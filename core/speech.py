@@ -33,6 +33,8 @@ import io
 import logging
 import os
 import re
+import threading
+import time
 import wave
 
 import httpx
@@ -71,6 +73,11 @@ _download_progress: dict[str, dict] = {}
 # utterance - which would make Open Mic unusable.
 _model = None
 _model_name: str | None = None
+
+# The in-process whisper instance is not re-entrant, so everything that touches it (and registers or swaps the engine)
+# serializes on this one lock. The routes share it. The CUDA whisper-server child is a separate process that answers
+# requests concurrently, so a call that is already on the GPU does NOT take it (see transcribe_call).
+ENGINE_LOCK = threading.Lock()
 
 
 class SpeechUnavailable(Exception):
@@ -199,23 +206,64 @@ def prepare_call(name: str, backend: str = 'auto') -> dict:
     return {'model': name, 'engine': 'cpu', 'fallback': reason}
 
 
-def transcribe_call(audio: bytes, name: str, backend: str = 'auto') -> dict:
+def _clean(text: str) -> str:
+    # Match Voice-line's non-speech marker filtering on either engine.
+    return ' '.join(re.sub(r'\[[^\]]*\]', '', text).split())
+
+
+def _clean_segments(segments: list[dict]) -> list[dict]:
+    cleaned = [{'text': _clean(segment['text']), 'start_ms': segment['start_ms'], 'end_ms': segment['end_ms']} for segment in segments]
+    return [segment for segment in cleaned if segment['text']]
+
+
+def transcribe_call(audio: bytes, name: str, backend: str = 'auto', segments: bool = False, blocking: bool = True) -> dict:
+    """One call-quality transcription.
+
+    The lock rule: the CUDA server is a separate process serving requests concurrently, so a request that goes to it
+    holds no lock (a rolling partial and the final pass overlap instead of queueing). Only the in-process CPU engine
+    and engine start-up/switching take ENGINE_LOCK. `blocking=False` is for disposable rolling partials: when the CPU
+    engine is busy they return {'busy': True} at once rather than queue behind (and then delay) a real utterance.
+    `segments=True` adds timed segments (end_ms relative to the start of the audio) for the rolling transcript.
+    """
     from core import speech_acceleration
     if not audio or len(audio) > MAX_AUDIO_BYTES:
         raise SpeechUnavailable('No audio was recorded.' if not audio else 'That recording is too large to transcribe.')
+    waited = 0.0
+    def locked(work):
+        nonlocal waited
+        began = time.perf_counter()
+        if not ENGINE_LOCK.acquire(blocking=blocking):
+            return None
+        waited += time.perf_counter() - began
+        try:
+            return work()
+        finally:
+            ENGINE_LOCK.release()
+    def finish(text, info, parts=None):
+        result = {'text': _clean(text), **info, 'queue_ms': round(waited * 1000)}
+        if segments:
+            result['segments'] = _clean_segments(parts or [])
+        return result
     if len(_wav_to_float32(audio)) < 3200:
-        return {'text': '', **prepare_call(name, backend)}
-    info = prepare_call(name, backend)
+        info = locked(lambda: prepare_call(name, backend))
+        return {'text': '', 'busy': True} if info is None else finish('', info)
+    path = model_path(selected_model(name))
+    if backend == 'auto' and speech_acceleration.is_ready(path):
+        info = {'model': name, 'engine': 'cuda', 'fallback': None}
+    else:
+        info = locked(lambda: prepare_call(name, backend))
+        if info is None:
+            return {'text': '', 'busy': True}
     if info['engine'] == 'cuda':
         try:
-            text = speech_acceleration.transcribe(audio, model_path(name))
+            text, parts = speech_acceleration.transcribe_segments(audio, path, timed=segments)
+            return finish(text, info, parts)
         except ValueError as error:
             info = {'model': name, 'engine': 'cpu', 'fallback': str(error)}
-            text = transcribe(audio, name)
-    else:
-        text = transcribe(audio, name)
-    # Match Voice-line's non-speech marker filtering on either engine.
-    return {'text': ' '.join(re.sub(r'\[[^\]]*\]', '', text).split()), **info}
+    outcome = locked(lambda: transcribe_segments(audio, name))
+    if outcome is None:
+        return {'text': '', 'busy': True}
+    return finish(outcome[0], info, outcome[1])
 
 
 def _load(name: str):
@@ -274,9 +322,9 @@ def _wav_to_float32(audio: bytes):
     return samples
 
 
-def transcribe(audio: bytes, model_name: str | None = None) -> str:
-    """Transcribe 16 kHz mono WAV bytes. Raises SpeechUnavailable with a
-    user-facing message when it cannot."""
+def transcribe_segments(audio: bytes, model_name: str | None = None) -> tuple[str, list[dict]]:
+    """Like transcribe(), also returning the timed segments ({text, start_ms, end_ms}) whisper cut the audio into.
+    Callers serialize on ENGINE_LOCK (the cached instance is shared)."""
     if not audio:
         raise SpeechUnavailable("No audio was recorded.")
     if len(audio) > MAX_AUDIO_BYTES:
@@ -289,16 +337,25 @@ def transcribe(audio: bytes, model_name: str | None = None) -> str:
     # Under ~0.2s is almost always a mis-click rather than speech, and
     # whisper reports [BLANK_AUDIO] for it, which reads as a bug to a user.
     if len(samples) < 3200:
-        return ""
+        return "", []
     try:
-        segments = _load(name).transcribe(samples)
+        raw = _load(name).transcribe(samples)
     except Exception as e:
         logger.exception("speech: transcription failed")
         raise SpeechUnavailable("That recording could not be transcribed.") from e
-    text = " ".join(segment.text.strip() for segment in segments).strip()
+    parts = [{"text": segment.text.strip(), "start_ms": int(getattr(segment, "t0", 0)) * 10, "end_ms": int(getattr(segment, "t1", 0)) * 10} for segment in raw]
+    text = " ".join(part["text"] for part in parts).strip()
     # whisper.cpp emits these bracketed markers for silence and noise. They
     # are not speech, and inserting them into someone's chat box would be
     # worse than returning nothing.
     for marker in ("[BLANK_AUDIO]", "(blank_audio)", "[ Silence ]", "[SILENCE]"):
         text = text.replace(marker, "")
-    return " ".join(text.split())
+        for part in parts:
+            part["text"] = part["text"].replace(marker, "").strip()
+    return " ".join(text.split()), [part for part in parts if part["text"]]
+
+
+def transcribe(audio: bytes, model_name: str | None = None) -> str:
+    """Transcribe 16 kHz mono WAV bytes. Raises SpeechUnavailable with a
+    user-facing message when it cannot."""
+    return transcribe_segments(audio, model_name)[0]

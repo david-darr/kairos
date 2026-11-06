@@ -52,7 +52,8 @@ export function callTransport(controller, onStatus, onPush) {
     async start(agent,endpoint,model) { clearTimeout(poll);const mine=++epoch; const parent_id=await controller.ensureSession(); const room_id=controller.roomId?.()||null; const next=await api('/api/agent-calls',{method:'POST',body:JSON.stringify({parent_id,agent_id:controller.agentId?.()||agent.id,endpoint_id:endpoint,model:model||null,...(room_id?{room_id}:{})})});if(disposed||mine!==epoch){api(`/api/agent-calls/${next.id}/end`,{method:'POST',keepalive:true,toast:false}).catch(()=>{});throw new Error('Call ended during setup.');}record=next;savedSummary='';check();if(onPush)watch(next.id,mine); return record; },
     async turn(text,onEvent) { abort=new AbortController(); const current=abort; try {await readEvents(`/api/agent-calls/${record.id}/turn`,{text,request_id:crypto.randomUUID()},current.signal,onEvent);}finally{if(abort===current)abort=null;} },
     async update(taskId,onEvent) {abort=new AbortController();const current=abort;try{await readEvents(`/api/agent-calls/${record.id}/work/${taskId}/update`,{},current.signal,onEvent);}finally{if(abort===current)abort=null;}},
-    interrupt(){abort?.abort();if(record&&!record.ended)api(`/api/agent-calls/${record.id}/interrupt`,{method:'POST',toast:false}).catch(()=>{});},
+    // `spoken` = a barge-in: the user talked over the reply while it was being said, so the server marks it cut off.
+    interrupt(spoken=false){abort?.abort();if(record&&!record.ended)api(`/api/agent-calls/${record.id}/interrupt`,{method:'POST',toast:false,...(spoken?{body:JSON.stringify({spoken:true})}:{})}).catch(()=>{});},
     stopWork(id){return api(`/api/agent-calls/${record.id}/work/${id}/stop`,{method:'POST'}).then(check);},
     // Look at the call record now (a pushed finish), instead of waiting out the poll.
     refresh(){clearTimeout(poll);return check();},

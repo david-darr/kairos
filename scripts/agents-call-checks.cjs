@@ -24,7 +24,7 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   await waitFor("!!document.querySelector('.agent-call-open') && !!document.querySelector('.bots-composer-input')");
   await js(`window.__callBot = ${JSON.stringify(BOT)}; window.__callSid = ${JSON.stringify(SID)}; true`);
   await js(String.raw`(async()=>{
-    window.__callTest={level:0,opened:0,closed:0,played:0,calls:{},callTurns:[],workUpdates:[],callEnds:[],callStops:[],callCounter:0,paused:0,urls:[],transcripts:0,wavBodies:[],fetch:window.fetch,utterance:window.SpeechSynthesisUtterance,synthesis:Object.getOwnPropertyDescriptor(window,'speechSynthesis'),getUserMedia:navigator.mediaDevices.getUserMedia};
+    window.__callTest={level:0,opened:0,closed:0,played:0,calls:{},callTurns:[],workUpdates:[],callEnds:[],callStops:[],callStopBodies:[],partialRequests:[],callCounter:0,paused:0,urls:[],transcripts:0,wavBodies:[],fetch:window.fetch,utterance:window.SpeechSynthesisUtterance,synthesis:Object.getOwnPropertyDescriptor(window,'speechSynthesis'),getUserMedia:navigator.mediaDevices.getUserMedia};
     const ctx=window.__callTest.inputContext=new AudioContext({sampleRate:16000});
     const source=ctx.createOscillator();source.frequency.value=180;
     const gain=window.__callTest.gain=ctx.createGain();gain.gain.value=0;
@@ -52,7 +52,7 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
         if(!action)return json(call);
         if(action==='prepare'||action==='timing')return json({ok:true,prepare_ms:12});
         if(action==='end'){t.callEnds.push(call.id);call.ended=true;call.summary_state='saved';call.summary='**Call summary**\n\nDiscussed the new layout.';return json(call);}
-        if(action==='interrupt'){t.callStops.push(call.id);t.releaseReply?.();return json({ok:true});}
+        if(action==='interrupt'){t.callStops.push(call.id);t.callStopBodies.push(options&&options.body||'');t.releaseReply?.();return json({ok:true});}
         if(action==='watch')return new Response(new ReadableStream({start(c){t.pushEvent=e=>c.enqueue(new TextEncoder().encode(JSON.stringify(e)+'\n'));options.signal?.addEventListener('abort',()=>{try{c.close()}catch{}});}}),{headers:{'Content-Type':'application/x-ndjson'}});
         if(action&&action.startsWith('work/')&&action.endsWith('/update')){t.workUpdates.push(action);return new Response(new TextEncoder().encode(JSON.stringify({type:'text',delta:"That's done: Parkour course. Built the course.",templated:true})+'\n'+JSON.stringify({type:'done',reply_ms:0})+'\n'),{headers:{'Content-Type':'application/x-ndjson'}});}
         if(action==='turn'){
@@ -67,7 +67,15 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
       }
 
       if(String(url)==='/api/speech/status') return new Response(JSON.stringify({engine_available:true,active_model:window.__callTest.missingModel?null:'base.en',call_model:'small.en',acceleration:{supported:true,configured:false},models:[{name:'base.en',label:'Base',size_mb:142,downloaded:!window.__callTest.missingModel},{name:'small.en',label:'Small',size_mb:466,downloaded:!window.__callTest.missingModel}]}),{headers:{'Content-Type':'application/json'}});
-      if(String(url)==='/api/speech/prepare') {window.__callTest.prepared=JSON.parse(options.body).model;return new Response(JSON.stringify({model:window.__callTest.prepared,engine:'cpu',prepare_ms:12}),{headers:{'Content-Type':'application/json'}});}
+      if(String(url)==='/api/speech/prepare') {window.__callTest.prepared=JSON.parse(options.body).model;return new Response(JSON.stringify({model:window.__callTest.prepared,engine:window.__callTest.engine||'cpu',prepare_ms:12}),{headers:{'Content-Type':'application/json'}});}
+      if(String(url)==='/api/speech/partial') {
+        // Rolling transcription: 'busy' (the default, a recognizer that skips) leaves every older flow exactly as it was.
+        const t=window.__callTest, mode=t.partialMode||'busy', bytes=new Uint8Array(await options.body.get('audio').arrayBuffer());
+        t.partialRequests.push({ms:Math.round((bytes.length-44)/32),model:options.body.get('model'),backend:options.body.get('backend')});
+        if(mode==='fail')return new Response('{}',{status:500});
+        if(mode==='busy')return json({busy:true,text:''});
+        return json({text:t.partialText,segments:[{text:t.partialText,end_ms:Math.round((bytes.length-44)/32)}],engine:'cuda',timings:{recognition_ms:20,queue_ms:0}});
+      }
       if(String(url).endsWith('/progress')&&String(url).startsWith('/api/speech/models/')) {window.__callTest.missingModel=false;return new Response(JSON.stringify({done:true}),{headers:{'Content-Type':'application/json'}});}
       if(String(url)==='/api/speech/transcribe') {
         const bytes=new Uint8Array(await options.body.get('audio').arrayBuffer());window.__callTest.wavHeader=String.fromCharCode(...bytes.slice(0,4));window.__callTest.wavRate=new DataView(bytes.buffer).getUint32(24,true);window.__callTest.transcribedModel=options.body.get('model');window.__callTest.wavBodies.push(Array.from(bytes));window.__callTest.transcripts++;
@@ -164,8 +172,36 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   await capture('agents-call-speaking');
   await js("document.querySelector('.agent-call-orb kairos-mascot').style.removeProperty('--word')");
   const before=writes.filter(w=>w.path==='/api/chat/live').length;
-  await js('window.__callTest.level=.7'); await delay(1600); await js('window.__callTest.level=0');
-  assert.equal(writes.filter(w=>w.path==='/api/chat/live').length,before,'Assistant playback cannot record another utterance');
+  // Keep listening while speaking (build order step 3). The microphone stays open, echo-cancelled; Kairos's own voice leaking back
+  // (quiet, level .1 here) is the echo and never interrupts, a short "mm-hm" never interrupts, ~250 ms of real voice does.
+  assert.equal(await js("document.querySelector('.agent-call').dataset.state"),'speaking');
+  const echoPaused=await js('window.__callTest.paused'), echoStops=await js('window.__callTest.callStops.length'), echoTurns=await js('window.__callTest.callTurns.length'), echoTranscripts=await js('window.__callTest.transcripts');
+  await js('window.__callTest.level=.1'); await delay(1600); await js('window.__callTest.level=0');
+  assert.equal(await js("document.querySelector('.agent-call').dataset.state"),'speaking','Kairos\'s own voice leaking back does not interrupt it');
+  assert.equal(await js('window.__callTest.paused'),echoPaused,'Echo never cancels the speech');
+  await js('window.__callTest.level=.5'); await delay(110); await js('window.__callTest.level=0'); await delay(500);
+  assert.equal(await js("document.querySelector('.agent-call').dataset.state"),'speaking','A short "mm-hm" does not interrupt');
+  assert.equal(await js('window.__callTest.callStops.length'),echoStops,'A backchannel sends no interrupt to the server');
+  assert.equal(await js("document.querySelector('.agent-call').dataset.bargeIns||'0'"),'0');
+  assert.equal(await js('window.__callTest.transcripts'),echoTranscripts,'and is not transcribed as a turn');
+  const bargeAt=await js('performance.now()');
+  await js('window.__callTest.level=.5');
+  await waitFor("document.querySelector('.agent-call').dataset.bargeIns==='1'",3000);
+  const bargeMs=await js(`performance.now()-${bargeAt}`);
+  assert.ok(bargeMs<1200,`Sustained voice interrupts within about a second of starting (${Math.round(bargeMs)} ms including test scheduling; the detector itself needs 250 ms)`);
+  assert.ok(await js('window.__callTest.paused>'+echoPaused),'Barge-in stops the speech');
+  const stopMs=Number(await js("document.querySelector('.agent-call').dataset.bargeStopMs"));
+  console.log("barge stop ms", stopMs, "detect ms", Math.round(bargeMs));
+  assert.ok(stopMs>=0&&stopMs<200,`Stopping playback takes well under 200 ms once the voice is recognised (${stopMs} ms)`);
+  await waitFor('window.__callTest.callStops.length>'+echoStops,1500);
+  assert.equal(await js('window.__callTest.callStopBodies.at(-1)'),JSON.stringify({spoken:true}),'The server is told the reply was cut off by voice');
+  assert.ok(await js("['listening','transcribing'].includes(document.querySelector('.agent-call').dataset.state)"),'The call is listening to the interruption, not paused');
+  await delay(500); await js('window.__callTest.level=0');
+  await waitFor('window.__callTest.callTurns.length>'+echoTurns,6000);
+  assert.equal(await js('window.__callTest.transcripts'),echoTranscripts+1,'The interrupting sentence is transcribed as a normal turn');
+  assert.ok(await js("window.__callTest.wavBodies.at(-1).length>16000*2*.55"),'and holds the start of what was said, from before the interrupt fired');
+  await waitFor("document.querySelector('.agent-call').dataset.state==='speaking'",8000);
+  assert.equal(writes.filter(w=>w.path==='/api/chat/live').length,before,'Call dialogue still never enters the ordinary chat transport');
   await click('.agent-call-controls button:first-child');
   await waitFor("document.querySelector('.agent-call').dataset.state==='listening'");
   assert.ok(await js('window.__callTest.paused>0'),'Assistant mute stops playback');
@@ -226,6 +262,37 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   assert.equal(await js("document.querySelector('.agent-call').dataset.state"),'listening','Interrupt resumes microphone capture');
   await navigate('home');
   await openBot();await waitFor("!!document.querySelector('.agent-call-open')");
+  // Transcribe while the user talks (build order step 4): a call on the GPU server rolls partials. The caption follows the
+  // speaker, and when the first pause arrives the last partial already covers every voiced sample, so the final transcript is
+  // that text with NO upload at the end of the turn. A failing partial endpoint falls back to the whole clip.
+  await js("window.__callTest.engine='cuda';window.__callTest.partialMode='ok';window.__callTest.partialText='Rolling words arrived before the endpoint.';window.__callTest.nextText='THE WHOLE CLIP WAS SENT';true;");
+  await click('.agent-call-open');await waitFor("!document.querySelector('.agent-call-setup button[type=submit]').disabled");await js("document.querySelector('.agent-call-setup').requestSubmit()");
+  await waitFor("document.querySelector('.agent-call').dataset.state==='listening'");
+  assert.equal(await js("document.querySelector('.agent-call').dataset.partials"),'on','Rolling transcription is on for a GPU call');
+  const rollTranscripts=await js('window.__callTest.transcripts'), rollTurns=await js('window.__callTest.callTurns.length'), rollRequests=await js('window.__callTest.partialRequests.length');
+  await js('window.__callTest.level=.5');
+  await waitFor("document.querySelector('.agent-call-heard').textContent.startsWith('Hearing: Rolling words')",3000);
+  assert.ok(await js('window.__callTest.partialRequests.length>'+rollRequests),'Audio is sent for a partial while the user is still talking');
+  assert.equal(await js("document.querySelector('.agent-call').dataset.state"),'listening','and the call keeps listening');
+  assert.equal(await js('window.__callTest.partialRequests.at(-1).model+"/"+window.__callTest.partialRequests.at(-1).backend'),'small.en/auto','Partials use the call\'s model and processor');
+  await delay(300); await js('window.__callTest.level=0');
+  await waitFor('window.__callTest.callTurns.length>'+rollTurns,6000);
+  assert.equal(await js('window.__callTest.callTurns.at(-1).text'),'Rolling words arrived before the endpoint.','The turn is the rolling transcript');
+  assert.equal(await js('window.__callTest.transcripts'),rollTranscripts,'Nothing was uploaded at the end of the turn (the partial covered the voiced audio)');
+  assert.equal(await js("JSON.parse(document.querySelector('.agent-call').dataset.callTimings).partial"),'reuse');
+  assert.ok(await js("document.querySelector('.agent-call-timing').textContent.includes('rolling: reuse')"),'The timing line says the transcript was rolling');
+  await waitFor("document.querySelector('.agent-call').dataset.state==='speaking'",8000);
+  await js("window.__callTest.partialMode='fail';true;");
+  await click('.agent-call-controls button:first-child');   // mute the assistant so the next turn is quiet
+  await waitFor("document.querySelector('.agent-call').dataset.state==='listening'");
+  const failTurns=await js('window.__callTest.callTurns.length');
+  await js('window.__callTest.level=.5'); await delay(1500); await js('window.__callTest.level=0');
+  await waitFor('window.__callTest.callTurns.length>'+failTurns,6000);
+  assert.equal(await js('window.__callTest.callTurns.at(-1).text'),'THE WHOLE CLIP WAS SENT','A failing partial endpoint falls back to sending the whole clip');
+  assert.equal(await js('window.__callTest.transcripts'),rollTranscripts+1);
+  assert.equal(await js("document.querySelector('.agent-call-error').textContent"),'','and says nothing alarming about it');
+  await js("window.__callTest.engine='';window.__callTest.partialMode='busy';window.__callTest.nextText='';true;");
+  await click('.agent-call .is-end');
   await click('.agent-call-open');await waitFor("!document.querySelector('.agent-call-setup button[type=submit]').disabled");
   await js("document.querySelector('[aria-label=\"Call input mode\"]').value='hold';window.__callTest.nextText='Keep my complete sentence with its pause.';document.querySelector('.agent-call-setup').requestSubmit();true;");
   await waitFor("document.querySelector('.agent-call').dataset.state==='listening'");

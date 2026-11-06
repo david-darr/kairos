@@ -4,7 +4,7 @@ import { getInputDevice, setInputDevice, encodeWav } from './voiceInput.js';
 export function isCallRecordingSupported() {
   return !!(navigator.mediaDevices?.getUserMedia && window.AudioContext && window.AudioWorkletNode);
 }
-export function createCallRecorder({ onLevel, onSpeechStart, onSegment, onError, mode = 'automatic' } = {}) {
+export function createCallRecorder({ onLevel, onSpeechStart, onSegment, onChunk, onBargeIn, onError, mode = 'automatic' } = {}) {
   let stream = null, context = null, source = null, node = null, gain = null, closed = false, enabled = false, settleReady = null, readyTimer = null;
   const close = () => {
     closed = true; enabled = false;
@@ -37,7 +37,10 @@ export function createCallRecorder({ onLevel, onSpeechStart, onSegment, onError,
           if (data.type === 'ready') { clearTimeout(readyTimer); settleReady?.(); settleReady = null; }
           if (data.type === 'level') onLevel?.(data.level);
           if (data.type === 'speech_start') onSpeechStart?.();
-          if (data.type === 'segment') onSegment?.(data.pcm.length ? encodeWav(data.pcm, 16000) : null, data.timing);
+          if (data.type === 'chunk') onChunk?.(data.pcm, data.pause);
+          if (data.type === 'barge_in') onBargeIn?.();
+          // The raw samples ride along (third argument) so a rolling transcript can send just the tail.
+          if (data.type === 'segment') onSegment?.(data.pcm.length ? encodeWav(data.pcm, 16000) : null, data.timing, data.pcm.length ? data.pcm : null);
         };
         node.onprocessorerror = () => { close(); onError?.(new Error('Microphone processing stopped. End the call and try again.')); };
         gain = active.createGain(); gain.gain.value = 0;
@@ -46,7 +49,8 @@ export function createCallRecorder({ onLevel, onSpeechStart, onSegment, onError,
         await Promise.all([active.resume(), ready]);
       } catch (error) { close(); throw error; }
     },
-    setEnabled(value) { enabled = !!value && !closed; node?.port.postMessage({ type: 'enabled', value: enabled }); },
+    // `barge` keeps the microphone open while Kairos speaks: no segmenting, only a watch for the user's voice over the echo.
+    setEnabled(value, barge = false) { enabled = !!value && !closed; node?.port.postMessage({ type: 'enabled', value: enabled }); node?.port.postMessage({ type: 'barge', value: enabled && !!barge }); },
     beginHold() { if (enabled && !closed) node?.port.postMessage({ type: 'hold_start' }); },
     endHold() { if (!closed) node?.port.postMessage({ type: 'hold_end' }); },
     cancelHold() { node?.port.postMessage({ type: 'hold_cancel' }); },

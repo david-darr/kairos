@@ -3,7 +3,8 @@
 No discovery, downloads, shell commands or connection to Voice-line's server.
 Only an administrator can register a trusted installation. Its executable and
 DLL hashes are checked before starting a private loopback child process.
-Callers serialize operations with speech_routes' engine lock.
+Starting, switching and registering serialize on core.speech.ENGINE_LOCK (callers hold it). Once the server is running
+the lock is NOT needed: it answers requests concurrently, so is_ready() lets transcription skip the lock entirely.
 """
 import atexit
 import hashlib
@@ -198,22 +199,46 @@ def prepare(model_path):
         raise ValueError(_failed) from error
 
 
-def transcribe(audio, model_path):
+def is_ready(model_path):
+    """True when a verified server for this model is already running, so a request can go straight to it without
+    taking the engine lock (nothing to start, switch or verify)."""
+    return bool(_read() and not _failed and _process and _process.poll() is None and _model == str(model_path) and _gpu.is_set() and _port)
+
+
+def transcribe_segments(audio, model_path, timed=True):
+    """(text, segments) from the running server. Safe to call from several threads at once. `segments` are
+    {text, start_ms, end_ms} (empty if this server build does not report them)."""
     global _failed
-    prepare(model_path)
+    if not is_ready(model_path):
+        prepare(model_path)   # callers that skipped is_ready hold the engine lock
+    port = _port
     try:
         with httpx.Client(timeout=90, trust_env=False) as client:
-            result = client.post(f'http://127.0.0.1:{_port}/inference',
-                                 files={'file': ('audio.wav', audio, 'audio/wav')},
-                                 data={'response_format': 'json'})
+            url = f'http://127.0.0.1:{port}/inference'
+            result = client.post(url, files={'file': ('audio.wav', audio, 'audio/wav')}, data={'response_format': 'verbose_json' if timed else 'json'})
+            if timed and 400 <= result.status_code < 500:
+                # A server build that does not know the timed format still answers plain text.
+                result = client.post(url, files={'file': ('audio.wav', audio, 'audio/wav')}, data={'response_format': 'json'})
             result.raise_for_status()
-            text = result.json().get('text')
+            body = result.json()
+            text = body.get('text')
             if not isinstance(text, str):
                 raise ValueError('Invalid recognition response')
-            return text
+            parts = []
+            for item in body.get('segments') or []:
+                if isinstance(item, dict) and isinstance(item.get('text'), str) and isinstance(item.get('end'), (int, float)):
+                    start = item.get('start')
+                    parts.append({'text': item['text'].strip(), 'start_ms': round((start if isinstance(start, (int, float)) else 0) * 1000), 'end_ms': round(item['end'] * 1000)})
+            return text, parts
     except Exception as error:
-        stop(); _failed = 'GPU recognition stopped. Using built-in CPU recognition.'
-        raise ValueError(_failed) from error
+        # Only stop the server this request used: another thread may have restarted or replaced it meanwhile.
+        if _port == port:
+            stop(); _failed = 'GPU recognition stopped. Using built-in CPU recognition.'
+        raise ValueError('GPU recognition stopped. Using built-in CPU recognition.') from error
+
+
+def transcribe(audio, model_path):
+    return transcribe_segments(audio, model_path)[0]
 
 
 atexit.register(stop)

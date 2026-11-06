@@ -10,7 +10,6 @@ megabytes into the shared data directory.
 """
 import asyncio
 import logging
-import threading
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
@@ -23,22 +22,30 @@ from core.middleware import require_admin, require_user
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/speech", tags=["speech"])
-_transcription_lock = threading.Lock()
+# The cached in-process whisper instance is shared, so it (and engine start-up) serialize on this lock while chat
+# events, permission answers and Stop stay responsive. It lives in core.speech so transcribe_call can skip it for the
+# CUDA server, which answers concurrently. Dictation and Open Mic (no `backend`) still hold it for the whole run.
+_transcription_lock = speech.ENGINE_LOCK
 
 
-def _local_transcription(data: bytes, model: str | None = None, timed: bool = False, backend: str | None = None):
-    # The cached whisper instance is shared. Serialize engine use on worker
-    # threads while leaving chat events, permission answers and Stop responsive.
+def _local_transcription(data: bytes, model: str | None = None, timed: bool = False, backend: str | None = None, partial: bool = False):
     requested = time.perf_counter()
-    with _transcription_lock:
-        started = time.perf_counter()
-        info = speech.transcribe_call(data, model, backend) if backend else None
-        text = info['text'] if info else speech.transcribe(data, model_name=model) if model else speech.transcribe(data)
-        timings = {'queue_ms': round((started-requested)*1000), 'recognition_ms': round((time.perf_counter()-started)*1000)}
-        if timed:
+    if backend:
+        info = speech.transcribe_call(data, model, backend, segments=True, blocking=False) if partial else speech.transcribe_call(data, model, backend)
+        queue_ms = info.pop('queue_ms', 0)
+        timings = {'queue_ms': queue_ms, 'recognition_ms': max(0, round((time.perf_counter()-requested)*1000) - queue_ms)}
+        text = info['text']
+    else:
+        with _transcription_lock:
+            started = time.perf_counter()
+            info = None
+            text = speech.transcribe(data, model_name=model) if model else speech.transcribe(data)
+            timings = {'queue_ms': round((started-requested)*1000), 'recognition_ms': round((time.perf_counter()-started)*1000)}
+    if timed:
+        if not partial:
             logger.info('speech timing model=%s bytes=%d queue_ms=%d recognition_ms=%d', model or 'default', len(data), timings['queue_ms'], timings['recognition_ms'])
-            return {**(info or {'text': text, 'model': model}), 'timings': timings}
-        return text
+        return {**(info or {'text': text, 'model': model}), 'timings': timings}
+    return text
 
 
 class PrepareSpeech(BaseModel):
@@ -111,6 +118,28 @@ async def download_model(name: str, user: str = Depends(require_admin)) -> dict:
 @router.get("/models/{name}/progress")
 async def download_progress(name: str, user: str = Depends(require_user)) -> dict:
     return speech.get_download_progress(name)
+
+
+@router.post("/partial")
+async def transcribe_partial(audio: UploadFile = File(...), model: str = Form(...), backend: Literal['auto', 'cpu'] = Form(default='auto'), user: str = Depends(require_user)) -> dict:
+    """Rolling transcript of the audio so far, while the user is still talking.
+
+    The client sends a window of the utterance (from the last text it has committed to now) about every second. The
+    answer is the window's text and its timed segments, so the client can commit the stable ones and later send only
+    the tail for the final pass. It is disposable by design: when the in-process CPU engine is busy it answers
+    `{"busy": true}` at once instead of queueing, so it can never delay a real transcription behind it. Failure here
+    is never fatal; the client falls back to sending the whole clip at the end of the turn.
+    """
+    data = await audio.read(speech.MAX_AUDIO_BYTES + 1)
+    if len(data) > speech.MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="That recording is too large to transcribe.")
+    try:
+        return await asyncio.to_thread(_local_transcription, data, model, True, backend, True)
+    except speech.SpeechUnavailable as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception:
+        logger.exception("speech: unexpected partial transcription failure")
+        raise HTTPException(status_code=500, detail="Transcription failed.")
 
 
 @router.post("/transcribe")

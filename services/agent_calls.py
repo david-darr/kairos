@@ -356,10 +356,16 @@ def stop_work(call, task_id):
     return {'stopping':stopped, 'jobs':view(call)['jobs']}
 
 
-def interrupt(call):
+def interrupt(call, spoken=False):
+    """Stop the running reply. `spoken` is a barge-in: the user talked over Kairos while it was being SAID. If the model
+    had already finished, the saved reply was cut off in the user's ears all the same, so it is marked interrupted too
+    (the call summary then knows the end of it was not heard)."""
     call['revision'] += 1
     task = _turns.get(call['id'])
     if task and task is not asyncio.current_task(): task.cancel()
+    elif spoken and not task:
+        last = call['messages'][-1] if call['messages'] else None
+        if last and last.get('role') == 'assistant': last['interrupted'] = True
     _save(call)
 
 

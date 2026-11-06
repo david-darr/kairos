@@ -128,6 +128,23 @@ class Calls(unittest.IsolatedAsyncioTestCase):
         await asyncio.gather(task,return_exceptions=True)
         self.assertTrue(self.record['messages'][-1]['interrupted'])
 
+    async def test_barge_in_marks_a_finished_reply_as_cut_off_but_a_plain_interrupt_does_not(self):
+        # The model finished long before the voice did: the user talked over the SPEECH. The saved reply was still cut off in their ears.
+        async for _ in calls.turn(self.record, 'Hello', 'finished'): pass
+        self.assertFalse(self.record['messages'][-1]['interrupted'])
+        calls.interrupt(self.record)
+        self.assertFalse(self.record['messages'][-1]['interrupted'], 'an ordinary interrupt with nothing running changes nothing')
+        calls.interrupt(self.record, spoken=True)
+        self.assertTrue(self.record['messages'][-1]['interrupted'], 'a barge-in marks the reply that was being spoken')
+        # Over HTTP: the body is optional (older clients post none) and only {"spoken": true} marks.
+        app = FastAPI(); app.include_router(router); app.dependency_overrides[require_user] = lambda: 'david'
+        self.record['messages'][-1]['interrupted'] = False
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+            base = f"/api/agent-calls/{self.record['id']}/interrupt"
+            self.assertEqual((await client.post(base)).json(), {'ok': True}); self.assertFalse(self.record['messages'][-1]['interrupted'])
+            self.assertEqual((await client.post(base, json={'spoken': False})).status_code, 200); self.assertFalse(self.record['messages'][-1]['interrupted'])
+            self.assertEqual((await client.post(base, json={'spoken': True})).status_code, 200); self.assertTrue(self.record['messages'][-1]['interrupted'])
+
     async def test_stop_work_cancels_a_starter_before_worker_admission(self):
         future=asyncio.create_task(asyncio.Event().wait())
         with patch.object(calls.task_service,'create_task',return_value={'id':'queued'}),patch.object(calls.task_scheduler,'start_in_background',return_value=future),patch.object(calls.task_scheduler,'stop_run',return_value=False),patch.object(calls.task_service,'get_task',return_value={'status':'ready'}),patch.object(calls.task_service,'set_card_status') as status:

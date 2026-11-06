@@ -3,7 +3,8 @@ import { api, el, toast } from './api.js';
 import { liveVoice } from './callLive.js';
 import { callTransport } from './callTransport.js';
 import { voiceSettings, neuralSpeaker } from './callVoice.js';
-import { transcribeBlob, refreshSpeechStatus } from './voiceInput.js';
+import { transcribeBlob, transcribePartial, refreshSpeechStatus } from './voiceInput.js';
+import { createPartialTranscriber } from './partialTranscript.js';
 import { createCallRecorder, isCallRecordingSupported } from './callRecorder.js';
 import { createSpeaker, isSpeechOutputSupported, whenVoicesReady, resolveVoice } from './voiceOutput.js';
 import { createMascot } from './mascot.js';
@@ -73,6 +74,11 @@ export function agentCall(agent, controller) {
   let workUpdates=[], announcedWork=new Set();
   // Latency of each spoken turn, kept in memory for this call (see voiceTrace.js).
   const voiceTrace=createVoiceTrace({label:'call'});let turnTrace=null, currentTrace=null, flushQueued=false;
+  // Rolling transcription while the user talks (partialTranscript.js): captions the words as they come and lets the end of
+  // the turn send only a tail, or nothing. Any failure there falls back to the whole clip.
+  const partials=createPartialTranscriber({send:(wav,signal)=>transcribePartial(wav,{signal,model:model.value,backend:acceleration.value}),
+    onText:text=>{if(active&&!microphoneMuted&&text)heard.textContent=`Hearing: ${text}`;}});
+  let bargeIns=0;
   const announceWork=id=>{if(active&&callMode.value==='local'&&!announcedWork.has(id)){announcedWork.add(id);workUpdates.push(id);scheduleFlush();}};
   let endpoints = [];
   // A group call (a room's controller has roomId): each reply names the member who spoke, and on device voices
@@ -168,7 +174,7 @@ export function agentCall(agent, controller) {
     action('End call', () => hangup(), 'is-end'), action('Interrupt', interrupt)]);
   function interrupt() {
       if(callMode.value==='cloud'){toast('Speak to interrupt the live conversation. Delegated work keeps running.');return;}
-      transport.interrupt(); voiceBusy=false;
+      transport.interrupt(); voiceBusy=false; partials.cancel();
       revision++; pending?.abort(); audioQueue = []; texts = []; deferredReply = null; speechActive = false;
       cancelHold(); recorder?.setEnabled(false); stopPlayback(); listen(); scheduleFlush();
   }
@@ -249,7 +255,14 @@ export function agentCall(agent, controller) {
     callMascot.setAttribute('state', CALL_MASCOT[next] || 'idle');
     if (next !== 'listening') orb.style.setProperty('--level', '0');
     if (next !== 'speaking') orb.style.setProperty('--word', '0');
-    recorder?.setEnabled(active && !microphoneMuted && !['speaking', 'paused', 'preparing', 'setup'].includes(next));
+    applyMicrophone(next);
+  }
+  // The microphone is on in every state but speaking/paused/preparing/setup. While Kairos SPEAKS (local, automatic input) it
+  // stays open in barge-in mode instead: echo-cancelled capture that only watches for the user's voice over the echo
+  // (speechSegments.js BargeIn) and interrupts. Hold-to-talk stays deaf while speaking: pressing the button already interrupts.
+  function applyMicrophone(at = state) {
+    const duplex = active && !microphoneMuted && at === 'speaking' && callMode.value === 'local' && inputMode.value === 'automatic';
+    recorder?.setEnabled(active && !microphoneMuted && (duplex || !['speaking', 'paused', 'preparing', 'setup'].includes(at)), duplex);
   }
   async function loadSetup() {
     const token = epoch; start.disabled = true;
@@ -349,7 +362,7 @@ export function agentCall(agent, controller) {
     emitState();
     if(callMode.value==='cloud'){live.muteMicrophone(value);microphone.setAttribute('aria-pressed',String(value));microphone.textContent=value?'Unmute microphone':'Mute microphone';return;}
     microphone.setAttribute('aria-pressed', String(value)); microphone.textContent = value ? 'Unmute microphone' : 'Mute microphone';
-    if (value) { cancelHold(); recorder?.close(); recorder = null; speechActive = false; orb.style.setProperty('--level', '0'); if (state === 'listening') status.textContent = 'Microphone muted'; scheduleFlush(); }
+    if (value) { cancelHold(); partials.cancel(); recorder?.close(); recorder = null; speechActive = false; orb.style.setProperty('--level', '0'); if (state === 'listening') status.textContent = 'Microphone muted'; scheduleFlush(); }
     else if (active) {
       try { await openMicrophone(); if (state === 'listening') status.textContent = 'Listening...'; }
       catch (problem) { microphoneMuted = true; microphone.setAttribute('aria-pressed', 'true'); microphone.textContent = 'Unmute microphone'; error.textContent = problem.message; }
@@ -360,18 +373,22 @@ export function agentCall(agent, controller) {
     const token = epoch;
     const next = createCallRecorder({
       mode: inputMode.value,
-      onLevel: level => { if (active && !microphoneMuted) orb.style.setProperty('--level', String(level)); },
-      onSpeechStart: () => { if (active && !microphoneMuted) { speechActive = true; status.textContent = inputMode.value === 'hold' ? 'Recording your full sentence...' : voiceBusy ? 'Listening to your next sentence...' : 'Listening...'; } },
-      onSegment: (blob, measured) => {
+      onLevel: level => { if (active && !microphoneMuted && state !== 'speaking') orb.style.setProperty('--level', String(level)); },
+      onChunk: pcm => { if (active && !microphoneMuted && epoch === token) partials.push(pcm); },
+      onBargeIn: () => { if (epoch === token) bargeIn(); },
+      onSpeechStart: () => { if (active && !microphoneMuted) { partials.begin(); speechActive = true; status.textContent = inputMode.value === 'hold' ? 'Recording your full sentence...' : voiceBusy ? 'Listening to your next sentence...' : 'Listening...'; } },
+      onSegment: (blob, measured, pcm) => {
         speechActive = false;
+        const session = partials.take();
         if (inputMode.value === 'hold') { holding = false; hold.setAttribute('aria-pressed', 'false'); hold.textContent = 'Hold to talk'; }
+        if (!active || microphoneMuted || epoch !== token || !blob) session?.cancel();
         if (!active || microphoneMuted || epoch !== token) return;
         if (blob) {
           if (audioQueue.length >= 6) { setMicrophoneMuted(true); error.textContent = 'Speech is arriving faster than recognition can process it. The microphone is muted while the queued sentences finish.'; return; }
           if (measured.limit) error.textContent = 'The 60-second recording limit was reached. Hold again to continue.';
           utteranceEnded=performance.now()-(measured.endpoint_ms||0);
           const trace=voiceTrace.begin(utteranceEnded); voiceTrace.mark(trace,'endpoint');
-          audioQueue.push({ blob, measured, ended:utteranceEnded, revision, trace }); processAudio();
+          audioQueue.push({ blob, measured, ended:utteranceEnded, revision, trace, pcm, session }); processAudio();
         }
         scheduleFlush();
       },
@@ -380,7 +397,19 @@ export function agentCall(agent, controller) {
     recorder = next;
     try { await next.start(); } catch (problem) { next.close(); if (recorder === next) recorder = null; throw problem; }
     if (!active || disposed || epoch !== token || microphoneMuted || recorder !== next) { next.close(); return; }
-    next.setEnabled(!['speaking','paused'].includes(state));
+    applyMicrophone();
+  }
+  // The user's voice held for ~250 ms over Kairos speaking (the worklet decided; see speechSegments.js for the thresholds).
+  // Stop the speech now: the speaker's cancel aborts every queued and prefetched sentence, and the server marks the reply
+  // as cut off. The worklet already holds the start of the user's sentence and keeps recording it as a normal utterance.
+  function bargeIn() {
+    if (!active || state !== 'speaking' || callMode.value !== 'local') return;
+    const began = performance.now();
+    bargeIns++; dialog.dataset.bargeIns = String(bargeIns);
+    transport.interrupt(true); voiceBusy = false; revision++; pending?.abort(); audioQueue = []; texts = []; deferredReply = null;
+    stopPlayback();
+    speechActive = true; listen();
+    dialog.dataset.bargeStopMs = String(Math.round(performance.now() - began));
   }
   function listen() {
     if (!active) return;
@@ -392,7 +421,7 @@ export function agentCall(agent, controller) {
     if (recognitionTiming.endpoint_ms != null) parts.push(`Pause ${recognitionTiming.endpoint_ms} ms`);
     if(response?.end_to_audio_ms!=null)parts.push(`First audio ${response.end_to_audio_ms} ms after speech`);
     if(response?.first_output_ms!=null)parts.push(`First text ${response.first_output_ms} ms`);
-    if (recognitionTiming.upload_ms != null) parts.push(`Recognition ${recognitionTiming.upload_ms} ms`);
+    if (recognitionTiming.upload_ms != null) parts.push(`Recognition ${recognitionTiming.upload_ms} ms${recognitionTiming.partial ? ` (rolling: ${recognitionTiming.partial})` : ''}`);
     if (response?.reply_ms != null) parts.push(`Agent ${(response.reply_ms/1000).toFixed(1)} s`);
     if (response?.playback_ms != null) parts.push(`Voice ${response.playback_ms} ms`);
     const stages = voiceTrace.format(response?.trace);
@@ -410,6 +439,18 @@ export function agentCall(agent, controller) {
     flushQueued = true;
     queueMicrotask(() => { flushQueued = false; flushText(); });
   }
+  // Final transcript of one finished utterance: the rolling session's text when it has one (nothing to send, or only the
+  // tail), otherwise, or if anything about that goes wrong, the whole clip exactly as before.
+  async function recognize(item, signal, onTiming) {
+    const options = { pcm: true, model: model.value, backend: acceleration.value, signal, onTiming };
+    if (item.session && item.pcm) {
+      try {
+        const rolled = await item.session.finalize(item.pcm, wav => transcribeBlob(wav, options));
+        if (rolled) { item.rolled = rolled.mode; return rolled.text; }
+      } catch (problem) { if (problem.name === 'AbortError') throw problem; }
+    }
+    return transcribeBlob(item.blob, options);
+  }
   async function processAudio() {
     if (transcribing || !active) return;
     transcribing = true; const callToken = epoch;
@@ -421,10 +462,10 @@ export function agentCall(agent, controller) {
         const started = performance.now(); pending = new AbortController();
         try {
           voiceTrace.mark(item.trace, 'upload_sent');
-          const text = await transcribeBlob(item.blob, { pcm: true, model: model.value, backend: acceleration.value, signal: pending.signal, onTiming: value => { recognitionTiming = { ...value }; } });
+          const text = await recognize(item, pending.signal, value => { recognitionTiming = { ...value }; });
           if (!active || epoch !== callToken || revision !== mine) continue;
           voiceTrace.mark(item.trace, 'transcript_back');
-          recognitionTiming = { ...recognitionTiming, ...item.measured, upload_ms: Math.round(performance.now()-started), capture_queue_ms: Math.round(started-item.ended) };
+          recognitionTiming = { ...recognitionTiming, ...item.measured, upload_ms: Math.round(performance.now()-started), capture_queue_ms: Math.round(started-item.ended), partial: item.rolled || undefined };
           drawTiming();
           if (text.trim()) {
             texts.push(text.trim()); turnTrace = item.trace; heard.textContent = `Heard: ${text.trim()}`;
@@ -502,7 +543,7 @@ export function agentCall(agent, controller) {
       await localSpeaker.prepare(); stopPlayback();
       await transport.start(agent,conversation.value,conversationModel.value.trim());
       if(disposed||epoch!==token||!dialog.open){transport.end();return;}
-      voiceTrace.reset(); turnTrace = currentTrace = null;
+      voiceTrace.reset(); partials.reset(); turnTrace = currentTrace = null; bargeIns = 0; delete dialog.dataset.bargeIns;
       setState('preparing','Preparing the conversation model...');
       await api(`/api/agent-calls/${transport.record.id}/prepare`,{method:'POST',toast:false});
       if(disposed||epoch!==token||!dialog.open){transport.end();return;}
@@ -516,6 +557,7 @@ export function agentCall(agent, controller) {
       if (disposed || epoch !== token || !dialog.open) return;
       recognitionTiming = { prepare_ms: ready.prepare_ms }; drawTiming();
       showEngine(ready);
+      if (ready.engine !== 'cuda') partials.disable('cpu'); dialog.dataset.partials = partials.state.disabled || 'on';
       active = true; microphoneMuted = false; assistantMuted = false;
       dialog.dataset.inputMode = inputMode.value;
       microphone.setAttribute('aria-pressed', 'false'); microphone.textContent = 'Mute microphone'; assistant.setAttribute('aria-pressed', 'false'); assistant.textContent = 'Mute assistant';
@@ -529,7 +571,7 @@ export function agentCall(agent, controller) {
   });
   function hangup() {
     active = false; epoch++; revision++; audioQueue = []; texts = []; workUpdates=[];deferredReply = null; flushQueued = false; clearInterval(timer); timer = null; clearTimeout(downloadTimer); downloadTimer = null;
-    cancelHold(); recorder?.close(); recorder = null; speechActive = false; pending?.abort(); pending = null; stopPlayback();
+    cancelHold(); partials.cancel(); recorder?.close(); recorder = null; speechActive = false; pending?.abort(); pending = null; stopPlayback();
     live.stop();transport.end();voiceBusy=false;paid.checked=false;
     setup.hidden = false; controls.hidden = true; clock.textContent = '00:00'; model.disabled = false;
     response = null; recognitionTiming = {}; timing.textContent = ''; heard.textContent = '';

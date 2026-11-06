@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 (async()=>{
   const source=fs.readFileSync(path.join(__dirname,'../static/js/speechSegments.js'),'utf8');
-  const {SpeechSegments,HeldSpeech}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+  const {SpeechSegments,HeldSpeech,BargeIn,BARGE_VOICE_MS,BARGE_WARMUP_MS}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
   const rate=16000;
   const tone=(ms,volume=.04)=>Float32Array.from({length:Math.round(rate*ms/1000)},(_,i)=>volume*Math.sin(i*2*Math.PI*180/rate));
   const silence=ms=>new Float32Array(Math.round(rate*ms/1000));
@@ -37,6 +37,68 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
   assert.equal(separated.segments.length,3,'Resuming after playback does not recalibrate over the first word');
   const long=run([silence(500),tone(62000),silence(1000)]);
   assert.ok(long.segments.length>=3&&long.segments.every(s=>s.pcm.length<=rate*30),'Long speech stays bounded without losing subsequent segments');
+  // ---- rolling-transcript feed: new audio while an utterance runs, plus one flush at the first pause ----
+  {
+    const chunks=[];const segments=[];
+    const d=new SpeechSegments({chunkMs:1000,onSegment:(pcm,timing)=>{if(pcm.length)segments.push({pcm,timing});},onChunk:(pcm,meta)=>chunks.push({pcm,pause:meta.pause})});
+    for(const part of [silence(500),tone(2400),silence(900)])for(let at=0;at<part.length;at+=128)d.push(part.subarray(at,at+128));
+    assert.equal(segments.length,1);
+    const voiced=chunks.filter(c=>!c.pause),flush=chunks.filter(c=>c.pause);
+    assert.ok(voiced.length>=2&&voiced.every(c=>c.pcm.length>=rate),'About one second of new audio is handed out at a time while speaking');
+    assert.equal(flush.length,1,'One extra hand-off when the speaker first goes quiet');
+    assert.ok(flush[0].pcm.length<rate*.45,'The pause flush carries only the audio since the last chunk (the first ~300 ms of silence)');
+    const sent=chunks.reduce((n,c)=>n+c.pcm.length,0);
+    assert.ok(sent>=segments[0].pcm.length&&sent<=segments[0].pcm.length+rate*.8,'The chunks cover the whole segment (they may run into the trailing silence)');
+    const joined=new Float32Array(sent);let at=0;for(const c of chunks){joined.set(c.pcm,at);at+=c.pcm.length;}
+    assert.deepEqual(Array.from(joined.subarray(0,segments[0].pcm.length)),Array.from(segments[0].pcm),'The chunks, joined, are the segment audio sample for sample (so a tail can be cut at any committed offset)');
+    const off=run([silence(500),tone(2400),silence(900)]);assert.ok(off.segments.length===1,'Without a chunk callback nothing changes');
+  }
+  // ---- barge-in: the user's voice over Kairos's own echo ----
+  {
+    const leak=(ms,volume=.008,hz=180)=>Float32Array.from({length:Math.round(rate*ms/1000)},(_,i)=>volume*Math.sin(i*2*Math.PI*hz/rate));
+    const voice=(ms,volume=.05)=>Float32Array.from({length:Math.round(rate*ms/1000)},(_,i)=>volume*Math.sin(i*2*Math.PI*310/rate)+.5*volume*Math.sin(i*2*Math.PI*870/rate));
+    const mix=(a,b)=>Float32Array.from(a,(v,i)=>v+(b[i]||0));
+    const play=(parts,options={})=>{const hits=[];const detector=new BargeIn({...options,onBarge:hit=>hits.push(hit)});detector.reset(.002);let samples=0;
+      // The worklet stops feeding the detector the moment it fires (the segmenter takes over), so does this.
+      outer:for(const part of parts)for(let at=0;at<part.length;at+=128){detector.push(part.subarray(at,at+128));samples+=Math.min(128,part.length-at);if(hits.length){hits[0].at=samples/rate*1000;break outer;}}
+      return {hits,detector};};
+    // Echo alone, quiet or loud, steady or swelling, never interrupts.
+    assert.equal(play([leak(3000,.006)]).hits.length,0,'A quiet leak of Kairos\'s own voice never interrupts');
+    assert.equal(play([leak(3000,.04)]).hits.length,0,'A loud leak is learned as the floor during playback and never interrupts');
+    assert.equal(play([leak(1000,.02),leak(600,.03),leak(1000,.02)]).hits.length,0,'The leak swelling with Kairos\'s loudest syllables stays under three times the learned floor');
+    assert.equal(play([silence(3000)]).hits.length,0,'Silence is not a voice');
+    assert.equal(play([leak(1000,.002),leak(10,.9),leak(1000,.002)]).hits.length,0,'A click is not a voice');
+    // A backchannel ("mm-hm", a cough) is shorter than the interrupt time and passes.
+    const mmhm=play([leak(800),mix(leak(1000),voice(190)),leak(1500)]);assert.equal(mmhm.hits.length,0,'A 190 ms "mm-hm" over the echo does not interrupt');
+    const two=play([leak(800),mix(leak(1000),voice(150)),leak(1000)]);assert.equal(two.hits.length,0);
+    const stutter=play([leak(500),mix(leak(300),voice(150)),leak(400),mix(leak(300),voice(150)),leak(1000)]);
+    assert.equal(stutter.hits.length,0,'Two short sounds with a real gap between them are two backchannels, not one 300 ms voice');
+    // Sustained speech interrupts after BARGE_VOICE_MS of voice, and hands over the audio so the first word is whole.
+    assert.equal(BARGE_VOICE_MS,250);
+    const speech=play([leak(800),mix(leak(1500),voice(1500)),leak(500)]);
+    assert.equal(speech.hits.length,1,'Sustained speech over the echo interrupts, once');
+    assert.ok(speech.hits[0].at>=800+BARGE_VOICE_MS-30&&speech.hits[0].at<=800+BARGE_VOICE_MS+60,`It fires ~${BARGE_VOICE_MS} ms after the voice starts (${speech.hits[0].at} ms)`);
+    const heard=speech.hits[0].parts.reduce((n,part)=>n+part.length,0);
+    assert.ok(heard>=rate*(.25+.25)&&heard<=rate*(.3+.3),'The hand-over holds the 300 ms before the onset and the 250 ms of voice');
+    assert.ok(speech.hits[0].voiced>=rate*.25);
+    const loudOverLoud=play([leak(1000,.03),mix(leak(1500,.03),voice(1500,.2))]);
+    assert.equal(loudOverLoud.hits.length,1,'A voice well above a loud leak still interrupts');
+    const shortGap=play([leak(600),mix(leak(150),voice(150)),leak(80),mix(leak(150),voice(150)),leak(800)]);
+    assert.equal(shortGap.hits.length,1,'A dip shorter than BARGE_GAP_MS between syllables does not restart the count');
+    assert.equal(play([leak(BARGE_WARMUP_MS+10),mix(leak(1000),voice(1000))]).hits.length,1,'Voice that starts right after the warm-up interrupts');
+    // The seeded utterance carries on as a normal segment: onset kept, ended by the usual silence.
+    const finished=[];const seg=new SpeechSegments({onSegment:(pcm,timing)=>{if(pcm.length)finished.push({pcm,timing});}});
+    for(let at=0;at<silence(500).length;at+=128)seg.push(silence(500).subarray(at,at+128));
+    const det=new BargeIn({onBarge:({parts,voiced})=>seg.begin(parts,voiced)});det.reset(seg.noise);
+    // Playback stops the instant the barge fires, so after it only the user (then silence) reaches the segmenter.
+    const before=[leak(800),mix(leak(1500),voice(1500))];let started=0;seg.onStart=()=>started++;
+    outer:for(const part of before)for(let at=0;at<part.length;at+=128){det.push(part.subarray(at,at+128));if(seg.active)break outer;}
+    assert.ok(seg.active,'the detector started the utterance');
+    for(const part of [voice(1250),silence(1200)])for(let at=0;at<part.length;at+=128)seg.push(part.subarray(at,at+128));
+    assert.equal(started,1);assert.equal(finished.length,1,'The interrupting sentence becomes one normal segment');
+    assert.ok(finished[0].pcm.length>rate*1.5,'It holds the whole sentence, from the onset, not just what came after the interrupt');
+    assert.ok(finished[0].timing.endpoint_ms>=700,'and ends on the usual silence endpoint');
+  }
   const file=path.join(__dirname,'../data/ui-review/native-call-audio/native-call-test.wav');
   if(fs.existsSync(file)){
     const wav=fs.readFileSync(file);let offset=12,pcm=null;

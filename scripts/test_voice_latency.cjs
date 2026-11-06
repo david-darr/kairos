@@ -1,6 +1,7 @@
 // Voice latency work (Fluid Voice build order steps 1 and 2, no new models): the per-turn trace helper, the sentence
 // chunker (no hold-back, first-clause release, abbreviations/decimals), the call speaker's prefetching queue
-// (order, cancellation mid-prefetch, look-ahead limit) and the call transport's push channel.
+// (order, cancellation mid-prefetch, look-ahead limit), the call transport's push channel and the rolling transcript
+// (partials, commit, reuse / tail finals, fallback, the slow-engine gate) against a scripted fake recognizer.
 // Plain node, no browser: the speaker runs against a fake AudioContext and a fake speech endpoint.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -231,5 +232,149 @@ const load = async (file, prefix = '') => import('data:text/javascript;base64,' 
     assert.equal(opened.length, count, 'ending the call closes the channel and stops reconnecting');
   }
 
-  console.log('Voice latency trace, chunker, prefetching speaker and push channel: passed');
+  // ---- rolling transcript (build order step 4) --------------------------------------------------------------------
+  // A scripted fake recognizer stands in for whisper: 12 words, one per 500 ms, cut into segments every 3 s (the way
+  // whisper cuts at a pause). A window is just a Float32Array whose samples carry their absolute position, so the fake
+  // knows what audio it was given. `rtf` models recognition time as a real-time factor of the audio it is handed.
+  {
+    const { createPartialTranscriber, PARTIAL_MAX_RTF } = await load('static/js/partialTranscript.js');
+    const rate = 16, words = Array.from({ length: 12 }, (_, i) => `w${i}`), SEG = 3000;
+    const clip = ms => Float32Array.from({ length: ms * rate }, (_, i) => (i + 1) / 1e7);        // absolute sample index in the value
+    const startOf = pcm => (Math.round(pcm[0] * 1e7) - 1) / rate, lengthMs = pcm => pcm.length / rate;
+    const transcribe = pcm => {                      // what the fake recognizer says about [start, start + length)
+      const a = startOf(pcm), b = a + lengthMs(pcm), parts = [];
+      for (let i = 0; i < words.length; i++) { const s0 = i * 500, s1 = s0 + 500; if (s0 >= a && s1 <= b) parts.push({ i, s0, s1 }); }
+      const segs = [];
+      for (const p of parts) { const at = Math.floor(p.s0 / SEG); (segs[at] ||= { text: [], end_ms: 0 }); segs[at].text.push(words[p.i]); segs[at].end_ms = p.s1 - a; }
+      const list = segs.filter(Boolean).map(g => ({ text: g.text.join(' '), end_ms: g.end_ms }));
+      return { text: list.map(g => g.text).join(' '), segments: list };
+    };
+    const harness = (options = {}) => {
+      const log = { sent: [], finals: [], captions: [] };
+      const rtf = options.rtf ?? .1;
+      const send = async (pcm, signal) => {
+        log.sent.push({ from: startOf(pcm), ms: lengthMs(pcm) });
+        if (options.fail) { const e = new Error('down'); if (options.status) e.status = options.status; throw e; }
+        if (options.busy) return { busy: true, text: '' };
+        if (options.hold) await options.hold(signal);
+        return { ...transcribe(pcm), timings: { recognition_ms: lengthMs(pcm) * rtf } };
+      };
+      const sendFinal = async pcm => { log.finals.push({ from: startOf(pcm), ms: lengthMs(pcm) }); return transcribe(pcm).text; };
+      const partials = createPartialTranscriber({ send, encode: pcm => pcm, onText: text => log.captions.push(text), ...(options.maxRtf ? { maxRtf: options.maxRtf } : {}) });
+      return { partials, log, sendFinal };
+    };
+    // Stream `totalMs` of speech into a session as the recorder does: 1 s chunks, then the pause flush; returns the clip.
+    const speak = async (partials, totalMs, pauseExtra = 300, chunkMs = 1000, deliverMs = totalMs) => {
+      partials.begin(); let at = 0;     // deliverMs < totalMs: the recorder had not yet handed out the last words when the turn ended
+      while (at < deliverMs) { const n = Math.min(chunkMs, deliverMs - at); partials.push(clip(at + n).subarray(at * rate)); at += n; await tick(); await tick(); }
+      if (pauseExtra) { partials.push(clip(at + pauseExtra).subarray(at * rate)); await tick(); await tick(); }
+      return { speechMs: totalMs, pcm: clip(totalMs + 160) };            // the segment: voiced audio plus the 160 ms trailing keep
+    };
+
+    // 1. A 6 s utterance. Partials caption it as it goes; two agreeing runs commit the first segment; the end of the turn is
+    //    the last partial itself (it saw all the voiced audio at the pause), so nothing is uploaded at all.
+    {
+      const { partials, log, sendFinal } = harness();
+      const { pcm } = await speak(partials, 6000);
+      assert.ok(log.captions.length >= 4, 'the caption grows as the user talks');
+      assert.equal(log.captions[0], 'w0 w1');
+      assert.equal(log.captions.at(-1), 'w0 w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11', 'the last caption is the whole sentence');
+      assert.ok(log.sent.some(entry => entry.from === 3000), 'once the first segment is stable the window moves past it (later partials start at 3 s)');
+      assert.ok(log.sent.filter(entry => entry.from === 3000).every(entry => entry.ms <= 3600), 'and stays short, so a long sentence does not get slower to follow');
+      const done = await partials.take().finalize(pcm, sendFinal);
+      assert.deepEqual(done, { text: 'w0 w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11', mode: 'reuse' });
+      assert.equal(log.finals.length, 0, 'reuse sends nothing at the end of the turn');
+    }
+    // 2. No pause flush before the endpoint: the last partial misses the final words, so only the TAIL after the committed text is sent.
+    {
+      const { partials, log, sendFinal } = harness();
+      const { pcm } = await speak(partials, 6000, 0, 1000, 5000);
+      const done = await partials.take().finalize(pcm, sendFinal);
+      assert.equal(done.mode, 'tail');
+      assert.equal(done.text, 'w0 w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11', 'committed text plus the tail is the complete sentence');
+      assert.equal(log.finals.length, 1);
+      assert.equal(log.finals[0].from, 3000, 'the final pass starts at the committed boundary');
+      assert.ok(log.finals[0].ms < pcm.length / rate / 2 + 200, `only ${log.finals[0].ms} ms of the ${pcm.length / rate} ms clip are sent`);
+    }
+    // 3. A short utterance has no committed text and no flush: nothing to reuse, so the caller sends the whole clip as before.
+    {
+      const { partials, log, sendFinal } = harness();
+      const { pcm } = await speak(partials, 2000, 0, 1000, 1000);
+      assert.equal(await partials.take().finalize(pcm, sendFinal), null, 'null means: send the whole clip');
+      assert.equal(log.finals.length, 0);
+    }
+    // 4. A partial still running at the end of the turn: one that covers the voiced audio is waited for, an older one is dropped.
+    {
+      let release;
+      const { partials, sendFinal } = harness({ hold: () => new Promise(resolve => { release = resolve; }) });
+      partials.begin(); partials.push(clip(1000)); await tick();
+      const pcm = clip(1000 + 160);
+      const outcome = partials.take().finalize(pcm, sendFinal); await tick();
+      release();
+      assert.deepEqual(await outcome, { text: 'w0 w1', mode: 'reuse' }, 'the in-flight run already covers every voiced sample, so its answer is the final one');
+      const second = harness({ hold: signal => new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })))) });
+      second.partials.begin(); second.partials.push(clip(1000)); await tick();
+      const late = await second.partials.take().finalize(clip(3000), second.sendFinal);
+      assert.equal(late, null, 'an in-flight run that covers less than the clip is aborted and the whole clip goes instead');
+    }
+    // 5. Failure falls back cleanly: the utterance goes whole-clip; three in a row switch it off for the call; a 404 at once.
+    {
+      const bad = harness({ fail: true });
+      const { pcm } = await speak(bad.partials, 3000);
+      assert.equal(await bad.partials.take().finalize(pcm, bad.sendFinal), null, 'a failed partial means the whole clip is sent');
+      assert.equal(bad.log.finals.length, 0);
+      for (let i = 0; i < 3; i++) { await speak(bad.partials, 1500, 0); bad.partials.take(); }
+      assert.equal(bad.partials.state.disabled, 'unavailable', 'repeated failures stop rolling transcription for the call');
+      const sentBefore = bad.log.sent.length; await speak(bad.partials, 3000); assert.equal(bad.log.sent.length, sentBefore, 'and no more requests are made');
+      bad.partials.reset(); assert.equal(bad.partials.state.disabled, '', 'a new call starts clean');
+      const old = harness({ fail: true, status: 404 }); await speak(old.partials, 1500, 0);
+      assert.equal(old.partials.state.disabled, 'unavailable', 'a server without the endpoint is never asked again');
+      const busy = harness({ busy: true }); const result = await speak(busy.partials, 3000);
+      assert.equal(await busy.partials.take().finalize(result.pcm, busy.sendFinal), null, 'a busy engine answer is skipped, not an error');
+      assert.equal(busy.partials.state.failures, 0);
+    }
+    // 6. A recognizer slower than PARTIAL_MAX_RTF (CPU Small) would only fight the real pass for the engine: rolling turns itself off.
+    {
+      const slow = harness({ rtf: 1.0 }); await speak(slow.partials, 4000);
+      assert.equal(slow.partials.state.disabled, 'slow', `real-time factor 1.0 is above ${PARTIAL_MAX_RTF}`);
+      const fast = harness({ rtf: .1 }); await speak(fast.partials, 4000);
+      assert.equal(fast.partials.state.disabled, '', 'a GPU-speed recognizer keeps rolling');
+    }
+    // 6b. The in-process CPU engine is off by default (disable('cpu')), and so is a GPU server that falls back to CPU mid-call.
+    {
+      const cpu = harness(); cpu.partials.disable('cpu'); await speak(cpu.partials, 3000);
+      assert.equal(cpu.log.sent.length, 0, 'a CPU call never sends a rolling request');
+      const drop = harness(); const original = drop.partials; original.begin();
+      const custom = createPartialTranscriber({ send: async pcm => ({ ...transcribe(pcm), engine: 'cpu' }), encode: pcm => pcm });
+      custom.begin(); custom.push(clip(1000)); await tick(); await tick(); custom.push(clip(2000).subarray(1000 * rate)); await tick(); await tick();
+      assert.equal(custom.state.disabled, 'cpu', 'a reply that says the engine fell back to CPU turns rolling off');
+    }
+    // 7. A new utterance drops the old session: no request from it can land in the next one's caption.
+    {
+      let release; const { partials, log } = harness({ hold: () => new Promise(resolve => { release = resolve; }) });
+      partials.begin(); partials.push(clip(1000)); await tick();
+      partials.begin(); release(); await tick(); await tick();
+      assert.deepEqual(log.captions, [], 'a cancelled session never captions');
+    }
+
+    // ---- measured with the fake recognizer: what the end-of-turn pass costs, whole clip vs rolling --------------
+    // Recognition time = audio length x real-time factor. CPU Small is ~1.0 (the one committed figure, core/speech.py);
+    // a CUDA whisper server is assumed ~0.1 (NOT measured on this machine: no GPU runtime or model is installed here).
+    // The pause-flush partial starts ~300 ms into the silence and the endpoint fires at 700 ms, so a reused answer is free
+    // only for the part of its run that fits in that 400 ms; any more is waited for. The CPU rows show the gate: at
+    // factor 1.0 rolling switches itself off (above PARTIAL_MAX_RTF), so the turn costs exactly what it did before.
+    const table = [];
+    for (const [engine, factor] of [['cpu small', 1.0], ['cuda', .1], ['cuda (slower, 0.25)', .25]]) for (const seconds of [2, 4, 6]) {
+      const ms = seconds * 1000, whole = ms * factor;
+      const { partials, log, sendFinal } = harness({ rtf: factor });
+      const { pcm } = await speak(partials, ms, 300);
+      const disabled = partials.state.disabled;
+      const rolled = disabled ? null : await partials.take().finalize(pcm, sendFinal);
+      const last = log.sent.at(-1), wait = rolled ? (rolled.mode === 'reuse' ? Math.max(0, last.ms * factor - 400) : log.finals.at(-1).ms * factor) : whole;
+      table.push(`${engine} ${seconds} s: whole clip ${Math.round(whole)} ms -> ${disabled ? `rolling off (${disabled}), whole clip` : rolled ? `${rolled.mode} ${Math.round(wait)} ms` : 'whole clip'}${rolled ? ` (saves ${Math.round(whole - wait)} ms)` : ''}`);
+    }
+    console.log('Final-pass recognition cost (fake recognizer, scripted words):\n  ' + table.join('\n  '));
+  }
+
+  console.log('Voice latency trace, chunker, prefetching speaker, push channel and rolling transcript: passed');
 })().catch(error => { console.error(error); process.exit(1); });

@@ -152,6 +152,122 @@ class NativeCalls(unittest.TestCase):
             runtime.unregister()
 
 
+    # ---- rolling transcription (Fluid Voice build order step 4): partial endpoint, lock rules, fallback ----
+    @staticmethod
+    def _wav(seconds=1.0):
+        import io, wave
+        buffer = io.BytesIO()
+        with wave.open(buffer, 'wb') as handle:
+            handle.setnchannels(1); handle.setsampwidth(2); handle.setframerate(16000); handle.writeframes(bytes(int(16000 * seconds) * 2))
+        return buffer.getvalue()
+
+    def test_partial_returns_text_and_timed_segments_from_either_engine(self):
+        from core import speech, speech_acceleration
+        parts = [{'text': 'hello there', 'start_ms': 0, 'end_ms': 900}, {'text': '[BLANK_AUDIO]', 'start_ms': 900, 'end_ms': 1200}, {'text': 'how are', 'start_ms': 1200, 'end_ms': 2000}]
+        with patch.object(speech, 'selected_model', return_value='small.en'), patch.object(speech_acceleration, 'is_ready', return_value=True), \
+                patch.object(speech_acceleration, 'transcribe_segments', return_value=('hello there [BLANK_AUDIO] how are', parts)) as gpu:
+            body = self.client.post('/api/speech/partial', data={'model': 'small.en', 'backend': 'auto'}, files={'audio': ('p.wav', self._wav(), 'audio/wav')}).json()
+        self.assertEqual(body['engine'], 'cuda'); self.assertEqual(body['text'], 'hello there how are')
+        self.assertEqual([(x['text'], x['end_ms']) for x in body['segments']], [('hello there', 900), ('how are', 2000)], 'markers are dropped, timings kept')
+        self.assertTrue(gpu.call_args.kwargs['timed'], 'the GPU server is asked for timed segments only for partials')
+        self.assertIn('recognition_ms', body['timings'])
+        class Piece:
+            def __init__(self, text, t0, t1): self.text, self.t0, self.t1 = text, t0, t1
+        class Engine:
+            def transcribe(self, samples): return [Piece(' one two', 0, 80), Piece(' three', 80, 150)]
+        with patch.object(speech, 'selected_model', return_value='small.en'), patch.object(speech, 'prepare_call', return_value={'model': 'small.en', 'engine': 'cpu', 'fallback': None}), \
+                patch.object(speech, 'engine_available', return_value=True), patch.object(speech, '_load', return_value=Engine()):
+            body = self.client.post('/api/speech/partial', data={'model': 'small.en', 'backend': 'cpu'}, files={'audio': ('p.wav', self._wav(), 'audio/wav')}).json()
+        self.assertEqual(body['engine'], 'cpu'); self.assertEqual(body['text'], 'one two three')
+        self.assertEqual([x['end_ms'] for x in body['segments']], [800, 1500], 'whisper.cpp centiseconds become milliseconds')
+
+    def test_cuda_requests_do_not_take_the_engine_lock_but_cpu_requests_do(self):
+        import threading
+        from core import speech, speech_acceleration
+        inside, release = threading.Barrier(3, timeout=3), threading.Event()
+        def gpu(audio, path, timed=True):
+            inside.wait(); release.wait(3); return 'ok', []
+        results = []
+        with patch.object(speech, 'selected_model', return_value='small.en'), patch.object(speech_acceleration, 'is_ready', return_value=True), patch.object(speech_acceleration, 'transcribe_segments', side_effect=gpu):
+            with speech.ENGINE_LOCK:   # a CPU job (say dictation) is running: GPU calls must not wait for it
+                threads = [threading.Thread(target=lambda: results.append(speech.transcribe_call(self._wav(), 'small.en', 'auto'))) for _ in range(2)]
+                for thread in threads: thread.start()
+                try:
+                    inside.wait()   # both GPU requests are inside the server call at the same time, with the lock held elsewhere
+                finally:
+                    release.set()
+                for thread in threads: thread.join(3)
+        self.assertEqual([r['engine'] for r in results], ['cuda', 'cuda'])
+        self.assertTrue(all(r['queue_ms'] < 500 for r in results))
+
+        running, hold, order = threading.Event(), threading.Event(), []
+        def cpu(audio, name):
+            order.append('start'); running.set(); hold.wait(3); order.append('end'); return 'text', [{'text': 'text', 'start_ms': 0, 'end_ms': 1}]
+        with patch.object(speech, 'selected_model', return_value='small.en'), patch.object(speech, 'prepare_call', return_value={'model': 'small.en', 'engine': 'cpu', 'fallback': None}), \
+                patch.object(speech, 'transcribe_segments', side_effect=cpu):
+            first = threading.Thread(target=lambda: speech.transcribe_call(self._wav(), 'small.en', 'cpu')); first.start()
+            self.assertTrue(running.wait(2))
+            self.assertEqual(speech.transcribe_call(self._wav(), 'small.en', 'cpu', segments=True, blocking=False), {'text': '', 'busy': True}, 'a partial never queues behind a running CPU job')
+            second = threading.Thread(target=lambda: order.append(speech.transcribe_call(self._wav(), 'small.en', 'cpu')['text'])); second.start()
+            threading.Event().wait(.15)
+            self.assertEqual(order, ['start'], 'a real (blocking) CPU request waits its turn')
+            hold.set(); first.join(3); second.join(3)
+            self.assertEqual(order[0:2], ['start', 'end']); self.assertEqual(order[-1], 'text')
+
+    def test_gpu_failure_inside_a_partial_falls_back_to_cpu_without_losing_the_text(self):
+        from core import speech, speech_acceleration
+        class Piece:
+            def __init__(self, text, t0, t1): self.text, self.t0, self.t1 = text, t0, t1
+        class Engine:
+            def transcribe(self, samples): return [Piece('on the cpu', 0, 100)]
+        with patch.object(speech, 'selected_model', return_value='small.en'), patch.object(speech_acceleration, 'is_ready', return_value=True), \
+                patch.object(speech_acceleration, 'transcribe_segments', side_effect=ValueError('GPU recognition stopped. Using built-in CPU recognition.')), \
+                patch.object(speech, 'engine_available', return_value=True), patch.object(speech, '_load', return_value=Engine()):
+            body = self.client.post('/api/speech/partial', data={'model': 'small.en', 'backend': 'auto'}, files={'audio': ('p.wav', self._wav(), 'audio/wav')}).json()
+        self.assertEqual((body['text'], body['engine']), ('on the cpu', 'cpu')); self.assertIn('GPU recognition stopped', body['fallback'])
+
+    def test_partial_validates_like_transcribe(self):
+        self.assertEqual(self.client.post('/api/speech/partial', files={'audio': ('p.wav', b'x')}).status_code, 422, 'a model is required')
+        self.assertEqual(self.client.post('/api/speech/partial', data={'model': 'small.en', 'backend': 'remote'}, files={'audio': ('p.wav', b'x')}).status_code, 422)
+        with patch('routes.speech_routes.speech.MAX_AUDIO_BYTES', 4):
+            self.assertEqual(self.client.post('/api/speech/partial', data={'model': 'small.en'}, files={'audio': ('p.wav', b'12345')}).status_code, 413)
+        from core.speech import SpeechUnavailable
+        with patch('routes.speech_routes.speech.transcribe_call', side_effect=SpeechUnavailable('Download the selected speech model before starting the call.')):
+            response = self.client.post('/api/speech/partial', data={'model': 'small.en'}, files={'audio': ('p.wav', b'audio')})
+        self.assertEqual(response.status_code, 422); self.assertIn('Download', response.json()['detail'])
+
+    def test_final_transcription_is_unchanged_for_a_tail_only_clip(self):
+        # The end-of-turn pass is the ordinary /transcribe call, just with less audio: same shape, no segments asked for.
+        info = {'text': 'the tail', 'model': 'small.en', 'engine': 'cuda', 'fallback': None, 'queue_ms': 0}
+        with patch('routes.speech_routes.speech.transcribe_call', return_value=info) as recognize:
+            body = self.client.post('/api/speech/transcribe', data={'model': 'small.en', 'backend': 'auto'}, files={'audio': ('t.wav', b'tail')}).json()
+        recognize.assert_called_once_with(b'tail', 'small.en', 'auto')
+        self.assertEqual(body['text'], 'the tail'); self.assertNotIn('segments', body); self.assertNotIn('queue_ms', body)
+        self.assertEqual(set(body['timings']), {'queue_ms', 'recognition_ms'})
+
+    def test_gpu_runtime_ready_check_needs_no_lock_and_a_replaced_server_is_not_latched_failed(self):
+        from core import speech_acceleration as runtime
+        with patch.object(runtime, '_read', return_value=None):
+            self.assertFalse(runtime.is_ready('m.bin'))
+        class Live:
+            def poll(self): return None
+        with patch.object(runtime, '_read', return_value={'folder': 'x'}), patch.object(runtime, '_process', Live()), patch.object(runtime, '_model', 'm.bin'), patch.object(runtime, '_port', 1234), patch.object(runtime, '_failed', None):
+            runtime._gpu.set()
+            try:
+                self.assertTrue(runtime.is_ready('m.bin')); self.assertFalse(runtime.is_ready('other.bin'))
+            finally:
+                runtime._gpu.clear()
+        # A request that fails after the server was swapped out must not latch the NEW server as failed.
+        with patch.object(runtime, 'is_ready', return_value=True), patch.object(runtime, '_port', 1111), patch.object(runtime, 'stop') as stop, patch.object(runtime.httpx, 'Client') as client:
+            def fail(*a, **k):
+                runtime._port = 2222   # another thread restarted the server on a new port while this was in flight
+                raise OSError('connection reset')
+            client.return_value.__enter__.return_value.post.side_effect = fail
+            with self.assertRaises(ValueError):
+                runtime.transcribe_segments(b'x', 'm.bin')
+            stop.assert_not_called(); self.assertIsNone(runtime._failed)
+
+
 class Organization(unittest.TestCase):
     def test_pins_unread_and_new_session_do_not_leak_between_users(self):
         Path(agent_conversations._file()).unlink(missing_ok=True)

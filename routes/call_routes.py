@@ -115,9 +115,12 @@ async def turn(ident: str, body: Turn, user: str = Depends(require_user)):
             yield json.dumps({'type':'error','message':str(error.detail)}) + '\n'
     return StreamingResponse(events(), media_type='application/x-ndjson', headers={'Cache-Control':'no-store','X-Accel-Buffering':'no'})
 
+class Interrupt(BaseModel):
+    spoken: bool = False
+
 @router.post('/{ident}/interrupt')
-async def interrupt(ident: str, user: str = Depends(require_user)):
-    calls.interrupt(calls.require(ident, user))
+async def interrupt(ident: str, body: Interrupt | None = None, user: str = Depends(require_user)):
+    calls.interrupt(calls.require(ident, user), spoken=bool(body and body.spoken))
     return {'ok':True}
 
 @router.post('/{ident}/prepare')

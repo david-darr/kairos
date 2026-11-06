@@ -166,10 +166,21 @@ export async function transcribeBlob(blob, { signal, model, backend, pcm = false
   return result.text || '';
 }
 
-// One recording session. Kept as an object rather than a start/stop pair of
-// functions so the caller can always reach stop() and release the microphone,
-// including from an error path — a live mic indicator left on after a failure
-// is alarming and looks like the app is listening when it isn't.
+// Rolling transcript of an utterance still in progress (partialTranscript.js). Resolves
+// {text, segments, busy, timings}; rejects with an Error carrying .status so the caller can tell "this server has no
+// partial endpoint" (404) from a one-off failure.
+export async function transcribePartial(wav, { signal, model, backend } = {}) {
+  const form = new FormData();
+  form.append('audio', wav, 'partial.wav');
+  form.append('model', model);
+  if (backend) form.append('backend', backend);
+  const res = await fetch('/api/speech/partial', { method: 'POST', body: form, signal });
+  if (!res.ok) {
+    const failure = new Error('Partial transcription failed.'); failure.status = res.status; throw failure;
+  }
+  return res.json();
+}
+
 // One recording session. Kept as an object rather than a start/stop pair of
 // functions so the caller can always reach stop() and release the microphone,
 // including from an error path — a live mic indicator left on after a failure
