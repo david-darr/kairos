@@ -10,7 +10,7 @@ from fastapi.responses import Response, FileResponse
 from starlette.background import BackgroundTask
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from services import bot_package
 from services.bot_package_import import ImportFailure
 
@@ -90,7 +90,7 @@ async def upload(request, limit, suffixes, *, password=False):
 
 
 @router.get("/templates")
-async def templates(user: str = Depends(require_admin)):
+async def templates(user: str = Depends(require_user)):
     from pathlib import Path
     import json
     root = Path(__file__).resolve().parents[1] / "static" / "data"
@@ -99,27 +99,27 @@ async def templates(user: str = Depends(require_admin)):
 
 
 @router.post("/packages/export-preview")
-async def export_preview(body: ExportBody, user: str = Depends(require_admin)):
+async def export_preview(body: ExportBody, user: str = Depends(require_user)):
     with guard():
         return await asyncio.to_thread(bot_package.export_preview, body.bot_ids, body.options.model_dump(), owner_user=user)
 
 
 @router.post("/packages/export")
-async def export(body: ExportBody, user: str = Depends(require_admin)):
+async def export(body: ExportBody, user: str = Depends(require_user)):
     with guard():
         raw = await asyncio.to_thread(bot_package.export_bytes, body.bot_ids, body.options.model_dump(), owner_user=user)
     return Response(raw, media_type="application/json", headers={"Content-Disposition": 'attachment; filename="bots.kairos.json"'})
 
 
 @router.post("/packages/inspect")
-async def inspect(request: Request, user: str = Depends(require_admin)):
+async def inspect(request: Request, user: str = Depends(require_user)):
     with guard():
         raw, _ = await upload(request, bot_package.MAX_BYTES, (".json", ".md"))
         return await asyncio.to_thread(bot_package.inspect, raw, owner_user=user)
 
 
 @router.post("/packages/import")
-async def import_package(body: ImportBody, user: str = Depends(require_admin)):
+async def import_package(body: ImportBody, user: str = Depends(require_user)):
     with guard():
         return await asyncio.to_thread(bot_package.import_, body.token, body.selection.model_dump() if body.selection else None,
                                        owner_user=user)
@@ -130,7 +130,7 @@ class ScoutBody(Body):
 
 
 @router.post("/packages/scout")
-async def scout(body: ScoutBody, user: str = Depends(require_admin)):
+async def scout(body: ScoutBody, user: str = Depends(require_user)):
     from services.bot_scout import scout as run
     with guard():
         return await asyncio.to_thread(run, body.path, owner_user=user)
@@ -145,8 +145,8 @@ class RestoreBody(PasswordBody):
     confirm: Literal["REPLACE"]
 
 
-@router.post("/backups/export")
-async def backup_export(body: PasswordBody, user: str = Depends(require_admin)):
+@router.post("/backups/export", dependencies=[Depends(require_admin)])
+async def backup_export(body: PasswordBody, user: str = Depends(require_user)):
     import shutil
     from services import bot_backup
     folder = bot_backup._scratch()
@@ -161,8 +161,8 @@ async def backup_export(body: PasswordBody, user: str = Depends(require_admin)):
         raise
 
 
-@router.post("/backups/preview")
-async def backup_preview(request: Request, user: str = Depends(require_admin)):
+@router.post("/backups/preview", dependencies=[Depends(require_admin)])
+async def backup_preview(request: Request, user: str = Depends(require_user)):
     import shutil
     from services import bot_backup
     # Stream-limit multipart input, and let Starlette spool the file to disk.
@@ -196,8 +196,8 @@ async def backup_preview(request: Request, user: str = Depends(require_admin)):
         shutil.rmtree(folder)
 
 
-@router.post("/backups/restore")
-async def backup_restore(body: RestoreBody, user: str = Depends(require_admin)):
+@router.post("/backups/restore", dependencies=[Depends(require_admin)])
+async def backup_restore(body: RestoreBody, user: str = Depends(require_user)):
     from services import bot_backup
     with guard():
         return await asyncio.to_thread(bot_backup.restore, body.upload_id, body.password, body.confirm, owner_user=user)
@@ -205,14 +205,14 @@ async def backup_restore(body: RestoreBody, user: str = Depends(require_admin)):
 
 # -- problem reports (F101): drafted and kept on this computer, never sent ----------------------------------------
 @router.post("/reports")
-async def report_draft(body: ReportBody, user: str = Depends(require_admin)):
+async def report_draft(body: ReportBody, user: str = Depends(require_user)):
     from services import bot_report
     return await asyncio.to_thread(bot_report.draft, user, session_id=body.session_id, message_id=body.message_id,
                                    went_wrong=body.went_wrong, you_saw=body.you_saw, steps=body.steps)
 
 
-@router.post("/reports/open-folder")
-async def report_folder(user: str = Depends(require_admin)):
+@router.post("/reports/open-folder", dependencies=[Depends(require_admin)])
+async def report_folder(user: str = Depends(require_user)):
     """Show the reports folder. Fixed arguments, never a shell; the folder is Kairos's own."""
     import os
     import subprocess
@@ -229,6 +229,6 @@ async def report_folder(user: str = Depends(require_admin)):
 
 
 @router.get("/reports/{ident}")
-async def report_get(ident: str, user: str = Depends(require_admin)):
+async def report_get(ident: str, user: str = Depends(require_user)):
     from services import bot_report
     return await asyncio.to_thread(bot_report.get, user, ident)

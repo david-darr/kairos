@@ -1,10 +1,11 @@
-"""Admin-only community catalog, review-gated install and revocation controls."""
+"""Community catalog, review-gated install and revocation controls. Skills, tools and automations are
+each account's own to install (the record is per account); tabs and publishing stay admin."""
 import zipfile
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, StrictBool
 
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from core import tab_install
 from services import skill_curator
 from services import github_account, store_publish
@@ -41,22 +42,22 @@ async def _answer(call):
 
 
 @router.get("/catalog")
-async def catalog(cache_only: bool = False, user: str = Depends(require_admin)):
+async def catalog(cache_only: bool = False, user: str = Depends(require_user)):
     return await _answer(store_catalog.catalog(cache_only=cache_only))
 
 
 @router.post("/refresh")
-async def refresh(user: str = Depends(require_admin)):
+async def refresh(user: str = Depends(require_user)):
     return await _answer(store_catalog.catalog(refresh=True))
 
 
 @router.post("/install")
-async def install(body: InstallRequest, user: str = Depends(require_admin)):
+async def install(body: InstallRequest, user: str = Depends(require_user)):
     return await _answer(store_catalog.install(**body.model_dump()))
 
 
 @router.post("/revoked/{kind}/{slug}/reenable")
-async def reenable(kind: str, slug: str, body: ReenableRequest, request: Request, user: str = Depends(require_admin)):
+async def reenable(kind: str, slug: str, body: ReenableRequest, request: Request, user: str = Depends(require_user)):
     result = await _answer(store_catalog.reenable(kind, slug, **body.model_dump()))
     if kind == "tab":
         from core import custom_tabs, tab_hooks
@@ -66,7 +67,7 @@ async def reenable(kind: str, slug: str, body: ReenableRequest, request: Request
 
 
 @router.delete("/installed/{kind}/{slug}")
-async def remove(kind: str, slug: str, user: str = Depends(require_admin)):
+async def remove(kind: str, slug: str, user: str = Depends(require_user)):
     return await _answer(store_catalog.remove(kind, slug))
 
 

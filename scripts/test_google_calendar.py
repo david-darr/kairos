@@ -102,8 +102,12 @@ class GoogleTests(unittest.IsolatedAsyncioTestCase):
             if not admin:
                 raise HTTPException(403, "admin privileges required")
             return "fixture"
+        def signed_in():
+            if not admin:
+                raise HTTPException(401, "authentication required")
+            return "fixture"
         app.dependency_overrides[require_admin] = identity
-        app.dependency_overrides[require_user] = lambda: "fixture"
+        app.dependency_overrides[require_user] = signed_in
         async with REAL_CLIENT(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             return await client.request(method, path, json=body)
 
@@ -356,14 +360,16 @@ class GoogleTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(google, "MAX_DOWNLOAD", 4):
             self.assertEqual((await self.web("/api/google/drive/files/file/preview")).status_code, 413)
 
-    async def test_all_google_routes_are_admin_only(self):
+    async def test_all_google_routes_need_a_sign_in(self):  # phase 4c: each account has its own Google sign-ins
         for method, path, body in (("GET", "/api/google/status", None), ("GET", "/api/google/drive/storage", None),
                                    ("GET", "/api/google/drive/files/file/thumbnail", None), ("GET", "/api/google/drive/files/file/preview", None),
                                    ("GET", "/api/google/calendar/calendars", None), ("GET", f"/api/google/calendar/events?start={START}&end={END}", None),
                                    ("PATCH", "/api/google/calendar/settings", {"calendar_ids": []}),
                                    ("POST", "/api/google/calendar/action", {"action": "delete", "event_id": "timed"})):
-            self.assertEqual((await self.web(path, method, body, admin=False)).status_code, 403)
+            self.assertEqual((await self.web(path, method, body, admin=False)).status_code, 401)
         self.assertFalse(self.requests)
+        # The install's OAuth app stays with an admin.
+        self.assertEqual((await self.web("/api/google/client", "POST", {"client_id": "x"}, admin=False)).status_code, 403)
 
 
 class SanitizingTests(unittest.TestCase):

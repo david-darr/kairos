@@ -1,6 +1,6 @@
 """Bot connections, MCP servers, keys, logins, setup import and resource settings (Phase 2, unit U5).
 
-Mounted beneath /api/bots by the Phase 2 aggregate router. Admin only. Every path here starts with a
+Mounted beneath /api/bots by the Phase 2 aggregate router. Any signed-in account (setup-import stays admin). Every path here starts with a
 fixed word (connections, mcp, keys, logins, setup-import, resource-settings), declared before any
 bot-id route, so a bot id is never read as one of them. Bodies are bounded and refuse unknown fields.
 Nothing returned ever holds a saved secret: servers show header and variable names, keys show
@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from core import integrations, mcp_oauth
-from core.middleware import local_api_base, require_admin
+from core.middleware import local_api_base, require_admin, require_user
 from services import (bot_connections, bot_highlevel, bot_keys, bot_logins, bot_mcp_config, bot_onepassword,
                       bot_setup_import)
 from services.bot_connections import ConnectionError_
@@ -20,7 +20,7 @@ from services.bot_keys import KeyError_
 from services.bot_logins import LoginError
 from services.bot_mcp_config import McpConfigError
 
-router = APIRouter(prefix="/api/bots", tags=["bot-connections"], dependencies=[Depends(require_admin)])
+router = APIRouter(prefix="/api/bots", tags=["bot-connections"], dependencies=[Depends(require_user)])
 
 
 class Body(BaseModel):
@@ -112,23 +112,23 @@ async def guarded_async(call):
 # -- connected apps ------------------------------------------------------------------------------
 
 @router.get("/connections")
-async def connections(user: str = Depends(require_admin), q: str = Query("", max_length=100), category: str = Query("", max_length=40),
+async def connections(user: str = Depends(require_user), q: str = Query("", max_length=100), category: str = Query("", max_length=40),
                       mcp_only: bool = False, connected_only: bool = False):
     return guarded(lambda: bot_connections.inventory(user, query=q, category=category, mcp_only=mcp_only, connected_only=connected_only))
 
 
 @router.post("/connections/{service}/authorize")
-async def authorize(service: str, body: AuthorizeBody, user: str = Depends(require_admin)):
+async def authorize(service: str, body: AuthorizeBody, user: str = Depends(require_user)):
     return await guarded_async(lambda: bot_connections.authorize(service, user, local_api_base(), body.alias, account=body.account))
 
 
 @router.put("/connections/{service}/accounts/{account}/alias")
-async def set_alias(service: str, account: str, body: AliasBody, user: str = Depends(require_admin)):
+async def set_alias(service: str, account: str, body: AliasBody, user: str = Depends(require_user)):
     return guarded(lambda: bot_connections.set_alias(service, account, body.alias, user))
 
 
 @router.delete("/connections/{service}/accounts/{account}")
-async def disconnect(service: str, account: str, user: str = Depends(require_admin)):
+async def disconnect(service: str, account: str, user: str = Depends(require_user)):
     return guarded(lambda: bot_connections.disconnect(service, account, user))
 
 
@@ -280,12 +280,12 @@ async def remove_login(login_id: str):
 
 # -- setup import and settings -------------------------------------------------------------------
 
-@router.get("/setup-import")
+@router.get("/setup-import", dependencies=[Depends(require_admin)])
 async def preview_import():
     return await _off_thread(bot_setup_import.scan)
 
 
-@router.post("/setup-import")
+@router.post("/setup-import", dependencies=[Depends(require_admin)])
 async def apply_import(body: ImportBody):
     return await _off_thread(lambda: bot_setup_import.apply({"mcp": body.mcp, "skills": body.skills}, bot_id=body.bot_id))
 
@@ -304,12 +304,12 @@ async def _off_thread(call):
 
 
 @router.get("/resource-settings")
-async def get_resource_settings(user: str = Depends(require_admin)):
+async def get_resource_settings(user: str = Depends(require_user)):
     return bot_keys.resource_settings(user)
 
 
 @router.patch("/resource-settings")
-async def patch_resource_settings(body: SettingsBody, user: str = Depends(require_admin)):
+async def patch_resource_settings(body: SettingsBody, user: str = Depends(require_user)):
     fields = body.model_dump(exclude_unset=True)
     expected = fields.pop("expected_revision", None)
     return guarded(lambda: bot_keys.update_resource_settings(user, fields, expected))

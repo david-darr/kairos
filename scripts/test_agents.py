@@ -966,10 +966,16 @@ class AutoModeTests(AgentTestCase):
 
         def not_admin():
             raise HTTPException(status_code=403, detail="admin only")
+        def signed_out():
+            raise HTTPException(status_code=401, detail="authentication required")
+        # Phase 4c: every account has its own bots, so a signed-in non-admin may make one (held at Ask without
+        # machine access); nobody signed in may not, and the install's avatar image provider stays admin.
+        locked.dependency_overrides[require_user] = signed_out
         locked.dependency_overrides[require_admin] = not_admin
         client = TestClient(locked)
-        self.assertEqual(client.post("/api/agents", json={"name": "Rogue"}).status_code, 403)
-        self.assertEqual(client.post(f"/api/agents/{self.agent['id']}/cards", json={"name": "x", "prompt": "y"}).status_code, 403)
+        self.assertEqual(client.post("/api/agents", json={"name": "Rogue"}).status_code, 401)
+        self.assertEqual(client.post(f"/api/agents/{self.agent['id']}/cards", json={"name": "x", "prompt": "y"}).status_code, 401)
+        self.assertEqual(client.put("/api/agents/avatar-provider", json={"provider": "x", "api_key": "y"}).status_code, 403)
 
     def test_only_an_admin_can_direct_an_agents_work_through_tasks(self):
         """Regression, 2026-10-13. /api/agents is admin-only because agents

@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from core import bot_app_events
 from core import bot_event_receipts as receipts_module
 from core.bot_app_event_adapters import ADAPTERS
-from core.middleware import require_admin, require_user
+from core.middleware import require_user
 from services import bot_app_triggers
 from services.trigger_service import (ADDRESS_MAX_BODY, DEFAULT_MAX_PENDING, MAX_PENDING_RANGE, trigger_service)
 
@@ -145,7 +145,7 @@ async def list_app_triggers(bot_id: Optional[str] = None, user: str = Depends(re
 
 
 @router.post("/api/bot-app-triggers")
-async def create_app_trigger(body: AppTriggerBody, user: str = Depends(require_admin)) -> dict:
+async def create_app_trigger(body: AppTriggerBody, user: str = Depends(require_user)) -> dict:
     fields = _dump(body)
     bot_id = fields.pop("bot_id")
     try:
@@ -155,7 +155,7 @@ async def create_app_trigger(body: AppTriggerBody, user: str = Depends(require_a
 
 
 @router.patch("/api/bot-app-triggers/{trigger_id}")
-async def update_app_trigger(trigger_id: str, body: AppTriggerPatch, user: str = Depends(require_admin)) -> dict:
+async def update_app_trigger(trigger_id: str, body: AppTriggerPatch, user: str = Depends(require_user)) -> dict:
     fields = _dump(body)
     expected = fields.pop("expected_revision", None)
     try:
@@ -296,7 +296,7 @@ async def list_webhooks(bot_id: Optional[str] = None, user: str = Depends(requir
 
 
 @router.post("/api/bot-webhooks")
-async def create_webhook(body: WebhookBody, user: str = Depends(require_admin)) -> dict:
+async def create_webhook(body: WebhookBody, user: str = Depends(require_user)) -> dict:
     """A new address-mode webhook. It waits for the person's OK by default; Run straight away is their choice."""
     fields = _dump(body)
     name = fields.pop("name")
@@ -309,7 +309,7 @@ async def create_webhook(body: WebhookBody, user: str = Depends(require_admin)) 
 
 
 @router.patch("/api/bot-webhooks/{trigger_id}")
-async def update_webhook(trigger_id: str, body: WebhookPatch, user: str = Depends(require_admin)) -> dict:
+async def update_webhook(trigger_id: str, body: WebhookPatch, user: str = Depends(require_user)) -> dict:
     _mine(trigger_id, user)
     try:
         return _shown(trigger_service.update(trigger_id, **_dump(body)))

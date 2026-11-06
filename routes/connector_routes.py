@@ -1,5 +1,6 @@
 """Settings > Channels > Connectors (core/connectors). Managing connectors
-is admin-only: a connector can let messages reach Kairos and its agents.
+is each account's own (it sees and edits only the connectors it made): a connector can let messages reach
+that account's Kairos and agents, and what they start runs as an admin chat only for an admin.
 The webhook endpoint is public by necessity and trusts nothing until the
 platform's own signature has been verified (core/connectors/platforms)."""
 from typing import Optional
@@ -9,7 +10,7 @@ from pydantic import BaseModel
 
 from core import model_endpoints
 from core.connectors import KINDS, hub, store
-from core.middleware import require_admin
+from core.middleware import require_user
 
 router = APIRouter(prefix="/api/connectors", tags=["connectors"])
 
@@ -44,26 +45,26 @@ def _shown(record: dict) -> dict:
 
 
 def _own_connector(connector_id: str) -> None:
-    """An admin manages their own account's connectors (Multi-Account group 6); another account's is 404."""
+    """An account manages only its own connectors (Multi-Account group 6); another account's is 404."""
     record = store.get_record(connector_id)
     if record is None or not store.mine(record):
         raise HTTPException(status_code=404, detail="no such connector")
 
 
 @router.get("/kinds")
-async def kinds(user: str = Depends(require_admin)) -> list[dict]:
+async def kinds(user: str = Depends(require_user)) -> list[dict]:
     return [{"kind": c.kind, "label": c.label, "description": c.description, "docs_url": c.docs_url,
              "two_way": c.two_way, "webhook": c.webhook, "sender_help": c.sender_help,
              "fields": [f.describe() for f in c.fields]} for c in KINDS.values()]
 
 
 @router.get("")
-async def list_connectors(user: str = Depends(require_admin)) -> list[dict]:
+async def list_connectors(user: str = Depends(require_user)) -> list[dict]:
     return [_shown(r) for r in store.list_records() if store.mine(r)]
 
 
 @router.post("")
-async def create_connector(body: ConnectorBody, user: str = Depends(require_admin)) -> dict:
+async def create_connector(body: ConnectorBody, user: str = Depends(require_user)) -> dict:
     cls = _kind(body.kind or "")
     if body.model_endpoint_id and model_endpoints.get_endpoint(body.model_endpoint_id) is None:
         raise HTTPException(status_code=400, detail="pick a model added in Settings")
@@ -77,7 +78,7 @@ async def create_connector(body: ConnectorBody, user: str = Depends(require_admi
 
 
 @router.patch("/{connector_id}")
-async def update_connector(connector_id: str, body: ConnectorBody, user: str = Depends(require_admin)) -> dict:
+async def update_connector(connector_id: str, body: ConnectorBody, user: str = Depends(require_user)) -> dict:
     _own_connector(connector_id)
     record = store.get_record(connector_id)
     if record is None:
@@ -98,7 +99,7 @@ async def update_connector(connector_id: str, body: ConnectorBody, user: str = D
 
 
 @router.delete("/{connector_id}")
-async def delete_connector(connector_id: str, user: str = Depends(require_admin)) -> dict:
+async def delete_connector(connector_id: str, user: str = Depends(require_user)) -> dict:
     _own_connector(connector_id)
     await hub.stop(connector_id)
     store.delete(connector_id)
@@ -107,7 +108,7 @@ async def delete_connector(connector_id: str, user: str = Depends(require_admin)
 
 
 @router.post("/{connector_id}/test")
-async def test_connector(connector_id: str, body: TestBody, user: str = Depends(require_admin)) -> dict:
+async def test_connector(connector_id: str, body: TestBody, user: str = Depends(require_user)) -> dict:
     _own_connector(connector_id)
     record = store.get_record(connector_id)
     if record is None:

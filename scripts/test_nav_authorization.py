@@ -42,6 +42,20 @@ MEMBER_OK = {
     ("POST", "/api/skills"): "members may create skills (David's decision, 2026-10-27)",
     ("DELETE", "/api/permissions/{rule_id}"): "rules are kept per account (phase 4b): a member revokes only their own",
     ("GET", "/api/runs"): "runs live in the account's own chat database (phase 4b): a member sees only their own",
+    ("GET", "/api/agents"): "per account since phase 4c: a member reaches only their own bots",
+    ("POST", "/api/agents"): "per account since phase 4c: a member reaches only their own bots (held at Ask without machine access)",
+    ("GET", "/api/agents/inbox"): "per account since phase 4c: a member reaches only their own bots' inbox",
+    ("GET", "/api/agents/{agent_id}"): "per account since phase 4c: a member reaches only their own bots",
+    ("PATCH", "/api/agents/{agent_id}"): "per account since phase 4c: a member reaches only their own bots",
+    ("DELETE", "/api/agents/{agent_id}"): "per account since phase 4c: a member reaches only their own bots",
+    ("POST", "/api/agents/{agent_id}/forget-logins"): "per account since phase 4c: a member reaches only their own bots' saved logins",
+    ("GET", "/api/integrations"): "per account since phase 4c: a member reaches only their own integrations",
+    ("GET", "/api/store/catalog"): "per account since phase 4c: a member reaches only their own store installs (tabs stay admin)",
+    ("GET", "/api/settings"): "per account since phase 4c: a member reaches only their own account settings",
+    ("POST", "/api/settings/computer-steps"): "per account since phase 4c: a member reaches only their own computer-step days (an account setting)",
+    ("GET", "/api/file-checkpoints"): "per account since phase 4c: a member reaches only their own file checkpoints",
+    ("GET", "/api/file-checkpoints/{event_id}"): "per account since phase 4c: a member reaches only their own file checkpoints",
+    ("POST", "/api/file-checkpoints/{event_id}/restore"): "per account since phase 4c: a member reaches only their own file checkpoints (restoring needs machine access)",
 }
 # Answers the Electron window's cookie only, never a session (routes/cli_routes.py).
 APP_WINDOW_ONLY = {"/api/auth/cli/terminals"}

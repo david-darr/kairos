@@ -10,7 +10,7 @@ import time
 import uuid
 from pathlib import Path
 
-from core.constants import DATA_DIR
+from core import accounts
 from services import bot_skill_library, bot_skills
 from services.bot_skills import ABSENT, LOCK, SkillError, checked, ident, name, read_json, state_path, write_json
 
@@ -47,11 +47,11 @@ def set_mode(scope, value):
 
 
 def _pending_path():
-    return checked(Path(DATA_DIR) / bot_skill_library.ROOT / "pending.json")
+    return checked(Path(accounts.path(bot_skill_library.ROOT, "pending.json")))
 
 
 def _notes_path():
-    return checked(Path(DATA_DIR) / bot_skill_library.ROOT / "share-notes.json")
+    return checked(Path(accounts.path(bot_skill_library.ROOT, "share-notes.json")))
 
 
 def pending_shares(bot_id=None):

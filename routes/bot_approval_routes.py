@@ -3,7 +3,7 @@
 Spec: Kairos Projects/Agents Redesign/phase-3-design.md, sections 4.1, 5.1, 5.2 and 6.
 
 These routes carry complete absolute prefixes and are added to routes/permission_routes.py's router, so
-they do not nest. Every management route needs an admin, and a conversation id must belong to the bot
+they do not nest. Every management route needs a signed-in user (each account has its own bots), and a conversation id must belong to the bot
 and to the caller; anything else answers 404. Bodies forbid extra fields and are bounded.
 
 Raising the level is not an ordinary write. The page asks to prepare it (POST .../elevate); only the
@@ -19,7 +19,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from core import bot_outbound, bot_policy, permissions
-from core.middleware import require_admin
+from core.middleware import require_user
 
 router = APIRouter(tags=["bot-approvals"])
 
@@ -75,7 +75,7 @@ def _bot(bot_id: str) -> dict:
 
 @router.get("/api/bots-approvals/{bot_id}")
 async def get_policy(bot_id: str, thread_id: Optional[str] = Query(default=None, max_length=80),
-                     user: str = Depends(require_admin)) -> dict:
+                     user: str = Depends(require_user)) -> dict:
     _bot(bot_id)
     try:
         return bot_policy.view(bot_id, thread_id, user)
@@ -84,7 +84,7 @@ async def get_policy(bot_id: str, thread_id: Optional[str] = Query(default=None,
 
 
 @router.post("/api/bots-approvals/{bot_id}/mode")
-async def set_mode(bot_id: str, body: ModeBody, user: str = Depends(require_admin)) -> dict:
+async def set_mode(bot_id: str, body: ModeBody, user: str = Depends(require_user)) -> dict:
     """Lower the level, or set one that is not higher. Raising goes through .../elevate."""
     _bot(bot_id)
     try:
@@ -97,7 +97,7 @@ async def set_mode(bot_id: str, body: ModeBody, user: str = Depends(require_admi
 
 
 @router.post("/api/bots-approvals/{bot_id}/elevate")
-async def prepare_elevation(bot_id: str, body: ElevateBody, user: str = Depends(require_admin)) -> dict:
+async def prepare_elevation(bot_id: str, body: ElevateBody, user: str = Depends(require_user)) -> dict:
     """Step one of raising the level. Changes nothing; the desktop shell finishes it."""
     _bot(bot_id)
     try:
@@ -136,14 +136,14 @@ async def desktop_step(step: Literal["confirm", "activate", "commit", "revoke"],
 
 
 @router.get("/api/bots-approvals/{bot_id}/commands")
-async def list_commands(bot_id: str, user: str = Depends(require_admin)) -> dict:
+async def list_commands(bot_id: str, user: str = Depends(require_user)) -> dict:
     _bot(bot_id)
     return {"rules": bot_policy.list_command_rules(bot_id), "limit": bot_policy.MAX_COMMAND_RULES,
             "state_corrupt": bot_policy.state_corrupt()}
 
 
 @router.post("/api/bots-approvals/{bot_id}/commands")
-async def add_command(bot_id: str, body: RuleBody, user: str = Depends(require_admin)) -> dict:
+async def add_command(bot_id: str, body: RuleBody, user: str = Depends(require_user)) -> dict:
     """Remember the exact command a live request is asking about. There is no way to write a rule from
     nothing: it must belong to a request that is waiting right now, for this bot."""
     _bot(bot_id)
@@ -165,7 +165,7 @@ async def add_command(bot_id: str, body: RuleBody, user: str = Depends(require_a
 
 
 @router.delete("/api/bots-approvals/{bot_id}/commands/{rule_id}")
-async def delete_command(bot_id: str, rule_id: str, user: str = Depends(require_admin)) -> dict:
+async def delete_command(bot_id: str, rule_id: str, user: str = Depends(require_user)) -> dict:
     _bot(bot_id)
     try:
         removed = bot_policy.delete_command_rule(bot_id, rule_id)
@@ -177,7 +177,7 @@ async def delete_command(bot_id: str, rule_id: str, user: str = Depends(require_
 
 
 @router.get("/api/bots-approvals/{bot_id}/outbound")
-async def get_outbound(bot_id: str, user: str = Depends(require_admin)) -> dict:
+async def get_outbound(bot_id: str, user: str = Depends(require_user)) -> dict:
     agent = _bot(bot_id)
     outbound = agent.get("outbound") or {"policy": "ask", "daily_cap": 25}
     cap = int(outbound.get("daily_cap") or 25)
@@ -194,7 +194,7 @@ async def get_decisions(bot_id: Optional[str] = Query(default=None, max_length=8
                         thread_id: Optional[str] = Query(default=None, max_length=80),
                         since: Optional[float] = Query(default=None, ge=0),
                         limit: int = Query(default=200, ge=1, le=1000),
-                        user: str = Depends(require_admin)) -> dict:
+                        user: str = Depends(require_user)) -> dict:
     return {"decisions": _decision_rows(user, bot_id, thread_id, since, limit),
             "retention_days": bot_policy.DECISION_RETENTION_DAYS}
 
@@ -204,7 +204,7 @@ async def get_decisions_csv(bot_id: Optional[str] = Query(default=None, max_leng
                             thread_id: Optional[str] = Query(default=None, max_length=80),
                             since: Optional[float] = Query(default=None, ge=0),
                             limit: int = Query(default=1000, ge=1, le=1000),
-                            user: str = Depends(require_admin)) -> PlainTextResponse:
+                            user: str = Depends(require_user)) -> PlainTextResponse:
     text = bot_policy.decisions_csv(_decision_rows(user, bot_id, thread_id, since, limit))
     return PlainTextResponse(text, media_type="text/csv",
                              headers={"Content-Disposition": 'attachment; filename="bot-decisions.csv"'})

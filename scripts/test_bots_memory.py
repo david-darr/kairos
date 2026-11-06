@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from core import tool_registry  # noqa: E402
 from core.auth import SESSION_COOKIE_NAME, auth_manager  # noqa: E402
-from core.middleware import require_admin  # noqa: E402
+from core.middleware import require_admin, require_user  # noqa: E402
 from routes import bot_memory_routes, bot_resources_routes  # noqa: E402
 from services import bot_memory, bot_memory_entries as entries, bot_memory_journal as journal, bot_memory_store as store  # noqa: E402
 from services.agent_service import agent_service  # noqa: E402
@@ -31,7 +31,7 @@ from services.task_service import task_service  # noqa: E402
 
 app = FastAPI()
 app.include_router(bot_memory_routes.router)
-app.dependency_overrides[require_admin] = lambda: "david"
+app.dependency_overrides[require_admin] = lambda: "david"; app.dependency_overrides[require_user] = lambda: "david"
 web = TestClient(app, client=("127.0.0.1", 50000))
 ABSENT = store.ABSENT
 TODAY = datetime.now().date()
@@ -517,7 +517,7 @@ class RouteTests(NotebookCase):
         self.assertTrue(args[0][1].startswith("obsidian://open?path=%2Ftmp%2Fx%20y"))
         self.assertFalse(kwargs.get("shell"))
 
-    def test_every_route_needs_an_admin(self):
+    def test_every_route_needs_a_signed_in_user_and_opening_a_folder_needs_an_admin(self):
         auth_manager._users = {"users": {}}
         auth_manager._sessions = {}
         auth_manager.create_user("bob", "bob-password-1")
@@ -537,7 +537,16 @@ class RouteTests(NotebookCase):
                 path = route.path.replace("{bot_id}", self.id).replace("{change}", "abc")
                 for who in ("bob", None):
                     got = caller(who).request(method, path, json=None if method == "GET" else {}, params={"path": "MEMORY.md", "expected_hash": ABSENT})
-                    self.assertIn(got.status_code, (401, 403), f"{who} {method} {path} -> {got.status_code}")
+                    # Phase 4c: every account has its own bots' notebooks. Nobody signed in: 401. A signed-in
+                    # non-admin is let through (whatever the route then says about this bot), except opening a
+                    # folder on the host computer, which stays admin.
+                    if who is None:
+                        self.assertEqual(got.status_code, 401, f"{who} {method} {path} -> {got.status_code}")
+                    elif path.endswith("/memory/open"):
+                        self.assertEqual(got.status_code, 403, f"{who} {method} {path} -> {got.status_code}")
+                    else:
+                        self.assertNotEqual(got.status_code, 401, f"{who} {method} {path} -> {got.status_code}")
+                        self.assertNotIn("admin", got.text.lower(), f"{who} {method} {path} wants an admin")
                 swept += 1
         self.assertEqual(swept, len([m for r in bot_memory_routes.router.routes for m in r.methods - {"HEAD", "OPTIONS"}]))
         self.assertGreaterEqual(swept, 11)
@@ -547,7 +556,7 @@ class RouteTests(NotebookCase):
         self.assertIn("bot_memory_routes", bot_resources_routes.included)
         full = FastAPI()
         full.include_router(bot_resources_routes.router)
-        full.dependency_overrides[require_admin] = lambda: "david"
+        full.dependency_overrides[require_admin] = lambda: "david"; full.dependency_overrides[require_user] = lambda: "david"
         self.assertIn("/api/bots/{bot_id}/memory", full.openapi()["paths"])
         self.assertEqual(TestClient(full).get(self.url()).status_code, 200)
 

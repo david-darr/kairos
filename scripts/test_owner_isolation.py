@@ -300,12 +300,22 @@ class OwnerIsolation(unittest.TestCase):
     def test_forge_is_refused_to_members_on_every_route(self):
         self.sweep("/api/forge")
 
-    def test_agents_refuse_members_on_every_change_route(self):
-        # Reading the list is member-visible by design (agents tab); every
-        # route that creates, edits, deletes or directs an agent is admin-only.
-        allow = {(m, t) for m, t in self.routes_under("/api/agents") if m == "GET" and t in ("/api/agents",)}
-        allow |= {("POST", "/api/agents/conversations/{kind}/{ident}"), ("POST", "/api/agents/inbox/{item_id}/answer")}
-        self.sweep("/api/agents", allow)
+    def test_agents_need_a_sign_in_and_only_the_image_provider_stays_admin(self):
+        # Phase 4c: every account has its own bots (held at Ask without machine access), so a member is let in on
+        # every route, to their own data: the admin's bot ids are not theirs. Nobody signed in: 401. The install's
+        # avatar image provider (one key and limit) stays admin.
+        import re
+        for method, template in self.routes_under("/api/agents"):
+            path = re.sub(r"\{[^}]+\}", "probe-id", template)
+            with self.subTest(method=method, route=template):
+                body = None if method == "GET" else {}
+                self.assertEqual(self.anon.request(method, path, json=body).status_code, 401, f"anonymous {method} {path}")
+                got = self.bob.request(method, path, json=body)
+                if template == "/api/agents/avatar-provider":
+                    self.assertEqual(got.status_code, 403, f"member {method} {path} -> {got.status_code}")
+                else:
+                    self.assertNotEqual(got.status_code, 401, f"member {method} {path} -> {got.status_code}")
+                    self.assertNotIn("admin", got.text.lower(), f"member {method} {path} wants an admin")
 
 
 if __name__ == "__main__":

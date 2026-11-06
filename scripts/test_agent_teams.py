@@ -412,17 +412,12 @@ class TeamTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(NotFound):
             await self.service.message("alice", system_id, "Wrong team", "m4", to=self.team(other["id"])["Lee"]["id"])
 
-    def test_only_an_admin_seats_agents(self):
-        body = swarm_routes.Create(**payload(member("Lee", "Lead", agent_id=self.lead_agent["id"]), []),
-                                   command_id="x")
-        with patch.object(swarm_routes.auth_manager, "is_admin", lambda user: False):
-            with self.assertRaises(HTTPException) as refused:
-                swarm_routes.agents_allowed("guest", body)
-            self.assertEqual(refused.exception.status_code, 403)
-            swarm_routes.agents_allowed("guest", swarm_routes.Create(**payload(member("Lee", "Lead"), []),
-                                                                     command_id="y"))
-        with patch.object(swarm_routes.auth_manager, "is_admin", lambda user: True):
-            swarm_routes.agents_allowed("admin", body)
+    def test_any_account_seats_its_own_agents(self):
+        """Phase 4c: bots are per account and capped, so any account may seat one of its own on a team; an
+        agent that is not in the caller's account is refused by the service, not by an admin check."""
+        self.assertFalse(hasattr(swarm_routes, "agents_allowed"))
+        with self.assertRaises(ValueError):
+            self.service._link({"name": "Lee", "role": "Lead", "agent_id": "not-this-accounts"}, True)
 
 
 if __name__ == "__main__":

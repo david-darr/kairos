@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from services import bot_memory, bot_memory_journal, bot_memory_store as store
 from services.agent_service import agent_service
 
@@ -94,7 +94,7 @@ def _row(row: dict) -> dict:
 
 
 @router.get("/{bot_id}/memory")
-async def memory_overview(bot_id: str, user: str = Depends(require_admin)) -> dict:
+async def memory_overview(bot_id: str, user: str = Depends(require_user)) -> dict:
     _bot(bot_id)
     try:
         return await run_in_threadpool(bot_memory.overview, bot_id)
@@ -103,7 +103,7 @@ async def memory_overview(bot_id: str, user: str = Depends(require_admin)) -> di
 
 
 @router.patch("/{bot_id}/memory/settings")
-async def memory_settings(bot_id: str, body: SettingsBody, user: str = Depends(require_admin)) -> dict:
+async def memory_settings(bot_id: str, body: SettingsBody, user: str = Depends(require_user)) -> dict:
     _bot(bot_id)
     try:
         return await run_in_threadpool(lambda: bot_memory.set_settings(
@@ -113,7 +113,7 @@ async def memory_settings(bot_id: str, body: SettingsBody, user: str = Depends(r
 
 
 @router.get("/{bot_id}/memory/file")
-async def memory_file_read(bot_id: str, path: str = Query(max_length=200), user: str = Depends(require_admin)) -> dict:
+async def memory_file_read(bot_id: str, path: str = Query(max_length=200), user: str = Depends(require_user)) -> dict:
     _bot(bot_id)
     _kind(path)
     try:
@@ -124,7 +124,7 @@ async def memory_file_read(bot_id: str, path: str = Query(max_length=200), user:
 
 @router.put("/{bot_id}/memory/file")
 async def memory_file_write(bot_id: str, body: FileBody, path: str = Query(max_length=200),
-                            user: str = Depends(require_admin)) -> dict:
+                            user: str = Depends(require_user)) -> dict:
     _bot(bot_id)
     _kind(path, EDITABLE_KINDS)
     try:
@@ -138,7 +138,7 @@ async def memory_file_write(bot_id: str, body: FileBody, path: str = Query(max_l
 
 @router.delete("/{bot_id}/memory/file")
 async def memory_file_delete(bot_id: str, path: str = Query(max_length=200), expected_hash: str = Query(max_length=64),
-                             user: str = Depends(require_admin)) -> dict:
+                             user: str = Depends(require_user)) -> dict:
     _bot(bot_id)
     kind = _kind(path, EDITABLE_KINDS)
     if kind == store.KIND_INDEX:
@@ -152,7 +152,7 @@ async def memory_file_delete(bot_id: str, path: str = Query(max_length=200), exp
 
 
 @router.post("/{bot_id}/memory/entries")
-async def memory_entry(bot_id: str, body: EntryBody, user: str = Depends(require_admin)) -> dict:
+async def memory_entry(bot_id: str, body: EntryBody, user: str = Depends(require_user)) -> dict:
     _bot(bot_id)
     _kind(body.path, (store.KIND_INDEX, store.KIND_TOPIC))
     try:
@@ -168,7 +168,7 @@ async def memory_entry(bot_id: str, body: EntryBody, user: str = Depends(require
 
 @router.get("/{bot_id}/memory/journal")
 async def memory_journal(bot_id: str, limit: int = Query(default=JOURNAL_DEFAULT, ge=1, le=bot_memory_journal.API_ROWS),
-                         user: str = Depends(require_admin)) -> dict:
+                         user: str = Depends(require_user)) -> dict:
     _bot(bot_id)
     try:
         await run_in_threadpool(bot_memory.ensure_notebook, bot_id)
@@ -178,7 +178,7 @@ async def memory_journal(bot_id: str, limit: int = Query(default=JOURNAL_DEFAULT
 
 
 @router.post("/{bot_id}/memory/journal/{change}/revert")
-async def memory_revert(bot_id: str, change: str, user: str = Depends(require_admin)) -> dict:
+async def memory_revert(bot_id: str, change: str, user: str = Depends(require_user)) -> dict:
     _bot(bot_id)
     if not store.BOT_ID.fullmatch(bot_id) or not change.isalnum() or len(change) > 32:
         raise HTTPException(status_code=404, detail="there is no such change")
@@ -190,7 +190,7 @@ async def memory_revert(bot_id: str, change: str, user: str = Depends(require_ad
 
 
 @router.get("/{bot_id}/memory/upkeep")
-async def memory_upkeep(bot_id: str, user: str = Depends(require_admin)) -> dict:
+async def memory_upkeep(bot_id: str, user: str = Depends(require_user)) -> dict:
     _bot(bot_id)
     entries = await run_in_threadpool(agent_service.memory_upkeep_journal, bot_id)
     return {"enabled": bool(agent_service.get(bot_id).get("memory_upkeep")), "entries": entries}
@@ -211,7 +211,7 @@ tidy_runner = _tidy_now
 
 
 @router.post("/{bot_id}/memory/tidy")
-async def memory_tidy(bot_id: str, user: str = Depends(require_admin)) -> dict:
+async def memory_tidy(bot_id: str, user: str = Depends(require_user)) -> dict:
     agent = _bot(bot_id)
     if not agent.get("memory_upkeep"):
         raise HTTPException(status_code=409, detail="turn on keeping its notes tidy first")
@@ -252,8 +252,8 @@ def _loopback(request: Request) -> bool:
 opener = _open_target
 
 
-@router.post("/{bot_id}/memory/open")
-async def memory_open(bot_id: str, request: Request, body: OpenBody, user: str = Depends(require_admin)) -> dict:
+@router.post("/{bot_id}/memory/open", dependencies=[Depends(require_admin)])
+async def memory_open(bot_id: str, request: Request, body: OpenBody, user: str = Depends(require_user)) -> dict:
     _bot(bot_id)
     if not _loopback(request):
         raise HTTPException(status_code=403, detail="the notebook can only be opened on the computer it is stored on")

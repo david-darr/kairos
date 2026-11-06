@@ -224,10 +224,11 @@ class TriggerTests(unittest.TestCase):
         self.assertEqual(self.post(trigger, delivery="old").status_code, 403, "the old secret stops working")
         self.assertEqual(self.post(trigger, secret=fresh, delivery="new").status_code, 202)
 
-    def test_managing_triggers_needs_a_sign_in_and_making_one_an_admin(self):
-        # Seeing, deleting and answering a trigger work on the account's own triggers (phase 4b: any signed-in
-        # person); making one or changing what it starts stays admin until the bot reach cap (phase 4c).
-        admin_only = {("/api/triggers", "POST"), ("/api/triggers/{trigger_id}", "PATCH")}
+    def test_managing_triggers_needs_a_sign_in(self):
+        # Every trigger route works on the account's own triggers: any signed-in person (phase 4b opened seeing,
+        # deleting and answering; phase 4c opened making and changing one, since what it starts is held to the
+        # account's machine access like any other run).
+        admin_only = set()
         for route in trigger_routes.router.routes:
             calls = [dep.call for dep in route.dependant.dependencies]
             public = route.path == "/api/triggers/{trigger_id}" and "POST" in route.methods and route.name == "receive"

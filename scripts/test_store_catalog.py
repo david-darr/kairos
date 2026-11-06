@@ -20,7 +20,7 @@ import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from core import custom_tabs, integrations, settings, store_schema, tab_folders, tab_hooks, tab_install
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from services import skill_curator, skills_service, store_catalog as catalog_module
 from services.task_service import TaskService
 from services import task_service as tasks_module
@@ -398,9 +398,16 @@ class StoreTests(unittest.IsolatedAsyncioTestCase):
                         ("DELETE", "/api/store/installed/automation/fixture", None)]:
                         with self.subTest(path=path):
                             self.assertEqual(client.request(method, path, json=body).status_code, 401)
+                # Phase 4c: the install record is per account, so a member browses and installs skills, tools and
+                # automations for themselves; a tab is code for everyone (admin), and publishing stays admin.
                 with patch("core.middleware.get_current_user", return_value="member"), patch("core.middleware.auth_manager.is_admin", return_value=False):
-                    self.assertEqual(client.get("/api/store/catalog").status_code, 403)
-                app.dependency_overrides[require_admin] = lambda: "admin"
+                    self.assertEqual(client.get("/api/store/catalog").status_code, 200)
+                    self.assertEqual(client.get("/api/store/github").status_code, 403)
+                    with patch("core.accounts.is_admin_account", return_value=False):
+                        refused = client.post("/api/store/install", json={"kind": "tab", "slug": "fixture"})
+                    self.assertEqual(refused.status_code, 400)
+                    self.assertIn("admin", refused.text)
+                app.dependency_overrides[require_admin] = lambda: "admin"; app.dependency_overrides[require_user] = lambda: "admin"
                 self.assertEqual(client.get("/api/store/catalog").status_code, 200)
                 result = client.post("/api/store/install", json={"kind": "automation", "slug": "fixture"})
                 self.assertEqual(result.status_code, 200)

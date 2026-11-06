@@ -835,11 +835,13 @@ class NewSystem(BaseModel):
 
 
 @systems_router.post("")
-async def create_system(body: NewSystem, user: str = Depends(require_admin)) -> dict:
+async def create_system(body: NewSystem, user: str = Depends(require_user)) -> dict:
     """Tool Store > Design systems > New: from a palette and fonts, pasted CSS
     variables, or a Forge project's CSS (read only from the repo)."""
     try:
         if body.forge_project_id:
+            from core import accounts
+            accounts.require_machine_access("Reading a Forge project")  # it reads project files from this computer
             css, source = _forge_css(body.forge_project_id)
             return design_systems.from_css(body.name, css, created_by=user, source=source)
         if body.css:
@@ -892,7 +894,7 @@ async def get_default_look(user: str = Depends(require_user)) -> dict:
 
 
 @systems_router.post("/default/look")
-async def set_default_look(body: DefaultLook, user: str = Depends(require_admin)) -> dict:
+async def set_default_look(body: DefaultLook, user: str = Depends(require_user)) -> dict:
     """Use as default: the look new designs start in when nobody chose one. None clears it."""
     from core import settings as settings_store
     if body.id is not None and design_systems.get(body.id) is None:

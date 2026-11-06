@@ -44,6 +44,12 @@ def match_agent(text: str) -> Optional[tuple[dict, str]]:
     return None
 
 
+def _owner_is_admin() -> bool:
+    """Whether the account this message runs as belongs to an admin (accounts off: the one local user is)."""
+    from core import accounts
+    return accounts.is_admin_account()
+
+
 async def direct(agent: dict, rest: str, channel_key: str, channel_label: str,
                  attachment_ids: Optional[list[str]] = None) -> str:
     """What the agent says back. "job: ..." becomes a Ready card for it;
@@ -59,15 +65,16 @@ async def direct(agent: dict, rest: str, channel_key: str, channel_label: str,
     session_id = session_manager.get_or_create_channel_session(
         f"{channel_key}:agent:{agent['id']}", f"{agent['name']} on {channel_label}", model_endpoint_id=endpoint_id)
     agent_service.make_agent_chat(session_id, agent)
-    # Admin: only the channel's trusted owner gets here, and agent chats run
-    # in Auto, which applies to admin chats (core/permissions.py).
+    # Only the channel's trusted owner gets here. Agent chats run in Auto, which applies to admin chats
+    # (core/permissions.py), so the chat is an admin chat only when the account that owns this channel is
+    # an admin's (Multi-Account phase 4c): the caller runs us as that account (as_account).
     # Direct chat deliberately bypasses work admission: off and the daily cap
     # govern the work an agent does on its own, not whether it answers the
     # person. Settled 2026-10-13 against both references - MausBot lets an
     # addressed mention release a held member, and Monocode's pause applies
     # to habits, never to the conversation. A cap that silenced a chat would
     # also leave an agent mute mid-sentence.
-    return await chat_service.send_message(session_id, rest, attachment_ids or [], is_admin=True)
+    return await chat_service.send_message(session_id, rest, attachment_ids or [], is_admin=_owner_is_admin())
 
 
 def _queue_job(agent: dict, text: str) -> str:

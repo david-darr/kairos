@@ -24,7 +24,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from core import codex_cli, model_endpoints, permissions, secret_storage, settings
 from core.codex_brain import CodexBrain
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from routes import model_setup_routes
 from services import model_setup as setup
 from services import cookbook_service
@@ -324,12 +324,16 @@ class ModelSetupTests(unittest.TestCase):
             self.assertEqual(progress['status'], 'connected')
             self.assertEqual(progress['connection']['kind'], 'local')
 
-    def test_admin_only_every_route(self):
+    def test_installing_codex_is_admin_only_and_the_rest_needs_a_sign_in(self):
+        # Phase 4c: signing in and connecting are each account's own; installing Codex for the computer stays admin.
         app = FastAPI()
         app.include_router(model_setup_routes.router)
         def refuse():
             raise HTTPException(403, 'admin privileges required')
+        def signed_out():
+            raise HTTPException(401, 'authentication required')
         app.dependency_overrides[require_admin] = refuse
+        app.dependency_overrides[require_user] = signed_out
         with TestClient(app) as client:
             for method, url, body in [('GET', '/status', None), ('POST', '/codex/install', None),
                 ('GET', '/codex/install/job', None), ('POST', '/codex/install/job/cancel', None),
@@ -337,7 +341,10 @@ class ModelSetupTests(unittest.TestCase):
                 ('POST', '/api-key/test', {'kind': 'api', 'provider': 'openai', 'key': 'secret'}),
                 ('POST', '/connections', {'kind': 'claude'})]:
                 response = client.request(method, '/api/model-setup' + url, json=body)
-                self.assertEqual(response.status_code, 403, url)
+                self.assertEqual(response.status_code, 401, url)
+            app.dependency_overrides[require_user] = lambda: 'member'
+            for method, url in [('POST', '/codex/install'), ('GET', '/codex/install/job'), ('POST', '/codex/install/job/cancel')]:
+                self.assertEqual(client.request(method, '/api/model-setup' + url).status_code, 403, url)
 
     def test_install_progress_and_real_broker_ask_first(self):
         async def exercise():
@@ -419,9 +426,10 @@ class ModelSetupBoundaryTests(unittest.TestCase):
             npm.assert_not_called()
             http.assert_not_called()
 
-    def test_admin_dependency_is_on_every_setup_route(self):
+    def test_a_dependency_is_on_every_setup_route(self):
         for route in model_setup_routes.router.routes:
-            self.assertIn(require_admin, [d.call for d in route.dependant.dependencies], route.path)
+            calls = [d.call for d in route.dependant.dependencies]
+            self.assertIn(require_admin if 'codex/install' in route.path else require_user, calls, route.path)
 
     def test_install_cancel_before_approval_is_effective(self):
         async def exercise():

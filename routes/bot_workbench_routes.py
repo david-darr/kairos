@@ -1,14 +1,14 @@
-"""Admin workbench endpoints. No client paths or owner identities are accepted."""
+"""Workbench endpoints (the computers and browser sites stay admin). No client paths or owner identities are accepted."""
 import asyncio
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from services import bot_workbench as workbench, bot_browser_profiles as profiles, bot_help
 
-router = APIRouter(prefix="/api/bot-workbench", tags=["bot-workbench"], dependencies=[Depends(require_admin)])
+router = APIRouter(prefix="/api/bot-workbench", tags=["bot-workbench"], dependencies=[Depends(require_user)])
 
 
 class Body(BaseModel):
@@ -66,44 +66,44 @@ def change(fn, *args):
         raise HTTPException(409, str(error)) from None
 
 
-@router.get("/profiles")
+@router.get("/profiles", dependencies=[Depends(require_admin)])
 def list_profiles():
     return profiles.list_profiles()
 
 
-@router.post("/profiles")
+@router.post("/profiles", dependencies=[Depends(require_admin)])
 def create_profile(body: Name):
     return change(profiles.create, body.name)
 
 
-@router.patch("/profiles/{profile_id}")
+@router.patch("/profiles/{profile_id}", dependencies=[Depends(require_admin)])
 def rename_profile(profile_id: str, body: Name):
     return change(profiles.rename, profile_id, body.name)
 
 
-@router.delete("/profiles/{profile_id}")
+@router.delete("/profiles/{profile_id}", dependencies=[Depends(require_admin)])
 def delete_profile(profile_id: str):
     change(profiles.delete, profile_id)
     return {"ok": True}
 
 
-@router.get("/computers")
+@router.get("/computers", dependencies=[Depends(require_admin)])
 async def computers():
     return await workbench.inventory()
 
 
-@router.put("/computers/settings")
+@router.put("/computers/settings", dependencies=[Depends(require_admin)])
 def computer_settings(body: Limits):
     return workbench.set_computer_settings(body.max_running, body.idle_minutes)
 
 
 @router.get("/{bot_id}/status")
-async def status(bot_id: str, thread_id: str | None = Query(default=None, max_length=80), user=Depends(require_admin)):
+async def status(bot_id: str, thread_id: str | None = Query(default=None, max_length=80), user=Depends(require_user)):
     return await workbench.status(agent(bot_id, thread_id, user), thread_id)
 
 
-@router.post("/{bot_id}/computer/start")
-async def start(bot_id: str, thread_id: str | None = Query(default=None, max_length=80), user=Depends(require_admin)):
+@router.post("/{bot_id}/computer/start", dependencies=[Depends(require_admin)])
+async def start(bot_id: str, thread_id: str | None = Query(default=None, max_length=80), user=Depends(require_user)):
     bot = agent(bot_id, thread_id, user)
     try:
         await workbench.start(bot, thread_id)
@@ -114,7 +114,7 @@ async def start(bot_id: str, thread_id: str | None = Query(default=None, max_len
     return {"ok": True}
 
 
-@router.post("/{bot_id}/computer/sleep")
+@router.post("/{bot_id}/computer/sleep", dependencies=[Depends(require_admin)])
 async def sleep(bot_id: str):
     from core import computer
     agent(bot_id)
@@ -122,7 +122,7 @@ async def sleep(bot_id: str):
     return {"ok": True}
 
 
-@router.post("/{bot_id}/computer/control")
+@router.post("/{bot_id}/computer/control", dependencies=[Depends(require_admin)])
 def control(bot_id: str, body: Control):
     agent(bot_id)
     return change(workbench.control, bot_id, body.action, body.lease_id)
@@ -134,17 +134,17 @@ async def places(bot_id: str):
 
 
 @router.get("/{bot_id}/files")
-async def files(bot_id: str, thread_id: str | None = Query(default=None, max_length=80), user=Depends(require_admin)):
+async def files(bot_id: str, thread_id: str | None = Query(default=None, max_length=80), user=Depends(require_user)):
     bot = agent(bot_id, thread_id, user)
     return await asyncio.to_thread(workbench.files, bot, thread_id, user)
 
 
-@router.get("/{bot_id}/sites")
+@router.get("/{bot_id}/sites", dependencies=[Depends(require_admin)])
 async def sites(bot_id: str):
     return await asyncio.to_thread(profiles.sites, agent(bot_id))
 
 
-@router.post("/{bot_id}/sites/sign-out")
+@router.post("/{bot_id}/sites/sign-out", dependencies=[Depends(require_admin)])
 async def sign_out(bot_id: str, body: Site):
     try:
         await profiles.sign_out(agent(bot_id), body.host)
@@ -153,7 +153,7 @@ async def sign_out(bot_id: str, body: Site):
     return {"ok": True}
 
 
-@router.put("/{bot_id}/browser")
+@router.put("/{bot_id}/browser", dependencies=[Depends(require_admin)])
 async def browser(bot_id: str, body: Browser):
     from core import computer
     from services.agent_service import agent_service

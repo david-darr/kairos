@@ -268,7 +268,7 @@ class Migration(unittest.TestCase):
                                      backup=kwargs.pop("backup", self.backup), **kwargs)
 
     def test_group_one_moves_its_five_stores(self):
-        self.assertEqual([s.version for s in account_migration.STEPS], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "phase 3a added the model connections step")
+        self.assertEqual([s.version for s in account_migration.STEPS], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], "phase 4c added the bot keys, logins and skills library step")
         self.assertEqual(set(account_migration.STEPS[0].entries), {
             "notes.json", "calendar_events.json", "documents", "documents_index.json", "projects.json", "contacts.json"})
         (self.data / "documents").mkdir()
@@ -1136,8 +1136,7 @@ class BotsPerAccount(unittest.TestCase):
 class BotsMigration(unittest.TestCase):
     """Migration step 4: bots and Kip move into the account folder; install-level bot files stay."""
 
-    INSTALL_LEVEL = ("bot-skills-library/index.json", "bot-secrets/x", "bot-keys.json", "bot-connections/a.json",
-                     "bot-resource-settings/k.json", "bot_lifecycle/x", "discord_bots.json", "speech_models/m",
+    INSTALL_LEVEL = ("bot_lifecycle/x", "discord_bots.json", "speech_models/m", "store-catalog.json",
                      "speech_runtime.json", "swarm/swarm.sqlite3", "jobs.json")
 
     def setUp(self):
@@ -1188,8 +1187,10 @@ class BotsMigration(unittest.TestCase):
         account_migration._moved.pop(data, None)
         for name in ("bot_rooms.sqlite3", "bot_rooms.sqlite3-wal", "agents.json.pre-bots", "agents.json", "front_desk"):
             self.assertTrue(account_migration.is_moved(name, data), name)
-        for name in ("bot-skills-library", "bot-secrets", "bot-keys.json", "discord_bots.json", "swarm", "jobs.json"):
+        for name in ("discord_bots.json", "swarm", "jobs.json", "store-catalog.json"):
             self.assertFalse(account_migration.is_moved(name, data), name)
+        for name in ("bot-skills-library", "bot-secrets", "bot-keys.json"):
+            self.assertFalse(account_migration.is_moved(name, data), name + " moves with step 11, not at layout 4")
         (self.data / "layout.json").write_text(json.dumps({"version": 3}), encoding="utf-8")
         account_migration._moved.pop(data, None)
         self.assertFalse(account_migration.is_moved("bot_rooms.sqlite3", data), "not before layout 4")
@@ -1201,11 +1202,14 @@ class BotsMigration(unittest.TestCase):
         auth_manager.create_user("david-darr", "password-one-1", is_admin=True)
         account_id = auth_manager.account_id("david-darr")
         self.assertTrue(account_migration.is_moved("bot_rooms.sqlite3"))
-        self.assertFalse(account_migration.is_moved("bot-skills-library"))
+        self.assertTrue(account_migration.is_moved("bot-skills-library"))
+        self.assertFalse(account_migration.is_moved("discord_bots.json"))
         with accounts.as_account(account_id):
             self.assertEqual(accounts.path("bot_rooms.sqlite3"),
                              os.path.join(accounts.account_dir(account_id), "bot_rooms.sqlite3"))
-            self.assertEqual(accounts.path("bot-skills-library"), os.path.join(_DATA.name, "bot-skills-library"))
+            self.assertEqual(accounts.path("bot-skills-library"),
+                             os.path.join(accounts.account_dir(account_id), "bot-skills-library"))
+            self.assertEqual(accounts.path("discord_bots.json"), os.path.join(_DATA.name, "discord_bots.json"))
 
 
 class TasksPerAccount(unittest.TestCase):
@@ -1914,6 +1918,137 @@ class ModelConnectionsMigration(unittest.TestCase):
         self.assertTrue((data / "accounts" / "abc123" / "model_endpoints.json").is_file())
         self.assertFalse((data / "model_endpoints.json").exists())
         account_migration._moved.pop(str(data), None)
+
+
+class BotKeysLoginsMigration(unittest.TestCase):
+    """Migration step 11 (phase 4c): bot keys, saved logins, aliases, resource settings, the skills library and
+    the store's install record move into the first admin's account."""
+
+    NAMES = ("bot-keys.json", "bot-secrets/login.key", "bot-secrets/logins.enc", "bot-secrets/onepassword.json",
+             "bot-connections/aliases.json", "bot-resource-settings/k.json", "bot-skills-library/index.json",
+             "bot-skills-library/pending.json", "store-installs.json")
+
+    def test_the_stores_move_the_catalog_stays_and_the_logins_get_their_own_copy(self):
+        root = TemporaryDirectory(prefix="kairos-layout11-", dir=tempfile.gettempdir())
+        self.addCleanup(root.cleanup)
+        data = Path(root.name)
+        for name in self.NAMES + ("store-catalog.json",):
+            (data / name).parent.mkdir(parents=True, exist_ok=True)
+            (data / name).write_text(name, encoding="utf-8")
+        (data / "layout.json").write_text(json.dumps({"version": 10}), encoding="utf-8")
+        step = account_migration.STEPS[10]
+        self.assertEqual((step.version, step.copy_first), (11, ("bot-secrets",)))
+        result = account_migration.run(str(data), [step], account="abc123",
+                                       backup=lambda path: Path(path).write_text("backup", encoding="utf-8"))
+        self.assertTrue(result["ok"], result)
+        self.assertEqual((result["from_version"], result["to_version"]), (10, 11))
+        for name in self.NAMES:
+            self.assertEqual((data / "accounts" / "abc123" / name).read_text(encoding="utf-8"), name, name)
+            self.assertFalse((data / name).exists(), f"{name} left the top level")
+        self.assertEqual((data / "store-catalog.json").read_text(encoding="utf-8"), "store-catalog.json", "the public catalog stays")
+        copies = [Path(c) for c in result.get("copies", [])]
+        self.assertEqual(len(copies), 1, "the logins are copied first: no backup carries them")
+        self.assertEqual((copies[0] / "logins.enc").read_text(encoding="utf-8"), "bot-secrets/logins.enc")
+        account_migration._moved.pop(str(data), None)
+
+    def test_a_data_folder_without_these_stores_just_records_the_version(self):
+        root = TemporaryDirectory(prefix="kairos-layout11b-", dir=tempfile.gettempdir())
+        self.addCleanup(root.cleanup)
+        data = Path(root.name)
+        (data / "layout.json").write_text(json.dumps({"version": 10}), encoding="utf-8")
+        result = account_migration.run(str(data), [account_migration.STEPS[10]], account="abc123", backup=lambda path: None)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(account_migration.layout_version(str(data)), 11)
+        account_migration._moved.pop(str(data), None)
+
+
+class BotKeysLoginsPerAccount(unittest.TestCase):
+    """Phase 4c: keys, logins, aliases, resource settings, the skills library and the store's installs are each
+    account's own."""
+
+    @classmethod
+    def setUpClass(cls):
+        account_migration.run(_DATA.name, backup=lambda path: None)
+
+    def setUp(self):
+        fresh_users()
+        auth_manager.create_user("david-darr", "password-one-1", is_admin=True)
+        auth_manager.create_user("bea", "password-two-2")
+        self.first, self.second = (auth_manager.account_id(n) for n in ("david-darr", "bea"))
+        from services import bot_logins
+        bot_logins.reset_cache()
+
+    def test_bot_keys_are_per_account_and_the_first_admins_old_key_still_opens(self):
+        from core import secret_storage
+        from services import bot_keys
+        old = secret_storage.encrypt_install("old-exa-key-1234567890")  # written before accounts had keys
+        record = {"exa": {"value_encrypted": old, "last4": "7890", "updated_at": 1}}
+        with accounts.as_account(self.first):
+            Path(bot_keys._path()).parent.mkdir(parents=True, exist_ok=True)
+            Path(bot_keys._path()).write_text(json.dumps(record), encoding="utf-8")
+            self.assertEqual(bot_keys.get_key("exa"), "old-exa-key-1234567890")
+            self.assertTrue(bot_keys.get_slot("exa")["has_value"])
+        with accounts.as_account(self.second):
+            self.assertFalse(bot_keys.get_slot("exa")["has_value"], "bea has no key saved")
+            bot_keys.set_slot("exa", "bea-exa-key-0987654321")
+            self.assertEqual(bot_keys.get_key("exa"), "bea-exa-key-0987654321")
+            raw = json.loads(Path(bot_keys._path()).read_text(encoding="utf-8"))["exa"]["value_encrypted"]
+            self.assertEqual(secret_storage.decrypt_for(self.second, raw), "bea-exa-key-0987654321")
+            with self.assertRaises(Exception):
+                secret_storage.decrypt_install(raw)  # not the install key
+        with accounts.as_account(self.first):
+            self.assertEqual(bot_keys.get_key("exa"), "old-exa-key-1234567890", "david's key is untouched")
+        self.assertNotEqual(Path(accounts.account_dir(self.first), "bot-keys.json"), Path(accounts.account_dir(self.second), "bot-keys.json"))
+
+    def test_resource_settings_are_per_account(self):
+        from services import bot_keys
+        with accounts.as_account(self.second):
+            bot_keys.update_resource_settings("bea", {"tidy_time": "04:30"})
+            self.assertEqual(bot_keys.resource_settings("bea")["tidy_time"], "04:30")
+        with accounts.as_account(self.first):
+            self.assertEqual(bot_keys.resource_settings("bea")["tidy_time"], bot_keys.DEFAULT_SETTINGS["tidy_time"])
+
+    def test_saved_logins_and_the_one_password_link_are_per_account_with_their_own_key(self):
+        from services import bot_logins, bot_onepassword
+        with accounts.as_account(self.first):
+            made = bot_logins.create("example.com", "david", "david-password-1")
+            first_key = Path(bot_logins._folder(), "login.key").read_bytes()
+            bot_onepassword._write_state({"token": "ops_david", "vaults": []})
+            self.assertEqual(len(bot_logins.list_logins()), 1)
+            self.assertEqual(bot_logins.get(made["id"])["username"], "david")
+        with accounts.as_account(self.second):
+            self.assertEqual(bot_logins.list_logins(), [], "bea sees none of david's logins")
+            self.assertEqual(bot_onepassword._read_state(), {})
+            bot_logins.create("example.com", "bea", "bea-password-2")
+            second_key = Path(bot_logins._folder(), "login.key").read_bytes()
+            self.assertEqual([r["username"] for r in bot_logins.list_logins()], ["bea"])
+        self.assertNotEqual(first_key, second_key, "each account has its own login key")
+        with accounts.as_account(self.first):
+            self.assertEqual([r["username"] for r in bot_logins.list_logins()], ["david"])
+            self.assertEqual(bot_onepassword._read_state()["token"], "ops_david")
+
+    def test_aliases_the_skills_library_and_store_installs_are_per_account(self):
+        from services import bot_connections, bot_skill_library, store_catalog
+        with accounts.as_account(self.first):
+            bot_connections._save_aliases({"google/a": {"alias": "work"}})
+            bot_skill_library.publish("david-skill", "---\nname: david-skill\ndescription: d\n---\nDo it.\n", reviewed=True)
+            store_catalog.store_catalog.save_installs({"skill/x": {"kind": "skill", "local_id": "x"}})
+        with accounts.as_account(self.second):
+            self.assertEqual(bot_connections._aliases(), {})
+            self.assertEqual(bot_skill_library.list_all(), [])
+            self.assertEqual(store_catalog.store_catalog.installs(), {})
+            bot_skill_library.publish("bea-skill", "---\nname: bea-skill\ndescription: b\n---\nDo it.\n", reviewed=True)
+            self.assertEqual([r["name"] for r in bot_skill_library.list_all()], ["bea-skill"])
+        with accounts.as_account(self.first):
+            self.assertEqual([r["name"] for r in bot_skill_library.list_all()], ["david-skill"])
+            self.assertIn("skill/x", store_catalog.store_catalog.installs())
+            self.assertEqual(bot_connections._aliases(), {"google/a": {"alias": "work"}})
+
+    def test_a_restore_puts_each_accounts_logins_back(self):
+        folder = Path(accounts.account_dir(self.second), "bot-secrets")
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "logins.enc").write_text("x", encoding="utf-8")
+        self.assertIn(os.path.join("accounts", self.second, "bot-secrets"), backup._account_kept(_DATA.name))
 
 
 class KeysPerAccount(unittest.TestCase):

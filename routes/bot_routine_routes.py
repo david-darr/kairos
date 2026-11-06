@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.auth import auth_manager
-from core.middleware import require_admin, require_user
+from core.middleware import require_user
 from services import bot_limit_resets, bot_routines
 from services.bot_routines import RoutineError
 from services.task_service import task_service
@@ -250,13 +250,13 @@ async def automations(user: str = Depends(require_user)):
 # -- usage limits ----------------------------------------------------------------------------------
 
 @router.get("/api/bot-limit-resets")
-async def limit_resets(refresh: bool = False, user: str = Depends(require_admin)):
+async def limit_resets(refresh: bool = False, user: str = Depends(require_user)):
     import asyncio
     return {"limits": await asyncio.to_thread(bot_limit_resets.windows, refresh)}
 
 
 @router.post("/api/bot-limit-resets/after-reset")
-async def after_reset(body: AfterResetBody, user: str = Depends(require_admin)):
+async def after_reset(body: AfterResetBody, user: str = Depends(require_user)):
     """Move only this routine's next run to just after its account's limit resets."""
     from core import task_scheduler
     task = task_service.get_task(body.routine_id)
@@ -273,7 +273,7 @@ async def after_reset(body: AfterResetBody, user: str = Depends(require_admin)):
 
 
 @router.post("/api/bot-limit-resets/continue")
-async def continue_when_reset(body: ContinueBody, user: str = Depends(require_admin)):
+async def continue_when_reset(body: ContinueBody, user: str = Depends(require_user)):
     """One once-only routine in this conversation that runs after the limit resets."""
     from core.session_manager import session_manager
     from services.agent_service import agent_service

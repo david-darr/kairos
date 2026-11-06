@@ -1,5 +1,5 @@
-"""Webhook triggers (services/trigger_service.py). Managing triggers is
-admin-only: a trigger lets an outside service start work. The event endpoint
+"""Webhook triggers (services/trigger_service.py). Each account manages its own: a trigger lets an outside
+service start work in that account, held to the account's machine access. The event endpoint
 is public by necessity and trusts nothing until the signature is verified."""
 import asyncio
 import logging
@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from core.middleware import require_admin, require_user
+from core.middleware import require_user
 from services.trigger_service import trigger_service
 
 router = APIRouter(prefix="/api/triggers", tags=["triggers"])
@@ -66,7 +66,7 @@ async def list_triggers(user: str = Depends(require_user)) -> dict:
 
 
 @router.post("")
-async def create_trigger(body: TriggerBody, user: str = Depends(require_admin)) -> dict:
+async def create_trigger(body: TriggerBody, user: str = Depends(require_user)) -> dict:
     fields = _fields(body)
     try:
         trigger, secret = trigger_service.create(fields.pop("name", ""), **fields)
@@ -77,7 +77,7 @@ async def create_trigger(body: TriggerBody, user: str = Depends(require_admin)) 
 
 
 @router.patch("/{trigger_id}")
-async def update_trigger(trigger_id: str, body: TriggerBody, user: str = Depends(require_admin)) -> dict:
+async def update_trigger(trigger_id: str, body: TriggerBody, user: str = Depends(require_user)) -> dict:
     try:
         return trigger_service.public(trigger_service.update(trigger_id, **_fields(body)))
     except KeyError:

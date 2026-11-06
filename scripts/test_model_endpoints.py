@@ -148,12 +148,23 @@ class Models(unittest.TestCase):
         text = choices.text
         for secret in (KEY, self.base, "base_url", "has_api_key"):
             self.assertNotIn(secret, text)
+        # Phase 4c: connections are per account. Nobody signed in: 401. A member reaches their own list (never the
+        # admin's connection, its address or its key), and the admin's connection is not theirs to test, change or delete.
         for method, path, body in (("get", "", None), ("post", "", {"name": "x"}), ("delete", f"/{made['id']}", None),
                                    ("post", f"/{made['id']}/test", {}), ("patch", f"/{made['id']}/image-support", {"enabled": True}),
                                    ("get", "/usage", None), ("get", "/quotas", None)):
-            for who, c in (("member", self.member), ("anonymous", self.anon)):
-                got = getattr(c, method)("/api/models" + path, **({} if body is None else {"json": body}))
-                self.assertIn(got.status_code, (401, 403), f"{who} {method} {path} -> {got.status_code}")
+            kwargs = {} if body is None else {"json": body}
+            got = getattr(self.anon, method)("/api/models" + path, **kwargs)
+            self.assertEqual(got.status_code, 401, f"anonymous {method} {path} -> {got.status_code}")
+            got = getattr(self.member, method)("/api/models" + path, **kwargs)
+            self.assertNotIn(got.status_code, (401, 403), f"member {method} {path} -> {got.status_code}")
+            for secret in (KEY, self.base, made["id"]):
+                self.assertNotIn(secret, got.text, f"member {method} {path} shows the admin's connection")
+            if path.startswith("/" + made["id"]):
+                self.assertEqual(got.status_code, 404, f"member {method} {path}")
+        self.assertEqual(self.member.get("/api/models").json(), [])
+        self.assertEqual(self.admin.get(f"/api/models").status_code, 200)
+        self.assertEqual(self.member.put(f"/api/models/{made['id']}/shares", json={"usernames": []}).status_code, 403, "sharing stays admin")
         self.assertEqual(self.anon.get("/api/models/choices").status_code, 401)
 
     # -- probing: bad IDs, bad keys, timeouts -------------------------------------------

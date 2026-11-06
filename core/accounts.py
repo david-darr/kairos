@@ -146,6 +146,40 @@ def has_machine_access(account_id: Optional[str] = None) -> bool:
     return auth_manager.has_machine_access(username)
 
 
+def is_admin_account(account_id: Optional[str] = None) -> bool:
+    """Whether the account (default: the current one) belongs to an admin. Accounts off, or the "local"
+    folder with no user behind it: yes (the single local user owns the machine). Nobody signed in: no."""
+    from core.auth import auth_manager
+    if account_id is None:
+        try:
+            account_id = effective_account()
+        except NoAccount:
+            return False
+    username = auth_manager.username_for_account(account_id)
+    if username is None:
+        return account_id == LOCAL_ID
+    return auth_manager.is_admin(username)
+
+
+def refuse_host_only_address(url: str, what: str = "reach") -> None:
+    """An account without machine access may not point a connection or hook at this computer or its own
+    network (a request from here would be this machine's, not the person's). Admins and accounts with the
+    grant may. Checks the address as written: a name that only resolves to a private address is not caught."""
+    import ipaddress
+    from urllib.parse import urlsplit
+    if has_machine_access():
+        return
+    host = (urlsplit(url if "://" in url else "//" + url).hostname or "").lower().rstrip(".")
+    try:
+        address = ipaddress.ip_address(host)
+        host_only = address.is_loopback or address.is_private or address.is_link_local or address.is_unspecified
+    except ValueError:
+        host_only = host == "localhost" or host.endswith((".localhost", ".local", ".internal", ".lan", ".home.arpa")) or "." not in host
+    if host_only:
+        raise MachineAccessDenied(f"This account can't {what} on this computer or its network. "
+                                  "Ask an admin to turn on machine access, or use a hosted address.")
+
+
 def require_machine_access(what: str = "") -> None:
     if not has_machine_access():
         raise MachineAccessDenied(f"{what + ': ' if what else ''}{MACHINE_ACCESS_MESSAGE}")

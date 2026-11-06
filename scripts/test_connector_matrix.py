@@ -302,12 +302,17 @@ class Routes(unittest.TestCase):
         cls.admin.cookies.set(SESSION_COOKIE_NAME, auth_manager.create_session("boss"))
         cls.member.cookies.set(SESSION_COOKIE_NAME, auth_manager.create_session("member"))
 
-    def test_managing_connectors_is_admin_only_for_every_kind_and_secrets_stay_hidden(self):
+    def test_managing_connectors_needs_a_sign_in_for_every_kind_and_secrets_stay_hidden(self):
+        # Phase 4c: connectors are each account's own. Nobody signed in: 401. A member reaches only their own
+        # (an id that is not theirs is a 404, whoever it belongs to).
         for method, path, body in (("get", "", None), ("get", "/kinds", None), ("post", "", {"kind": "webhook"}),
                                    ("patch", "/x", {"name": "y"}), ("delete", "/x", None), ("post", "/x/test", {})):
-            for who, c in (("member", self.member), ("anonymous", self.anon)):
-                got = getattr(c, method)("/api/connectors" + path, **({} if body is None else {"json": body}))
-                self.assertIn(got.status_code, (401, 403), f"{who} {method} {path} -> {got.status_code}")
+            kwargs = {} if body is None else {"json": body}
+            got = getattr(self.anon, method)("/api/connectors" + path, **kwargs)
+            self.assertEqual(got.status_code, 401, f"anonymous {method} {path} -> {got.status_code}")
+            if path.startswith("/x"):
+                got = getattr(self.member, method)("/api/connectors" + path, **kwargs)
+                self.assertEqual(got.status_code, 404, f"member {method} {path} -> {got.status_code}")
         with patch.object(connector_routes.hub, "start", new=AsyncMock()), patch.object(connector_routes.hub, "stop", new=AsyncMock()):
             for kind, cls in KINDS.items():
                 with self.subTest(kind=kind):

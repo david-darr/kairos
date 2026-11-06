@@ -1,14 +1,16 @@
-"""Admin-only setup, with polled installation progress and broker approval."""
+"""Setup, with polled installation progress and broker approval. Signing in and connecting are each account's own;
+installing Codex stays admin."""
 import asyncio
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, ConfigDict
 
-from core.middleware import require_admin
+from core import accounts
+from core.middleware import require_admin, require_user
 from services import model_setup
 
-router = APIRouter(prefix='/api/model-setup', tags=['model-setup'], dependencies=[Depends(require_admin)])
+router = APIRouter(prefix='/api/model-setup', tags=['model-setup'], dependencies=[Depends(require_user)])
 
 
 class ConnectionRequest(BaseModel):
@@ -23,7 +25,7 @@ async def status():
     return await asyncio.to_thread(model_setup.status)
 
 
-@router.post('/codex/install')
+@router.post('/codex/install', dependencies=[Depends(require_admin)])
 async def install():
     try:
         return model_setup.begin_install()
@@ -31,7 +33,7 @@ async def install():
         raise HTTPException(409, str(error)) from error
 
 
-@router.get('/codex/install/{job_id}')
+@router.get('/codex/install/{job_id}', dependencies=[Depends(require_admin)])
 async def progress(job_id: str):
     try:
         return model_setup.install_progress(job_id)
@@ -39,7 +41,7 @@ async def progress(job_id: str):
         raise HTTPException(404, str(error)) from error
 
 
-@router.post('/codex/install/{job_id}/cancel')
+@router.post('/codex/install/{job_id}/cancel', dependencies=[Depends(require_admin)])
 async def cancel(job_id: str):
     try:
         return model_setup.cancel_install(job_id)
@@ -49,6 +51,10 @@ async def cancel(job_id: str):
 
 @router.post('/sign-in/{kind}')
 async def sign_in(kind: Literal['claude', 'codex']):
+    try:
+        accounts.require_machine_access('Signing in opens a window on this computer')
+    except accounts.MachineAccessDenied as error:
+        raise HTTPException(403, str(error)) from error
     try:
         return await asyncio.to_thread(model_setup.open_sign_in, kind)
     except (ValueError, OSError) as error:

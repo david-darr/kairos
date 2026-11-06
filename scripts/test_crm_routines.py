@@ -218,7 +218,7 @@ class RoutineTests(unittest.IsolatedAsyncioTestCase):
 
     def test_goal_route_stamps_authenticated_owner(self):
         app = FastAPI(); app.include_router(agent_routes.router)
-        app.dependency_overrides[tab_api.require_admin] = lambda: 'alice'
+        app.dependency_overrides[tab_api.require_admin] = lambda: 'alice'; app.dependency_overrides[tab_api.require_user] = lambda: 'alice'
         client = TestClient(app)
         result = client.post(f"/api/agents/{self.agent['id']}/goals", json={
             'name': 'Owner test', 'prompt': 'Review CRM', 'schedule_kind': 'daily', 'run_time': '09:30', 'owner_user': 'bob'})

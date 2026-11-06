@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from core.auth import auth_manager
-from core.middleware import require_admin, require_user
+from core.middleware import require_user
 from services import remote_skill_source, skill_curator, skill_recorder, skills_service
 from services.agent_service import agent_service
 
@@ -79,7 +79,7 @@ async def import_skill(body: ImportSkillRequest, user: str = Depends(require_use
 
 
 @router.post("/install-url")
-async def install_skill_url(body: InstallSkillUrlRequest, user: str = Depends(require_admin)) -> dict:
+async def install_skill_url(body: InstallSkillUrlRequest, user: str = Depends(require_user)) -> dict:
     """Install one public GitHub SKILL.md through the existing community scan."""
     try:
         source = await remote_skill_source.fetch_skill(body.url)
@@ -157,9 +157,9 @@ async def get_skill(slug: str, user: str = Depends(require_user)) -> dict:
 
 
 @router.post("/{slug}/approve")
-async def approve_skill(slug: str, user: str = Depends(require_admin)) -> dict:
+async def approve_skill(slug: str, user: str = Depends(require_user)) -> dict:
     """Let models use a skill whose current content scanned as dangerous.
-    Admin-only: skills reach every user's models. Bound to this exact
+    Skills are per account, so this reaches only the approver's own models. Bound to this exact
     content; an edit afterwards needs approving again."""
     try:
         skill_curator.approve(slug)

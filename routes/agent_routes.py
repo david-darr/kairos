@@ -1,7 +1,8 @@
 """Agents: identities, memory, goals, work and the inbox (services/agent_service.py).
 
-Admin only: agents always run in Auto (David, 2026-10-05), so whoever directs
-them is approving everything they do, the same rule as a chat's Auto mode."""
+Every signed-in account has its own bots (Multi-Account phase 4c). A bot of an account without machine
+access is held at Ask (core/bot_policy.py), so directing one never approves shell or file work on this
+computer. The image provider (one key and limit for the install) stays admin."""
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -9,7 +10,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field, StrictBool
 
 from core import model_endpoints
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from services import bot_avatar_service, bot_record, bot_threads
 from services.agent_service import agent_service
 from services.task_service import task_service
@@ -280,12 +281,12 @@ def _refused(error: ValueError) -> HTTPException:
 
 
 @router.get("")
-async def list_agents(user: str = Depends(require_admin)) -> list[dict]:
+async def list_agents(user: str = Depends(require_user)) -> list[dict]:
     return [_summary(a, user) for a in agent_service.list_agents()]
 
 
 @router.post("")
-async def create_agent(body: AgentBody, user: str = Depends(require_admin)) -> dict:
+async def create_agent(body: AgentBody, user: str = Depends(require_user)) -> dict:
     _check_endpoint(body.endpoint_id)
     try:
         fields = {k: v for k, v in body.model_dump().items()
@@ -296,7 +297,7 @@ async def create_agent(body: AgentBody, user: str = Depends(require_admin)) -> d
 
 
 @router.get("/inbox")
-async def whole_inbox(user: str = Depends(require_admin)) -> dict:
+async def whole_inbox(user: str = Depends(require_user)) -> dict:
     """Everything waiting on the person, across agents: open items, plus
     agents' results waiting for review (read from the cards, not copied).
     Reports and results follow the Bots Inbox (services/bot_attention.py):
@@ -316,7 +317,7 @@ async def whole_inbox(user: str = Depends(require_admin)) -> dict:
 
 
 @router.post("/configured")
-async def create_configured(body: ConfiguredBody, user: str = Depends(require_admin)) -> dict:
+async def create_configured(body: ConfiguredBody, user: str = Depends(require_user)) -> dict:
     """One call makes a bot, its starting notes and its routines, or nothing:
     a failure undoes what was made (cleanup_errors lists anything that could
     not be undone). A routine that cannot be switched on is a warning."""
@@ -340,7 +341,7 @@ async def create_configured(body: ConfiguredBody, user: str = Depends(require_ad
 
 
 @router.post("/order")
-async def order_agents(body: OrderBody, user: str = Depends(require_admin)) -> dict:
+async def order_agents(body: OrderBody, user: str = Depends(require_user)) -> dict:
     try:
         agent_service.reorder(body.ids)
     except KeyError:
@@ -351,12 +352,12 @@ async def order_agents(body: OrderBody, user: str = Depends(require_admin)) -> d
 
 
 @router.get("/defaults")
-async def get_defaults(user: str = Depends(require_admin)) -> dict:
+async def get_defaults(user: str = Depends(require_user)) -> dict:
     return bot_record.defaults_view([a["name"] for a in agent_service.list_agents()])
 
 
 @router.put("/defaults")
-async def put_defaults(body: DefaultsBody, user: str = Depends(require_admin)) -> dict:
+async def put_defaults(body: DefaultsBody, user: str = Depends(require_user)) -> dict:
     try:
         bot_record.write_defaults(body.defaults)
     except ValueError as e:
@@ -365,12 +366,12 @@ async def put_defaults(body: DefaultsBody, user: str = Depends(require_admin)) -
 
 
 @router.get("/presets")
-async def get_presets(user: str = Depends(require_admin)) -> list[dict]:
+async def get_presets(user: str = Depends(require_user)) -> list[dict]:
     return bot_record.list_presets()
 
 
 @router.post("/presets")
-async def add_preset(body: PresetBody, user: str = Depends(require_admin)) -> dict:
+async def add_preset(body: PresetBody, user: str = Depends(require_user)) -> dict:
     if (body.from_agent_id is None) == (body.preset is None):
         raise HTTPException(status_code=400, detail="send either from_agent_id or preset")
     try:
@@ -381,7 +382,7 @@ async def add_preset(body: PresetBody, user: str = Depends(require_admin)) -> di
 
 
 @router.delete("/presets/{preset_id}")
-async def delete_preset(preset_id: str, user: str = Depends(require_admin)) -> dict:
+async def delete_preset(preset_id: str, user: str = Depends(require_user)) -> dict:
     if not bot_record.delete_preset(preset_id):
         raise HTTPException(status_code=404, detail="preset not found")
     return {"ok": True}
@@ -392,13 +393,13 @@ class ConversationAction(BaseModel):
 
 
 @router.get('/conversations')
-async def conversations(user: str = Depends(require_admin)) -> dict:
+async def conversations(user: str = Depends(require_user)) -> dict:
     from core.agent_conversations import agent_threads
     return agent_threads(user, agent_service.list_agents())
 
 
 @router.post('/conversations/{kind}/{ident}')
-async def organize_conversation(kind: str, ident: str, body: ConversationAction, user: str = Depends(require_admin)) -> dict:
+async def organize_conversation(kind: str, ident: str, body: ConversationAction, user: str = Depends(require_user)) -> dict:
     from core import agent_conversations
     count = 0
     session_id = None
@@ -446,7 +447,7 @@ def _avatar_failure(error: ValueError) -> HTTPException:
 
 
 @router.get("/section-modules")
-async def section_modules(user: str = Depends(require_admin)) -> dict:
+async def section_modules(user: str = Depends(require_user)) -> dict:
     """Which later-phase panel sections are installed (static/js/botsSection*.js), so the panel loads
     only files that exist and shows its own basics for the rest."""
     from pathlib import Path
@@ -473,7 +474,7 @@ async def delete_avatar_provider(user: str = Depends(require_admin)) -> dict:
 
 
 @router.post("/avatar-drafts")
-async def upload_avatar_draft(request: Request, user: str = Depends(require_admin)) -> dict:
+async def upload_avatar_draft(request: Request, user: str = Depends(require_user)) -> dict:
     try:
         return bot_avatar_service.store(bot_avatar_service.draft_scope(user), await _read_image_body(request))
     except ValueError as error:
@@ -481,7 +482,7 @@ async def upload_avatar_draft(request: Request, user: str = Depends(require_admi
 
 
 @router.post("/avatar-drafts/generate")
-async def generate_avatar_draft(body: AvatarGenerateBody, user: str = Depends(require_admin)) -> dict:
+async def generate_avatar_draft(body: AvatarGenerateBody, user: str = Depends(require_user)) -> dict:
     try:
         return await bot_avatar_service.generate(bot_avatar_service.draft_scope(user), body.direction)
     except ValueError as error:
@@ -489,7 +490,7 @@ async def generate_avatar_draft(body: AvatarGenerateBody, user: str = Depends(re
 
 
 @router.get("/avatar-drafts/{asset_id}")
-async def read_avatar_draft(asset_id: str, user: str = Depends(require_admin)) -> Response:
+async def read_avatar_draft(asset_id: str, user: str = Depends(require_user)) -> Response:
     try:
         return _image_response(*bot_avatar_service.read(bot_avatar_service.draft_scope(user), asset_id))
     except KeyError:
@@ -497,7 +498,7 @@ async def read_avatar_draft(asset_id: str, user: str = Depends(require_admin)) -
 
 
 @router.get("/{agent_id}")
-async def get_agent(agent_id: str, user: str = Depends(require_admin)) -> dict:
+async def get_agent(agent_id: str, user: str = Depends(require_user)) -> dict:
     from services.agent_handoff import person_inbox
     agent = _require(agent_id)
     owned = _owned(agent_id)
@@ -520,7 +521,7 @@ async def get_agent(agent_id: str, user: str = Depends(require_admin)) -> dict:
 
 
 @router.patch("/{agent_id}")
-async def update_agent(agent_id: str, body: AgentBody, user: str = Depends(require_admin)) -> dict:
+async def update_agent(agent_id: str, body: AgentBody, user: str = Depends(require_user)) -> dict:
     _require(agent_id)
     fields = body.model_dump(exclude_unset=True)
     expected = fields.pop("expected_revision", None)
@@ -535,13 +536,13 @@ async def update_agent(agent_id: str, body: AgentBody, user: str = Depends(requi
 
 
 @router.get("/{agent_id}/soul")
-async def read_soul(agent_id: str, user: str = Depends(require_admin)) -> dict:
+async def read_soul(agent_id: str, user: str = Depends(require_user)) -> dict:
     _require(agent_id)
     return agent_service.read_soul(agent_id)
 
 
 @router.post("/{agent_id}/soul/apply")
-async def apply_soul_file(agent_id: str, body: SoulApplyBody, user: str = Depends(require_admin)) -> dict:
+async def apply_soul_file(agent_id: str, body: SoulApplyBody, user: str = Depends(require_user)) -> dict:
     _require(agent_id)
     try:
         return agent_service.apply_soul_file(agent_id, body.expected_file_text, body.expected_revision)
@@ -550,7 +551,7 @@ async def apply_soul_file(agent_id: str, body: SoulApplyBody, user: str = Depend
 
 
 @router.post("/{agent_id}/soul/discard-file")
-async def discard_soul_file(agent_id: str, body: SoulApplyBody, user: str = Depends(require_admin)) -> dict:
+async def discard_soul_file(agent_id: str, body: SoulApplyBody, user: str = Depends(require_user)) -> dict:
     """Put the stored standing instructions back over a hand edit of SOUL.md."""
     _require(agent_id)
     try:
@@ -560,7 +561,7 @@ async def discard_soul_file(agent_id: str, body: SoulApplyBody, user: str = Depe
 
 
 @router.get("/{agent_id}/history/{history_id}")
-async def profile_history_row(agent_id: str, history_id: str, user: str = Depends(require_admin)) -> dict:
+async def profile_history_row(agent_id: str, history_id: str, user: str = Depends(require_user)) -> dict:
     """One row with its full before and after, for a diff."""
     _require(agent_id)
     row = next((r for r in agent_service.profile_history(agent_id, 500, True)["rows"] if r["id"] == history_id), None)
@@ -570,13 +571,13 @@ async def profile_history_row(agent_id: str, history_id: str, user: str = Depend
 
 
 @router.get("/{agent_id}/memory/topics")
-async def memory_topics(agent_id: str, user: str = Depends(require_admin)) -> dict:
+async def memory_topics(agent_id: str, user: str = Depends(require_user)) -> dict:
     _require(agent_id)
     return {"topics": [{"name": name, "description": description} for name, description in agent_service.topic_index(agent_id)]}
 
 
 @router.get("/{agent_id}/history")
-async def profile_history(agent_id: str, limit: int = 100, user: str = Depends(require_admin)) -> dict:
+async def profile_history(agent_id: str, limit: int = 100, user: str = Depends(require_user)) -> dict:
     _require(agent_id)
     try:
         return agent_service.profile_history(agent_id, limit)
@@ -586,7 +587,7 @@ async def profile_history(agent_id: str, limit: int = 100, user: str = Depends(r
 
 @router.post("/{agent_id}/history/{history_id}/rollback")
 async def rollback_profile(agent_id: str, history_id: str, body: RollbackBody,
-                           user: str = Depends(require_admin)) -> dict:
+                           user: str = Depends(require_user)) -> dict:
     _require(agent_id)
     try:
         agent = agent_service.rollback_profile(agent_id, history_id, body.expected_revision, body.expected_file_text)
@@ -599,7 +600,7 @@ async def rollback_profile(agent_id: str, history_id: str, body: RollbackBody,
 
 @router.post("/{agent_id}/proposals/{receipt_id}/undo")
 async def undo_proposal(agent_id: str, receipt_id: str, body: UndoProposalBody,
-                        user: str = Depends(require_admin)) -> dict:
+                        user: str = Depends(require_user)) -> dict:
     """Undo a change the bot made to itself, only while nothing changed after it."""
     _require(agent_id)
     try:
@@ -612,7 +613,7 @@ async def undo_proposal(agent_id: str, receipt_id: str, body: UndoProposalBody,
 
 
 @router.get("/{agent_id}/avatar-image/{asset_id}")
-async def read_avatar_image(agent_id: str, asset_id: str, user: str = Depends(require_admin)) -> Response:
+async def read_avatar_image(agent_id: str, asset_id: str, user: str = Depends(require_user)) -> Response:
     _require(agent_id)
     try:
         return _image_response(*bot_avatar_service.read(bot_avatar_service.bot_scope(agent_id), asset_id))
@@ -621,7 +622,7 @@ async def read_avatar_image(agent_id: str, asset_id: str, user: str = Depends(re
 
 
 @router.post("/{agent_id}/avatar-image")
-async def upload_avatar_image(agent_id: str, request: Request, user: str = Depends(require_admin)) -> dict:
+async def upload_avatar_image(agent_id: str, request: Request, user: str = Depends(require_user)) -> dict:
     """Stage a picture for this bot. It is not shown until applied with PUT."""
     agent = _require(agent_id)
     try:
@@ -632,7 +633,7 @@ async def upload_avatar_image(agent_id: str, request: Request, user: str = Depen
 
 
 @router.post("/{agent_id}/avatar-image/generate")
-async def generate_avatar_image(agent_id: str, body: AvatarGenerateBody, user: str = Depends(require_admin)) -> dict:
+async def generate_avatar_image(agent_id: str, body: AvatarGenerateBody, user: str = Depends(require_user)) -> dict:
     agent = _require(agent_id)
     started = bot_avatar_service.snapshot_of(agent)
     try:
@@ -643,7 +644,7 @@ async def generate_avatar_image(agent_id: str, body: AvatarGenerateBody, user: s
 
 
 @router.put("/{agent_id}/avatar-image")
-async def apply_avatar_image(agent_id: str, body: AvatarImageBody, user: str = Depends(require_admin)) -> dict:
+async def apply_avatar_image(agent_id: str, body: AvatarImageBody, user: str = Depends(require_user)) -> dict:
     """Apply a staged picture and its framing, or reset to the bot's Kip (asset_id null)."""
     agent = _require(agent_id)
     if body.expected_snapshot and body.expected_snapshot != bot_avatar_service.snapshot_of(agent):
@@ -660,7 +661,7 @@ async def apply_avatar_image(agent_id: str, body: AvatarImageBody, user: str = D
 
 
 @router.delete("/{agent_id}")
-async def delete_agent(agent_id: str, user: str = Depends(require_admin)) -> dict:
+async def delete_agent(agent_id: str, user: str = Depends(require_user)) -> dict:
     if _require(agent_id).get("builtin"):
         raise HTTPException(status_code=409, detail="this built-in bot cannot be deleted; archive it instead")
     if any(t.get("status") == "running" for t in _owned(agent_id) if t["schedule_kind"] == "card"):
@@ -677,7 +678,7 @@ async def delete_agent(agent_id: str, user: str = Depends(require_admin)) -> dic
 
 
 @router.post("/{agent_id}/forget-logins")
-async def forget_logins(agent_id: str, user: str = Depends(require_admin)) -> dict:
+async def forget_logins(agent_id: str, user: str = Depends(require_user)) -> dict:
     _require(agent_id)
     try:
         agent_service.forget_logins(agent_id)
@@ -687,7 +688,7 @@ async def forget_logins(agent_id: str, user: str = Depends(require_admin)) -> di
 
 
 @router.post("/{agent_id}/chat")
-async def start_chat(agent_id: str, user: str = Depends(require_admin)) -> dict:
+async def start_chat(agent_id: str, user: str = Depends(require_user)) -> dict:
     """A chat with the agent: its model, and its identity and notes as they
     are now, frozen for this chat."""
     from core.session_manager import session_manager
@@ -702,7 +703,7 @@ async def start_chat(agent_id: str, user: str = Depends(require_admin)) -> dict:
 
 
 @router.put("/{agent_id}/memory")
-async def write_memory(agent_id: str, body: MemoryBody, user: str = Depends(require_admin)) -> dict:
+async def write_memory(agent_id: str, body: MemoryBody, user: str = Depends(require_user)) -> dict:
     _require(agent_id)
     try:
         return {"memory": agent_service.write_memory(agent_id, body.text)}
@@ -711,13 +712,13 @@ async def write_memory(agent_id: str, body: MemoryBody, user: str = Depends(requ
 
 
 @router.get("/{agent_id}/memory/upkeep")
-async def memory_upkeep_journal(agent_id: str, user: str = Depends(require_admin)) -> dict:
+async def memory_upkeep_journal(agent_id: str, user: str = Depends(require_user)) -> dict:
     _require(agent_id)
     return {"entries": agent_service.memory_upkeep_journal(agent_id)}
 
 
 @router.post("/{agent_id}/memory/upkeep/{upkeep_id}/undo")
-async def undo_memory_upkeep(agent_id: str, upkeep_id: str, user: str = Depends(require_admin)) -> dict:
+async def undo_memory_upkeep(agent_id: str, upkeep_id: str, user: str = Depends(require_user)) -> dict:
     _require(agent_id)
     try:
         return agent_service.undo_memory_upkeep(agent_id, upkeep_id)
@@ -726,7 +727,7 @@ async def undo_memory_upkeep(agent_id: str, upkeep_id: str, user: str = Depends(
 
 
 @router.post("/{agent_id}/setup/{receipt_id}/undo")
-async def undo_setup(agent_id: str, receipt_id: str, user: str = Depends(require_admin)) -> dict:
+async def undo_setup(agent_id: str, receipt_id: str, user: str = Depends(require_user)) -> dict:
     """Undo one /setup change from the bot's profile (Agents 2.0, 2026-10-14)."""
     _require(agent_id)
     try:
@@ -738,7 +739,7 @@ async def undo_setup(agent_id: str, receipt_id: str, user: str = Depends(require
 
 
 @router.post("/{agent_id}/goals")
-async def add_goal(agent_id: str, body: GoalBody, user: str = Depends(require_admin)) -> dict:
+async def add_goal(agent_id: str, body: GoalBody, user: str = Depends(require_user)) -> dict:
     _require(agent_id)
     if body.schedule_kind not in ("daily", "interval"):
         raise HTTPException(status_code=400, detail="a goal runs daily or every so often")
@@ -752,7 +753,7 @@ async def add_goal(agent_id: str, body: GoalBody, user: str = Depends(require_ad
 
 
 @router.post("/{agent_id}/cards")
-async def add_card(agent_id: str, body: CardBody, user: str = Depends(require_admin)) -> dict:
+async def add_card(agent_id: str, body: CardBody, user: str = Depends(require_user)) -> dict:
     _require(agent_id)
     try:
         return task_service.create_task(body.name, body.prompt, "card", status=body.status or "ready",
@@ -762,7 +763,7 @@ async def add_card(agent_id: str, body: CardBody, user: str = Depends(require_ad
 
 
 @router.post("/inbox/{item_id}/answer")
-async def answer(item_id: str, body: AnswerBody, user: str = Depends(require_admin)) -> dict:
+async def answer(item_id: str, body: AnswerBody, user: str = Depends(require_user)) -> dict:
     item = agent_service.get_item(item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="inbox item not found")
@@ -776,7 +777,7 @@ async def answer(item_id: str, body: AnswerBody, user: str = Depends(require_adm
 
 @router.post("/{agent_id}/duplicate")
 async def duplicate_agent(agent_id: str, body: Optional[DuplicateBody] = None,
-                          user: str = Depends(require_admin)) -> dict:
+                          user: str = Depends(require_user)) -> dict:
     _require(agent_id)
     try:
         return _summary(bot_record.duplicate(agent_id, body.name if body else None))
@@ -785,12 +786,12 @@ async def duplicate_agent(agent_id: str, body: Optional[DuplicateBody] = None,
 
 
 @router.get("/{agent_id}/overview")
-async def agent_overview(agent_id: str, user: str = Depends(require_admin)) -> dict:
+async def agent_overview(agent_id: str, user: str = Depends(require_user)) -> dict:
     return bot_record.overview(_require(agent_id))
 
 
 @router.get("/{agent_id}/system-prompt")
-async def agent_system_prompt(agent_id: str, user: str = Depends(require_admin)) -> dict:
+async def agent_system_prompt(agent_id: str, user: str = Depends(require_user)) -> dict:
     _require(agent_id)
     return agent_service.system_prompt(agent_id)
 
@@ -798,13 +799,13 @@ async def agent_system_prompt(agent_id: str, user: str = Depends(require_admin))
 # -- threads: a bot's conversations are its sessions (services/bot_threads.py) ---
 
 @router.get("/{agent_id}/threads")
-async def list_threads(agent_id: str, include_archived: int = 0, user: str = Depends(require_admin)) -> dict:
+async def list_threads(agent_id: str, include_archived: int = 0, user: str = Depends(require_user)) -> dict:
     return bot_threads.list_threads(_require(agent_id), bool(include_archived))
 
 
 @router.post("/{agent_id}/threads")
 async def create_thread(agent_id: str, body: Optional[ThreadCreateBody] = None,
-                        user: str = Depends(require_admin)) -> dict:
+                        user: str = Depends(require_user)) -> dict:
     body = body or ThreadCreateBody()
     try:
         return bot_threads.create_thread(_require(agent_id), user, body.title, body.folder_id, body.approval_mode)
@@ -813,12 +814,12 @@ async def create_thread(agent_id: str, body: Optional[ThreadCreateBody] = None,
 
 
 @router.post("/{agent_id}/threads/delete")
-async def delete_threads(agent_id: str, body: ThreadDeleteBody, user: str = Depends(require_admin)) -> dict:
+async def delete_threads(agent_id: str, body: ThreadDeleteBody, user: str = Depends(require_user)) -> dict:
     return await bot_threads.delete_threads(_require(agent_id), body.thread_ids)
 
 
 @router.post("/{agent_id}/threads/follow-model")
-async def threads_follow_model(agent_id: str, user: str = Depends(require_admin)) -> dict:
+async def threads_follow_model(agent_id: str, user: str = Depends(require_user)) -> dict:
     try:
         return await bot_threads.follow_model(_require(agent_id))
     except ValueError as e:
@@ -827,7 +828,7 @@ async def threads_follow_model(agent_id: str, user: str = Depends(require_admin)
 
 @router.patch("/{agent_id}/threads/{session_id}")
 async def patch_thread(agent_id: str, session_id: str, body: ThreadPatchBody,
-                       user: str = Depends(require_admin)) -> dict:
+                       user: str = Depends(require_user)) -> dict:
     agent = _require(agent_id)
     try:
         return bot_threads.update_thread(agent, session_id, body.model_dump(exclude_unset=True))
@@ -838,7 +839,7 @@ async def patch_thread(agent_id: str, session_id: str, body: ThreadPatchBody,
 
 
 @router.post("/{agent_id}/folders")
-async def add_folder(agent_id: str, body: FolderBody, user: str = Depends(require_admin)) -> dict:
+async def add_folder(agent_id: str, body: FolderBody, user: str = Depends(require_user)) -> dict:
     _require(agent_id)
     try:
         return bot_threads.add_folder(agent_id, body.name, body.emoji)
@@ -847,7 +848,7 @@ async def add_folder(agent_id: str, body: FolderBody, user: str = Depends(requir
 
 
 @router.put("/{agent_id}/folders/order")
-async def order_folders(agent_id: str, body: OrderBody, user: str = Depends(require_admin)) -> dict:
+async def order_folders(agent_id: str, body: OrderBody, user: str = Depends(require_user)) -> dict:
     _require(agent_id)
     try:
         return {"folders": bot_threads.order_folders(agent_id, body.ids)}
@@ -857,7 +858,7 @@ async def order_folders(agent_id: str, body: OrderBody, user: str = Depends(requ
 
 @router.patch("/{agent_id}/folders/{folder_id}")
 async def patch_folder(agent_id: str, folder_id: str, body: FolderPatchBody,
-                       user: str = Depends(require_admin)) -> dict:
+                       user: str = Depends(require_user)) -> dict:
     _require(agent_id)
     try:
         return bot_threads.update_folder(agent_id, folder_id, body.model_dump(exclude_unset=True))
@@ -868,7 +869,7 @@ async def patch_folder(agent_id: str, folder_id: str, body: FolderPatchBody,
 
 
 @router.delete("/{agent_id}/folders/{folder_id}")
-async def delete_folder(agent_id: str, folder_id: str, user: str = Depends(require_admin)) -> dict:
+async def delete_folder(agent_id: str, folder_id: str, user: str = Depends(require_user)) -> dict:
     _require(agent_id)
     try:
         return bot_threads.delete_folder(agent_id, folder_id)

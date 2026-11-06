@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.middleware import require_admin
+from core.middleware import require_user
 from services import bot_usage
 from core import model_prices
 
@@ -22,26 +22,26 @@ def _call(fn, *args, **kwargs):
 @router.get("/summary")
 def summary(from_: str | None = Query(None, alias="from"), to: str | None = None,
             group_by: Literal["bot", "model", "endpoint", "day", "trigger", "routine"] = "bot",
-            bot_id: str | None = None, user: str = Depends(require_admin)):
+            bot_id: str | None = None, user: str = Depends(require_user)):
     return _call(bot_usage.summary, from_, to, group_by, bot_id, user)
 
 
 @router.get("/runs")
 def runs(from_: str | None = Query(None, alias="from"), to: str | None = None,
          bot_id: str | None = None, offset: int = Query(0, ge=0, le=1_000_000),
-         limit: int = Query(50, ge=1, le=100), user: str = Depends(require_admin)):
+         limit: int = Query(50, ge=1, le=100), user: str = Depends(require_user)):
     return _call(bot_usage.runs, from_, to, bot_id, offset, limit, user)
 
 
 @router.get("/traces")
 def traces(from_: str | None = Query(None, alias="from"), to: str | None = None,
            bot_id: str | None = None, offset: int = Query(0, ge=0, le=1_000_000),
-           limit: int = Query(50, ge=1, le=100), user: str = Depends(require_admin)):
+           limit: int = Query(50, ge=1, le=100), user: str = Depends(require_user)):
     return _call(bot_usage.runs, from_, to, bot_id, offset, limit, user)
 
 
 @router.get("/traces/{run_id}")
-def trace(run_id: str, user: str = Depends(require_admin)):
+def trace(run_id: str, user: str = Depends(require_user)):
     from services.bot_trace import detail
     try:
         return detail(run_id, user)
@@ -51,7 +51,7 @@ def trace(run_id: str, user: str = Depends(require_admin)):
 
 @router.get("/usage.csv")
 def csv(from_: str | None = Query(None, alias="from"), to: str | None = None,
-        bot_id: str | None = None, user: str = Depends(require_admin)):
+        bot_id: str | None = None, user: str = Depends(require_user)):
     return Response(_call(bot_usage.csv_export, from_, to, bot_id, user), media_type="text/csv",
                     headers={"Content-Disposition": 'attachment; filename="bot-usage.csv"'})
 
@@ -63,13 +63,13 @@ class Budget(BaseModel):
 
 
 @router.get("/budget")
-def budget(user: str = Depends(require_admin)):
+def budget(user: str = Depends(require_user)):
     from services.bot_spend import budget
     return budget()
 
 
 @router.put("/budget")
-def save_budget(body: Budget, user: str = Depends(require_admin)):
+def save_budget(body: Budget, user: str = Depends(require_user)):
     bot_usage.update_settings(budget=body.model_dump())
     return budget(user)
 
@@ -88,13 +88,13 @@ class Prices(BaseModel):
 
 
 @router.get("/prices")
-def prices(user: str = Depends(require_admin)):
+def prices(user: str = Depends(require_user)):
     return {"as_of": model_prices.PRICES_AS_OF, "prices": model_prices.LIST_PRICES,
             "prices_override": bot_usage.settings()["prices_override"]}
 
 
 @router.put("/prices")
-def save_prices(body: Prices, user: str = Depends(require_admin)):
+def save_prices(body: Prices, user: str = Depends(require_user)):
     if any(not 1 <= len(k) <= 200 for k in body.prices_override):
         raise HTTPException(422, "Model names are limited to 200 characters")
     bot_usage.update_settings(prices_override={k: v.model_dump() for k, v in body.prices_override.items()})
@@ -102,7 +102,7 @@ def save_prices(body: Prices, user: str = Depends(require_admin)):
 
 
 @router.get("/plan")
-def plan(refresh: bool = False, user: str = Depends(require_admin)):
+def plan(refresh: bool = False, user: str = Depends(require_user)):
     from core.quota_usage import get_bot_plan
     return get_bot_plan(refresh)
 
@@ -114,12 +114,12 @@ class Housekeeping(BaseModel):
 
 
 @router.get("/housekeeping")
-def housekeeping(user: str = Depends(require_admin)):
+def housekeeping(user: str = Depends(require_user)):
     config = bot_usage.settings()
     return {k: config[k] for k in ("event_retention_days", "event_size_cap_mb")}
 
 
 @router.put("/housekeeping")
-def save_housekeeping(body: Housekeeping, user: str = Depends(require_admin)):
+def save_housekeeping(body: Housekeeping, user: str = Depends(require_user)):
     bot_usage.update_settings(**body.model_dump())
     return housekeeping(user)

@@ -1,8 +1,9 @@
 """Saved logins for bots (Phase 2, unit U5).
 
 A login is a site, a username and a password, with an optional one-time-code seed. Records live in
-one file encrypted with their own key, both under <data>/bot-secrets, which no backup, export or
-restore ever carries (core/backup.py). The store is write-only toward the UI: rows come back masked
+one file encrypted with their own key, both under the account's own bot-secrets folder (each account has
+its own logins and its own login key; the first admin's moved unchanged, Multi-Account phase 4c), which no
+backup, export or restore ever carries or replaces (core/backup.py). The store is write-only toward the UI: rows come back masked
 (site, username, hosts, whether a code seed exists, who may use it, last used), never a password or
 seed. A bot sees only "site + username" lines; filling happens in the harness (core/computer.py),
 which asks `resolve_fill()` for the values at the moment it fills and never returns them.
@@ -52,8 +53,8 @@ class LoginRefused(LoginError):
 
 
 def _folder() -> str:
-    from core.constants import DATA_DIR
-    return os.path.join(DATA_DIR, SECRET_FOLDER)
+    from core import accounts
+    return accounts.path(SECRET_FOLDER)
 
 
 def _paths() -> tuple[str, str]:
@@ -62,7 +63,7 @@ def _paths() -> tuple[str, str]:
 
 
 _lock = threading.RLock()
-_cache: dict = {"signature": None, "data": None}
+_cache: dict = {"path": None, "signature": None, "data": None}
 
 
 def _restrict(path: str) -> None:
@@ -100,7 +101,7 @@ def _load() -> dict:
             return {"version": 1, "logins": {}}
         stat = os.stat(data_path)
         signature = (stat.st_mtime_ns, stat.st_size)
-        if _cache["signature"] == signature and _cache["data"] is not None:
+        if _cache["path"] == data_path and _cache["signature"] == signature and _cache["data"] is not None:
             return json.loads(json.dumps(_cache["data"]))
         try:
             with open(data_path, "rb") as f:
@@ -112,7 +113,7 @@ def _load() -> dict:
             raise LoginError("The saved logins cannot be read. Nothing was changed.", 503) from error
         if not isinstance(data, dict) or not isinstance(data.get("logins"), dict):
             raise LoginError("The saved logins cannot be read. Nothing was changed.", 503)
-        _cache.update(signature=signature, data=data)
+        _cache.update(path=data_path, signature=signature, data=data)
         return json.loads(json.dumps(data))
 
 
@@ -129,7 +130,7 @@ def _save(data: dict) -> None:
         _restrict(temp)
         os.replace(temp, data_path)
         stat = os.stat(data_path)
-        _cache.update(signature=(stat.st_mtime_ns, stat.st_size), data=json.loads(json.dumps(data)))
+        _cache.update(path=data_path, signature=(stat.st_mtime_ns, stat.st_size), data=json.loads(json.dumps(data)))
 
 
 def seal(text: str) -> str:
@@ -148,7 +149,7 @@ def unseal(token: str) -> str:
 
 def reset_cache() -> None:
     with _lock:
-        _cache.update(signature=None, data=None)
+        _cache.update(path=None, signature=None, data=None)
 
 
 # -- hosts -----------------------------------------------------------------------------------------

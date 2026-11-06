@@ -1,9 +1,4 @@
 {
  "leaks": [],
- "bea_denied": [
-  "bea cannot create bots: denied 403",
-  "bea cannot create hooks: denied 403",
-  "bea cannot create model connections: denied 403",
-  "bea cannot create triggers: denied 403"
- ]
+ "bea_denied": []
 }

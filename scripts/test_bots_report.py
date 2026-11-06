@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from bots_chat_harness import OWNER, Harness  # noqa: E402
-from core.middleware import require_admin  # noqa: E402
+from core.middleware import require_admin, require_user  # noqa: E402
 from services import bot_report  # noqa: E402
 
 SECRET = "sk-ant-" + "A1b2C3d4E5f6G7h8I9j0K1l2"
@@ -92,7 +92,7 @@ class ReportTests(unittest.IsolatedAsyncioTestCase):
     def test_routes(self):
         from routes.bot_lifecycle_routes import router
         app = FastAPI(); app.include_router(router)
-        app.dependency_overrides[require_admin] = lambda: OWNER
+        app.dependency_overrides[require_admin] = lambda: OWNER; app.dependency_overrides[require_user] = lambda: OWNER
         client = TestClient(app)
         made = client.post("/api/bot-lifecycle/reports", json={"session_id": self.sid, "message_id": self.message_id, "went_wrong": "Broke"})
         self.assertEqual(made.status_code, 200)

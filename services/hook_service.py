@@ -174,6 +174,8 @@ class HookService:
             url = str(config.get("url") or "").strip()
             if not url.startswith(("https://", "http://")):
                 raise ValueError("the web address must start with https:// or http://")
+            from core import accounts
+            accounts.refuse_host_only_address(url, "send a hook")
             config["url"] = url
         elif action == "vault_note":
             path = str(config.get("path") or "").strip().replace("\\", "/")

@@ -1,6 +1,6 @@
 """Keys and resource settings (Phase 2, unit U5).
 
-Keys are write-only. A saved key is encrypted with the install key (core/secret_storage), shown only
+Keys are write-only. A saved key is encrypted with the account's own key (core/secret_storage), shown only
 as "saved" and its last four characters, and never sent back. A test returns a status word and a fixed
 sentence, never the key or the provider's reply. Rows are grouped AI, Servers, Voice, Computers, Apps
 and Helpers. AI and Helpers rows are the model connections that already exist (Settings > Models):
@@ -9,6 +9,10 @@ they are listed and tested here, and their keys stay where they are set.
 `resource_settings` is the protected, owner-scoped preferences document for the Phase 2 background
 work: the helper model, the daily tidy time, the capture quiet interval, the room-capture preference
 and the skill-review preferences. The owner's key comes from the signed-in account, never a request.
+
+Both files are per account (Multi-Account phase 4c, migration step 11): bot-keys.json and
+bot-resource-settings/ sit in the account's folder, and a key is encrypted with that account's key. What
+was saved before is the first admin's, encrypted with the install key, which is that account's key too.
 """
 import hashlib
 import os
@@ -18,7 +22,8 @@ import time
 from typing import Optional
 
 from core.atomic_io import read_json, write_json_atomic
-from core.secret_storage import decrypt_install as decrypt, encrypt_install as encrypt
+from core import accounts
+from core.secret_storage import decrypt, encrypt
 
 GROUPS = ["AI", "Servers", "Voice", "Computers", "Apps", "Helpers"]
 MAX_KEY = 4096
@@ -63,8 +68,7 @@ _lock = threading.RLock()
 
 
 def _path() -> str:
-    from core.constants import DATA_DIR
-    return os.path.join(DATA_DIR, "bot-keys.json")
+    return accounts.path("bot-keys.json")
 
 
 def _store() -> dict:
@@ -224,9 +228,8 @@ ROOM_CAPTURE = ("off", "ask", "on")
 
 
 def _owner_path(owner: str) -> str:
-    from core.constants import DATA_DIR
     key = hashlib.sha256(str(owner).encode("utf-8")).hexdigest()[:16]
-    return os.path.join(DATA_DIR, "bot-resource-settings", key + ".json")
+    return accounts.path("bot-resource-settings", key + ".json")
 
 
 def resource_settings(owner: str) -> dict:

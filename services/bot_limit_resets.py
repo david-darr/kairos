@@ -33,7 +33,15 @@ NEAR_LIMIT = 90.0
 BLOCKED = 100.0
 
 _lock = threading.Lock()
-_cache: dict = {"at": 0.0, "rows": []}
+_cache: dict = {}  # per account: each reads its own Claude and Codex sign-in (core/cli_env.py)
+
+
+def _slot() -> str:
+    from core import accounts
+    try:
+        return accounts.effective_account()
+    except accounts.NoAccount:
+        return ""
 
 
 def _overlay(force_provider: Optional[str] = None) -> dict:
@@ -76,9 +84,11 @@ def normalize(overlay: dict, now: Optional[float] = None) -> list[dict]:
 def windows(refresh: bool = False, now: Optional[float] = None) -> list[dict]:
     """Normalized account windows, cached; `refresh` rereads the providers."""
     now = time.time() if now is None else now
+    slot = _slot()
     with _lock:
-        if not refresh and _cache["rows"] and now - _cache["at"] < CACHE_SECONDS:
-            return list(_cache["rows"])
+        held = _cache.get(slot) or {"at": 0.0, "rows": []}
+        if not refresh and held["rows"] and now - held["at"] < CACHE_SECONDS:
+            return list(held["rows"])
     try:
         overlay = _overlay()
         if refresh:
@@ -91,9 +101,9 @@ def windows(refresh: bool = False, now: Optional[float] = None) -> list[dict]:
     except Exception:
         logger.exception("usage limits could not be read")
         with _lock:
-            return list(_cache["rows"])
+            return list((_cache.get(slot) or {"rows": []})["rows"])
     with _lock:
-        _cache.update(at=now, rows=rows)
+        _cache[slot] = {"at": now, "rows": rows}
     return list(rows)
 
 
@@ -124,4 +134,4 @@ def blocked_until(endpoint_id: Optional[str], now: Optional[float] = None) -> Op
 
 def clear_cache() -> None:
     with _lock:
-        _cache.update(at=0.0, rows=[])
+        _cache.clear()

@@ -599,7 +599,6 @@ class RouteTests(unittest.TestCase):
         self.app = FastAPI()
         self.app.include_router(tab_crm.router)
         self.app.dependency_overrides[tab_crm.require_user] = lambda: "alice"
-        self.app.dependency_overrides[tab_crm.require_admin] = lambda: "alice"
         self.client = TestClient(self.app)
         self.client.__enter__()
     def tearDown(self):

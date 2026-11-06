@@ -271,6 +271,9 @@ def parse_antigravity_limits(data):
 
 def _antigravity_windows():
     from core.antigravity_cli import find_antigravity, run_readonly, auth_error
+    if cli_env.homes():
+        # Antigravity has one sign-in per computer, the first admin's: another account has none of its own to report.
+        raise SignInNeeded()
     executable = find_antigravity()
     if not executable:
         raise RuntimeError("Antigravity CLI is unavailable")

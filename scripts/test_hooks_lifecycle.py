@@ -80,14 +80,21 @@ class Hooks(unittest.IsolatedAsyncioTestCase):
 
     # -- the gate ------------------------------------------------------------------
 
-    def test_every_hook_route_refuses_members_and_anonymous_callers_for_real(self):
+    def test_every_hook_route_needs_a_sign_in_and_a_member_only_reaches_their_own_hooks(self):
+        # Phase 4c: hooks are per account. Nobody signed in: 401 on every route. A member is let in, but works in
+        # their own account: the admin's hook is not theirs to see, edit, test or delete, and a pause is theirs.
         hook = self.create(event="chat.reply", action="channel", config={"channel_id": "conn:x"})
         for method, path, body in (("get", "", None), ("post", "", {"name": "x", "event": "chat.reply", "action": "channel", "config": {"channel_id": "c"}}),
                                    ("patch", f"/{hook['id']}", {"enabled": False}), ("delete", f"/{hook['id']}", None),
                                    ("post", f"/{hook['id']}/test", {}), ("post", "/pause", {"paused": True})):
-            for who, c in (("member", self.member), ("anonymous", self.anon)):
-                got = getattr(c, method)("/api/hooks" + path, **({} if body is None else {"json": body}))
-                self.assertIn(got.status_code, (401, 403), f"{who} {method} {path} -> {got.status_code}")
+            kwargs = {} if body is None else {"json": body}
+            got = getattr(self.anon, method)("/api/hooks" + path, **kwargs)
+            self.assertEqual(got.status_code, 401, f"anonymous {method} {path} -> {got.status_code}")
+            got = getattr(self.member, method)("/api/hooks" + path, **kwargs)
+            self.assertNotIn(got.status_code, (401, 403), f"member {method} {path} -> {got.status_code}")
+            if path.startswith("/" + hook["id"]):
+                self.assertEqual(got.status_code, 404, f"member {method} {path}: not the member's hook")
+        self.assertEqual(self.member.get("/api/hooks").json()["hooks"][0]["name"], "x", "the member has only their own hook")
         self.assertEqual(len(hook_service.hooks()), 1)
         self.assertTrue(hook_service.get(hook["id"])["enabled"])
         self.assertFalse(hook_service.paused)

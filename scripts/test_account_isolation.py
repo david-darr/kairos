@@ -108,7 +108,7 @@ def fill(account):
     account.seed("calendar", "POST", "/api/calendar/events", {"title": f"{m} event", "start": "2026-11-10T10:00:00Z", "end": "2026-11-10T11:00:00Z"}, "event")
     account.seed("documents", "POST", "/api/documents", {"title": f"{m} document", "content": f"{m} body"}, "document")
     account.seed("projects", "POST", "/api/projects", {"name": f"{m} project", "instructions": m}, "project")
-    account.seed("model connections", "POST", "/api/models", {"name": f"{m} model", "base_url": "http://127.0.0.1:9/v1", "model": "x", "api_key": account.secret}, "endpoint")
+    account.seed("model connections", "POST", "/api/models", {"name": f"{m} model", "base_url": ("http://127.0.0.1:9/v1" if account.name == "david" else "https://models.invalid/v1"), "model": "x", "api_key": account.secret}, "endpoint")
     account.seed("tasks", "POST", "/api/tasks", {"name": f"{m} task", "prompt": m, "schedule_kind": "once", "run_at": "2030-01-01T00:00:00Z"}, "task")
     account.seed("bots", "POST", "/api/agents", {"name": f"{m} bot", "role": m, "instructions": m}, "agent")
     # The vault save route only edits an existing note, so the note is written as a file, into the account's own
@@ -271,19 +271,118 @@ class AccountIsolation(unittest.TestCase):
             for mark in david.markers():
                 self.assertNotIn(mark, r.text, f"bea read david's data via {path}")
 
-    def test_what_stays_admin_only_in_these_areas(self):
-        # Creating a trigger or a webhook, repointing a call voice server, the machine's usage limits and connectors
-        # (an allow-listed sender reaches agents as an admin chat) stay with an admin until the bot reach cap
-        # (phase 4c) and the machine-access gate.
+    def test_a_non_admin_makes_and_sees_only_her_own_bots_hooks_triggers_and_connections(self):
+        # Phase 4c: bea created her own bot, hook, trigger and model connection in fill(); each list shows hers
+        # and none of david's, and david's shows none of hers.
+        david, bea = self.accounts["david"], self.accounts["bea"]
+        for kind in ("bots", "hooks", "model connections", "triggers"):
+            self.assertEqual(bea.seeded.get(kind), "ok", f"bea creates {kind}")
+        for path in ("/api/agents", "/api/hooks", "/api/models", "/api/triggers"):
+            mine, theirs = call(bea.client, "GET", path)[0], call(david.client, "GET", path)[0]
+            self.assertLess(mine.status_code, 300, path)
+            for mark in david.markers():
+                self.assertNotIn(mark, mine.text, f"bea read david's data via {path}")
+            for mark in bea.markers():
+                self.assertNotIn(mark, theirs.text, f"david read bea's data via {path}")
+        # The lists that name things show hers (a trigger's list does not echo the marker back, so check the count).
+        for path in ("/api/agents", "/api/hooks", "/api/models"):
+            self.assertIn(bea.mark, call(bea.client, "GET", path)[0].text, f"bea sees her own via {path}")
+        self.assertEqual(len(call(bea.client, "GET", "/api/triggers")[0].json()["triggers"]), 1)
+
+    def test_what_bea_can_make_is_held_to_her_account(self):
+        david, bea = self.accounts["david"], self.accounts["bea"]
+        # A bot cannot be made at Full: bea has no machine access, so hers start at Ask and stay there.
+        refused = call(bea.client, "POST", "/api/agents", json={"name": "Bea full bot", "approval_mode": "full"})[0]
+        self.assertEqual(refused.status_code, 409, refused.text)
+        made = call(bea.client, "POST", "/api/agents", json={"name": "Bea plain bot"})[0]
+        self.assertLess(made.status_code, 300, made.text)
+        from core import accounts, bot_policy
+        with accounts.as_account(auth_manager.account_id("bea")):
+            self.assertEqual(bot_policy.effective_policy(made.json()["id"]).mode, "ask")
+        # No command hooks, no local MCP command, no model server on this computer, no hook to this computer.
+        for method, path, body in (
+                ("POST", "/api/hooks", {"name": "c", "event": "chat.reply", "action": "command", "config": {"command": "echo hi"}}),
+                ("POST", "/api/hooks", {"name": "w", "event": "chat.reply", "action": "webhook", "config": {"url": "http://127.0.0.1:9/x"}}),
+                ("POST", "/api/integrations/mcp-server", {"name": "s", "mcp_type": "stdio", "command": "echo"}),
+                ("POST", "/api/models", {"name": "l", "base_url": "http://localhost:11434/v1", "model": "x", "kind": "local"})):
+            r, err = call(bea.client, method, path, json=body)
+            self.assertIsNone(err, path)
+            self.assertGreaterEqual(r.status_code, 400, f"{method} {path} should be refused for bea, got {r.status_code}")
+            self.assertLess(r.status_code, 500, f"{method} {path} should be a clean refusal, got {r.status_code}")
+        # Her vault stays inside her own folder, and nothing is seeded elsewhere.
+        outside = str(Path(_DATA.name) / "elsewhere")
+        r = call(bea.client, "POST", "/api/settings/vault-dir", json={"path": outside})[0]
+        self.assertEqual(r.status_code, 403, r.text)
+        self.assertFalse(Path(outside).exists())
+        # A tab is code for everyone: only an admin installs one from the store.
+        r = call(bea.client, "POST", "/api/store/install", json={"kind": "tab", "slug": "x"})[0]
+        self.assertEqual(r.status_code, 400, r.text)
+        self.assertIn("admin", r.text.lower())
+        # Keys are hers alone (the store moved into each account in step 11).
+        r = call(bea.client, "PUT", "/api/bots/keys/exa", json={"value": bea.secret})[0]
+        self.assertLess(r.status_code, 300, r.text)
+        for account in (bea, david):
+            listing = call(account.client, "GET", "/api/bots/keys")[0]
+            self.assertLess(listing.status_code, 300, listing.text)
+            exa = next(k for k in listing.json()["keys"] if k["id"] == "exa")
+            self.assertEqual(exa["has_value"], account is bea, f"{account.name}'s exa key")
+
+    def test_what_stays_admin_only(self):
+        # The install's own things: the call voice server, the avatar image provider and the Google OAuth app,
+        # the install-wide settings, sharing a connection, the whole-folder backups, importing this computer's
+        # tool setup, the browser computers, the Codex install and the store's publishing side.
         bea = self.accounts["bea"]
-        for method, path, body in (("POST", "/api/triggers", {"name": "x"}), ("PATCH", "/api/triggers/nope", {"name": "x"}),
-                                   ("POST", "/api/bot-webhooks", {"name": "x"}), ("PATCH", "/api/bot-webhooks/nope", {}),
-                                   ("PUT", "/api/agent-calls/voices", {"url": "http://127.0.0.1:9", "protocol": "voicestudio"}),
-                                   ("GET", "/api/connectors", None), ("POST", "/api/connectors", {"kind": "webhook"}),
-                                   ("GET", "/api/bot-limit-resets", None)):
+        for method, path, body in (
+                ("PUT", "/api/agent-calls/voices", {"url": "http://127.0.0.1:9", "protocol": "voicestudio"}),
+                ("PUT", "/api/agents/avatar-provider", {"provider": "openai", "api_key": "x"}),
+                ("POST", "/api/google/client", {"client_id": "x"}),
+                ("POST", "/api/settings/computer-use", {"enabled": True}),
+                ("POST", "/api/settings/agent-tools", {"disabled_tools": []}),
+                ("PUT", "/api/models/nope/shares", {"usernames": []}),
+                ("POST", "/api/bot-lifecycle/backups/export", {"password": "x"}),
+                ("GET", "/api/bots/setup-import", None),
+                ("GET", "/api/bot-workbench/computers", None),
+                ("POST", "/api/model-setup/codex/install", None),
+                ("GET", "/api/image-provider", None),
+                ("GET", "/api/store/github", None)):
             r, err = call(bea.client, method, path, json=body)
             self.assertIsNone(err, path)
             self.assertEqual(r.status_code, 403, f"{method} {path} should stay admin-only, got {r.status_code}")
+
+    def test_connectors_and_limits_are_each_accounts_own(self):
+        david, bea = self.accounts["david"], self.accounts["bea"]
+        for path in ("/api/connectors", "/api/connectors/kinds", "/api/bot-limit-resets", "/api/models/quotas", "/api/bot-usage/plan"):
+            for account in (bea, david):
+                r, err = call(account.client, "GET", path)
+                self.assertIsNone(err, path)
+                self.assertLess(r.status_code, 300, f"{path} should be open to {account.name}, got {r.status_code} {r.text[:100]}")
+        from core.connectors import store as connector_store
+        fake = [{"id": "dc", "kind": "slack", "name": "David connector", "account": auth_manager.account_id("david")},
+                {"id": "bc", "kind": "slack", "name": "Bea connector", "account": auth_manager.account_id("bea")}]
+        with patch.object(connector_store, "list_records", return_value=fake), \
+                patch.object(connector_store, "get_record", side_effect=lambda i: next((r for r in fake if r["id"] == i), None)):
+            seen = {a.name: [c["name"] for c in call(a.client, "GET", "/api/connectors")[0].json()] for a in (david, bea)}
+            self.assertEqual(seen, {"david": ["David connector"], "bea": ["Bea connector"]})
+            self.assertEqual(call(bea.client, "DELETE", "/api/connectors/dc")[0].status_code, 404)
+            self.assertEqual(call(bea.client, "PATCH", "/api/connectors/dc", json={"name": "x"})[0].status_code, 404)
+
+    def test_a_connector_message_is_an_admin_chat_only_for_an_admin(self):
+        # core/channels/agent_routing.py direct(): the chat runs with the owning account's real admin status.
+        import asyncio
+        from core import accounts
+        from core.channels import agent_routing
+        seen = []
+
+        async def fake_send(session_id, text, attachments, is_admin=False, **kwargs):
+            seen.append(is_admin)
+            return "ok"
+
+        agent = {"id": "a1", "name": "Scout"}
+        for name, expected in (("david", True), ("bea", False)):
+            # The account first: agent_service is per account, so the patches must land on this account's.
+            with accounts.as_account(auth_manager.account_id(name)),                     patch.object(agent_routing.chat_service, "send_message", fake_send),                     patch.object(agent_routing.agent_service, "chat_endpoint", return_value="e1"),                     patch.object(agent_routing.agent_service, "make_agent_chat"),                     patch.object(agent_routing.session_manager, "get_or_create_channel_session", return_value="s1"):
+                asyncio.run(agent_routing.direct(agent, "hello", "conn:x", "Slack"))
+            self.assertEqual(seen[-1], expected, f"{name}'s connector chat")
 
     def test_system_status_names_only_the_callers_discord_bots(self):
         from core.channels import discord_channel

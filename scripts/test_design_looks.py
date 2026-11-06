@@ -214,7 +214,7 @@ class ToolTests(unittest.TestCase):
         self.assertIn("design system playful", made)
         self.assertTrue(call("design_create", {"title": "X", "look": "nope"}, sid).startswith("Not run: no look"))
 
-    def test_a_default_look_fills_in_and_is_admin_only(self):
+    def test_a_default_look_fills_in_and_is_each_accounts_own(self):
         app = FastAPI()
         app.include_router(design_routes.systems_router)
         client = TestClient(app)
@@ -228,10 +228,12 @@ class ToolTests(unittest.TestCase):
         self.assertIn("design system nordic", made)
         self.assertEqual(client.post("/api/design-systems/default/look", json={"id": None}).json()["id"], None)
         self.assertEqual(client.delete("/api/design-systems/editorial").status_code, 422, "bundled looks stay")
+        # Phase 4c: the default look is an account setting (design_default_look), so a non-admin may set theirs.
         from core.auth import auth_manager
         from unittest.mock import patch
         with patch.object(auth_manager, "is_admin", return_value=False):
-            self.assertEqual(client.post("/api/design-systems/default/look", json={"id": "sport"}).status_code, 403)
+            self.assertEqual(client.post("/api/design-systems/default/look", json={"id": "sport"}).status_code, 200)
+        client.post("/api/design-systems/default/look", json={"id": None})
 
     def test_creative_direction_reaches_every_model_and_small_windows(self):
         for surface in (tool_registry.OPENAI, tool_registry.CLAUDE, tool_registry.CODEX):

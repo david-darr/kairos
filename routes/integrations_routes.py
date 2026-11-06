@@ -1,6 +1,6 @@
 """Settings > Integrations (David's ask 2026-08-31, matching Odysseus's
-"Add Integration" panel). Admin-gated: API-service keys and MCP server
-config both widen what the agent can reach.
+"Add Integration" panel). Each account has its own integrations. A local command (stdio MCP) needs the
+machine-access grant (core/integrations.py, core/mcp_client.py), and the REA download stays admin.
 """
 import asyncio
 import html
@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from core import contacts_store, dav_client, integrations, mcp_client, mcp_oauth, rea_integration, sync_engine
-from core.middleware import local_api_base, require_admin
+from core.middleware import local_api_base, require_admin, require_user
 from services.calendar_service import calendar_service
 
 router = APIRouter(prefix="/api/integrations", tags=["integrations"])
@@ -34,17 +34,17 @@ class CreateMcpServerRequest(BaseModel):
 
 
 @router.get("")
-async def list_integrations(user: str = Depends(require_admin)) -> list[dict]:
+async def list_integrations(user: str = Depends(require_user)) -> list[dict]:
     return integrations.list_integrations()
 
 
 @router.post("/api-service")
-async def create_api_service(body: CreateApiServiceRequest, user: str = Depends(require_admin)) -> dict:
+async def create_api_service(body: CreateApiServiceRequest, user: str = Depends(require_user)) -> dict:
     return integrations.create_api_service(body.name, body.base_url, body.api_key)
 
 
 @router.get("/catalog")
-async def mcp_catalog(user: str = Depends(require_admin)) -> list[dict]:
+async def mcp_catalog(user: str = Depends(require_user)) -> list[dict]:
     """Known MCP servers to add (core/mcp_catalog.json)."""
     return integrations.mcp_catalog()
 
@@ -76,7 +76,7 @@ async def add_rea(user: str = Depends(require_admin)) -> dict:
 
 
 @router.post("/mcp-server")
-async def create_mcp_server(body: CreateMcpServerRequest, user: str = Depends(require_admin)) -> dict:
+async def create_mcp_server(body: CreateMcpServerRequest, user: str = Depends(require_user)) -> dict:
     return await add_mcp_server(body)
 
 
@@ -97,7 +97,7 @@ class AcceptToolsRequest(BaseModel):
 
 
 @router.post("/{item_id}/check")
-async def check_mcp_server(item_id: str, user: str = Depends(require_admin)) -> dict:
+async def check_mcp_server(item_id: str, user: str = Depends(require_user)) -> dict:
     """Check an MCP server now: working, down or signed out, and which of its
     tools are new or changed since they were pinned (core/integrations.py)."""
     checked = await mcp_client.check(item_id)
@@ -107,7 +107,7 @@ async def check_mcp_server(item_id: str, user: str = Depends(require_admin)) -> 
 
 
 @router.post("/{item_id}/tools/accept")
-async def accept_mcp_tools(item_id: str, body: AcceptToolsRequest, user: str = Depends(require_admin)) -> dict:
+async def accept_mcp_tools(item_id: str, body: AcceptToolsRequest, user: str = Depends(require_user)) -> dict:
     """Let models use these held tools, as they were when reviewed."""
     try:
         return integrations.accept_tools(item_id, body.names)
@@ -122,7 +122,7 @@ async def accept_mcp_tools(item_id: str, body: AcceptToolsRequest, user: str = D
 # provider sends back carries no app cookie. It is admitted by the `state` of
 # a sign-in an admin started, and anything else is turned away.
 @router.post("/{item_id}/oauth/start")
-async def oauth_start(item_id: str, user: str = Depends(require_admin)) -> dict:
+async def oauth_start(item_id: str, user: str = Depends(require_user)) -> dict:
     try:
         return await mcp_oauth.start_sign_in(item_id, local_api_base() + mcp_oauth.CALLBACK_PATH)
     except KeyError:
@@ -132,7 +132,7 @@ async def oauth_start(item_id: str, user: str = Depends(require_admin)) -> dict:
 
 
 @router.get("/{item_id}/oauth")
-async def oauth_status(item_id: str, user: str = Depends(require_admin)) -> dict:
+async def oauth_status(item_id: str, user: str = Depends(require_user)) -> dict:
     try:
         return mcp_oauth.status(item_id)
     except KeyError:
@@ -140,7 +140,7 @@ async def oauth_status(item_id: str, user: str = Depends(require_admin)) -> dict
 
 
 @router.delete("/{item_id}/oauth")
-async def oauth_sign_out(item_id: str, user: str = Depends(require_admin)) -> dict:
+async def oauth_sign_out(item_id: str, user: str = Depends(require_user)) -> dict:
     try:
         mcp_oauth.sign_out(item_id)
     except KeyError:
@@ -167,7 +167,7 @@ class CreateDavRequest(BaseModel):
 
 
 @router.post("/caldav")
-async def create_caldav(body: CreateDavRequest, user: str = Depends(require_admin)) -> dict:
+async def create_caldav(body: CreateDavRequest, user: str = Depends(require_user)) -> dict:
     """Creates the integration and runs its first sync immediately — so
     "Add" visibly does something real rather than just saving credentials
     that only take effect on some later manual step."""
@@ -181,7 +181,7 @@ async def create_caldav(body: CreateDavRequest, user: str = Depends(require_admi
 
 
 @router.post("/carddav")
-async def create_carddav(body: CreateDavRequest, user: str = Depends(require_admin)) -> dict:
+async def create_carddav(body: CreateDavRequest, user: str = Depends(require_user)) -> dict:
     item = integrations.create_dav("carddav_contacts", body.name, body.url, body.username, body.password)
     try:
         await _sync_carddav(item["id"])
@@ -209,7 +209,7 @@ class CreateIcalFeedRequest(BaseModel):
 
 
 @router.post("/ical")
-async def create_ical_feed(body: CreateIcalFeedRequest, user: str = Depends(require_admin)) -> dict:
+async def create_ical_feed(body: CreateIcalFeedRequest, user: str = Depends(require_user)) -> dict:
     """Plain iCal (.ics) feed subscription (David's ask 2026-08-31) —
     simpler than CalDAV: one GET, one document, no PROPFIND. Most public
     feeds (Google's "secret address in iCal format", Apple share links)
@@ -228,7 +228,7 @@ async def _sync_ical_feed(item_id: str) -> int:
 
 
 @router.post("/{item_id}/sync")
-async def sync_integration(item_id: str, user: str = Depends(require_admin)) -> dict:
+async def sync_integration(item_id: str, user: str = Depends(require_user)) -> dict:
     # Delegates to core/sync_engine so this button and the nightly Sync All
     # task run identical code. They used to be able to drift apart, which is
     # the kind of difference nobody notices until the unattended path breaks.
@@ -244,7 +244,7 @@ async def sync_integration(item_id: str, user: str = Depends(require_admin)) -> 
 
 
 @router.post("/sync-all")
-async def sync_all_now(user: str = Depends(require_admin)) -> dict:
+async def sync_all_now(user: str = Depends(require_user)) -> dict:
     """Manual trigger for the same pass the daily task runs (David's ask
     2026-09-06) — useful right after adding a feed, and for confirming the
     nightly job would work without waiting until morning."""
@@ -253,12 +253,12 @@ async def sync_all_now(user: str = Depends(require_admin)) -> dict:
 
 
 @router.get("/contacts")
-async def list_contacts(user: str = Depends(require_admin)) -> list[dict]:
+async def list_contacts(user: str = Depends(require_user)) -> list[dict]:
     return contacts_store.list_contacts()
 
 
 @router.delete("/{item_id}")
-async def delete_integration(item_id: str, user: str = Depends(require_admin)) -> dict:
+async def delete_integration(item_id: str, user: str = Depends(require_user)) -> dict:
     item = integrations.get_integration(item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="integration not found")

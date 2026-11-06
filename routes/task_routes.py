@@ -15,22 +15,12 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 
 def agent_task_is_admins(task_id: str, request: Request) -> None:
-    """Directing an agent is admin-only, through every route that can do it.
-
-    routes/agent_routes.py states the rule and the reason: agents always run
-    in Auto (David, 2026-10-05), so whoever directs them is approving
-    everything they do. That file enforced it; these generic task routes did
-    not. An agent's goals and cards are ordinary tasks here, and they carry
-    no owner or admin_only, so visible_to treats them as shared - a non-admin
-    could run, stop, edit, re-status or delete an agent's work and have it
-    approve itself under Auto. Found 2026-10-13.
-
-    Only agent-owned tasks are affected; an ordinary user's own tasks keep
-    working as before. A missing task falls through, so the route itself
-    answers 404 rather than this telling a stranger which ids exist."""
-    task = task_service.get_task(task_id)
-    if task and task.get("agent_id"):
-        require_admin(request)
+    """Directing a bot's tasks was admin-only while every bot ran in Auto and tasks were shared
+    (found 2026-10-13). Since multi-account phase 4 every task lives in its owner's account, so a member
+    only ever reaches their own bots' tasks, and a bot in an account without machine access is capped at
+    "ask" (core/bot_policy.py), so directing it approves nothing by itself. Kept as a no-op dependency so
+    the routes' shape stays the same."""
+    return None
 
 
 def task_is_visible(task_id: str, user: str = Depends(require_user)) -> None:

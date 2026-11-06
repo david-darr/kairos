@@ -238,7 +238,9 @@ class Routes(unittest.TestCase):
         for bot in bots.list_bots():
             bots.delete_bot(bot["id"])
 
-    def test_every_route_is_admin_only_and_the_token_is_never_returned(self):
+    def test_every_route_needs_a_sign_in_works_on_the_callers_own_bots_and_never_returns_the_token(self):
+        # Phase 4c: Discord bots are each account's own (a record names the account it answers as). Nobody signed in:
+        # 401. A member is let in, sees none of the admin's bots and cannot change or remove one.
         with patch("core.channels.discord_channel.restart", new=AsyncMock()):
             made = self.admin.post("/api/settings/discord-bots", json={"name": "Home", "token": "tok-xyz", "allowed_user_id": OWNER})
             self.assertEqual(made.status_code, 200, made.text)
@@ -247,10 +249,16 @@ class Routes(unittest.TestCase):
             for method, path, body in (("get", "", None), ("post", "", {"name": "x", "token": "t"}), ("patch", f"/{bot_id}", {"name": "y"}),
                                        ("delete", f"/{bot_id}", None), ("post", f"/{bot_id}/channels", {"discord_channel_id": "1", "label": "a"}),
                                        ("patch", f"/{bot_id}/channels/x", {"mode": "open"}), ("delete", f"/{bot_id}/channels/x", None)):
-                for who, c in (("member", self.member), ("anonymous", self.anon)):
-                    got = getattr(c, method)("/api/settings/discord-bots" + path, **({} if body is None else {"json": body}))
-                    self.assertIn(got.status_code, (401, 403), f"{who} {method} {path} -> {got.status_code}")
-            self.assertEqual(len(bots.list_bots()), 1, "refused requests changed nothing")
+                kwargs = {} if body is None else {"json": body}
+                got = getattr(self.anon, method)("/api/settings/discord-bots" + path, **kwargs)
+                self.assertEqual(got.status_code, 401, f"anonymous {method} {path} -> {got.status_code}")
+                got = getattr(self.member, method)("/api/settings/discord-bots" + path, **kwargs)
+                self.assertNotIn(got.status_code, (401, 403), f"member {method} {path} -> {got.status_code}")
+                self.assertNotIn("tok-xyz", got.text)
+                if bot_id in path:
+                    self.assertEqual(got.status_code, 404, f"member {method} {path}: not the member's bot")
+            self.assertEqual([b["name"] for b in bots.list_bots() if b["id"] == bot_id], ["Home"], "the admin's bot is untouched")
+            self.assertEqual([b["name"] for b in self.member.get("/api/settings/discord-bots").json()], ["x"], "the member sees only their own")
             self.assertNotIn("tok-xyz", self.admin.get("/api/settings/discord-bots").text)
 
     def test_channel_ids_and_modes_are_validated_through_the_route(self):

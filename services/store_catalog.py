@@ -75,12 +75,29 @@ def _key(kind, slug):
     return kind + "/" + slug
 
 
+def _tabs_are_admin_only(kind):
+    """A tab is code that runs inside the app for everyone: only an admin installs, turns back on or removes one."""
+    if kind == "tab":
+        from core import accounts
+        if not accounts.is_admin_account():
+            raise ValueError("Only an admin can install or remove a tab.")
+
+
 class StoreCatalog:
-    def __init__(self, data_dir=DATA_DIR):
-        self.root = Path(data_dir)
-        self.cache_path = self.root / "store-catalog.json"
-        self.installs_path = self.root / "store-installs.json"
+    def __init__(self, data_dir=None):
+        self._per_account = data_dir is None  # the app's own: installs sit in each account's folder
+        self.root = Path(data_dir or DATA_DIR)
+        self.cache_path = self.root / "store-catalog.json"  # the public catalog: one copy for the install
         self.lock = asyncio.Lock()
+
+    @property
+    def installs_path(self):
+        """What this account installed (Multi-Account phase 4c): its local ids point at its own skills,
+        tools and automations, so the record sits in its folder."""
+        if not self._per_account:  # a store built for a folder of its own (tests) keeps its record there
+            return self.root / "store-installs.json"
+        from core import accounts
+        return Path(accounts.path("store-installs.json"))
 
     def installs(self):
         return read_json(str(self.installs_path), {})
@@ -234,6 +251,7 @@ class StoreCatalog:
         from services import skills_service, skill_curator
         from services.task_service import task_service
         if kind == "tab":
+            _tabs_are_admin_only(kind)
             from core import accounts
             accounts.require_machine_access("Installing a tab")
         key = _key(kind, slug)
@@ -296,6 +314,7 @@ class StoreCatalog:
             return {**result, "commit": snapshot["commit"]}
 
     async def reenable(self, kind, slug, confirmed=False, expected_revocation=None):
+        _tabs_are_admin_only(kind)
         if not confirmed:
             raise ValueError("Explicit confirmation is required to turn a revoked item back on")
         snapshot = await self.snapshot()
@@ -312,6 +331,7 @@ class StoreCatalog:
             return {"ok": True, "local_id": record["local_id"]}
 
     async def remove(self, kind, slug):
+        _tabs_are_admin_only(kind)
         from core import custom_tabs, integrations, tab_hooks
         from services import skills_service
         from services.task_service import task_service
@@ -338,12 +358,15 @@ store_catalog = StoreCatalog()
 
 async def watch_revocations():
     """Refresh installed items hourly while Kairos runs, including off-screen."""
+    from core import accounts
     while True:
-        try:
-            if store_catalog.installs():
-                await store_catalog.catalog()
-        except (ValueError, OSError, KeyError):
-            logging.getLogger(__name__).exception("Community revocation refresh failed")
+        for account in accounts.all_accounts():  # each account's own installs
+            try:
+                with accounts.as_account(account):
+                    if store_catalog.installs():
+                        await store_catalog.catalog()
+            except (ValueError, OSError, KeyError):
+                logging.getLogger(__name__).exception("Community revocation refresh failed")
         await asyncio.sleep(TTL)
 
 

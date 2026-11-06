@@ -1,6 +1,6 @@
 """Bot skills: private skills, the shared library and learned-skill requests (Phase 2, unit U3).
 
-Mounted beneath /api/bots by the Phase 2 aggregate router. Admin only. Library routes are declared
+Mounted beneath /api/bots by the Phase 2 aggregate router. Any signed-in account (each has its own library; migrate-global stays admin). Library routes are declared
 before the bot-id routes so a fixed word is never read as a bot id. Bodies are bounded and refuse
 unknown fields; mutations carry the revision or hash the person reviewed.
 """
@@ -9,13 +9,13 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from services import (bot_skill_import, bot_skill_learning, bot_skill_library, bot_skill_review, bot_skill_sharing,
                       bot_skills)
 from services.agent_service import agent_service
 from services.bot_skills import SkillError
 
-router = APIRouter(prefix="/api/bots", tags=["bot-skills"], dependencies=[Depends(require_admin)])
+router = APIRouter(prefix="/api/bots", tags=["bot-skills"], dependencies=[Depends(require_user)])
 
 
 class Body(BaseModel):
@@ -111,7 +111,7 @@ async def add_to_library(body: ImportBody):
     return guarded(lambda: bot_skill_import.import_text_to_library(body.content, body.filename))
 
 
-@router.post("/skills-library/migrate-global")
+@router.post("/skills-library/migrate-global", dependencies=[Depends(require_admin)])
 async def migrate_global():
     return guarded(bot_skill_library.migrate_global)
 

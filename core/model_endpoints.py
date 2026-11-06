@@ -158,6 +158,9 @@ def set_shares(endpoint_id: str, grantees: list[str]) -> list[str]:
 
 def create_endpoint(name: str, base_url: str = "", model: str = "", api_key: Optional[str] = None,
                      kind: str = "api", num_ctx: Optional[int] = None, supports_images: bool = False) -> dict:
+    from core import accounts
+    if kind in ("local", "api") and base_url:
+        accounts.refuse_host_only_address(base_url, "connect to a model server")
     if kind not in ("local", "api", "claude_cli", "codex_cli", "antigravity_cli"):
         raise ValueError("kind must be 'local', 'api', 'claude_cli', 'codex_cli', or 'antigravity_cli'")
     if kind not in ("claude_cli", "codex_cli", "antigravity_cli") and not base_url:

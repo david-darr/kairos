@@ -142,6 +142,8 @@ def mcp_catalog() -> list[dict]:
                     "Inspect applications, websites, JavaScript, binaries and runtime behavior with evidence.",
                     "transport": "stdio", "auth": "none", "package": REA_PACKAGE,
                     "docs": "https://github.com/morluto/rea"})
+    if not accounts.has_machine_access():  # a local command is not on offer to an account that may not run one
+        servers = [s for s in servers if s.get("transport") != "stdio"]
     added = {(i.get("url") or "").rstrip("/") for i in _load().values() if i.get("kind") == "mcp_server"}
     return [{**s, "added": bool(existing()) if s["id"] == "rea" else
              (s.get("url") or "").rstrip("/") in added} for s in servers]

@@ -30,8 +30,8 @@ class ConnectionError_(ValueError):
 
 
 def _alias_path() -> str:
-    from core.constants import DATA_DIR
-    return os.path.join(DATA_DIR, "bot-connections", ALIAS_FILE)
+    from core import accounts
+    return accounts.path("bot-connections", ALIAS_FILE)
 
 
 def _aliases() -> dict:

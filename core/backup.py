@@ -98,13 +98,14 @@ def _account_vaults(data_dir: str) -> list[str]:
 
 def _account_kept(data_dir: str) -> list[str]:
     """What a restore leaves in each account folder because no backup carries it: the account's vault, and
-    its file checkpoints (the undo history, left out of backups by name like the shared one)."""
+    its file checkpoints (the undo history, left out of backups by name like the shared one), and its saved
+    logins with their key (bot-secrets, which no backup carries)."""
     root = os.path.join(data_dir, "accounts")
     try:
         names = sorted(os.listdir(root))
     except OSError:
         return []
-    return [os.path.join("accounts", name, kept) for name in names for kept in ("vault", "file_checkpoints")
+    return [os.path.join("accounts", name, kept) for name in names for kept in ("vault", "file_checkpoints", SECRET_FOLDER)
             if os.path.isdir(os.path.join(root, name, kept))]
 
 

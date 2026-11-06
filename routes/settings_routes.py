@@ -1,7 +1,7 @@
 """Settings — the Settings tab. Vault location, Discord channel config, and
-onboarding state. All admin-gated (matches Odysseus's own settings-write
-policy — see specs/auth-security.md): in the single-user default this is a
-no-op (SINGLE_USER is always admin), it only matters once AUTH_ENABLED=true.
+onboarding state. The "My account" settings (core/settings.py ACCOUNT_KEYS: vault, helper model, auto-compact,
+computer-step days, onboarding) and one's own Discord bots are each signed-in account's own. Settings of the
+whole install (computer use, the tool lists) stay admin (specs/auth-security.md).
 """
 import os
 from typing import Optional
@@ -9,9 +9,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from core import discord_bots_store, permissions, tool_registry, settings as settings_store
+from core import accounts, discord_bots_store, permissions, tool_registry, settings as settings_store
 from core.channels import discord_channel
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from core.session_manager import session_manager
 from core.vault import build_custom_vault, resolve_vault_dir, seed_vault_if_empty
 from core import vault as vault_store
@@ -64,7 +64,7 @@ class SetDisabledToolsRequest(BaseModel):
 
 
 @router.get("")
-async def get_settings(user: str = Depends(require_admin)) -> dict:
+async def get_settings(user: str = Depends(require_user)) -> dict:
     raw = settings_store.load_settings()
     return {
         "onboarding_complete": raw["onboarding_complete"],
@@ -107,7 +107,7 @@ class SetComputerStepsRequest(BaseModel):
 
 
 @router.post("/computer-steps")
-async def set_computer_steps(body: SetComputerStepsRequest, user: str = Depends(require_admin)) -> dict:
+async def set_computer_steps(body: SetComputerStepsRequest, user: str = Depends(require_user)) -> dict:
     """Settings > Computer use: how long models' computer steps are kept
     (core/computer_trajectory.py); 0 keeps none and deletes what is kept."""
     if body.days not in (0, 1, 7, 30):
@@ -119,7 +119,7 @@ async def set_computer_steps(body: SetComputerStepsRequest, user: str = Depends(
 
 
 @router.post("/auto-compact")
-async def set_auto_compact(body: SetAutoCompactRequest, user: str = Depends(require_admin)) -> dict:
+async def set_auto_compact(body: SetAutoCompactRequest, user: str = Depends(require_user)) -> dict:
     """Settings > Added Models: compact local and API chats near a full
     window (services/chat_service.py _compact_if_nearly_full)."""
     settings_store.update_settings(auto_compact=body.enabled)
@@ -131,7 +131,7 @@ class SetHelpersRequest(BaseModel):
 
 
 @router.post("/helpers")
-async def set_helpers(body: SetHelpersRequest, user: str = Depends(require_admin)) -> dict:
+async def set_helpers(body: SetHelpersRequest, user: str = Depends(require_user)) -> dict:
     """Settings > Added Models > Helpers: the model helpers run on
     (core/helpers.py). Never Claude or Codex: their own tools can't be
     limited to reading."""
@@ -146,13 +146,13 @@ async def set_helpers(body: SetHelpersRequest, user: str = Depends(require_admin
 
 
 @router.post("/onboarding-complete")
-async def complete_onboarding(user: str = Depends(require_admin)) -> dict:
+async def complete_onboarding(user: str = Depends(require_user)) -> dict:
     settings_store.update_settings(onboarding_complete=True)
     return {"ok": True}
 
 
 @router.post("/vault-dir")
-async def set_vault_dir(body: VaultDirRequest, user: str = Depends(require_admin)) -> dict:
+async def set_vault_dir(body: VaultDirRequest, user: str = Depends(require_user)) -> dict:
     # Check the folder and seed it first; only a folder that works is saved.
     # A relative or empty path would resolve against the app's own folder.
     path = body.path
@@ -160,6 +160,10 @@ async def set_vault_dir(body: VaultDirRequest, user: str = Depends(require_admin
         raise HTTPException(status_code=400, detail="Choose a full folder path, such as C:\\Users\\you\\Vault.")
     if os.path.exists(path) and not os.path.isdir(path):
         raise HTTPException(status_code=400, detail="That path is a file, not a folder.")
+    try:
+        vault_store.check_vault_dir(path)  # before anything is written there: an account without machine access keeps its vault in its own folder
+    except accounts.MachineAccessDenied as error:
+        raise HTTPException(status_code=403, detail=str(error))
     try:
         seed_vault_if_empty(path)
     except OSError as error:
@@ -174,7 +178,7 @@ async def set_vault_dir(body: VaultDirRequest, user: str = Depends(require_admin
 
 
 @router.post("/vault-setup")
-async def setup_vault(body: VaultSetupRequest, user: str = Depends(require_admin)) -> dict:
+async def setup_vault(body: VaultSetupRequest, user: str = Depends(require_user)) -> dict:
     """Onboarding questionnaire (David's ask 2026-08-31) — builds a vault
     structure shaped to the areas the user said they want tracked, replacing
     the generic seed if nothing real has touched it yet (see
@@ -192,7 +196,7 @@ def _own_discord_bot(bot_id: str) -> None:
 
 
 @router.get("/discord-bots")
-async def list_discord_bots(user: str = Depends(require_admin)) -> list[dict]:
+async def list_discord_bots(user: str = Depends(require_user)) -> list[dict]:
     """David's ask 2026-09-01: "you should be able to see all the bots you
     have connected to" — multiple bots, not the original single-token
     design (see core/discord_bots_store.py)."""
@@ -200,14 +204,14 @@ async def list_discord_bots(user: str = Depends(require_admin)) -> list[dict]:
 
 
 @router.post("/discord-bots")
-async def create_discord_bot(body: CreateDiscordBotRequest, user: str = Depends(require_admin)) -> dict:
+async def create_discord_bot(body: CreateDiscordBotRequest, user: str = Depends(require_user)) -> dict:
     bot = discord_bots_store.create_bot(body.name, body.token, body.allowed_user_id, body.model_endpoint_id)
     await discord_channel.restart()
     return bot
 
 
 @router.patch("/discord-bots/{bot_id}")
-async def update_discord_bot(bot_id: str, body: UpdateDiscordBotRequest, user: str = Depends(require_admin)) -> dict:
+async def update_discord_bot(bot_id: str, body: UpdateDiscordBotRequest, user: str = Depends(require_user)) -> dict:
     _own_discord_bot(bot_id)
     try:
         bot = discord_bots_store.update_bot(
@@ -231,7 +235,7 @@ async def update_discord_bot(bot_id: str, body: UpdateDiscordBotRequest, user: s
 
 
 @router.delete("/discord-bots/{bot_id}")
-async def delete_discord_bot(bot_id: str, user: str = Depends(require_admin)) -> dict:
+async def delete_discord_bot(bot_id: str, user: str = Depends(require_user)) -> dict:
     _own_discord_bot(bot_id)
     discord_bots_store.delete_bot(bot_id)
     await discord_channel.restart()
@@ -242,7 +246,7 @@ async def delete_discord_bot(bot_id: str, user: str = Depends(require_admin)) ->
 # behavior scoped to a specific Discord channel, not just the whole bot) --
 
 @router.post("/discord-bots/{bot_id}/channels")
-async def add_discord_channel(bot_id: str, body: AddDiscordChannelRequest, user: str = Depends(require_admin)) -> dict:
+async def add_discord_channel(bot_id: str, body: AddDiscordChannelRequest, user: str = Depends(require_user)) -> dict:
     _own_discord_bot(bot_id)
     if not body.discord_channel_id.strip().isdigit():
         raise HTTPException(status_code=400, detail=(
@@ -261,7 +265,7 @@ async def add_discord_channel(bot_id: str, body: AddDiscordChannelRequest, user:
 
 
 @router.patch("/discord-bots/{bot_id}/channels/{entry_id}")
-async def update_discord_channel(bot_id: str, entry_id: str, body: UpdateDiscordChannelRequest, user: str = Depends(require_admin)) -> dict:
+async def update_discord_channel(bot_id: str, entry_id: str, body: UpdateDiscordChannelRequest, user: str = Depends(require_user)) -> dict:
     _own_discord_bot(bot_id)
     try:
         bot = discord_bots_store.update_channel(bot_id, entry_id, label=body.label, mode=body.mode)
@@ -274,7 +278,7 @@ async def update_discord_channel(bot_id: str, entry_id: str, body: UpdateDiscord
 
 
 @router.delete("/discord-bots/{bot_id}/channels/{entry_id}")
-async def delete_discord_channel(bot_id: str, entry_id: str, user: str = Depends(require_admin)) -> dict:
+async def delete_discord_channel(bot_id: str, entry_id: str, user: str = Depends(require_user)) -> dict:
     _own_discord_bot(bot_id)
     try:
         bot = discord_bots_store.remove_channel(bot_id, entry_id)

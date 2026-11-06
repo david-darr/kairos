@@ -1,5 +1,5 @@
 """Model endpoint registry — the "bring your own model" CRUD surface (Settings
-tab's Models section). Admin-gated like settings_routes.py; encryption of the
+tab's Models section). Each account has its own connections (sharing one stays admin); encryption of the
 API key happens here, at the boundary, same as Discord's token in
 settings_routes.py — core/model_endpoints.py itself never sees a plaintext
 key from a caller that didn't already go through encrypt().
@@ -36,7 +36,7 @@ class CreateEndpointRequest(BaseModel):
 
 
 @router.get("")
-async def list_endpoints(user: str = Depends(require_admin)) -> list[dict]:
+async def list_endpoints(user: str = Depends(require_user)) -> list[dict]:
     # `mark` names the provider logo the UI shows beside each model
     # (core/model_marks.py); None keeps the generic icon.
     return [{**endpoint, "mark": model_marks.mark_for(endpoint)} for endpoint in model_endpoints.list_endpoints()]
@@ -81,7 +81,7 @@ async def get_endpoint_catalog(endpoint_id: str, refresh: bool = False,
 
 
 @router.get("/usage")
-async def get_usage(user: str = Depends(require_admin)) -> dict:
+async def get_usage(user: str = Depends(require_user)) -> dict:
     """Home tab's "AI Models" card (David's ask 2026-09-01). See
     core/token_usage.py's module docstring — best-effort, percentage is
     share of usage across endpoints that have reported any, not a percentage
@@ -90,7 +90,7 @@ async def get_usage(user: str = Depends(require_admin)) -> dict:
 
 
 @router.get("/quotas")
-async def get_quotas(user: str = Depends(require_admin)) -> dict:
+async def get_quotas(user: str = Depends(require_user)) -> dict:
     """Account quota windows (`providers`) and every connected model with its
     quota or JARVIS-recorded tokens (`models`); see core/quota_usage.py."""
     return await quota_usage.get_usage_overlay_async()
@@ -101,7 +101,7 @@ class RefreshQuotaRequest(BaseModel):
 
 
 @router.post("/quotas/refresh")
-async def refresh_quota(body: RefreshQuotaRequest, user: str = Depends(require_admin)) -> dict:
+async def refresh_quota(body: RefreshQuotaRequest, user: str = Depends(require_user)) -> dict:
     """A click on one ring of the desktop usage overlay: read that provider
     now rather than waiting for the cache, at most once per short interval."""
     if body.provider not in quota_usage.READERS:
@@ -113,7 +113,7 @@ async def refresh_quota(body: RefreshQuotaRequest, user: str = Depends(require_a
 
 
 @router.post("")
-async def create_endpoint(body: CreateEndpointRequest, user: str = Depends(require_admin)) -> dict:
+async def create_endpoint(body: CreateEndpointRequest, user: str = Depends(require_user)) -> dict:
     try:
         return model_endpoints.create_endpoint(body.name, body.base_url, body.model, body.api_key, body.kind, body.num_ctx,
                                                body.supports_images)
@@ -122,7 +122,7 @@ async def create_endpoint(body: CreateEndpointRequest, user: str = Depends(requi
 
 
 @router.delete("/{endpoint_id}")
-async def delete_endpoint(endpoint_id: str, user: str = Depends(require_admin)) -> dict:
+async def delete_endpoint(endpoint_id: str, user: str = Depends(require_user)) -> dict:
     endpoint = model_endpoints.get_endpoint(endpoint_id)
     if endpoint is None or endpoint.get("shared"):
         raise HTTPException(status_code=404, detail="endpoint not found")
@@ -169,7 +169,7 @@ class ImageSupportRequest(BaseModel):
 
 
 @router.patch("/{endpoint_id}/image-support")
-async def set_image_support(endpoint_id: str, body: ImageSupportRequest, user: str = Depends(require_admin)) -> dict:
+async def set_image_support(endpoint_id: str, body: ImageSupportRequest, user: str = Depends(require_user)) -> dict:
     try:
         return model_endpoints.set_image_support(endpoint_id, body.enabled)
     except KeyError:
@@ -179,7 +179,7 @@ async def set_image_support(endpoint_id: str, body: ImageSupportRequest, user: s
 
 
 @router.post("/{endpoint_id}/test")
-async def test_endpoint(endpoint_id: str, user: str = Depends(require_admin)) -> dict:
+async def test_endpoint(endpoint_id: str, user: str = Depends(require_user)) -> dict:
     """Real reachability probe (David's ask 2026-08-31, matching Odysseus's
     Test/Probe buttons) — sends one minimal chat completion and reports
     whether it actually succeeded, not just whether the URL is well-formed."""

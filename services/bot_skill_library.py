@@ -1,6 +1,7 @@
 """The shared skill library: reviewed procedures that bots can be given.
 
-Layout under `<DATA_DIR>/bot-skills-library/`: `index.json` (metadata, no text),
+One library per account (Multi-Account phase 4c). Layout under the account's own `bot-skills-library/`:
+`index.json` (metadata, no text),
 `archive/<name>/<revision>.json` (immutable bundles), `skills/<name>/` (a read-only
 projection of the current revision), `assignments.json`, `share-notes.json` and
 `pending.json`. Retiring or replacing a skill never deletes archived bytes.
@@ -11,7 +12,7 @@ import time
 import uuid
 from pathlib import Path
 
-from core.constants import DATA_DIR
+from core import accounts
 from services.bot_skills import (ABSENT, LOCK, SkillError, atomic, bundle, check_revision, checked, digest, ident,
                                  name, read_json, redact, scan, usable_name, write_json)
 
@@ -20,7 +21,7 @@ TEXT_FIELDS = ("skill_md", "references")
 
 
 def _path(*parts):
-    return checked(Path(DATA_DIR).joinpath(ROOT, *parts))
+    return checked(Path(accounts.path(ROOT, *parts)))
 
 
 def _index():

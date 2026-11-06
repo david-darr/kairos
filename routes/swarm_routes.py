@@ -8,7 +8,6 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from core.auth import auth_manager
 from core.middleware import require_user
 from core.swarm import architect
 from core.swarm.budget import BudgetLimit
@@ -177,14 +176,6 @@ def human(request: Request):
     return owner
 
 
-def agents_allowed(owner, body):
-    """Agents are still admin-only (routes/agent_routes.py: a non-admin cannot make one yet), so only an
-    admin may seat one on a team. Lift this together with the bot reach cap (Multi-Account phase 4c);
-    team agents run with their bot's own reach."""
-    if any(member.agent_id for member in [body.lead, *body.specialists]) and not auth_manager.is_admin(owner):
-        raise HTTPException(403, "Only an admin can put agents on a team")
-
-
 def service(request: Request):
     value = getattr(request.app.state, "swarm", None)
     if value is None:
@@ -238,7 +229,6 @@ async def systems(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=
 
 @router.post("/systems", status_code=201)
 async def create(body: Create, owner=Depends(human), svc=Depends(service)):
-    agents_allowed(owner, body)
     return await mutation(svc.create(owner, body.model_dump(exclude={"command_id"}), body.command_id))
 
 
@@ -252,7 +242,6 @@ async def snapshot(system_id: str, owner=Depends(human), svc=Depends(service)):
 
 @router.patch("/systems/{system_id}")
 async def update(system_id: str, body: Update, owner=Depends(human), svc=Depends(service)):
-    agents_allowed(owner, body)
     return await mutation(svc.update(owner, system_id, body.model_dump(exclude={"command_id", "expected_revision"}), body.command_id, body.expected_revision))
 
 

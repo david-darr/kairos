@@ -1,12 +1,13 @@
 """Lifecycle hooks (services/hook_service.py): Settings > Administration >
-Hooks. Every route is admin-only, and no model tool reaches any of this: a
-hook can run a command on this computer, so only the person makes them."""
+Hooks. Each account has its own hooks. No model tool reaches any of this: a hook can run a command on this
+computer, so only the person makes them, and a command hook needs the account's machine access
+(services/hook_service.py)."""
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from core.middleware import require_admin
+from core.middleware import require_user
 from services.hook_service import EVENTS, hook_service
 
 router = APIRouter(prefix="/api/hooks", tags=["hooks"])
@@ -28,13 +29,13 @@ class PauseBody(BaseModel):
 
 
 @router.get("")
-async def list_hooks(user: str = Depends(require_admin)) -> dict:
+async def list_hooks(user: str = Depends(require_user)) -> dict:
     return {"hooks": [hook_service.public(h) for h in hook_service.hooks()], "paused": hook_service.paused,
             "events": EVENTS}
 
 
 @router.post("")
-async def create_hook(body: HookBody, user: str = Depends(require_admin)) -> dict:
+async def create_hook(body: HookBody, user: str = Depends(require_user)) -> dict:
     fields = body.model_dump(exclude_unset=True)
     try:
         return hook_service.public(hook_service.create(fields.pop("name", ""), **fields))
@@ -43,7 +44,7 @@ async def create_hook(body: HookBody, user: str = Depends(require_admin)) -> dic
 
 
 @router.patch("/{hook_id}")
-async def update_hook(hook_id: str, body: HookBody, user: str = Depends(require_admin)) -> dict:
+async def update_hook(hook_id: str, body: HookBody, user: str = Depends(require_user)) -> dict:
     try:
         return hook_service.public(hook_service.update(hook_id, **body.model_dump(exclude_unset=True)))
     except KeyError:
@@ -53,7 +54,7 @@ async def update_hook(hook_id: str, body: HookBody, user: str = Depends(require_
 
 
 @router.delete("/{hook_id}")
-async def delete_hook(hook_id: str, user: str = Depends(require_admin)) -> dict:
+async def delete_hook(hook_id: str, user: str = Depends(require_user)) -> dict:
     try:
         hook_service.delete(hook_id)
     except KeyError:
@@ -62,7 +63,7 @@ async def delete_hook(hook_id: str, user: str = Depends(require_admin)) -> dict:
 
 
 @router.post("/{hook_id}/test")
-async def test_hook(hook_id: str, user: str = Depends(require_admin)) -> dict:
+async def test_hook(hook_id: str, user: str = Depends(require_user)) -> dict:
     try:
         return await hook_service.test(hook_id)
     except KeyError:
@@ -70,6 +71,6 @@ async def test_hook(hook_id: str, user: str = Depends(require_admin)) -> dict:
 
 
 @router.post("/pause")
-async def pause(body: PauseBody, user: str = Depends(require_admin)) -> dict:
+async def pause(body: PauseBody, user: str = Depends(require_user)) -> dict:
     hook_service.set_paused(body.paused)
     return {"paused": hook_service.paused}

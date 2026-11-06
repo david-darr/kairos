@@ -74,8 +74,8 @@ STEPS: list[Step] = [
                       "agent_conversations.json")),
     # Bots and Kip: each account's bots, their notebooks, memory, rooms, cards, routines' state, usage,
     # calls and voice choices, and Kip's own folder (front_desk/). Install-level and left where they are:
-    # the shared skills library (bot-skills-library), speech models and runtime, Discord bots (group 6),
-    # Swarm (group 8), and bot secrets, keys, logins and connections (phase 3). Checked against the
+    # speech models and runtime, Discord bots (group 6), Swarm (group 8); the shared skills library and
+    # bot secrets, keys, logins and connections moved in step 11. Checked against the
     # installed tabs and add-ons (data/tabs, data/addons): none reads these files directly.
     Step(4, "bots and Kip", ("agents.json", "agents.json.*", "agents", "agent_voice.json", "call_voice.json",
                              "agent_calls", "bot-attention.sqlite3*", "bot-grants-state.json", "bot-memory-state",
@@ -115,6 +115,13 @@ STEPS: list[Step] = [
     Step(8, "usage counts", ("token_usage.json", "token_usage_daily.json", "image_usage.json")),
     Step(9, "tab data and creative add-on connections", ("tab-data", "creative-connections.json")),
     Step(10, "model connections", ("model_endpoints.json",)),
+    # Bot keys and resource settings, saved logins with their own key and the 1Password link (bot-secrets,
+    # which no backup carries, so it gets its own copy first), app-connection aliases, the skills library
+    # with its sharing queue, and what the community store installed. The store's catalog cache is the same
+    # public file for everyone and stays. Checked against the installed tabs and add-ons: none reads these.
+    Step(11, "bot keys, logins, connections and skills library",
+         ("bot-keys.json", "bot-secrets", "bot-connections", "bot-resource-settings", "bot-skills-library",
+          "store-installs.json"), copy_first=("bot-secrets",)),
 ]
 
 

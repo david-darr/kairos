@@ -1,4 +1,5 @@
-"""Admin-owned Google Workspace connection and Library actions.
+"""Google Workspace connection and Library actions. Each account signs in to its own Google accounts; the
+install's OAuth client app (POST /client) stays admin.
 
 Drive, Sheets and Forms routes take an optional `account` query parameter:
 an opaque id from /status, checked against the signed-in user's own
@@ -15,7 +16,7 @@ from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
 from core import google_workspace as google
-from core.middleware import local_api_base, require_admin
+from core.middleware import local_api_base, require_admin, require_user
 
 
 router = APIRouter(prefix="/api/google", tags=["google-workspace"])
@@ -93,7 +94,7 @@ def _account(user: str, account: str | None) -> str:
 
 
 @router.get("/status")
-async def status(user: str = Depends(require_admin)) -> dict:
+async def status(user: str = Depends(require_user)) -> dict:
     return google.status(user)
 
 
@@ -106,12 +107,12 @@ async def configure(body: ClientRequest, user: str = Depends(require_admin)) -> 
 
 
 @router.delete("/connection")
-async def disconnect(user: str = Depends(require_admin)) -> dict:
+async def disconnect(user: str = Depends(require_user)) -> dict:
     return google.disconnect(None, user)
 
 
 @router.delete("/accounts/{account_id}")
-async def disconnect_account(account_id: str, user: str = Depends(require_admin)) -> dict:
+async def disconnect_account(account_id: str, user: str = Depends(require_user)) -> dict:
     try:
         return google.disconnect(account_id, user)
     except google.GoogleError as problem:
@@ -119,14 +120,14 @@ async def disconnect_account(account_id: str, user: str = Depends(require_admin)
 
 
 @router.post("/accounts/default")
-async def default_account(body: DefaultAccountRequest, user: str = Depends(require_admin)) -> dict:
+async def default_account(body: DefaultAccountRequest, user: str = Depends(require_user)) -> dict:
     try:
         return google.set_default(body.account, body.purpose, user)
     except google.GoogleError as problem:
         raise HTTPException(problem.status, str(problem)) from problem
 
 
-async def _calendar_scope(account: str | None = None, user: str = Depends(require_admin)):
+async def _calendar_scope(account: str | None = None, user: str = Depends(require_user)):
     try:
         ident = google.resolve_calendar_account(user, account)
         with google.use_account(ident, user):
@@ -136,7 +137,7 @@ async def _calendar_scope(account: str | None = None, user: str = Depends(requir
 
 
 @router.post("/oauth/start")
-async def start(body: SignInRequest | None = None, user: str = Depends(require_admin)) -> dict:
+async def start(body: SignInRequest | None = None, user: str = Depends(require_user)) -> dict:
     try:
         return {"url": google.start_sign_in(local_api_base() + CALLBACK, user, bool(body and body.add),
                                             body.account if body else None)}
@@ -169,31 +170,31 @@ async def callback(state: str = "", code: str | None = None, error: str | None =
 @router.get("/drive/files")
 async def files(q: str = "", parent: str | None = None, kind: str = "all", trashed: bool = False,
                 page_token: str | None = None, section: str = "all", account: str | None = None,
-                user: str = Depends(require_admin)) -> dict:
+                user: str = Depends(require_user)) -> dict:
     return await _run(google.list_files(query=q, parent=parent, kind=kind, trashed=trashed, page_token=page_token,
                                         section=section, account=_account(user, account)))
 
 
 @router.get("/drive/storage")
-async def storage(account: str | None = None, user: str = Depends(require_admin)) -> dict:
+async def storage(account: str | None = None, user: str = Depends(require_user)) -> dict:
     return await _run(google.drive_storage(_account(user, account)))
 
 
 @router.get("/drive/files/{file_id}/thumbnail")
-async def thumbnail(file_id: str, account: str | None = None, user: str = Depends(require_admin)) -> Response:
+async def thumbnail(file_id: str, account: str | None = None, user: str = Depends(require_user)) -> Response:
     content, mime = await _run(google.file_thumbnail(file_id, _account(user, account)))
     return Response(content, media_type=mime, headers={"Cache-Control": "private, max-age=60", "X-Content-Type-Options": "nosniff"})
 
 
 @router.get("/drive/files/{file_id}/preview")
-async def preview(file_id: str, account: str | None = None, user: str = Depends(require_admin)) -> Response:
+async def preview(file_id: str, account: str | None = None, user: str = Depends(require_user)) -> Response:
     content, mime = await _run(google.file_preview(file_id, _account(user, account)))
     return Response(content, media_type=mime, headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
                     "Content-Security-Policy": "default-src 'none'; sandbox"})
 
 
 @router.get("/drive/files/{file_id}")
-async def file_info(file_id: str, account: str | None = None, user: str = Depends(require_admin)) -> dict:
+async def file_info(file_id: str, account: str | None = None, user: str = Depends(require_user)) -> dict:
     return await _run(google.file_info(file_id, _account(user, account)))
 
 
@@ -206,7 +207,7 @@ _EXPORTS = {
 
 
 @router.get("/drive/files/{file_id}/download")
-async def download(file_id: str, account: str | None = None, user: str = Depends(require_admin)) -> Response:
+async def download(file_id: str, account: str | None = None, user: str = Depends(require_user)) -> Response:
     account = _account(user, account)
     info = await _run(google.file_info(file_id, account))
     mime = info.get("mimeType") or "application/octet-stream"
@@ -221,7 +222,7 @@ async def download(file_id: str, account: str | None = None, user: str = Depends
 
 @router.post("/drive/upload")
 async def upload(file: UploadFile = File(...), parent: str | None = Form(None), account: str | None = None,
-                 user: str = Depends(require_admin)) -> dict:
+                 user: str = Depends(require_user)) -> dict:
     account = _account(user, account)
     data = await file.read(google.MAX_DOWNLOAD + 1)
     return await _run(google.upload_file(file.filename or "upload", data,
@@ -229,39 +230,39 @@ async def upload(file: UploadFile = File(...), parent: str | None = Form(None), 
 
 
 @router.post("/drive/action")
-async def drive_action(body: DriveActionRequest, account: str | None = None, user: str = Depends(require_admin)) -> dict:
+async def drive_action(body: DriveActionRequest, account: str | None = None, user: str = Depends(require_user)) -> dict:
     return await _run(google.drive_action(**body.model_dump(), account=_account(user, account)))
 
 
 @router.get("/sheets/{file_id}")
 async def sheet(file_id: str, cell_range: str | None = None, account: str | None = None,
-                user: str = Depends(require_admin)) -> dict:
+                user: str = Depends(require_user)) -> dict:
     return await _run(google.sheet_get(file_id, cell_range, _account(user, account)))
 
 
 @router.post("/sheets/action")
-async def sheet_action(body: SheetActionRequest, account: str | None = None, user: str = Depends(require_admin)) -> dict:
+async def sheet_action(body: SheetActionRequest, account: str | None = None, user: str = Depends(require_user)) -> dict:
     return await _run(google.sheet_action(**body.model_dump(), account=_account(user, account)))
 
 
 @router.get("/forms/{file_id}")
 async def form(file_id: str, responses: bool = False, page_token: str | None = None, account: str | None = None,
-               user: str = Depends(require_admin)) -> dict:
+               user: str = Depends(require_user)) -> dict:
     return await _run(google.form_get(file_id, responses, page_token, _account(user, account)))
 
 
 @router.post("/forms/action")
-async def form_action(body: FormActionRequest, account: str | None = None, user: str = Depends(require_admin)) -> dict:
+async def form_action(body: FormActionRequest, account: str | None = None, user: str = Depends(require_user)) -> dict:
     return await _run(google.form_action(**body.model_dump(), account=_account(user, account)))
 
 
 @router.get("/calendar/calendars")
-async def calendars(user: str = Depends(require_admin), scope=Depends(_calendar_scope)) -> list[dict]:
+async def calendars(user: str = Depends(require_user), scope=Depends(_calendar_scope)) -> list[dict]:
     return await _run(google.calendar_list())
 
 
 @router.patch("/calendar/settings")
-async def calendar_settings(body: CalendarSettingsRequest, user: str = Depends(require_admin), scope=Depends(_calendar_scope)) -> dict:
+async def calendar_settings(body: CalendarSettingsRequest, user: str = Depends(require_user), scope=Depends(_calendar_scope)) -> dict:
     try:
         return google.calendar_settings(body.calendar_ids)
     except google.GoogleError as problem:
@@ -269,15 +270,15 @@ async def calendar_settings(body: CalendarSettingsRequest, user: str = Depends(r
 
 
 @router.get("/calendar/events")
-async def calendar_events(start: str, end: str, calendar_ids: str = "primary", user: str = Depends(require_admin), scope=Depends(_calendar_scope)) -> list[dict]:
+async def calendar_events(start: str, end: str, calendar_ids: str = "primary", user: str = Depends(require_user), scope=Depends(_calendar_scope)) -> list[dict]:
     return await _run(google.calendar_events([ident for ident in calendar_ids.split(",") if ident], start, end))
 
 
 @router.post("/calendar/action")
-async def calendar_action(body: CalendarActionRequest, user: str = Depends(require_admin), scope=Depends(_calendar_scope)) -> dict:
+async def calendar_action(body: CalendarActionRequest, user: str = Depends(require_user), scope=Depends(_calendar_scope)) -> dict:
     return await _run(google.calendar_action(**body.model_dump()))
 
 
 @router.get("/calendar/events/{event_id}")
-async def calendar_event(event_id: str, calendar_id: str = "primary", user: str = Depends(require_admin), scope=Depends(_calendar_scope)) -> dict:
+async def calendar_event(event_id: str, calendar_id: str = "primary", user: str = Depends(require_user), scope=Depends(_calendar_scope)) -> dict:
     return await _run(google.calendar_event(calendar_id, event_id))

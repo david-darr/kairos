@@ -48,17 +48,25 @@ class SettingsRoutes(unittest.TestCase):
     def tearDown(self):
         settings_store.update_settings(**{k: self.saved[k] for k in ("disabled_tools", "extra_allowed_tools", "auto_compact", "vault_dir", "onboarding_complete", "computer_use")})
 
-    def test_every_route_is_admin_only(self):
-        probes = (("get", "", None), ("post", "/computer-use", {"enabled": True}), ("post", "/computer-steps", {"days": 7}),
-                  ("post", "/auto-compact", {"enabled": True}), ("post", "/helpers", {}), ("post", "/onboarding-complete", {}),
-                  ("post", "/vault-dir", {"path": "x"}), ("post", "/vault-setup", {}), ("get", "/agent-tools", None),
-                  ("post", "/agent-tools", {"disabled_tools": []}), ("post", "/extra-allowed-tools", {"extra_allowed_tools": ["x"]}))
+    def test_install_settings_are_admin_only_and_account_settings_are_each_accounts_own(self):
+        # Phase 4c: the install's own settings (computer use, the tool lists) stay with an admin; the "My account"
+        # ones (core/settings.py ACCOUNT_KEYS) and one's own Discord bots are each account's. Nobody signed in: 401.
+        admin_only = (("post", "/computer-use", {"enabled": True}), ("get", "/agent-tools", None),
+                      ("post", "/agent-tools", {"disabled_tools": []}), ("post", "/extra-allowed-tools", {"extra_allowed_tools": ["x"]}))
+        own = (("get", "", None), ("post", "/computer-steps", {"days": 7}), ("post", "/auto-compact", {"enabled": True}),
+               ("post", "/helpers", {}), ("post", "/onboarding-complete", {}), ("post", "/vault-dir", {"path": "x"}),
+               ("post", "/vault-setup", {}))
         before = dict(settings_store.load_settings())
-        for method, path, body in probes:
-            for who, c in (("member", self.member), ("anonymous", self.anon)):
-                got = getattr(c, method)("/api/settings" + path, **({} if body is None else {"json": body}))
-                self.assertIn(got.status_code, (401, 403), f"{who} {method} {path} -> {got.status_code}")
-        self.assertEqual(settings_store.load_settings(), before, "refused requests changed nothing")
+        for method, path, body in admin_only + own:
+            got = getattr(self.anon, method)("/api/settings" + path, **({} if body is None else {"json": body}))
+            self.assertEqual(got.status_code, 401, f"anonymous {method} {path} -> {got.status_code}")
+        for method, path, body in admin_only:
+            got = getattr(self.member, method)("/api/settings" + path, **({} if body is None else {"json": body}))
+            self.assertEqual(got.status_code, 403, f"member {method} {path} -> {got.status_code}")
+        for method, path, body in own:
+            got = getattr(self.member, method)("/api/settings" + path, **({} if body is None else {"json": body}))
+            self.assertNotIn(got.status_code, (401, 403), f"member {method} {path} -> {got.status_code}")
+        self.assertEqual(settings_store.load_settings(), before, "the member's changes left the first admin's settings alone")
 
     def test_agent_tools_save_revert_and_validate(self):
         listing = self.admin.get("/api/settings/agent-tools").json()

@@ -165,12 +165,13 @@ def _vault_allows(vault: dict, bot_id: str) -> bool:
 
 
 def _items(token: str, vault_id: str) -> list:
-    stamp = _cache.get(vault_id)
+    slot = (_state_path(), vault_id)  # one cache entry per account: each has its own token and vault list
+    stamp = _cache.get(slot)
     if stamp and time.monotonic() - stamp[0] < CACHE_SECONDS:
         return stamp[1]
     rows = _op(["item", "list", "--vault", vault_id, "--categories", "Login", "--format", "json"], token)
     rows = [r for r in rows[:MAX_ITEMS] if isinstance(r, dict) and r.get("id")] if isinstance(rows, list) else []
-    _cache[vault_id] = (time.monotonic(), rows)
+    _cache[slot] = (time.monotonic(), rows)
     return rows
 
 

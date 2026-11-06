@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from core import tab_api
-from core.tab_api import require_user, require_admin
+from core.tab_api import require_user
 from . import scanner as crm_scanner
 from . import work as crm_work
 from .service import crm_service
@@ -95,7 +95,7 @@ async def overview(user: str = Depends(active_user)):
 
 
 @router.put("/settings")
-async def configure(body: SettingsBody, user: str = Depends(active_user), admin: str = Depends(require_admin)):
+async def configure(body: SettingsBody, user: str = Depends(active_user)):
     fields = changed(body)
     if fields.get("endpoint_id"):
         endpoint = next((e for e in tab_api.list_models() if e["id"] == fields["endpoint_id"]), None)
@@ -132,7 +132,7 @@ async def models(endpoint_id: str, user: str = Depends(active_user)):
 
 
 @router.get("/connections")
-async def connections(user: str = Depends(active_user), admin: str = Depends(require_admin)):
+async def connections(user: str = Depends(active_user)):
     choices = [{"kind": "email", "id": a["id"], "label": a["email"]} for a in tab_api.email_accounts()]
     choices += tab_api.message_connections()
     choices += [{"kind": "document", "id": d["id"], "label": d["title"] + " ? Library"} for d in tab_api.documents()]
@@ -141,8 +141,8 @@ async def connections(user: str = Depends(active_user), admin: str = Depends(req
 
 
 @router.post("/sources")
-async def add_source(body: SourceBody, user: str = Depends(active_user), admin: str = Depends(require_admin)):
-    allowed = await connections(user, admin)
+async def add_source(body: SourceBody, user: str = Depends(active_user)):
+    allowed = await connections(user)
     found = next((c for c in allowed["connections"] if c["kind"] == body.kind and c["id"] == body.connection_id), None)
     if not found:
         raise HTTPException(400, "Select an available connection")
@@ -158,7 +158,7 @@ async def toggle_source(source_id: str, body: ToggleBody, user: str = Depends(ac
 
 
 @router.post("/scan")
-async def run_scan(body: ScanBody, user: str = Depends(active_user), admin: str = Depends(require_admin)):
+async def run_scan(body: ScanBody, user: str = Depends(active_user)):
     try:
         return crm_scanner.begin_scan(user, body.retry)
     except ValueError as e:
@@ -208,7 +208,7 @@ async def original_message(message_id: str, user: str = Depends(active_user)):
 
 
 @router.post("/tasks/{task_id}/agent")
-async def assign(task_id: str, body: AgentBody, user: str = Depends(active_user), admin: str = Depends(require_admin)):
+async def assign(task_id: str, body: AgentBody, user: str = Depends(active_user)):
     task = problem(lambda: crm_service.task(user, task_id))
     if task.get("agent_card_id") and tab_api.backlog_card(task["agent_card_id"]):
         return {"card_id": task["agent_card_id"]}
@@ -266,7 +266,7 @@ async def save_reply(task_id: str, body: ReplyBody, user: str = Depends(active_u
 
 
 @router.post("/tasks/{task_id}/send")
-async def send_reply(task_id: str, body: ReplyBody, user: str = Depends(active_user), admin: str = Depends(require_admin)):
+async def send_reply(task_id: str, body: ReplyBody, user: str = Depends(active_user)):
     problem(lambda: crm_service.task(user, task_id))
     # The recipient, account and thread come from the stored source message,
     # never from the request, so a page can't redirect the reply.

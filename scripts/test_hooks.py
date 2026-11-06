@@ -37,7 +37,7 @@ from fastapi.testclient import TestClient
 
 from core import tool_registry
 from core.brain import Brain
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from core.session_manager import session_manager
 from routes import hook_routes
 from services import chat_service
@@ -103,7 +103,7 @@ class HookTests(unittest.IsolatedAsyncioTestCase):
         patch("core.channels.registry.send_to_channel", self.sent).start()
         app = FastAPI()
         app.include_router(hook_routes.router)
-        app.dependency_overrides[require_admin] = lambda: "admin"
+        app.dependency_overrides[require_admin] = lambda: "admin"; app.dependency_overrides[require_user] = lambda: "admin"
         self.client = TestClient(app)
 
     async def asyncTearDown(self):
@@ -318,9 +318,10 @@ class HookTests(unittest.IsolatedAsyncioTestCase):
 
     # -- who can touch hooks ---------------------------------------------------------------
 
-    async def test_only_an_admin_and_no_model_tool(self):
+    async def test_only_a_signed_in_person_and_no_model_tool(self):
+        # Phase 4c: each account has its own hooks (a command hook needs its machine access).
         for route in hook_routes.router.routes:
-            self.assertTrue(any(dep.call is require_admin for dep in route.dependant.dependencies), route.path)
+            self.assertTrue(any(dep.call is require_user for dep in route.dependant.dependencies), route.path)
         names = [spec.name for spec in tool_registry._REGISTRY.values()]
         self.assertFalse([n for n in names if "hook" in n.lower()], "no tool reaches hooks")
 

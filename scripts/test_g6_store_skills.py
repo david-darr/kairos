@@ -118,7 +118,7 @@ class Skills(unittest.TestCase):
         self.assertEqual(self.web.get("/api/skills/polite").json()["curation"]["source"], "imported")
         self.assertEqual(self.web.get("/api/skills/risky").json()["curation"]["scan"]["verdict"], "caution")
 
-    def test_an_edit_that_makes_an_imported_skill_dangerous_hides_it_from_models_until_an_admin_approves_that_text(self):
+    def test_an_edit_that_makes_an_imported_skill_dangerous_hides_it_from_models_until_its_owner_approves_that_text(self):
         self.web.post("/api/skills/import", json={"filename": "polite.md", "content": md("Polite", SAFE)})
         self.assertTrue(skill_curator.model_visible("polite"))
         self.web.put("/api/skills/polite", json={"description": "Polite", "body": DANGEROUS})
@@ -126,8 +126,10 @@ class Skills(unittest.TestCase):
         self.assertEqual((curation["scan"]["verdict"], curation["blocked_for_models"]), ("dangerous", True))
         self.assertNotIn("polite", [s["slug"] for s in memory_tools.list_skills()], "listed to no model")
         self.assertIn("polite", self.slugs(), "but still shown in Tool Store so the person can act")
+        # Phase 4c: skills are per account (the approval sits in the account's own skills folder), so the
+        # person who owns the skill approves it, admin or not.
         USER["name"] = "bob"
-        self.assertEqual(self.web.post("/api/skills/polite/approve").status_code, 403, "approval is admin-only")
+        self.assertEqual(self.web.post("/api/skills/ghost/approve").status_code, 404)
         USER["name"] = "admin"
         self.assertEqual(self.web.post("/api/skills/ghost/approve").status_code, 404)
         approved = self.web.post("/api/skills/polite/approve").json()["curation"]

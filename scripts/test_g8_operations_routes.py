@@ -72,7 +72,6 @@ A21_ADMIN = [
     ("GET", "/api/system/backup/full"), ("GET", "/api/system/backup/export"), ("POST", "/api/system/backup/import"),
     ("GET", "/api/system/backup/restore"), ("POST", "/api/system/backup/restore"), ("DELETE", "/api/system/backup/restore"),
     ("POST", "/api/system/wipe"), ("GET", "/api/system/wipe-kinds"),
-    ("GET", "/api/file-checkpoints"), ("GET", "/api/file-checkpoints/probe"), ("POST", "/api/file-checkpoints/probe/restore"),
     ("GET", "/api/sandbox/changes"), ("GET", "/api/sandbox/changes/probe"),
     ("POST", "/api/sandbox/changes/probe/apply"), ("DELETE", "/api/sandbox/changes/probe"),
     ("GET", "/api/workspace/browse"), ("GET", "/api/workspace/vet"), ("GET", "/api/computer/status"),
@@ -129,6 +128,15 @@ class RouteSweepTests(Base):
             with self.subTest(method=method, path=path):
                 kwargs = {} if method in ("GET", "DELETE") else {"json": {}}
                 self.assertIn(self.member.request(method, path, **kwargs).status_code, (401, 403))
+
+    def test_file_checkpoints_are_each_accounts_own_and_restoring_needs_machine_access(self):
+        # Phase 4c: the checkpoint store is per account. A member reads their own (none), and a restore writes to
+        # files on this computer, so it needs the account's machine access, not admin as such.
+        self.assertEqual(self.member.get("/api/file-checkpoints").json(), [])
+        self.assertEqual(self.member.get("/api/file-checkpoints/probe").status_code, 404)
+        refused = self.member.post("/api/file-checkpoints/probe/restore", json={"files": []})
+        self.assertEqual(refused.status_code, 403)
+        self.assertIn("machine access", refused.text)
 
     def test_the_a21_admin_routes_exist(self):
         templated = {(m, fill(p)) for m, p in all_routes()}

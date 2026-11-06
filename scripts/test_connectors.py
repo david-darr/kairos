@@ -193,19 +193,20 @@ class RulesTests(ConnectorTestCase):
 
 
 class RouteTests(ConnectorTestCase):
-    def test_managing_connectors_is_admin_only_and_validated(self):
+    def test_managing_connectors_needs_a_sign_in_and_is_validated(self):
+        # Phase 4c: each account manages its own connectors (store.mine); nobody signed in gets 401.
         from fastapi import FastAPI, HTTPException
         from fastapi.testclient import TestClient
-        from core.middleware import require_admin
+        from core.middleware import require_user
         from routes import connector_routes
         app = FastAPI()
         app.include_router(connector_routes.router)
 
-        def not_admin():
-            raise HTTPException(status_code=403)
-        app.dependency_overrides[require_admin] = not_admin
-        self.assertEqual(TestClient(app).get("/api/connectors").status_code, 403)
-        app.dependency_overrides[require_admin] = lambda: "david"
+        def signed_out():
+            raise HTTPException(status_code=401)
+        app.dependency_overrides[require_user] = signed_out
+        self.assertEqual(TestClient(app).get("/api/connectors").status_code, 401)
+        app.dependency_overrides[require_user] = lambda: "david"
         client = TestClient(app)
         self.assertEqual(client.post("/api/connectors", json={"kind": "telegram", "values": {}}).status_code, 400,
                          "the bot token is required")

@@ -33,7 +33,7 @@ import asyncio
 import httpx
 from fastapi import FastAPI
 from core import google_workspace as google, google_chat_tools, tool_registry
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from core.secret_storage import decrypt, encrypt
 from routes import google_routes
 
@@ -91,7 +91,7 @@ class AccountTests(unittest.IsolatedAsyncioTestCase):
     async def web(self, path, method="GET", body=None, user="admin"):
         app = FastAPI()
         app.include_router(google_routes.router)
-        app.dependency_overrides[require_admin] = lambda: user
+        app.dependency_overrides[require_admin] = lambda: user; app.dependency_overrides[require_user] = lambda: user
         async with REAL_CLIENT(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             return await client.request(method, path, json=body)
 

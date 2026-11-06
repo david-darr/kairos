@@ -137,6 +137,7 @@ class _SignIn:
     code: asyncio.Future
     task: Optional[asyncio.Task] = None
     started: float = field(default_factory=time.time)
+    account: Optional[str] = None  # who started it: the browser that comes back has no sign-in of its own
 
 
 # state -> the sign-in waiting for the browser to come back.
@@ -197,7 +198,8 @@ async def start_sign_in(item_id: str, redirect_uri: str) -> dict:
 
     loop = asyncio.get_running_loop()
     url_ready: asyncio.Future = loop.create_future()
-    sign_in = _SignIn(item_id=item_id, code=loop.create_future())
+    from core import accounts
+    sign_in = _SignIn(item_id=item_id, code=loop.create_future(), account=accounts.current_account())
 
     async def redirect_handler(authorization_url: str) -> None:
         if url_ready.done():
@@ -269,7 +271,9 @@ async def finish_sign_in(state: str, code: Optional[str], iss: Optional[str], er
             sign_in = _pending.pop(known)  # popped, so a state is single-use
     if sign_in is None:
         return False, "This sign-in link is not one Kairos is waiting for. Start again from Settings."
-    name = (integrations.get_integration(sign_in.item_id) or {}).get("name", "the server")
+    from core import accounts
+    with accounts.as_account(sign_in.account or accounts.local_account()):
+        name = (integrations.get_integration(sign_in.item_id) or {}).get("name", "the server")
     if error or not code:
         _last_error[sign_in.item_id] = f"the provider refused: {error or 'no code returned'}"
         sign_in.task.cancel()

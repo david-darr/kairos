@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from core import runs, model_prices
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from services import bot_usage
 from routes.bot_usage_routes import router
 
@@ -82,9 +82,11 @@ class UsageTests(unittest.TestCase):
         client = TestClient(app)
         with patch("core.middleware.auth_enabled", return_value=True):
             self.assertEqual(client.get("/api/bot-usage/summary").status_code, 401)
-        with patch("core.middleware.get_current_user", return_value="member"), patch("core.middleware.auth_manager.is_admin", return_value=False):
-            self.assertEqual(client.get("/api/bot-usage/summary").status_code, 403)
-        app.dependency_overrides[require_admin] = lambda: "alice"
+        # Phase 4c: a signed-in non-admin reads usage too, of the bots they own only (owner filter below).
+        with patch("core.middleware.get_current_user", return_value="member"), patch("core.middleware.auth_manager.is_admin", return_value=False),                 patch("services.agent_service.agent_service.get", return_value={"id": "usage-bot", "owner_user": "bob"}):
+            self.assertEqual(client.get("/api/bot-usage/summary").status_code, 200)
+            self.assertEqual(client.get("/api/bot-usage/summary").json()["totals"]["runs"], 0)
+        app.dependency_overrides[require_admin] = lambda: "alice"; app.dependency_overrides[require_user] = lambda: "alice"
         with patch("services.agent_service.agent_service.get", return_value={"id": "usage-bot", "owner_user": "bob"}):
             self.assertEqual(client.get("/api/bot-usage/summary").json()["totals"]["runs"], 0)
         with patch("services.agent_service.agent_service.get", return_value={"id": "usage-bot", "owner_user": "alice"}):
