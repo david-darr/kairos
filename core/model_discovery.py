@@ -20,7 +20,6 @@ from urllib.parse import urlparse
 import httpx
 
 from core import model_catalog
-from core.secret_storage import decrypt
 
 _TTL_SECONDS = 300
 _MAX_MODELS = 1000
@@ -82,8 +81,8 @@ def _claude_cli_token() -> str | None:
 
 
 def _api_key(endpoint: dict) -> str | None:
-    encrypted = endpoint.get("api_key_encrypted")
-    return decrypt(encrypted) if encrypted else None
+    from core import model_endpoints
+    return model_endpoints.api_key_of(endpoint)
 
 
 def _entry(model_id: str, name: str | None = None, *, source: str) -> dict:

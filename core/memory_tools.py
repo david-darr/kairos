@@ -196,7 +196,7 @@ def read_skill(slug: str, path: str | None = None) -> str:
 #
 # Deliberately NOT raw file access to data/ — that directory also holds
 # auth.json (password hashes), sessions.json (session tokens), and
-# model_endpoints.json (encrypted API keys). Giving a model raw read access
+# model_endpoints.json (encrypted API keys), and each .secret_key (the encryption keys themselves). Giving a model raw read access
 # to the whole folder would be a real credential-exposure risk, not a
 # hypothetical one. These functions go through the exact same service
 # layer (services/notes_service.py etc.) the app's own routes use, so a

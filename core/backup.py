@@ -12,7 +12,8 @@ connections - as one zip:
   (.secret_key) lives in the data folder, so a backup carrying it is as
   sensitive as the passwords themselves. Without it, every encrypted value
   is blanked: a restored connection asks for its key again rather than
-  failing to decrypt.
+  failing to decrypt. Each account has its own key too (accounts/<id>/.secret_key); a keyless backup
+  leaves those out as well, and a keyless restore keeps each account's current one.
 - Saved logins and their own key (bot-secrets/) never travel, even with keys
   included: no backup carries them, a backup that names them is refused, and a
   restore leaves this install's own in place (Bots Phase 2, 2026-10-29).
@@ -59,6 +60,23 @@ SKIPPED_SUFFIXES = ("-wal", "-shm", ".tmp")
 MAX_RESTORE_BYTES = 10 * 1024 ** 3
 MAX_ENTRIES = 100_000
 PENDING_OPTIONS = "pending.json"
+
+
+def _is_key_file(rel: str) -> bool:
+    """The install key, or any account's key (accounts/<id>/.secret_key)."""
+    parts = rel.replace("\\", "/").split("/")
+    return parts[-1] == KEY_FILE and (len(parts) == 1 or (len(parts) == 3 and parts[0] == "accounts"))
+
+
+def _account_key_files(data_dir: str) -> list[str]:
+    """Each account's key file that exists, as a path relative to the data folder."""
+    root = os.path.join(data_dir, "accounts")
+    try:
+        names = sorted(os.listdir(root))
+    except OSError:
+        return []
+    return [os.path.join("accounts", name, KEY_FILE) for name in names
+            if os.path.isfile(os.path.join(root, name, KEY_FILE))]
 
 
 def _data_dir() -> str:
@@ -174,7 +192,7 @@ def make_backup(target: str, include_keys: bool = False) -> dict:
     with _scratch() as scratch, \
             zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path, rel in _files(data_dir):
-            if rel == KEY_FILE and not include_keys:
+            if _is_key_file(rel) and not include_keys:
                 continue
             try:
                 if _is_sqlite(path):
@@ -327,6 +345,11 @@ def apply_pending_restore(data_dir: Optional[str] = None) -> Optional[dict]:
         # entered again after the restore is encrypted with a key that exists.
         if not manifest.get("includes_keys") and os.path.exists(os.path.join(safety, KEY_FILE)):
             shutil.copy2(os.path.join(safety, KEY_FILE), os.path.join(data_dir, KEY_FILE))
+        # Same for each account's own key: its folder came from the backup, the key stays this install's.
+        if not manifest.get("includes_keys"):
+            for rel in _account_key_files(safety):
+                os.makedirs(os.path.dirname(os.path.join(data_dir, rel)), exist_ok=True)
+                shutil.copy2(os.path.join(safety, rel), os.path.join(data_dir, rel))
         # Logs and checkpoints are not in a backup; this install's own stay. So do saved logins and their key:
         # a restore never replaces, removes or adds them.
         for kept in ("logs", "file_checkpoints", SECRET_FOLDER):

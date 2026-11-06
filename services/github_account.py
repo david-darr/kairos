@@ -11,7 +11,7 @@ import httpx
 
 from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
-from core.secret_storage import decrypt, encrypt
+from core.secret_storage import decrypt_install as decrypt, encrypt_install as encrypt
 
 # Public client ID of the "Kairos" GitHub OAuth App (device flow, no secret).
 CLIENT_ID = "Ov23liYYhbpQVkY1UurQ"

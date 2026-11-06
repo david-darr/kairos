@@ -12,7 +12,7 @@ from typing import Optional
 
 from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
-from core.secret_storage import decrypt, encrypt
+from core.secret_storage import decrypt_for, encrypt_for
 
 BOTS_FILE = os.path.join(DATA_DIR, "discord_bots.json")
 
@@ -113,11 +113,12 @@ def create_bot(name: str, token: str, allowed_user_id: Optional[str] = None,
     data = _load()
     bot_id = uuid.uuid4().hex[:12]
     from core import accounts
+    account = accounts.effective_account()
     data[bot_id] = {
         "id": bot_id,
         "name": name,
-        "account": accounts.effective_account(),
-        "token_encrypted": encrypt(token),
+        "account": account,
+        "token_encrypted": encrypt_for(account, token),
         "allowed_user_id": allowed_user_id or None,
         "model_endpoint_id": model_endpoint_id or None,
     }
@@ -134,7 +135,7 @@ def update_bot(bot_id: str, name: Optional[str] = None, token: Optional[str] = N
     if name is not None:
         bot["name"] = name
     if token:
-        bot["token_encrypted"] = encrypt(token)
+        bot["token_encrypted"] = encrypt_for(account_of(bot), token)
     if allowed_user_id is not None:
         bot["allowed_user_id"] = allowed_user_id or None
     if model_endpoint_id is not None:
@@ -203,4 +204,4 @@ def resolve_token(bot_id: str) -> Optional[str]:
     bot = get_bot(bot_id)
     if bot is None or not bot.get("token_encrypted"):
         return None
-    return decrypt(bot["token_encrypted"])
+    return decrypt_for(account_of(bot), bot["token_encrypted"])

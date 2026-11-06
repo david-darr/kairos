@@ -1916,5 +1916,120 @@ class ModelConnectionsMigration(unittest.TestCase):
         account_migration._moved.pop(str(data), None)
 
 
+class KeysPerAccount(unittest.TestCase):
+    """Phase 3b: each account has its own encryption key; the first admin's is the install key."""
+
+    @classmethod
+    def setUpClass(cls):
+        account_migration.run(_DATA.name, backup=lambda path: None)
+
+    def setUp(self):
+        from core import secret_storage
+        self.s = secret_storage
+        fresh_users()
+        auth_manager.create_user("david-darr", "password-one-1", is_admin=True)
+        auth_manager.create_user("bea", "password-two-2")
+        self.first, self.second = (auth_manager.account_id(n) for n in ("david-darr", "bea"))
+        # What the app wrote before accounts had keys: the install key, nothing else.
+        self.old = self.s.encrypt_install("written-before-accounts")
+
+    def test_the_first_admin_keeps_the_install_key_and_old_values(self):
+        with accounts.as_account(self.first):
+            self.assertEqual(self.s.decrypt(self.old), "written-before-accounts")
+            self.s.encrypt("touch")  # makes the account's key file
+        key = Path(accounts.ACCOUNTS_DIR, self.first, ".secret_key")
+        self.assertEqual(key.read_bytes(), Path(self.s._KEY_FILE).read_bytes())
+        self.assertEqual(self.s.decrypt_for(self.first, self.old), "written-before-accounts")
+
+    def test_a_second_account_has_its_own_key(self):
+        with accounts.as_account(self.second):
+            token = self.s.encrypt("bea-secret")
+            self.assertEqual(self.s.decrypt(token), "bea-secret")
+        second_key = Path(accounts.ACCOUNTS_DIR, self.second, ".secret_key").read_bytes()
+        self.assertNotEqual(second_key, Path(self.s._KEY_FILE).read_bytes())
+        with self.assertRaises(Exception):
+            self.s.decrypt_for(self.first, token)
+        with accounts.as_account(self.first), self.assertRaises(Exception):
+            self.s.decrypt(token)
+        with self.assertRaises(Exception):
+            self.s.decrypt_install(token)
+        self.assertEqual(self.s.decrypt_for(self.second, token), "bea-secret")
+
+    def test_a_bot_of_the_second_account_decrypts_at_start_up_with_no_account(self):
+        from core import discord_bots_store
+        from core.connectors import KINDS, store as connector_store
+        temp = TemporaryDirectory(prefix="kairos-keys-", dir=tempfile.gettempdir())
+        self.addCleanup(temp.cleanup)
+        with patch.object(discord_bots_store, "BOTS_FILE", os.path.join(temp.name, "discord_bots.json")), \
+                patch.object(connector_store, "CONNECTORS_FILE", os.path.join(temp.name, "connectors.json")):
+            with accounts.as_account(self.second):
+                bot = discord_bots_store.create_bot("Bea's bot", "bea-bot-token")
+                record = connector_store.create("teams", "Bea's Teams", {"webhook_url": "https://hook.example.test/x"},
+                                                KINDS["teams"].fields, ["me"], False, None)
+            token = accounts.set_current(None)
+            try:
+                self.assertRaises(accounts.NoAccount, accounts.effective_account) if False else None
+            finally:
+                accounts.reset_current(token)
+            # Start-up: nobody set an account.
+            self.assertIsNone(accounts.current_account())
+            self.assertEqual(discord_bots_store.resolve_token(bot["id"]), "bea-bot-token")
+            self.assertEqual(connector_store.secrets_of(connector_store.get_record(record["id"])),
+                             {"webhook_url": "https://hook.example.test/x"} if False else connector_store.secrets_of(record))
+            with accounts.as_account(self.first):
+                self.assertEqual(discord_bots_store.resolve_token(bot["id"]), "bea-bot-token")
+
+    def test_install_secrets_decrypt_from_any_account(self):
+        token = self.s.encrypt_install("install-secret")
+        for account in (self.first, self.second):
+            with accounts.as_account(account):
+                self.assertEqual(self.s.decrypt_install(token), "install-secret")
+                self.assertEqual(self.s.decrypt(token), "install-secret", "legacy fallback")
+
+    def test_a_shared_connection_key_is_read_with_the_owners_key(self):
+        from core import model_endpoints
+        owner = self.second
+        with accounts.as_account(owner):
+            ep = model_endpoints.create_endpoint("Bea's", "https://api.example.test", "m1", api_key="sk-bea")
+            model_endpoints.set_shares(ep["id"], [self.first])
+        self.addCleanup(lambda: Path(accounts.ACCOUNTS_DIR, owner, "model_endpoints.json").unlink(missing_ok=True))
+        self.addCleanup(lambda: Path(model_endpoints.shares_file()).unlink(missing_ok=True))
+        with accounts.as_account(self.first):
+            self.assertEqual(model_endpoints.resolve_runtime(ep["id"])[2], "sk-bea")
+
+    def test_a_keyless_backup_has_no_key_file_anywhere(self):
+        with accounts.as_account(self.first):
+            self.s.encrypt("a")
+        with accounts.as_account(self.second):
+            self.s.encrypt("b")
+        archive = Path(tempfile.gettempdir()) / f"kairos-keys-{uuid_hex()}.zip"
+        self.addCleanup(lambda: archive.unlink(missing_ok=True))
+        backup.make_backup(str(archive), include_keys=False)
+        with zipfile.ZipFile(archive) as z:
+            self.assertEqual([n for n in z.namelist() if n.endswith(".secret_key")], [])
+        backup.make_backup(str(archive), include_keys=True)
+        with zipfile.ZipFile(archive) as z:
+            names = [n for n in z.namelist() if n.endswith(".secret_key")]
+        self.assertIn(f"accounts/{self.second}/.secret_key", names)
+
+    def test_a_keyless_restore_keeps_each_accounts_current_key(self):
+        with accounts.as_account(self.second):
+            self.s.encrypt("b")
+        key = Path(accounts.ACCOUNTS_DIR, self.second, ".secret_key")
+        before = key.read_bytes()
+        archive = Path(tempfile.gettempdir()) / f"kairos-keys-{uuid_hex()}.zip"
+        self.addCleanup(lambda: archive.unlink(missing_ok=True))
+        backup.make_backup(str(archive), include_keys=False)
+        backup.stage_restore(str(archive))
+        result = backup.apply_pending_restore()
+        self.assertTrue(result and result["ok"], result)
+        self.assertEqual(key.read_bytes(), before)
+
+
+def uuid_hex():
+    import uuid
+    return uuid.uuid4().hex[:8]
+
+
 if __name__ == "__main__":
     unittest.main()

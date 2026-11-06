@@ -26,7 +26,7 @@ from typing import Any, Optional
 
 from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
-from core.secret_storage import decrypt, encrypt
+from core.secret_storage import decrypt, decrypt_for, encrypt
 
 ENDPOINTS_FILE = None  # override (tests); else the current account's model_endpoints.json
 # Connections an account shares with others (D3, Multi-Account phase 3a): install-level, keyed
@@ -206,11 +206,19 @@ def delete_endpoint(endpoint_id: str) -> None:
     write_json_atomic(endpoints_file(), data)
 
 
+def api_key_of(ep: dict) -> Optional[str]:
+    """A connection's key, decrypted. A shared connection's key belongs to its owner's account."""
+    if not ep.get("api_key_encrypted"):
+        return None
+    if ep.get("shared") and ep.get("owner_account"):
+        return decrypt_for(ep["owner_account"], ep["api_key_encrypted"])
+    return decrypt(ep["api_key_encrypted"])
+
+
 def resolve_runtime(endpoint_id: str) -> tuple[str, str, Optional[str], Optional[int]]:
     """(base_url, model, api_key, num_ctx) with the key decrypted — for
     runtime calls only, never returned from an API route."""
     ep = get_endpoint(endpoint_id)
     if ep is None:
         raise ValueError(f"unknown model endpoint: {endpoint_id}")
-    api_key = decrypt(ep["api_key_encrypted"]) if ep.get("api_key_encrypted") else None
-    return ep["base_url"], ep["model"], api_key, ep.get("num_ctx")
+    return ep["base_url"], ep["model"], api_key_of(ep), ep.get("num_ctx")

@@ -18,7 +18,7 @@ import time
 from typing import Optional
 
 from core.atomic_io import read_json, write_json_atomic
-from core.secret_storage import decrypt, encrypt
+from core.secret_storage import decrypt_install as decrypt, encrypt_install as encrypt
 
 GROUPS = ["AI", "Servers", "Voice", "Computers", "Apps", "Helpers"]
 MAX_KEY = 4096

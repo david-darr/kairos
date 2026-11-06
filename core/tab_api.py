@@ -40,7 +40,7 @@ def __getattr__(name):
 # A tab with a name colliding with an app store must not adopt credentials.
 _APP_STORES = {"auth.json", "sessions.json", "password_resets.json", "settings.json",
     "model_endpoints.json", "email_accounts.json", "connectors.json", "discord_bots.json",
-    "integrations.json", "google_workspace.json"}
+    "integrations.json", "google_workspace.json", ".secret_key"}
 
 
 def wrap_untrusted(label, text):

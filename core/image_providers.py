@@ -98,7 +98,7 @@ def save_provider(kind: str, key: str, base_url: Optional[str] = None, model: Op
     if daily_limit is not None:
         daily_limit = _limit(daily_limit)
     write_json_atomic(CONFIG_FILE, {"kind": kind, "base_url": _clean_base(kind, base_url), "model": model,
-                                    "key": secret_storage.encrypt(key.strip())})
+                                    "key": secret_storage.encrypt_install(key.strip())})
     if daily_limit is not None:
         set_daily_limit(daily_limit)
     return provider_state()
@@ -117,7 +117,7 @@ def _connection():
     if not isinstance(config, dict) or not config.get("key"):
         raise ImageUnavailable("Save an image connection first.")
     try:
-        key = secret_storage.decrypt(config["key"])
+        key = secret_storage.decrypt_install(config["key"])
         if not isinstance(key, str) or not key or not config.get("model") or not config.get("base_url"):
             raise ValueError()
         _clean_base(config.get("kind"), config["base_url"])

@@ -8,7 +8,7 @@ from typing import Optional
 
 from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
-from core.secret_storage import decrypt, encrypt
+from core.secret_storage import decrypt_for, encrypt_for
 
 CONNECTORS_FILE = os.path.join(DATA_DIR, "connectors.json")
 
@@ -30,7 +30,8 @@ def get_record(connector_id: str) -> Optional[dict]:
 
 
 def secrets_of(record: dict) -> dict:
-    return {key: decrypt(value) for key, value in (record.get("secrets") or {}).items() if value}
+    account = account_of(record)
+    return {key: decrypt_for(account, value) for key, value in (record.get("secrets") or {}).items() if value}
 
 
 def public(record: dict, fields: tuple) -> dict:
@@ -75,12 +76,13 @@ def create(kind: str, name: str, values: dict, fields: tuple, allowed_senders: l
     missing = [f.label for f in fields if f.required and not (settings.get(f.key) or secrets.get(f.key))]
     if missing:
         raise ValueError(f"missing: {', '.join(missing)}")
+    account = _current_account()
     record = {
         "id": uuid.uuid4().hex[:10], "kind": kind, "name": name, "enabled": True,
-        "settings": settings, "secrets": {k: encrypt(v) for k, v in secrets.items() if v},
+        "settings": settings, "secrets": {k: encrypt_for(account, v) for k, v in secrets.items() if v},
         "allowed_senders": _senders(allowed_senders), "open": bool(open_to_anyone),
         "model_endpoint_id": model_endpoint_id or None, "created_at": time.time(),
-        "account": _current_account(),
+        "account": account,
     }
     data = _load()
     data[record["id"]] = record
@@ -108,7 +110,7 @@ def update(connector_id: str, fields: tuple, *, name=None, values=None, allowed_
         record["settings"].update(settings)
         for key, value in secrets.items():
             if value:  # an empty secret field means "keep the saved one"
-                record["secrets"][key] = encrypt(value)
+                record["secrets"][key] = encrypt_for(account_of(record), value)
     if allowed_senders is not None:
         record["allowed_senders"] = _senders(allowed_senders)
     if open_to_anyone is not None:

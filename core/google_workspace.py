@@ -32,7 +32,7 @@ import httpx
 
 from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
-from core.secret_storage import decrypt, encrypt
+from core.secret_storage import decrypt, decrypt_install, encrypt, encrypt_install
 from core import calendar_recurrence as repeats
 
 
@@ -276,7 +276,7 @@ def configure(client_id: str, client_secret: str = "", user: str | None = None) 
             _refresh_locks.clear()
         data["client_id"] = client_id
         if client_secret:
-            data["client_secret"] = encrypt(client_secret.strip())
+            data["client_secret"] = encrypt_install(client_secret.strip())
         _save(data)
     return status(user)
 
@@ -346,7 +346,7 @@ async def finish_sign_in(state: str, code: str | None, redirect_uri: str, error:
     body = {"client_id": data["client_id"], "code": code, "code_verifier": pending["verifier"],
             "redirect_uri": redirect_uri, "grant_type": "authorization_code"}
     if data.get("client_secret"):
-        body["client_secret"] = decrypt(data["client_secret"])
+        body["client_secret"] = decrypt_install(data["client_secret"])
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(TOKEN_URL, data=body)
         if response.status_code >= 400:
@@ -439,7 +439,7 @@ async def _token(account_id: str | None = None, force: bool = False) -> str:
         body = {"client_id": data["client_id"], "refresh_token": decrypt(account["refresh_token"]),
                 "grant_type": "refresh_token"}
         if data.get("client_secret"):
-            body["client_secret"] = decrypt(data["client_secret"])
+            body["client_secret"] = decrypt_install(data["client_secret"])
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(TOKEN_URL, data=body)
         if response.status_code >= 400:
