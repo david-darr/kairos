@@ -7,6 +7,7 @@ import { transcribeBlob, refreshSpeechStatus } from './voiceInput.js';
 import { createCallRecorder, isCallRecordingSupported } from './callRecorder.js';
 import { createSpeaker, isSpeechOutputSupported, whenVoicesReady, resolveVoice } from './voiceOutput.js';
 import { createMascot } from './mascot.js';
+import { createVoiceTrace } from './voiceTrace.js';
 
 // In a call the bot's Kip replaces the orb (Kairos Mascot build spec,
 // 2026-10-22). It reads the orb's --level (microphone) and --word (speech)
@@ -66,10 +67,13 @@ export function agentCall(agent, controller) {
   let microphoneMuted = false, assistantMuted = false, state = 'setup';
   let pending = null, startedAt = 0, timer = null, downloadTimer = null;
   let voices = [], speech = null, wordTimer = null, speechFlushTimer = null;
-  let speechActive = false, audioQueue = [], texts = [], transcribing = false, dispatching = false, flushTimer = null, revision = 0;
+  let speechActive = false, audioQueue = [], texts = [], transcribing = false, dispatching = false, revision = 0;
   let response = null, deferredReply = null, recognitionTiming = {};
   let holding = false, holdPointer = null, voiceBusy = false, utteranceEnded = 0;
   let workUpdates=[], announcedWork=new Set();
+  // Latency of each spoken turn, kept in memory for this call (see voiceTrace.js).
+  const voiceTrace=createVoiceTrace({label:'call'});let turnTrace=null, currentTrace=null, flushQueued=false;
+  const announceWork=id=>{if(active&&callMode.value==='local'&&!announcedWork.has(id)){announcedWork.add(id);workUpdates.push(id);scheduleFlush();}};
   let endpoints = [];
   // A group call (a room's controller has roomId): each reply names the member who spoke, and on device voices
   // every member gets a different voice. Its summary goes to the room, so "chat" reads "room" in the copy.
@@ -86,10 +90,10 @@ export function agentCall(agent, controller) {
   const transport = callTransport(controller, record => {
     workList.replaceChildren(...record.jobs.map(job => el('div',{},[el('span',{text:`${job.title}: ${job.status}`}), ...(['ready','running'].includes(job.status)?[el('button',{type:'button',class:'btn quiet',text:'Stop work',onclick:()=>transport.stopWork(job.task_id)})]:[])])));
     if(record.live_error)error.textContent=record.live_error;
-    if(active&&callMode.value==='local')for(const job of record.jobs){if(!['ready','running'].includes(job.status)&&!announcedWork.has(job.task_id)){announcedWork.add(job.task_id);workUpdates.push(job.task_id);scheduleFlush();}}
+    if(active&&callMode.value==='local')for(const job of record.jobs)if(!['ready','running'].includes(job.status))announceWork(job.task_id);
     if(record.ended&&active)hangup();
     if(record.ended) { summaryStatus.textContent = record.summary_state==='saved'?`Call summary saved in ${savedIn}.`:record.summary_state==='failed'?record.summary_error:'Saving call summary?'; }
-  });
+  }, event => { if (event.type === 'work' && event.task_id) { announceWork(event.task_id); transport.refresh(); } });
   const callMode=el('select',{'aria-label':'Call mode'},[el('option',{value:'local',text:'Local recognition + conversation model'}),...(room?[]:[el('option',{value:'cloud',text:'GPT-Live (paid cloud voice)'})])]);
   const liveEndpoint=el('select',{'aria-label':'Cloud voice API connection'});
   const liveVoiceChoice=el('select',{'aria-label':'Cloud voice'},['marin','cedar','coral','sage','ash'].map(name=>el('option',{value:name,text:name})));
@@ -166,7 +170,7 @@ export function agentCall(agent, controller) {
       if(callMode.value==='cloud'){toast('Speak to interrupt the live conversation. Delegated work keeps running.');return;}
       transport.interrupt(); voiceBusy=false;
       revision++; pending?.abort(); audioQueue = []; texts = []; deferredReply = null; speechActive = false;
-      cancelHold(); recorder?.setEnabled(false); stopPlayback(); listen();
+      cancelHold(); recorder?.setEnabled(false); stopPlayback(); listen(); scheduleFlush();
   }
   const hold = action('Hold to talk', () => {}, 'agent-call-hold');
   controls.append(hold);
@@ -212,6 +216,8 @@ export function agentCall(agent, controller) {
   callIcon.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z"/></svg>';
   button.replaceChildren(callIcon, el('span', { class: 'agent-call-open-label', text: 'Call' }));
   const speakerOptions = {
+    onSentenceReady: () => voiceTrace.mark(currentTrace, 'first_sentence'),
+    onSentenceStart: index => { voiceTrace.sentenceStart(currentTrace); if (index > 0) drawTiming(); },
     onLevel:level=>{if(active&&state==='speaking')orb.style.setProperty('--word',String(level));},
     getVoice: () => {
       const chosen = voices.find(item => item.name === voice.value) || resolveVoice(voices);
@@ -219,8 +225,8 @@ export function agentCall(agent, controller) {
       const at = Math.max(0, room.memberIds().indexOf(speaking.id)), base = Math.max(0, voices.indexOf(chosen));
       return voices[(base + at) % voices.length];
     },
-    onStart: () => { if (active) { setState('speaking', `${who()} is speaking. Interrupt to speak.`); if (response && response.first_audio_ms == null) { response.first_audio_ms=Math.round(performance.now()-response.submitted); response.end_to_audio_ms=utteranceEnded?Math.round(performance.now()-utteranceEnded):null; drawTiming();if(transport.record&&response.end_to_audio_ms!=null)api(`/api/agent-calls/${transport.record.id}/timing`,{method:'POST',toast:false,body:JSON.stringify({end_to_audio_ms:response.end_to_audio_ms,first_audio_ms:response.first_audio_ms})}).catch(()=>{}); } } },
-    onEnd: () => { if (readingTyped) { readingTyped = false; if (callMode.value === 'cloud') live.muteMicrophone(microphoneMuted); } if (active && state === 'speaking') { if(voiceBusy)setState('thinking',`${who()} is finishing the reply...`);else listen(); scheduleFlush(); } },
+    onStart: () => { if (active) { setState('speaking', `${who()} is speaking. Interrupt to speak.`); if (response && response.first_audio_ms == null) { response.first_audio_ms=Math.round(performance.now()-response.submitted); response.end_to_audio_ms=utteranceEnded?Math.round(performance.now()-utteranceEnded):null; drawTiming();if(transport.record&&response.end_to_audio_ms!=null)api(`/api/agent-calls/${transport.record.id}/timing`,{method:'POST',toast:false,body:JSON.stringify({end_to_audio_ms:response.end_to_audio_ms,first_audio_ms:response.first_audio_ms,trace:voiceTrace.offsets(currentTrace)})}).catch(()=>{}); } } },
+    onEnd: () => { voiceTrace.report(currentTrace); if (readingTyped) { readingTyped = false; if (callMode.value === 'cloud') live.muteMicrophone(microphoneMuted); } if (active && state === 'speaking') { if(voiceBusy)setState('thinking',`${who()} is finishing the reply...`);else listen(); scheduleFlush(); } },
     onBoundary: () => {
       // OS speech exposes word timing, not its PCM amplitude. This pulse
       // follows real word events; microphone energy is measured separately.
@@ -343,7 +349,7 @@ export function agentCall(agent, controller) {
     emitState();
     if(callMode.value==='cloud'){live.muteMicrophone(value);microphone.setAttribute('aria-pressed',String(value));microphone.textContent=value?'Unmute microphone':'Mute microphone';return;}
     microphone.setAttribute('aria-pressed', String(value)); microphone.textContent = value ? 'Unmute microphone' : 'Mute microphone';
-    if (value) { cancelHold(); recorder?.close(); recorder = null; speechActive = false; orb.style.setProperty('--level', '0'); if (state === 'listening') status.textContent = 'Microphone muted'; }
+    if (value) { cancelHold(); recorder?.close(); recorder = null; speechActive = false; orb.style.setProperty('--level', '0'); if (state === 'listening') status.textContent = 'Microphone muted'; scheduleFlush(); }
     else if (active) {
       try { await openMicrophone(); if (state === 'listening') status.textContent = 'Listening...'; }
       catch (problem) { microphoneMuted = true; microphone.setAttribute('aria-pressed', 'true'); microphone.textContent = 'Unmute microphone'; error.textContent = problem.message; }
@@ -363,7 +369,9 @@ export function agentCall(agent, controller) {
         if (blob) {
           if (audioQueue.length >= 6) { setMicrophoneMuted(true); error.textContent = 'Speech is arriving faster than recognition can process it. The microphone is muted while the queued sentences finish.'; return; }
           if (measured.limit) error.textContent = 'The 60-second recording limit was reached. Hold again to continue.';
-          utteranceEnded=performance.now()-(measured.endpoint_ms||0); audioQueue.push({ blob, measured, ended:utteranceEnded, revision }); processAudio();
+          utteranceEnded=performance.now()-(measured.endpoint_ms||0);
+          const trace=voiceTrace.begin(utteranceEnded); voiceTrace.mark(trace,'endpoint');
+          audioQueue.push({ blob, measured, ended:utteranceEnded, revision, trace }); processAudio();
         }
         scheduleFlush();
       },
@@ -387,15 +395,20 @@ export function agentCall(agent, controller) {
     if (recognitionTiming.upload_ms != null) parts.push(`Recognition ${recognitionTiming.upload_ms} ms`);
     if (response?.reply_ms != null) parts.push(`Agent ${(response.reply_ms/1000).toFixed(1)} s`);
     if (response?.playback_ms != null) parts.push(`Voice ${response.playback_ms} ms`);
-    timing.textContent = parts.join(' / ');
-    dialog.dataset.callTimings = JSON.stringify({ ...recognitionTiming, ...(response || {}) });
+    const stages = voiceTrace.format(response?.trace);
+    timing.textContent = parts.join(' / ') + (stages ? ` | ${stages}` : '');
+    dialog.dataset.callTimings = JSON.stringify({ ...recognitionTiming, ...(response || {}), trace: response?.trace ? voiceTrace.offsets(response.trace) : undefined });
   }
   function showEngine(info) {
     engineStatus.textContent = `${model.value === 'small.en' ? 'Small' : model.value} / ${info.engine === 'cuda' ? 'GPU accelerated' : 'CPU recognition'}${info.fallback ? ` — ${info.fallback}` : ''}`;
   }
+  // Called from every event that can make a flush possible (an utterance ending, a transcript arriving, speech or a
+  // reply finishing, finished work). It runs at the end of the current event instead of on a 180 ms poll; flushText
+  // itself does not re-arm, so each of those events is the trigger.
   function scheduleFlush() {
-    clearTimeout(flushTimer);
-    if (active) flushTimer = setTimeout(flushText, 180);
+    if (!active || flushQueued) return;
+    flushQueued = true;
+    queueMicrotask(() => { flushQueued = false; flushText(); });
   }
   async function processAudio() {
     if (transcribing || !active) return;
@@ -407,12 +420,14 @@ export function agentCall(agent, controller) {
         if (!voiceBusy) setState('transcribing', 'Transcribing. You can keep speaking...');
         const started = performance.now(); pending = new AbortController();
         try {
+          voiceTrace.mark(item.trace, 'upload_sent');
           const text = await transcribeBlob(item.blob, { pcm: true, model: model.value, backend: acceleration.value, signal: pending.signal, onTiming: value => { recognitionTiming = { ...value }; } });
           if (!active || epoch !== callToken || revision !== mine) continue;
+          voiceTrace.mark(item.trace, 'transcript_back');
           recognitionTiming = { ...recognitionTiming, ...item.measured, upload_ms: Math.round(performance.now()-started), capture_queue_ms: Math.round(started-item.ended) };
           drawTiming();
           if (text.trim()) {
-            texts.push(text.trim()); heard.textContent = `Heard: ${text.trim()}`;
+            texts.push(text.trim()); turnTrace = item.trace; heard.textContent = `Heard: ${text.trim()}`;
             if (state === 'speaking') { stopPlayback(); listen(); }
           }
         } catch (problem) { if (active && epoch === callToken && mine === revision && problem.name !== 'AbortError') error.textContent = problem.message; }
@@ -426,17 +441,18 @@ export function agentCall(agent, controller) {
   async function flushText() {
     if (!active || disposed) return;
     if (!texts.length && !workUpdates.length && !deferredReply && !transcribing && !audioQueue.length) return;
-    if (speechActive || transcribing || audioQueue.length || dispatching || voiceBusy || state==='speaking') { scheduleFlush(); return; }
+    if (speechActive || transcribing || audioQueue.length || dispatching || voiceBusy || state==='speaking') return;
     if (!texts.length && !workUpdates.length) {
       if (deferredReply) { const text = deferredReply; deferredReply = null; say(text); }
       return;
     }
     const text = texts.join(' '), workId=text?null:workUpdates.shift(); texts = []; deferredReply = null;
+    currentTrace = (text && turnTrace) || voiceTrace.begin(); turnTrace = null; voiceTrace.mark(currentTrace, 'turn_started');
     const token = epoch, mine = revision; dispatching = true;
     try {
       speaking = null;
       setState('thinking', `${room ? 'The room' : agent.name} is thinking. You can keep speaking...`);
-      response = { submitted: performance.now() };
+      response = { submitted: performance.now(), trace: currentTrace };
       voiceBusy=true; speaker.reset();
       let output='', deferred=false;
       const consume = event => {
@@ -446,6 +462,7 @@ export function agentCall(agent, controller) {
         if(event.type==='text') {
           output+=event.delta; heard.textContent=`${who()}: ${output}`;
           if(event.first_output_ms!=null)response.first_output_ms=event.first_output_ms;
+          voiceTrace.mark(currentTrace, 'first_token');
           // If the caller is already continuing, retain the reply until the
           // next utterance can be considered instead of talking over them.
           if(speechActive||transcribing||audioQueue.length||texts.length){deferred=true;stopPlayback();}
@@ -467,6 +484,7 @@ export function agentCall(agent, controller) {
   }
   function say(text) {
     if (!active || assistantMuted || !text?.trim()) { listen(); return; }
+    currentTrace = null;
     setState('speaking', `${who()} is speaking...`);
     try { speaker.reset(); speaker.feed(text); speaker.finish(); }
     catch { stopPlayback(); error.textContent = 'Voice playback failed. Check the selected device voice.'; listen(); }
@@ -484,6 +502,7 @@ export function agentCall(agent, controller) {
       await localSpeaker.prepare(); stopPlayback();
       await transport.start(agent,conversation.value,conversationModel.value.trim());
       if(disposed||epoch!==token||!dialog.open){transport.end();return;}
+      voiceTrace.reset(); turnTrace = currentTrace = null;
       setState('preparing','Preparing the conversation model...');
       await api(`/api/agent-calls/${transport.record.id}/prepare`,{method:'POST',toast:false});
       if(disposed||epoch!==token||!dialog.open){transport.end();return;}
@@ -509,7 +528,7 @@ export function agentCall(agent, controller) {
     finally { starting = false; start.disabled = false; }
   });
   function hangup() {
-    active = false; epoch++; revision++; audioQueue = []; texts = []; workUpdates=[];deferredReply = null; clearTimeout(flushTimer); flushTimer = null; clearInterval(timer); timer = null; clearTimeout(downloadTimer); downloadTimer = null;
+    active = false; epoch++; revision++; audioQueue = []; texts = []; workUpdates=[];deferredReply = null; flushQueued = false; clearInterval(timer); timer = null; clearTimeout(downloadTimer); downloadTimer = null;
     cancelHold(); recorder?.close(); recorder = null; speechActive = false; pending?.abort(); pending = null; stopPlayback();
     live.stop();transport.end();voiceBusy=false;paid.checked=false;
     setup.hidden = false; controls.hidden = true; clock.textContent = '00:00'; model.disabled = false;

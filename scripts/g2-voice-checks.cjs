@@ -62,6 +62,12 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes }) 
   assert.deepEqual(await om('sent'), ['what time is it'], 'listen -> transcribe -> send, once');
   assert.deepEqual(await om('spoken'), ['Reply one. Reply two.'], 'the reply streams to the speaker');
   assert.equal(await g('transcribes.length'), 1, 'one transcription for one utterance');
+  // Latency trace (build order step 1): the turn is stamped from the end of speech to the first token, in order, in memory.
+  const openMicTrace = await js("(() => { const t = window.__mic.latency.last; return t ? window.__mic.latency.offsets(t) : null; })()");
+  assert.ok(openMicTrace, 'Open Mic keeps a trace of the turn');
+  for (const stage of ['speech_end', 'endpoint', 'upload_sent', 'transcript_back', 'turn_started', 'first_token']) assert.ok(Number.isFinite(openMicTrace[stage]), `Open Mic trace records ${stage}`);
+  assert.ok(openMicTrace.speech_end === 0 && openMicTrace.endpoint >= 800 && openMicTrace.endpoint <= openMicTrace.upload_sent && openMicTrace.upload_sent <= openMicTrace.transcript_back && openMicTrace.transcript_back <= openMicTrace.turn_started && openMicTrace.turn_started <= openMicTrace.first_token,
+    `Open Mic trace stages are in turn order, with the 900 ms silence wait counted (${JSON.stringify(openMicTrace)})`);
   // Sound between the speech level and the barge level while the assistant talks is NOT captured
   // (the microphone hearing the assistant must not become the next utterance).
   const capturedAfterTurn = await om('captured');
@@ -132,14 +138,14 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes }) 
     return true; })()`);
   await js("window.__vo.setPreferredVoice(''); window.__ev = []; window.__sp = window.__vo.createSpeaker({ onStart: () => __ev.push('start'), onEnd: () => __ev.push('end'), onError: e => __ev.push('error:' + e) }); true");
   await js("__sp.feed('First sentence. Second one. Third one. Fourth one. '); __sp.finish(); true");
-  assert.deepEqual(await synth('spoken.map(s => s.text)'), ['First sentence.', 'Second one. Third one.', 'Fourth one.'], 'sentences are voiced in order, first alone then in pairs, nothing dropped');
+  assert.deepEqual(await synth('spoken.map(s => s.text)'), ['First sentence.', 'Second one.', 'Third one.', 'Fourth one.'], 'sentences are voiced in order, each released as soon as it is complete, nothing dropped');
   assert.equal(await synth('spoken[0].voice'), 'Microsoft George', 'the default prefers a local British male voice when one exists');
   assert.equal(await synth('spoken[0].rate'), 1.02);
   await js("__synth.queue[0].fire('start')");
   assert.deepEqual(await js("__ev"), ['start'], 'speaking starts once');
   await js("__synth.finishNext()");
   assert.deepEqual(await js("__ev"), ['start'], 'the end is reported only when the whole queue has drained, not per sentence');
-  await js("__synth.finishNext(); __synth.finishNext()");
+  await js("__synth.finishNext(); __synth.finishNext(); __synth.finishNext()");
   assert.deepEqual(await js("__ev"), ['start', 'end'], 'one end, after the last sentence');
   // Voice choice persists, wins, and a vanished voice falls back instead of going silent.
   await js("__vo.setPreferredVoice('Local US'); window.__synth.spoken.length = 0; __sp.reset(); __sp.feed('Hello there. '); __sp.finish(); true");

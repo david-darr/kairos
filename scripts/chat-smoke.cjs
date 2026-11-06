@@ -726,8 +726,8 @@ app.whenReady().then(async () => {
     // through live speech synthesis would be slow and machine-dependent.
     assert.deepEqual(
       await js("import('/static/js/voiceOutput.js').then(m=>m._chunk('First one. Second one. Third one. Fourth one.'))"),
-      ['First one.', 'Second one. Third one.', 'Fourth one.'],
-      'First sentence ships alone, then two-sentence breaths',
+      ['First one.', 'Second one.', 'Third one.', 'Fourth one.'],
+      'Every completed sentence is released at once',
     );
     // A trailing sentence with no terminal punctuation must still be spoken;
     // that is the case voice-line's chunker exists for.

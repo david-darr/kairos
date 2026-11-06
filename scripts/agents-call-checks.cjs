@@ -24,7 +24,7 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   await waitFor("!!document.querySelector('.agent-call-open') && !!document.querySelector('.bots-composer-input')");
   await js(`window.__callBot = ${JSON.stringify(BOT)}; window.__callSid = ${JSON.stringify(SID)}; true`);
   await js(String.raw`(async()=>{
-    window.__callTest={level:0,opened:0,closed:0,played:0,calls:{},callTurns:[],callEnds:[],callStops:[],callCounter:0,paused:0,urls:[],transcripts:0,wavBodies:[],fetch:window.fetch,utterance:window.SpeechSynthesisUtterance,synthesis:Object.getOwnPropertyDescriptor(window,'speechSynthesis'),getUserMedia:navigator.mediaDevices.getUserMedia};
+    window.__callTest={level:0,opened:0,closed:0,played:0,calls:{},callTurns:[],workUpdates:[],callEnds:[],callStops:[],callCounter:0,paused:0,urls:[],transcripts:0,wavBodies:[],fetch:window.fetch,utterance:window.SpeechSynthesisUtterance,synthesis:Object.getOwnPropertyDescriptor(window,'speechSynthesis'),getUserMedia:navigator.mediaDevices.getUserMedia};
     const ctx=window.__callTest.inputContext=new AudioContext({sampleRate:16000});
     const source=ctx.createOscillator();source.frequency.value=180;
     const gain=window.__callTest.gain=ctx.createGain();gain.gain.value=0;
@@ -53,8 +53,10 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
         if(action==='prepare'||action==='timing')return json({ok:true,prepare_ms:12});
         if(action==='end'){t.callEnds.push(call.id);call.ended=true;call.summary_state='saved';call.summary='**Call summary**\n\nDiscussed the new layout.';return json(call);}
         if(action==='interrupt'){t.callStops.push(call.id);t.releaseReply?.();return json({ok:true});}
+        if(action==='watch')return new Response(new ReadableStream({start(c){t.pushEvent=e=>c.enqueue(new TextEncoder().encode(JSON.stringify(e)+'\n'));options.signal?.addEventListener('abort',()=>{try{c.close()}catch{}});}}),{headers:{'Content-Type':'application/x-ndjson'}});
+        if(action&&action.startsWith('work/')&&action.endsWith('/update')){t.workUpdates.push(action);return new Response(new TextEncoder().encode(JSON.stringify({type:'text',delta:"That's done: Parkour course. Built the course.",templated:true})+'\n'+JSON.stringify({type:'done',reply_ms:0})+'\n'),{headers:{'Content-Type':'application/x-ndjson'}});}
         if(action==='turn'){
-          t.callTurns.push(JSON.parse(options.body));
+          t.turnAt=performance.now();t.callTurns.push(JSON.parse(options.body));
           return new Response(new ReadableStream({start(c){
             const emit=e=>c.enqueue(new TextEncoder().encode(JSON.stringify(e)+'\n'));
             emit({type:'text',delta:'First useful sentence. ',first_output_ms:22});
@@ -71,6 +73,7 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
         const bytes=new Uint8Array(await options.body.get('audio').arrayBuffer());window.__callTest.wavHeader=String.fromCharCode(...bytes.slice(0,4));window.__callTest.wavRate=new DataView(bytes.buffer).getUint32(24,true);window.__callTest.transcribedModel=options.body.get('model');window.__callTest.wavBodies.push(Array.from(bytes));window.__callTest.transcripts++;
         const recognized=window.__callTest.nextText||'Please explain the new layout.';
         if(window.__callTest.holdTranscription)await new Promise(resolve=>window.__callTest.releaseTranscription=resolve);
+        window.__callTest.transcriptAt=performance.now();
         return new Response(JSON.stringify({text:recognized,timings:{recognition_ms:14,queue_ms:0}}),{headers:{'Content-Type':'application/json'}});
       }
       if(path.startsWith('/api/bot-chat/')&&path.includes('/messages')&&(!options||!options.method||options.method==='GET')&&!/[?&](before|around)=/.test(path)){
@@ -137,6 +140,14 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   assert.equal(writes.filter(w=>w.path==='/api/chat/live'||w.path==='/api/bot-chat/'+SID+'/send').length,0,'Call dialogue never enters the ordinary bot chat transport');
   assert.ok(await js("!document.querySelector('.bots-log').textContent.includes('Please explain the new layout.')"),'Raw call dialogue is absent from the conversation');
   assert.ok(await js("JSON.parse(document.querySelector('.agent-call').dataset.callTimings).end_to_audio_ms>=0"),'Speech end to first playback is measured');
+  // Voice latency trace (build order step 1): every stage of the turn is stamped, shown in the timing line, kept in memory.
+  const traced=await js("JSON.parse(document.querySelector('.agent-call').dataset.callTimings).trace");
+  for(const stage of ['speech_end','endpoint','upload_sent','transcript_back','turn_started','first_token','first_sentence','first_audio'])assert.ok(Number.isFinite(traced[stage]),`The latency trace records ${stage}`);
+  assert.ok(traced.speech_end===0&&traced.endpoint<=traced.upload_sent&&traced.upload_sent<=traced.transcript_back&&traced.transcript_back<=traced.turn_started&&traced.turn_started<=traced.first_token&&traced.first_token<=traced.first_sentence&&traced.first_sentence<=traced.first_audio,'Trace stages are in turn order');
+  assert.ok(await js("document.querySelector('.agent-call-timing').textContent.includes('first audio')"),'The call timing line shows the per-stage trace');
+  // The flush poll is gone (was 180 ms): the turn goes out as soon as the transcript lands.
+  const dispatchGap=await js('window.__callTest.turnAt-window.__callTest.transcriptAt');
+  assert.ok(dispatchGap>=0&&dispatchGap<100,`The turn is sent on the transcript event, not a poll (gap ${dispatchGap} ms)`);
   assert.equal(await js("document.querySelector('.bots-composer-input').value"),'My typed draft stays','Voice leaves typed drafts intact');
   await waitFor('window.__callTest.played>=1');
   assert.equal(await js('window.__callTest.wavHeader'),'RIFF','Native recognition receives WAV rather than browser WebM');
@@ -158,6 +169,11 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   await click('.agent-call-controls button:first-child');
   await waitFor("document.querySelector('.agent-call').dataset.state==='listening'");
   assert.ok(await js('window.__callTest.paused>0'),'Assistant mute stops playback');
+  // Finished work is pushed over the call's watch channel and spoken at once (the 2 s poll is only the fallback).
+  await waitFor('typeof window.__callTest.pushEvent==="function"');
+  await js("Object.values(window.__callTest.calls)[0].jobs=[{task_id:'t1',title:'Parkour course',status:'done',result:'Built the course.'}];window.__callTest.pushEvent({type:'work',task_id:'t1',status:'done'});true;");
+  await waitFor('window.__callTest.workUpdates.length===1',900);
+  assert.deepEqual(await js('window.__callTest.workUpdates'),['work/t1/update'],'A pushed finish requests its spoken update without waiting for the poll');
   await click('.agent-call-controls button:nth-child(2)');
   assert.equal(await js('window.__callTest.closed'),1,'Microphone mute releases the device');
   await click('.agent-call-controls button:nth-child(2)'); await waitFor('window.__callTest.opened===2');

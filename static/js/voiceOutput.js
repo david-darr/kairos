@@ -8,9 +8,10 @@
 //
 // Text is spoken sentence by sentence as it streams rather than waiting for
 // the whole reply. The chunking rule is carried over from voice-line's
-// _SentenceChunker, which exists because of a real problem: the first sentence
-// ships alone for the fastest time-to-first-audio, then sentences go in
-// two-sentence breaths so the voice does not sound clipped between every one.
+// _SentenceChunker: the first sentence ships alone (at a clause break when it
+// is long) for the fastest time-to-first-audio, and every later sentence goes
+// the moment it is complete. The old two-sentence breaths held sentence 2 until
+// sentence 3 arrived; speech that prefetches no longer needs them.
 
 // Matches a sentence boundary only when the next thing genuinely starts a new
 // sentence, so "v1.10.0" and "e.g. this" are not split mid-thought.
@@ -33,24 +34,55 @@ function forSpeech(text) {
     .trim();
 }
 
+// Words before a first-sentence clause break (comma, semicolon, dash) may be spoken ahead of the full stop.
+const FIRST_CLAUSE_WORDS = 6;
+// A full stop after one of these does not end a sentence: titles, initials, "U.S.", "e.g.".
+const ABBREVIATION = /(?:\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|Mt|Gen|Col|Lt|Sgt|Capt|Rep|Sen|Gov|Hon|Rev|vs|Inc|Ltd|Co|Corp|Fig|approx)|\b(?!I\.)[A-Z]|\b[A-Za-z]\.[A-Za-z]|\be\.g|\bi\.e)\.$/;
+const CLAUSE_BREAK = /[,;](?=\s)|\s+-{1,2}\s+|\s*[—–]\s*/g;
+
+// The next real sentence end in `text`, skipping abbreviations. Returns the regex match or null.
+function nextSentenceEnd(text) {
+  const pattern = new RegExp(SENTENCE_END.source, 'g');
+  for (let match; (match = pattern.exec(text));) {
+    if (!ABBREVIATION.test(text.slice(0, match.index))) return match;
+  }
+  return null;
+}
+
+// The earliest clause break with enough words before it, for the first sentence only.
+function firstClauseEnd(text) {
+  const pattern = new RegExp(CLAUSE_BREAK.source, 'g');
+  for (let match; (match = pattern.exec(text));) {
+    const head = text.slice(0, match.index + (/^[,;]/.test(match[0]) ? 1 : 0)).trim();
+    if (head.split(/\s+/).length >= FIRST_CLAUSE_WORDS) return { head, length: match.index + match[0].length };
+  }
+  return null;
+}
+
 // Sentence chunking, shared by the speaker and its tests. Duplicating this for
 // testability would let the tested rule and the spoken rule drift apart, which
 // defeats the point of testing it.
+//
+// Every completed sentence is released at once: the old rule held sentence 2 until
+// sentence 3 arrived, which put a whole sentence of generation time into the gap.
+// The first sentence may also go at a clause break (comma, semicolon, dash) after
+// about six words, so the first sound starts sooner.
 export function createChunker(onFlush) {
   let buffer = '';
-  let pending = [];
   let flushedFirst = false;
-  const emit = (sentence) => {
-    if (!flushedFirst) { flushedFirst = true; onFlush(sentence); return; }
-    pending.push(sentence);
-    if (pending.length >= 2) { onFlush(pending.join(' ')); pending = []; }
-  };
+  const emit = (sentence) => { flushedFirst = true; onFlush(sentence); };
   return {
     get started() { return flushedFirst; },
     feed(text) {
       buffer += text;
       for (;;) {
-        const match = SENTENCE_END.exec(buffer);
+        const match = nextSentenceEnd(buffer);
+        const clause = flushedFirst ? null : firstClauseEnd(buffer);
+        if (clause && (!match || clause.length <= match.index + 1)) {
+          buffer = buffer.slice(clause.length);
+          if (clause.head) emit(clause.head);
+          continue;
+        }
         if (!match) break;
         const sentence = buffer.slice(0, match.index + 1).trim();
         buffer = buffer.slice(match.index + match[0].length);
@@ -61,14 +93,14 @@ export function createChunker(onFlush) {
       const leftover = buffer.trim();
       buffer = '';
       if (leftover) emit(leftover);
-      if (pending.length) { onFlush(pending.join(' ')); pending = []; }
     },
     flushSentence() {
-      if (/[.!?]["')\]]?\s*$/.test(buffer) && !/\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|e\.g|i\.e)\.\s*$/i.test(buffer)) {
-        const sentence=buffer.trim();buffer='';emit(sentence);
+      // A trailing "3." may be the start of "3.5", so a digit and full stop wait for the next token.
+      if (/[.!?]["')\]]?\s*$/.test(buffer) && !ABBREVIATION.test(buffer.trimEnd()) && !/\d\.\s*$/.test(buffer)) {
+        const sentence = buffer.trim(); buffer = ''; if (sentence) emit(sentence);
       }
     },
-    reset() { buffer = ''; pending = []; flushedFirst = false; },
+    reset() { buffer = ''; flushedFirst = false; },
   };
 }
 
@@ -163,11 +195,12 @@ function pickVoice() {
 
 // One speaker per conversation. Holds the sentence buffer and the queue so a
 // barge-in can silence everything at once.
-export function createSpeaker({ onStart, onEnd, onBoundary, onError, getVoice } = {}) {
+export function createSpeaker({ onStart, onEnd, onBoundary, onError, getVoice, onSentenceReady, onSentenceStart } = {}) {
   let cancelled = false;
   let speaking = false;
   let queued = 0;
   let generation = 0;
+  let sentences = 0;
 
   const enqueue = (text) => {
     const clean = forSpeech(text);
@@ -175,11 +208,14 @@ export function createSpeaker({ onStart, onEnd, onBoundary, onError, getVoice } 
     queued += 1;
     const utterance = new SpeechSynthesisUtterance(clean);
     const mine = generation;
+    const index = sentences++;
+    onSentenceReady?.(index);
     const voice = getVoice ? getVoice() : pickVoice();
     if (voice) { utterance.voice = voice; utterance.lang = voice.lang; }
     utterance.rate = 1.02;
     utterance.addEventListener('start', () => {
       if (cancelled || mine !== generation) return;
+      onSentenceStart?.(index);
       if (!speaking) { speaking = true; onStart?.(); }
     });
     utterance.addEventListener('boundary', event => { if (!cancelled && mine === generation) onBoundary?.(event); });
@@ -227,6 +263,7 @@ export function createSpeaker({ onStart, onEnd, onBoundary, onError, getVoice } 
       generation++;
       cancelled = false;
       chunker.reset();
+      sentences = 0;
       queued = 0;
       speaking = false;
     },

@@ -173,6 +173,89 @@ class Calls(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([m['role'] for m in self.record['messages']],['assistant'])
         self.assertEqual(len(session_manager.get_session(self.parent)['messages']),1)
 
+    async def test_finished_work_is_pushed_to_the_call_when_it_finishes(self):
+        future=asyncio.get_running_loop().create_future()
+        task={'id':'task-push','status':'done','comments':[{'kind':'result','text':'Built the course. It has twelve jumps.'}]}
+        with patch.object(calls.task_service,'create_task',return_value={'id':'task-push'}),patch.object(calls.task_scheduler,'start_in_background',return_value=future),patch.object(calls.task_service,'get_task',return_value=task):
+            calls.delegate(self.record,'Build course','Build it','push-one')
+            stream=calls.watch_events(self.record)
+            self.assertEqual(await anext(stream),{'type':'ready'})
+            future.set_result(True)
+            self.assertEqual(await asyncio.wait_for(anext(stream),1),{'type':'work','task_id':'task-push','status':'done'},'the call hears about finished work at once, not on its next 2 s poll')
+            await stream.aclose()
+            self.assertFalse(calls._feeds,'a closed watcher is forgotten')
+
+    async def test_unfinished_work_is_not_pushed(self):
+        future=asyncio.get_running_loop().create_future()
+        with patch.object(calls.task_service,'create_task',return_value={'id':'task-run'}),patch.object(calls.task_scheduler,'start_in_background',return_value=future),patch.object(calls.task_service,'get_task',return_value={'id':'task-run','status':'running','comments':[]}):
+            calls.delegate(self.record,'Slow','Slow work','push-two')
+            stream=calls.watch_events(self.record,ping_seconds=.05);await anext(stream)
+            future.set_result(True)
+            self.assertEqual(await asyncio.wait_for(anext(stream),1),{'type':'ping'},'unfinished work stays quiet')
+            await stream.aclose()
+
+    async def test_watch_ends_with_the_call(self):
+        stream=calls.watch_events(self.record,ping_seconds=.05);await anext(stream)
+        calls.end(self.record)
+        with self.assertRaises(StopAsyncIteration):
+            while True:await asyncio.wait_for(anext(stream),1)
+
+    def test_spoken_work_line_uses_the_result_summary_or_defers_to_the_model(self):
+        job={'title':'Build course','status':'done','result':'Built the course.  It has twelve jumps. A third sentence is not read.'}
+        self.assertEqual(calls.work_line(job),"That's done: Build course. Built the course. It has twelve jumps.")
+        self.assertEqual(calls.work_line({**job,'status':'review'}),"That's ready for your review: Build course. Built the course. It has twelve jumps.")
+        self.assertIsNone(calls.work_line({**job,'result':'  '}),'no result text: the model still writes the update')
+        for status in ('blocked','backlog','unavailable','running'):self.assertIsNone(calls.work_line({**job,'status':status}),status+' needs the model to explain it')
+        tagged=calls.work_line({**job,'result':'Done <kairos-work>{"title":"x","request":"y"}</kairos-work> ok.'})
+        self.assertNotIn('<',tagged)
+        long=calls.work_line({**job,'result':'word '*200})
+        self.assertLessEqual(len(long),330);self.assertTrue(long.endswith('...'))
+
+    async def test_announce_speaks_a_ready_line_without_a_model_turn(self):
+        engine=calls._conversations[self.record['id']];streamed=[]
+        original=engine.stream
+        async def counted(*args,**kwargs):
+            streamed.append(1)
+            async for item in original(*args,**kwargs):yield item
+        engine.stream=counted
+        events=[e async for e in calls.announce(self.record,"That's done: Build course. Built it.",'work:task-x')]
+        self.assertEqual([e['type'] for e in events],['text','done']);self.assertEqual(events[0]['delta'],"That's done: Build course. Built it.");self.assertEqual(events[1]['reply_ms'],0)
+        self.assertEqual(streamed,[],'no model turn')
+        self.assertEqual([m['role'] for m in self.record['messages']],['assistant'],'the line joins the call dialogue without a fabricated user message')
+        again=[e async for e in calls.announce(self.record,"That's done: Build course. Built it.",'work:task-x')]
+        self.assertTrue(again[0]['replayed']);self.assertEqual(len(self.record['messages']),1,'a repeated request does not speak it twice')
+        calls.end(self.record)
+        with self.assertRaises(HTTPException):_=[e async for e in calls.announce(self.record,'x','work:later')]
+
+    async def test_work_update_route_speaks_the_summary_or_asks_the_model(self):
+        app=FastAPI();app.include_router(router);app.dependency_overrides[require_user]=lambda:'david'
+        engine=calls._conversations[self.record['id']];streamed=[]
+        original=engine.stream
+        async def counted(*args,**kwargs):
+            streamed.append(1)
+            async for item in original(*args,**kwargs):yield item
+        engine.stream=counted
+        tasks={'task-a':{'id':'task-a','status':'done','comments':[{'kind':'result','text':'All twelve jumps are built.'}]},
+               'task-b':{'id':'task-b','status':'blocked','comments':[{'kind':'result','text':'Could not reach the server.'}]}}
+        self.record['jobs']=[{'task_id':'task-a','title':'Course','key':'a'},{'task_id':'task-b','title':'Upload','key':'b'}]
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://test') as client:
+            with patch.object(calls.task_service,'get_task',side_effect=lambda ident:tasks.get(ident)):
+                first=await client.post(f"/api/agent-calls/{self.record['id']}/work/task-a/update")
+                lines=[json.loads(line) for line in first.text.splitlines()]
+                self.assertEqual(lines[0]['delta'],"That's done: Course. All twelve jumps are built.");self.assertEqual(streamed,[],'a finished job with a result summary costs no model turn')
+                second=await client.post(f"/api/agent-calls/{self.record['id']}/work/task-b/update")
+                self.assertTrue(any(json.loads(line).get('type')=='text' for line in second.text.splitlines()));self.assertEqual(len(streamed),1,'work without a usable summary still goes through the model')
+
+    async def test_timing_post_accepts_and_logs_the_stage_trace(self):
+        app=FastAPI();app.include_router(router);app.dependency_overrides[require_user]=lambda:'david'
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://test') as client:
+            with self.assertLogs(calls.logger,level='DEBUG') as logs:
+                reply=await client.post(f"/api/agent-calls/{self.record['id']}/timing",json={'end_to_audio_ms':900,'first_audio_ms':700,'trace':{'speech_end':0,'first_audio':900,'sentence_start':[900,1700]}})
+            self.assertEqual(reply.status_code,200);self.assertTrue(any('call voice trace' in line and '"first_audio": 900' in line for line in logs.output))
+            self.assertNotIn('trace',self.record['last_audio_timing'],'the trace is logged, not stored with the call')
+            bad=await client.post(f"/api/agent-calls/{self.record['id']}/timing",json={'end_to_audio_ms':1,'first_audio_ms':1,'trace':{'x':'not a number'}})
+            self.assertEqual(bad.status_code,422)
+
     async def test_restart_recovers_active_call_as_summary(self):
         _=[event async for event in calls.turn(self.record,'Build a course','one')]
         calls._calls.clear();await calls.recover()

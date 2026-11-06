@@ -5,7 +5,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 (async () => {
   const { createBlockQueue } = await load('static/js/botsSpeak.js');
   const { _chunk, _forSpeech } = await load('static/js/voiceOutput.js');
-  assert.deepEqual(_chunk('Hello there. This is next! Then another? Final line.'), ['Hello there.', 'This is next! Then another?', 'Final line.']);
+  assert.deepEqual(_chunk('Hello there. This is next! Then another? Final line.'), ['Hello there.', 'This is next!', 'Then another?', 'Final line.']);
   let prepared = [], played = [], finish;
   const queue = createBlockQueue({ prepare: async text => { prepared.push(text); return text; }, play: text => { played.push(text); return new Promise(resolve => finish = resolve); } });
   queue.update(['A']); await tick(); assert.deepEqual(prepared, []);

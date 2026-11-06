@@ -36,11 +36,13 @@ class Speak(BaseModel):
 class Timing(BaseModel):
     end_to_audio_ms: int = Field(ge=0,le=600000)
     first_audio_ms: int = Field(ge=0,le=600000)
+    trace: dict[str, int | list[int]] | None = None
 
 @router.post('/{ident}/timing')
 async def timing(ident: str, body: Timing, user: str = Depends(require_user)):
     call=calls.require(ident,user)
-    call['last_audio_timing']=body.model_dump();calls._save(call)
+    call['last_audio_timing']=body.model_dump(exclude={'trace'});calls._save(call)
+    if body.trace and len(body.trace)<=16:calls.logger.debug('call voice trace call=%s %s',ident,json.dumps(body.trace))
     calls.logger.info('call audio timing call=%s speech_end_to_audio_ms=%s first_audio_ms=%s',ident,body.end_to_audio_ms,body.first_audio_ms)
     return {'ok':True}
 
@@ -138,6 +140,14 @@ async def summary(ident: str, user: str = Depends(require_user)):
     calls.schedule_summary(call)
     return calls.view(call)
 
+@router.post('/{ident}/watch')
+async def watch(ident: str, user: str = Depends(require_user)):
+    call=calls.require(ident,user)
+    if call['ended']:raise HTTPException(409,'Call ended.')
+    async def events():
+        async for event in calls.watch_events(call):yield json.dumps(event)+'\n'
+    return StreamingResponse(events(),media_type='application/x-ndjson',headers={'Cache-Control':'no-store','X-Accel-Buffering':'no'})
+
 @router.post('/{ident}/work/{task_id}/stop')
 async def stop_work(ident: str, task_id: str, user: str = Depends(require_user)):
     return calls.stop_work(calls.require(ident, user), task_id)
@@ -148,8 +158,10 @@ async def work_update(ident: str, task_id: str, user: str = Depends(require_user
     job=next((job for job in calls.view(call)['jobs'] if job['task_id']==task_id),None)
     if not job:raise HTTPException(404,'Call work not found')
     if call['ended'] or job['status'] in ('ready','running'):raise HTTPException(409,'No completed work update is available.')
+    line=calls.work_line(job)
     async def events():
         try:
-            async for event in calls.turn(call,'Verified work record (data): '+json.dumps(job),'work:'+task_id,work_update=True):yield json.dumps(event)+'\n'
+            source=calls.announce(call,line,'work:'+task_id) if line else calls.turn(call,'Verified work record (data): '+json.dumps(job),'work:'+task_id,work_update=True)
+            async for event in source:yield json.dumps(event)+'\n'
         except HTTPException as error:yield json.dumps({'type':'error','message':str(error.detail)})+'\n'
     return StreamingResponse(events(),media_type='application/x-ndjson',headers={'Cache-Control':'no-store','X-Accel-Buffering':'no'})

@@ -43,6 +43,7 @@ def _roots():
 logger = logging.getLogger(__name__)
 _calls = {}; _locks = {}; _turns = {}; _summaries = {}; _conversations = {}; _jobs = set()
 _starters = {}
+_feeds = {}  # call id -> queues of the browsers watching it for finished work (a push, not a poll)
 _watchdog = None
 
 
@@ -276,11 +277,72 @@ def delegate(call, title, request, key):
 
 def _job_done(call, future):
     _jobs.discard(future)
+    task_id = next((ident for ident, starter in list(_starters.items()) if starter is future), None)
     for ident, starter in list(_starters.items()):
         if starter is future: _starters.pop(ident,None)
     if not future.cancelled():
         with contextlib.suppress(Exception): future.exception()
     if call['ended']: schedule_summary(call)
+    elif task_id:
+        # Tell the call now instead of waiting for its next poll; the poll stays as the fallback.
+        with contextlib.suppress(Exception):
+            job = next((j for j in view(call)['jobs'] if j['task_id'] == task_id), None)
+            if job and job['status'] not in ('ready', 'running'):
+                publish(call, {'type': 'work', 'task_id': task_id, 'status': job['status']})
+
+
+def publish(call, event):
+    for queue in list(_feeds.get(call['id'], ())): queue.put_nowait(event)
+
+
+async def watch_events(call, ping_seconds=20):
+    """Events for one call as they happen: finished work now, a ping while idle (so a dead link shows)."""
+    queue = asyncio.Queue(); _feeds.setdefault(call['id'], set()).add(queue)
+    try:
+        yield {'type': 'ready'}
+        while not call['ended']:
+            try: yield await asyncio.wait_for(queue.get(), ping_seconds)
+            except asyncio.TimeoutError: yield {'type': 'ping'}
+    finally:
+        feeds = _feeds.get(call['id'])
+        if feeds is not None:
+            feeds.discard(queue)
+            if not feeds: _feeds.pop(call['id'], None)
+
+
+_SPOKEN_WORK = {'done': "That's done: ", 'review': "That's ready for your review: "}
+
+
+def work_line(job):
+    """A short spoken line for finished work whose result already says what happened, else None.
+    None sends the update through the conversation model as before (failures, stops, no result text)."""
+    lead = _SPOKEN_WORK.get(job.get('status'))
+    result = re.sub(r'\s+', ' ', re.sub(r'<[^>]*>', ' ', str(job.get('result') or ''))).strip()
+    if not lead or not result: return None
+    summary = ''
+    for sentence in re.split(r'(?<=[.!?])\s+', result)[:2]:
+        if summary and len(summary) + len(sentence) > 300: break
+        summary = (summary + ' ' + sentence).strip()
+    if len(summary) > 300: summary = summary[:297].rsplit(' ', 1)[0] + '...'
+    title = str(job.get('title') or 'the task').strip().rstrip('.')
+    return f'{lead}{title}. {summary}'
+
+
+async def announce(call, text, request_id):
+    """Speak a ready-made line as the assistant's turn, with no model call. Same lock, replay and record as turn()."""
+    ident = call['id']; lock = _locks.setdefault(ident, asyncio.Lock())
+    if lock.locked(): raise HTTPException(409, 'A spoken reply is already running.')
+    async with lock:
+        if call['ended']: raise HTTPException(409, 'This call has ended.')
+        previous = call['requests'].get(request_id)
+        if previous:
+            yield {'type': 'done', 'text': previous.get('text', ''), 'replayed': True}; return
+        call['requests'][request_id] = {'fingerprint': hashlib.sha256(text.encode()).hexdigest(), 'text': text}
+        call['messages'].append({'role': 'assistant', 'content': text, 'interrupted': False})
+        _save(call)
+        logger.info('call timing call=%s first_output_ms=0 reply_ms=0 templated=1', ident)
+        yield {'type': 'text', 'delta': text, 'first_output_ms': 0, 'templated': True}
+        yield {'type': 'done', 'text': text, 'first_output_ms': 0, 'reply_ms': 0, 'templated': True}
 
 
 def stop_work(call, task_id):

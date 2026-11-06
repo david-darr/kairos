@@ -22,6 +22,7 @@
 
 import { createRecorder, transcribeBlob } from './voiceInput.js';
 import { createSpeaker, isSpeechOutputSupported } from './voiceOutput.js';
+import { createVoiceTrace } from './voiceTrace.js';
 
 // Tuned against normal speech at a normal distance. The onset threshold sits
 // above room tone; the barge-in threshold is higher because the microphone
@@ -64,6 +65,9 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
   let lastLoudAt = 0;
   let capturing = false;
   let bargeWindow = [];
+  // Per-turn latency, kept in memory for this session and logged at debug (see voiceTrace.js).
+  const voiceTrace = createVoiceTrace({ label: 'openmic' });
+  let turnTrace = null;
 
   const setState = (next) => {
     if (state === next) return;
@@ -147,6 +151,9 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
     if (!recorder || !capturing) return;
     capturing = false;
     bargeWindow = [];
+    // The silence wait is part of the turn: speech really ended at the last loud reading.
+    const trace = voiceTrace.begin(performance.now() - (Date.now() - lastLoudAt));
+    voiceTrace.mark(trace, 'endpoint');
     setState('transcribing');
     let blob = null;
     try {
@@ -161,7 +168,9 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
     let text = '';
     if (blob) {
       try {
+        voiceTrace.mark(trace, 'upload_sent');
         text = await transcribeBlob(blob);
+        voiceTrace.mark(trace, 'transcript_back');
       } catch (error) {
         fail(error.message || 'Transcription failed.');
       }
@@ -177,12 +186,14 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
     }
 
     setState('thinking');
+    turnTrace = trace;
+    voiceTrace.mark(trace, 'turn_started');
     // Clears the cancel latch from any previous interruption. Without it the
     // speaker stays permanently silenced after the first barge-in.
     speaker?.reset();
     try {
       await sendMessage(text, {
-        onChunk: (delta) => speaker?.feed(delta),
+        onChunk: (delta) => { voiceTrace.mark(trace, 'first_token'); speaker?.feed(delta); },
         onDone: () => speaker?.finish(),
       });
     } catch (error) {
@@ -227,6 +238,8 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
 
   return {
     get state() { return state; },
+    // The in-memory latency trace of this session's voice turns.
+    get latency() { return voiceTrace; },
 
     // Exposed so a test can feed levels directly. The real path goes through
     // the recorder's analyser, which a headless suite has no way to drive.
@@ -243,11 +256,13 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
       }, 1000);
       speaker = makeSpeaker({
         onStart: () => setState('speaking'),
+        onSentenceReady: () => voiceTrace.mark(turnTrace, 'first_sentence'),
+        onSentenceStart: () => voiceTrace.sentenceStart(turnTrace),
         // The device is already open; this only returns the state. It fires
         // once the whole queue has drained rather than per sentence, so the
         // pause between the assistant's own sentences is never mistaken for
         // the end of its turn.
-        onEnd: () => { if (!stopped) listen(); },
+        onEnd: () => { voiceTrace.report(turnTrace); if (!stopped) listen(); },
       });
       if (!isSpeechOutputSupported()) {
         // Still useful without a voice: it becomes hands-free dictation with
