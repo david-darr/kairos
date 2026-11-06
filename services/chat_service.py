@@ -25,7 +25,7 @@ from fastapi import HTTPException
 
 from claude_agent_sdk import CLIJSONDecodeError
 
-from core import attachments, chat_files, file_checkpoints, helpers, logs as log_files, mcp_oauth, model_catalog, model_endpoints, model_marks, permissions, runs, token_usage
+from core import attachments, chat_files, cli_env, file_checkpoints, helpers, logs as log_files, mcp_oauth, model_catalog, model_endpoints, model_marks, permissions, runs, token_usage
 from core import brain as brain_module
 from core.brain import Brain
 from core.codex_brain import CodexBrain
@@ -262,18 +262,25 @@ def _build_brain(endpoint: dict, session_id: Optional[str], is_admin: bool = Fal
         # level must not reach the provider; keep the bot's supported level.
         if effort is None or not model_catalog.validate_effort(endpoint["kind"], cli_model or None, effort):
             effort = agent.get("model_effort")
+    # A turn on a connection shared with this account signs in as the OWNER (core/cli_env.py); fixed here, when
+    # the brain is built, so a reconnect later in some other context cannot change whose login it uses.
+    cli_account = cli_env.account_for_endpoint(endpoint)
     if endpoint["kind"] == "claude_cli":
-        return Brain(cwd_override=workspace_dir, integration_ids=integration_ids,
-                     session_id=session_id, model=cli_model or None, is_admin=is_admin,
-                     project_id=project_id, effort=effort,
-                     resume_session_id=(session or {}).get("claude_session_id"), agent_id=agent_id,
-                     agent_prompt=agent_prompt, **forge_options)
+        brain = Brain(cwd_override=workspace_dir, integration_ids=integration_ids,
+                      session_id=session_id, model=cli_model or None, is_admin=is_admin,
+                      project_id=project_id, effort=effort,
+                      resume_session_id=(session or {}).get("claude_session_id"), agent_id=agent_id,
+                      agent_prompt=agent_prompt, **forge_options)
+        brain.cli_account = cli_account
+        return brain
     if endpoint["kind"] in ("codex_cli", "antigravity_cli"):
         brain_class = AntigravityBrain if endpoint["kind"] == "antigravity_cli" else CodexBrain
-        return brain_class(cwd_override=workspace_dir, session_id=session_id, integration_ids=integration_ids,
-                          model=cli_model or None, is_admin=is_admin, project_id=project_id,
-                          effort=effort, agent_prompt=agent_prompt,
-                          agent_auto=bool(agent_id and session is None), agent_id=agent_id, **forge_options)
+        brain = brain_class(cwd_override=workspace_dir, session_id=session_id, integration_ids=integration_ids,
+                            model=cli_model or None, is_admin=is_admin, project_id=project_id,
+                            effort=effort, agent_prompt=agent_prompt,
+                            agent_auto=bool(agent_id and session is None), agent_id=agent_id, **forge_options)
+        brain.cli_account = cli_account
+        return brain
     base_url, model, api_key, num_ctx = model_endpoints.resolve_runtime(endpoint["id"])
     if endpoint["kind"] == "api" and override is not None:
         model = override or endpoint["model"]

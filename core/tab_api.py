@@ -90,12 +90,12 @@ async def complete(endpoint_id, system, prompt, timeout=180, model=None):
             if model is not None and not _MODEL_ID.fullmatch(model):
                 raise ValueError("Choose a model this connection offers")
             from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
-            from core import claude_cli
+            from core import claude_cli, cli_env
             directory = tempfile.TemporaryDirectory(prefix="kairos-tab-reader-", ignore_cleanup_errors=True)
             try:
                 options = ClaudeAgentOptions(tools=[], mcp_servers={}, strict_mcp_config=True,
                     setting_sources=[], skills=[], plugins=[], cwd=directory.name, max_turns=1,
-                    cli_path=claude_cli.preferred_cli_path(),
+                    cli_path=claude_cli.preferred_cli_path(), env=cli_env.homes(cli_env.account_for_endpoint(endpoint)),
                     model=model if model is not None else endpoint.get("model") or None, system_prompt=system,
                     extra_args={"no-session-persistence": None, "disable-slash-commands": None})
                 result = None

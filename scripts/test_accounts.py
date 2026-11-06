@@ -2031,5 +2031,222 @@ def uuid_hex():
     return uuid.uuid4().hex[:8]
 
 
+def _now_ms():
+    import time
+    return int(time.time() * 1000)
+
+
+class CliHomesPerAccount(unittest.TestCase):
+    """Phase 3c: each account signs in to its own Claude and Codex; the first admin keeps the machine default."""
+
+    @classmethod
+    def setUpClass(cls):
+        account_migration.run(_DATA.name, backup=lambda path: None)
+
+    def setUp(self):
+        fresh_users()
+        auth_manager.create_user("david-darr", "password-one-1", is_admin=True)
+        auth_manager.create_user("bea", "password-two-2")
+        auth_manager.create_user("cal", "password-three-3")
+        self.first, self.second, self.third = (auth_manager.account_id(n) for n in ("david-darr", "bea", "cal"))
+        from core import cli_env, model_endpoints
+        self.cli_env, self.m = cli_env, model_endpoints
+
+        def clean():
+            for a in (self.first, self.second, self.third):
+                Path(accounts.ACCOUNTS_DIR, a, "model_endpoints.json").unlink(missing_ok=True)
+            Path(model_endpoints.shares_file()).unlink(missing_ok=True)
+        clean(); self.addCleanup(clean)
+
+    def test_the_first_admin_and_background_work_keep_the_machine_default(self):
+        with accounts.as_account(self.first):
+            self.assertEqual(self.cli_env.homes(), {})
+            self.assertIsNone(self.cli_env.import_root())
+        self.assertEqual(self.cli_env.homes(), {}, "background work sets no account: the first admin's")
+        token = accounts.set_current(None)  # nobody signed in
+        try:
+            self.assertEqual(self.cli_env.homes(), {})
+        finally:
+            accounts.reset_current(token)
+        with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": "", "CODEX_HOME": ""}):
+            with accounts.as_account(self.first):
+                self.assertEqual(self.cli_env.claude_dir(), os.path.join(os.path.expanduser("~"), ".claude"))
+                self.assertEqual(self.cli_env.codex_dir(), os.path.join(os.path.expanduser("~"), ".codex"))
+                self.assertEqual(self.cli_env.claude_json(), os.path.join(os.path.expanduser("~"), ".claude.json"))
+
+    def test_another_account_gets_folders_inside_its_own_account_folder(self):
+        with accounts.as_account(self.second):
+            homes = self.cli_env.homes()
+            mine = Path(accounts.account_dir())
+        self.assertEqual(Path(homes["CLAUDE_CONFIG_DIR"]), mine / "cli" / "claude")
+        self.assertEqual(Path(homes["CODEX_HOME"]), mine / "cli" / "codex")
+        self.assertTrue(Path(homes["CLAUDE_CONFIG_DIR"]).is_dir() and Path(homes["CODEX_HOME"]).is_dir())
+        self.assertEqual(self.cli_env.homes(self.third)["CODEX_HOME"],
+                         str(Path(accounts.account_dir(self.third)) / "cli" / "codex"), "named, not the current one")
+        self.assertEqual(self.cli_env.homes(self.first), {}, "naming the first admin is the machine default")
+        self.assertEqual(self.cli_env.claude_dir(self.second), homes["CLAUDE_CONFIG_DIR"])
+        self.assertEqual(self.cli_env.codex_dir(self.second), homes["CODEX_HOME"])
+        self.assertEqual(self.cli_env.claude_json(self.second), os.path.join(homes["CLAUDE_CONFIG_DIR"], ".claude.json"))
+
+    def test_codex_keeps_its_login_in_the_folder_not_the_keyring(self):
+        config = Path(self.cli_env.homes(self.second)["CODEX_HOME"]) / "config.toml"
+        self.assertEqual(config.read_text(encoding="utf-8"), 'cli_auth_credentials_store = "file"\n')
+        self.cli_env.homes(self.second)
+        self.assertEqual(config.read_text(encoding="utf-8").count("cli_auth_credentials_store"), 1, "written once")
+        config.write_text('model = "x"\n[tui]\ntheme = "dark"\n', encoding="utf-8")
+        self.cli_env.homes(self.second)
+        text = config.read_text(encoding="utf-8")
+        self.assertTrue(text.startswith('cli_auth_credentials_store = "file"\n'), "before any table")
+        self.assertIn('[tui]\ntheme = "dark"', text, "the account's own settings kept")
+        config.write_text('cli_auth_credentials_store = "keyring"\n', encoding="utf-8")
+        self.cli_env.homes(self.second)
+        self.assertEqual(config.read_text(encoding="utf-8"), 'cli_auth_credentials_store = "keyring"\n',
+                         "a choice already made is theirs")
+
+    def test_env_for_never_changes_the_process_environment(self):
+        before = dict(os.environ)
+        with accounts.as_account(self.second):
+            env = self.cli_env.env_for(base={"PATH": "x"})
+            plain = self.cli_env.env_for()
+        self.assertEqual(dict(os.environ), before)
+        self.assertEqual(env["PATH"], "x")
+        self.assertEqual(set(env) - {"PATH"}, {"CLAUDE_CONFIG_DIR", "CODEX_HOME"})
+        self.assertIn("CODEX_HOME", plain)
+        self.assertIsNot(plain, os.environ)
+        with accounts.as_account(self.first):
+            self.assertEqual(self.cli_env.env_for(base={"A": "1"}), {"A": "1"})
+        self.assertEqual(dict(os.environ), before)
+
+    def _shared_from_bea_to_cal(self, kind):
+        with accounts.as_account(self.second):
+            ep = self.m.create_endpoint("Bea's", kind=kind)
+            self.m.set_shares(ep["id"], [self.third])
+        return ep
+
+    def test_a_shared_connection_turn_runs_with_the_owners_homes(self):
+        from services import chat_service, chat_summary
+        ep = self._shared_from_bea_to_cal("claude_cli")
+        owner = self.cli_env.homes(self.second)
+        captured = {}
+
+        class FakeClient:
+            def __init__(self, options):
+                captured["claude"] = options.env
+
+            async def connect(self):
+                raise RuntimeError("stop here")
+
+            async def disconnect(self):
+                pass
+
+        async def fake_exec(*args, env=None, **kwargs):
+            captured["codex"] = env
+            raise RuntimeError("stop here")
+
+        with accounts.as_account(self.third):
+            record = self.m.get_endpoint(ep["id"])
+            self.assertTrue(record["shared"])
+            self.assertEqual(self.cli_env.account_for_endpoint(record), self.second)
+            self.assertIsNone(self.cli_env.account_for_endpoint({"id": "own"}), "an own connection: the current account")
+            self.assertNotEqual(self.cli_env.homes(), owner, "cal's own homes are not bea's")
+            # the brain a chat builds carries the owner
+            self.assertEqual(chat_service._build_brain(record, session_id=None).cli_account, self.second)
+            # and the spawn: capture what the Claude client and the Codex process are given
+            with patch.object(chat_summary, "ClaudeSDKClient", FakeClient), \
+                 patch.object(chat_summary.shutil, "which", return_value="codex"), \
+                 patch.object(chat_summary.asyncio, "create_subprocess_exec", fake_exec):
+                for kind in ("claude_cli", "codex_cli"):
+                    with self.assertRaises(RuntimeError):
+                        asyncio.run(chat_summary._model_summary({**record, "kind": kind}, None, "hi"))
+                self.assertEqual(captured["claude"], owner)
+                self.assertEqual(captured["codex"]["CODEX_HOME"], owner["CODEX_HOME"])
+                self.assertEqual(captured["codex"]["CLAUDE_CONFIG_DIR"], owner["CLAUDE_CONFIG_DIR"])
+                # not shared: cal's own
+                for kind in ("claude_cli", "codex_cli"):
+                    with self.assertRaises(RuntimeError):
+                        asyncio.run(chat_summary._model_summary({"id": "own", "kind": kind}, None, "hi"))
+                self.assertEqual(captured["claude"], self.cli_env.homes())
+                self.assertEqual(captured["codex"]["CODEX_HOME"], self.cli_env.homes()["CODEX_HOME"])
+                self.assertNotEqual(captured["claude"], owner)
+
+    def test_side_jobs_and_the_swarm_take_the_owners_homes_too(self):
+        from services import bot_side_jobs
+        from services.swarm_service import SwarmService
+        ep = self._shared_from_bea_to_cal("claude_cli")
+        with accounts.as_account(self.third):
+            record = self.m.get_endpoint(ep["id"])
+            options = bot_side_jobs.claude_options("C:/empty", None, "s", self.cli_env.account_for_endpoint(record))
+            self.assertEqual(options.env, self.cli_env.homes(self.second))
+            self.assertEqual(bot_side_jobs.claude_options("C:/empty", None, "s").env, self.cli_env.homes())
+            resolved = SwarmService._resolved(ep["id"])
+            self.assertEqual(self.cli_env.account_for_endpoint(resolved), self.second)
+
+    def test_the_login_readers_look_in_the_accounts_folder(self):
+        from core import model_catalog, model_discovery, quota_usage
+        from services import model_setup
+        claude = Path(self.cli_env.homes(self.second)["CLAUDE_CONFIG_DIR"])
+        codex = Path(self.cli_env.homes(self.second)["CODEX_HOME"])
+        (claude / ".credentials.json").write_text(json.dumps({"claudeAiOauth": {
+            "accessToken": "bea-token", "expiresAt": _now_ms() + 3_600_000}}), encoding="utf-8")
+        (codex / "auth.json").write_text(json.dumps({"tokens": {"access_token": "x"}}), encoding="utf-8")
+        with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": "", "CODEX_HOME": ""}), \
+             patch("platform.system", return_value="Linux"):
+            with accounts.as_account(self.second):
+                self.assertEqual(model_discovery._claude_cli_token(), "bea-token")
+                self.assertTrue(model_setup._codex_signed_in())
+                self.assertEqual(model_catalog._codex_cache_path(), str(codex / "models_cache.json"))
+                self.assertNotEqual(quota_usage._key("claude"), "claude", "quota readings are kept per account")
+            with accounts.as_account(self.third):
+                self.assertIsNone(model_discovery._claude_cli_token(), "cal has not signed in; bea's login is bea's")
+                self.assertFalse(model_setup._codex_signed_in())
+                self.assertEqual(model_discovery._claude_cli_token(self.second), "bea-token", "a shared connection's owner")
+            with accounts.as_account(self.first):
+                self.assertEqual(quota_usage._key("claude"), "claude")
+
+    def test_model_setup_status_and_sign_in_are_the_accounts(self):
+        from services import model_setup
+        codex = Path(self.cli_env.homes(self.second)["CODEX_HOME"])
+        (codex / "auth.json").write_text(json.dumps({"tokens": {"access_token": "x"}}), encoding="utf-8")
+        with patch.dict(os.environ, {"CODEX_HOME": "", "CLAUDE_CONFIG_DIR": ""}), \
+             patch.object(model_setup, "find_codex", return_value=None), \
+             patch.object(model_setup, "_claude_path", return_value=(None, "bundled")), \
+             patch.object(model_setup.antigravity_cli, "probe", return_value={}), \
+             patch.object(model_setup, "npm_available", return_value=False):
+            with accounts.as_account(self.second):
+                self.assertTrue(model_setup.status()["codex"]["signed_in"])
+            with accounts.as_account(self.third):
+                self.assertFalse(model_setup.status()["codex"]["signed_in"])
+        popen_env = {}
+        with patch.object(model_setup.platform, "system", return_value="Windows"), \
+             patch.object(model_setup, "find_codex", return_value="C:/codex.exe"), \
+             patch.object(model_setup.subprocess, "Popen", side_effect=lambda args, **kw: popen_env.update(kw["env"])):
+            with accounts.as_account(self.second):
+                model_setup.open_sign_in("codex")
+                self.assertEqual(popen_env["CODEX_HOME"], str(codex))
+                self.assertEqual(popen_env["CLAUDE_CONFIG_DIR"], self.cli_env.homes(self.second)["CLAUDE_CONFIG_DIR"])
+            popen_env.clear()
+            with accounts.as_account(self.first):
+                model_setup.open_sign_in("codex")
+                self.assertNotIn("CODEX_HOME", popen_env, "the first admin signs in to the machine default")
+
+    def test_mcp_imports_read_only_the_accounts_own_folders(self):
+        from services import bot_setup_import
+        Path(self.cli_env.claude_json(self.second)).write_text(json.dumps(
+            {"mcpServers": {"bea-server": {"command": "npx", "args": ["bea"]}}}), encoding="utf-8")
+        machine = TemporaryDirectory(prefix="kairos-machine-home-", dir=tempfile.gettempdir())
+        self.addCleanup(machine.cleanup)
+        (Path(machine.name) / ".claude.json").write_text(json.dumps(
+            {"mcpServers": {"admin-server": {"command": "npx", "args": ["admin"]}}}), encoding="utf-8")
+        with patch("pathlib.Path.home", return_value=Path(machine.name)), \
+             patch.dict(os.environ, {"CODEX_HOME": "", "CLAUDE_CONFIG_DIR": ""}):
+            with accounts.as_account(self.second):
+                names = {row["name"] for row in bot_setup_import.scan(include_skills=False)["mcp"]}
+            with accounts.as_account(self.first):
+                first = {row["name"] for row in bot_setup_import.scan(include_skills=False)["mcp"]}
+        self.assertEqual(names, {"bea-server"}, "never the first admin's configs")
+        self.assertIn("admin-server", first)
+        self.assertNotIn("bea-server", first)
+
+
 if __name__ == "__main__":
     unittest.main()

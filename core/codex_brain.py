@@ -60,7 +60,7 @@ from core.custom_tabs import USER_TABS_DIR, ensure_user_tab_dirs
 from core.middleware import local_api_base
 from core.session_manager import sent_text, session_manager
 from core.vault import resolve_vault_dir
-from core import projects, runs, system_prompt
+from core import cli_env, projects, runs, system_prompt
 
 # The command line Kairos's tools are invoked through (see
 # core/system_prompt.py's for_codex() and mcp_servers/hive_mind_cli.py's own
@@ -129,7 +129,7 @@ def _reported_suffix(failure: str | None, stderr_tail: str) -> str:
     return f" Codex said: {said}" if said else ""
 
 
-def _writable_roots_override() -> str:
+def _writable_roots_override(account_id: str | None = None) -> str:
     """Add Kairos user-tab source dirs without dropping the user's Codex roots.
 
     Codex config overrides replace arrays. Preserve writable roots from the
@@ -137,7 +137,7 @@ def _writable_roots_override() -> str:
     folder-tab source and the retained legacy split source directories.
     Only this setting is read; no config content is passed to the model.
     """
-    codex_home = os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
+    codex_home = cli_env.codex_dir(account_id)
     roots: list[str] = []
     config_path = os.path.join(codex_home, "config.toml")
     try:
@@ -293,6 +293,9 @@ class CodexBrain:
         self._stop_confirmed = True
         self._cancelled = False
 
+    # The account whose Codex sign-in this brain's turns use; None is the current account (core/cli_env.py).
+    cli_account: str | None = None
+
     @staticmethod
     def _codex_path() -> str:
         from core.codex_cli import find_codex
@@ -344,7 +347,7 @@ class CodexBrain:
         auto = self.is_admin and self.permission_mode == "auto"
         config_args = disabled_feature_args()
         if not auto:
-            config_args += ["-c", f"sandbox_workspace_write.writable_roots={_writable_roots_override()}"]
+            config_args += ["-c", f"sandbox_workspace_write.writable_roots={_writable_roots_override(self.cli_account)}"]
         if self.effort:
             config_args += ["-c", f'model_reasoning_effort="{self.effort}"']
         if self.thread_id:
@@ -557,7 +560,8 @@ class CodexBrain:
         # whatever was on 8420. The token is revoked when the turn ends.
         tool_token = tool_access.issue(self.session_id, self.is_admin, self.agent_id, self.model,
                                        integration_ids=self.integration_ids, read_only=self.read_only)
-        env = {**os.environ, "JARVIS_TOOL_TOKEN": tool_token, "JARVIS_API_BASE": local_api_base()}
+        env = cli_env.env_for(self.cli_account, {**os.environ, "JARVIS_TOOL_TOKEN": tool_token,
+                                                 "JARVIS_API_BASE": local_api_base()})
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -611,7 +615,7 @@ class CodexBrain:
         if not self.thread_id:
             return None
         if self._rollout_file is None:
-            home = os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
+            home = cli_env.codex_dir(self.cli_account)
             found = glob.glob(os.path.join(home, "sessions", "*", "*", "*",
                                            f"rollout-*-{self.thread_id}.jsonl"))
             if not found:

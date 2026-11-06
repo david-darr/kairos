@@ -16,7 +16,7 @@ import logging
 from datetime import datetime, time, timedelta
 from pathlib import Path
 
-from core import accounts as app_accounts, model_catalog, model_endpoints, projects
+from core import accounts as app_accounts, cli_env, model_catalog, model_endpoints, projects
 from core.swarm import accounts, architect
 from core.swarm.adapters import WorkerContext, build_worker, capability_for
 from core.swarm.budget import BudgetLimit
@@ -153,7 +153,8 @@ class SwarmService:
         base_url, model, api_key, num_ctx = model_endpoints.resolve_runtime(endpoint_id)
         return {"id": endpoint_id, "name": record.get("name") or endpoint_id,
                 "kind": record.get("kind") or "api", "base_url": base_url, "model": model,
-                "api_key": api_key, "num_ctx": num_ctx}
+                "api_key": api_key, "num_ctx": num_ctx,
+                "shared": bool(record.get("shared")), "owner_account": record.get("owner_account")}
 
     @staticmethod
     def _connection(endpoint_id):
@@ -190,7 +191,8 @@ class SwarmService:
             if not reason and endpoint.get("kind") == "codex_cli":
                 from core.swarm.adapters.codex_worker import installation_blocker, model_record
                 reason = installation_blocker()
-                if not reason and model_record(agent.get("model") or endpoint.get("model")) is None:
+                home = cli_env.codex_dir(cli_env.account_for_endpoint(model_endpoints.get_endpoint(endpoint["id"])))
+                if not reason and model_record(agent.get("model") or endpoint.get("model"), home) is None:
                     reason = "Choose an available model from the Codex CLI catalog."
             if reason:
                 problems.append(f"{agent['name']} ({endpoint['name']}): {reason}")
@@ -265,7 +267,8 @@ class SwarmService:
                                          memory=memory, scheduled=scheduled,
                                          jarvis_agent_id=agent.get("jarvis_agent_id")),
                 scratch_dir=str(scratch), model=agent.get("model") or endpoint.get("model") or None,
-                effort=agent.get("effort") or None, env={}))
+                effort=agent.get("effort") or None,
+                env=cli_env.homes(cli_env.account_for_endpoint(endpoint))))
 
         return factory
 

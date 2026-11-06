@@ -118,14 +118,14 @@ def _codex_cache_path() -> str:
     """`$CODEX_HOME` is Codex's own documented override (its `-c` help text
     refers to `$CODEX_HOME/config.toml`), so honour it rather than assuming
     the default location."""
-    home = os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
-    return os.path.join(home, "models_cache.json")
+    from core import cli_env
+    return os.path.join(cli_env.codex_dir(), "models_cache.json")
 
 
 # (mtime, size) -> parsed models. The cache file is ~220KB and the picker can
 # be re-rendered on every session switch, so it is parsed only when the file
 # on disk actually changes.
-_codex_cache: tuple[tuple[float, int], list[dict]] | None = None
+_codex_cache: tuple[tuple[str, float, int], list[dict]] | None = None
 _antigravity_live: tuple[float, list[dict]] | None = None
 
 
@@ -143,13 +143,15 @@ def _antigravity_models():
         for level in ("low", "medium", "high")), source="curated")
 
 
-_codex_live: tuple[float, list[dict]] | None = None
+# (expires, models, the Codex folder they were read for): one account's live list is never another's.
+_codex_live: tuple[float, list[dict], str] | None = None
 
 
-def remember_codex_live(models: list[dict], ttl_seconds: int = 300) -> None:
+def remember_codex_live(models: list[dict], ttl_seconds: int = 300, account_id: str | None = None) -> None:
     """Share the app-server's current effort/capacity data with validation."""
     global _codex_live
-    _codex_live = (time.monotonic() + ttl_seconds, models)
+    from core import cli_env
+    _codex_live = (time.monotonic() + ttl_seconds, models, cli_env.codex_dir(account_id))
 
 
 def _load_codex_models() -> list[dict]:
@@ -162,7 +164,7 @@ def _load_codex_models() -> list[dict]:
     if stat.st_size > _MAX_CACHE_BYTES:
         logger.warning("model_catalog: %s is unexpectedly large (%d bytes) — not parsed.", path, stat.st_size)
         return []
-    stamp = (stat.st_mtime, stat.st_size)
+    stamp = (path, stat.st_mtime, stat.st_size)
     if _codex_cache is not None and _codex_cache[0] == stamp:
         return _codex_cache[1]
 
@@ -232,7 +234,8 @@ def list_models(kind: str) -> list[dict]:
     if kind == "antigravity_cli":
         return _antigravity_models()
     if kind == "codex_cli":
-        if _codex_live and time.monotonic() < _codex_live[0]:
+        from core import cli_env
+        if _codex_live and time.monotonic() < _codex_live[0] and _codex_live[2] == cli_env.codex_dir():
             return _codex_live[1]
         return _load_codex_models()
     if kind == "claude_cli":

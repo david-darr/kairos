@@ -85,22 +85,24 @@ def available(bot_id: str) -> bool:
 
 # -- engines -----------------------------------------------------------------------------------------------
 
-def claude_options(cwd: str, model: Optional[str], system: str):
+def claude_options(cwd: str, model: Optional[str], system: str, cli_account: Optional[str] = None):
     """The Claude Code options of a side job. Exposed so a test can pin what makes it tool-free."""
     from claude_agent_sdk import ClaudeAgentOptions, PermissionResultDeny
+    from core import cli_env
 
     async def deny(name, arguments, context):
         return PermissionResultDeny(message="Background memory jobs cannot use tools", interrupt=True)
 
     return ClaudeAgentOptions(cwd=cwd, model=model or None, tools=[], mcp_servers={}, allowed_tools=[],
                               setting_sources=[], system_prompt=system, can_use_tool=deny,
-                              permission_mode="default", max_turns=1)
+                              permission_mode="default", max_turns=1, env=cli_env.homes(cli_account))
 
 
-async def _run_claude(model: Optional[str], prompt: str, system: str, timeout: float) -> tuple:
+async def _run_claude(model: Optional[str], prompt: str, system: str, timeout: float,
+                      cli_account: Optional[str] = None) -> tuple:
     from claude_agent_sdk import AssistantMessage, ClaudeSDKClient, ResultMessage, TextBlock
     with tempfile.TemporaryDirectory(prefix="kairos-sidejob-") as cwd:
-        client = ClaudeSDKClient(options=claude_options(cwd, model, system))
+        client = ClaudeSDKClient(options=claude_options(cwd, model, system, cli_account))
         parts, usage = [], None
         try:
             async with asyncio.timeout(timeout):
@@ -140,7 +142,8 @@ async def _call(candidate: dict, prompt: str, system: str, timeout: float) -> tu
     if _runner is not None:
         return await _runner(endpoint, candidate["model"], prompt, system, timeout)
     if endpoint["kind"] == "claude_cli":
-        return await _run_claude(candidate["model"], prompt, system, timeout)
+        from core import cli_env
+        return await _run_claude(candidate["model"], prompt, system, timeout, cli_env.account_for_endpoint(endpoint))
     return await _run_api(endpoint, candidate["model"], prompt, system, timeout)
 
 

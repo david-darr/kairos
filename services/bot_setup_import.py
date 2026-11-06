@@ -17,7 +17,7 @@ import tomllib
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from core import integrations
+from core import cli_env, integrations
 from services import bot_mcp_config
 from services.bot_mcp_config import McpConfigError
 
@@ -43,6 +43,10 @@ def _inside(path: Path, home: Path) -> bool:
 
 
 def _locations(home: Path) -> list[tuple[str, Path, str]]:
+    own = cli_env.import_root()
+    if own and home == Path(own).resolve():
+        # An account with its own Claude and Codex sign-in imports only from those folders.
+        return [("Claude Code", Path(cli_env.claude_json()), "json"), ("Codex", Path(cli_env.codex_dir()) / "config.toml", "toml")]
     appdata = Path(os.environ.get("APPDATA") or home / "AppData" / "Roaming")
     codex = Path(os.environ.get("CODEX_HOME") or home / ".codex")
     return [("Claude Code", home / ".claude.json", "json"), ("Claude Code", home / ".mcp.json", "json"),
@@ -128,7 +132,7 @@ def _entry(tool: str, name: str, blob: dict) -> dict:
 
 def scan(home=None, *, seconds: float = 2.0, clock=time.monotonic, include_skills: bool = True) -> dict:
     """Preview what other tools left behind. Reads only."""
-    home = Path(home or Path.home()).resolve()
+    home = Path(home or cli_env.import_root() or Path.home()).resolve()
     deadline, limited, seen, mcp = clock() + seconds, False, set(), []
     for tool, path, kind in _locations(home):
         if clock() > deadline or len(mcp) >= MAX_SERVERS:
@@ -170,7 +174,7 @@ def apply(selections: dict, *, home=None, bot_id=None) -> dict:
         raise McpConfigError("Choose at least one thing to import.")
     if len(wanted_mcp) > MAX_SELECT:
         raise McpConfigError(f"Import up to {MAX_SELECT} servers at a time.", 413)
-    home_path = Path(home or Path.home()).resolve()
+    home_path = Path(home or cli_env.import_root() or Path.home()).resolve()
     results = {"mcp": [], "skills": []}
     if wanted_mcp:
         built = {}

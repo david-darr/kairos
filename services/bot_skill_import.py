@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+from core import cli_env
 from services import bot_skill_library, bot_skills
 from services.bot_skills import MAX_SKILL, SkillError
 
@@ -287,10 +288,14 @@ def scan_setup_skills(home=None, *, seconds=2, clock=time.monotonic, locations=N
     """Preview the skills other AI tools left on this computer. Reads only; copies nothing.
 
     A skill the scanner flags is listed with its warnings and comes in switched off, like every import."""
-    home = Path(home or Path.home()).resolve()
+    home = Path(home or cli_env.import_root() or Path.home()).resolve()
     deadline, total, limited, found = clock() + seconds, 0, False, []
     codex = Path(os.environ.get("CODEX_HOME") or home / ".codex")
-    for tool, root in locations or [("Claude Code", home / ".claude" / "skills"), ("Codex", codex / "skills")]:
+    defaults = [("Claude Code", home / ".claude" / "skills"), ("Codex", codex / "skills")]
+    own = cli_env.import_root()
+    if own and home == Path(own).resolve():  # an account with its own sign-ins reads only its own folders
+        defaults = [("Claude Code", Path(cli_env.claude_dir()) / "skills"), ("Codex", Path(cli_env.codex_dir()) / "skills")]
+    for tool, root in locations or defaults:
         if not root.is_dir() or _linked(root):
             continue
         for folder in sorted(p for p in root.iterdir() if p.is_dir()):

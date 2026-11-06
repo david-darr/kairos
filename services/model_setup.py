@@ -28,7 +28,7 @@ import zipfile
 import httpx
 import claude_agent_sdk
 
-from core import antigravity_cli, claude_cli, model_discovery, model_endpoints, permissions
+from core import antigravity_cli, claude_cli, cli_env, model_discovery, model_endpoints, permissions
 from core.codex_cli import find_codex, managed_bin
 from core.providers import openai_compatible
 from services.forge_apps import child_env, command_args, resolve_command, CHOICES
@@ -56,7 +56,7 @@ def _claude_path():
 
 
 def _codex_signed_in():
-    path = Path(os.environ.get('CODEX_HOME') or Path.home() / '.codex') / 'auth.json'
+    path = Path(cli_env.codex_dir()) / 'auth.json'  # the current account's own Codex sign-in
     try:
         if path.stat().st_size > 1024 * 1024:
             return False
@@ -95,6 +95,8 @@ def status():
             pass
     connections = {kind: [] for kind in ('claude_cli', 'codex_cli', 'antigravity_cli', 'api', 'local')}
     for ep in model_endpoints.list_endpoints():
+        if ep.get('shared'):
+            continue  # another account's connection is not this account's own setup
         connections.setdefault(ep['kind'], []).append({k: ep[k] for k in ('id', 'name', 'kind', 'model')})
     return {'claude': {'available': bool(claude), 'source': source,
                        'signed_in': bool(model_discovery._claude_cli_token())},
@@ -356,7 +358,7 @@ def cancel_install(job_id):
     return {'ok': True}
 
 
-def _mac_launcher(args):
+def _mac_launcher(args, extra_env=None):
     # Terminal opens executable files, but does not forward CLI arguments.
     # A short Python .command executable preserves `codex login` as argv.
     # Its contents are Python, never a shell command or AppleScript string.
@@ -364,9 +366,9 @@ def _mac_launcher(args):
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / ('sign-in-' + uuid.uuid4().hex + '.command')
     source = (f'#!/usr/bin/env -S {shlex.quote(sys.executable)}\n'
-              'import pathlib, subprocess\n'
+              'import os, pathlib, subprocess\n'
               'try:\n'
-              f'    subprocess.run({args!r}, shell=False)\n'
+              f'    subprocess.run({args!r}, shell=False, env={{**os.environ, **{dict(extra_env or {})!r}}})\n'
               'finally:\n'
               '    pathlib.Path(__file__).unlink(missing_ok=True)\n')
     path.write_text(source, encoding='utf-8')
@@ -386,15 +388,21 @@ def open_sign_in(kind):
     if not args:
         raise ValueError('The sign-in app is not installed on this computer.')
     system = platform.system()
-    kwargs = {'shell': False, 'env': child_env(0)}
+    # The account's own Claude and Codex folders, so the console signs in to THIS account's login (the first
+    # admin's is the machine default and adds nothing). child_env strips them, so they are added back here.
+    homes = cli_env.homes()
+    kwargs = {'shell': False, 'env': {**child_env(0), **homes}}
     if system == 'Windows':
         kwargs['creationflags'] = subprocess.CREATE_NEW_CONSOLE
     elif system == 'Darwin':
-        args = ['open', '-a', 'Terminal', _mac_launcher(args)]
+        # Terminal does not inherit this environment, so the launcher carries the folders itself.
+        args = ['open', '-a', 'Terminal', _mac_launcher(args, homes) if homes else _mac_launcher(args)]
     else:
         terminal = next((shutil.which(t) for t in ('x-terminal-emulator', 'gnome-terminal', 'xterm') if shutil.which(t)), None)
         if not terminal:
             raise ValueError('No terminal app was found. Install a terminal, then try sign-in again.')
+        if homes:  # a terminal server (gnome-terminal) ignores our environment: set it inside the window
+            args = ['env', *(f'{key}={value}' for key, value in homes.items()), *args]
         args = [terminal, *(['--'] if Path(terminal).name == 'gnome-terminal' else ['-e']), *args]
     subprocess.Popen(args, **kwargs)
     return {'ok': True, 'message': 'Finish signing in in the window that opened.'}

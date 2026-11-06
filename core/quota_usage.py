@@ -20,7 +20,7 @@ from pathlib import Path
 
 import httpx
 
-from core import model_endpoints, model_marks, token_usage
+from core import cli_env, model_endpoints, model_marks, token_usage
 
 CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 REFRESH_SECONDS = 300
@@ -120,8 +120,15 @@ def parse_codex_limits(data):
     return windows
 
 
+def _key(name):
+    """The cache slot of a provider reading: the name for the machine default's sign-in, else the name plus
+    the current account's own folder, so one account's quota is never shown to another."""
+    folder = cli_env.homes().get(cli_env.CLAUDE_VAR)
+    return f"{name}@{folder}" if folder else name
+
+
 def _claude_windows():
-    path = Path.home() / ".claude" / ".credentials.json"
+    path = Path(cli_env.claude_dir()) / ".credentials.json"
     credentials = json.loads(path.read_text(encoding="utf-8"))
     oauth = credentials.get("claudeAiOauth") or {}
     token = oauth.get("accessToken")
@@ -133,7 +140,7 @@ def _claude_windows():
             "Authorization": f"Bearer {token}", "anthropic-beta": "oauth-2025-04-20",
         })
     if response.status_code == 429:
-        _retry_after["claude"] = time.monotonic() + 300
+        _retry_after[_key("claude")] = time.monotonic() + 300
         raise RateLimited("Claude usage is rate limited")
     if response.status_code == 401:
         raise SignInNeeded("Claude Code sign-in was refused")
@@ -159,7 +166,7 @@ def _codex_windows():
     codex = shutil.which("codex")
     if not codex:
         raise RuntimeError("Codex CLI is unavailable")
-    process = subprocess.Popen([codex, "app-server"], stdin=subprocess.PIPE,
+    process = subprocess.Popen([codex, "app-server"], stdin=subprocess.PIPE, env=cli_env.env_for(),
                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                text=True, encoding="utf-8", bufsize=1,
                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -202,12 +209,13 @@ def _provider(name, reader, force=False):
     `force` is set (a click on its ring). Every result carries a `status` -
     ok, stale, needs_sign_in, rate_limited or unavailable - and a fixed note."""
     now = time.monotonic()
-    old = _cache.get(name)
+    slot = _key(name)
+    old = _cache.get(slot)
     if force and old and now - old["checked"] < FORCED_REFRESH_SECONDS:
         raise RefreshThrottled(name)
     if old and not force and now - old["checked"] < REFRESH_SECONDS:
         return {**old["value"], "stale": False}
-    if now < _retry_after.get(name, 0):
+    if now < _retry_after.get(slot, 0):
         return _failed(name, old, "rate_limited")
     try:
         windows = reader()
@@ -215,14 +223,14 @@ def _provider(name, reader, force=False):
             raise RuntimeError("No quota windows returned")
         value = {"provider": name, "status": "ok", "note": "", "windows": windows,
                  "updated_at": time.time(), "stale": False}
-        _cache[name] = {"checked": now, "value": value}
+        _cache[slot] = {"checked": now, "value": value}
         return value
     except NoQuotaReported:
         # A settled answer, not a failure: cached like a reading so the CLI is
         # not asked again on every poll.
         value = {"provider": name, "status": "no_quota", "note": NOTES["no_quota"], "windows": [],
                  "updated_at": time.time(), "stale": False}
-        _cache[name] = {"checked": now, "value": value}
+        _cache[slot] = {"checked": now, "value": value}
         return value
     except SignInNeeded:
         # Sign-in problems are not retried on a timer: nothing changes until
@@ -231,7 +239,7 @@ def _provider(name, reader, force=False):
     except RateLimited:
         return _failed(name, old, "rate_limited")
     except Exception:
-        _retry_after[name] = max(_retry_after.get(name, 0), now + 60)
+        _retry_after[slot] = max(_retry_after.get(slot, 0), now + 60)
         return _failed(name, old, "unavailable")
 
 
@@ -340,7 +348,7 @@ async def get_usage_overlay_async(force_provider=None):
 
 
 _bot_plan_lock = threading.Lock()
-_bot_plan_cache = None
+_bot_plan_cache = {}  # per sign-in (_key), so one account never gets another's plan
 
 
 def get_bot_plan(refresh=False):
@@ -349,12 +357,12 @@ def get_bot_plan(refresh=False):
     Reuses provider readers and their stricter backoff. No credentials or
     request exceptions leave quota_usage.
     """
-    global _bot_plan_cache
     import copy
     with _bot_plan_lock:
         now = time.monotonic()
-        if _bot_plan_cache and now - _bot_plan_cache[0] < 45:
-            return copy.deepcopy(_bot_plan_cache[1])
+        cached = _bot_plan_cache.get(_key("plan"))
+        if cached and now - cached[0] < 45:
+            return copy.deepcopy(cached[1])
         if refresh:
             for name, (kind, reader) in READERS.items():
                 if any(e.get("kind") == kind for e in model_endpoints.list_endpoints()):
@@ -363,5 +371,5 @@ def get_bot_plan(refresh=False):
                     except RefreshThrottled:
                         pass
         value = get_usage_overlay()
-        _bot_plan_cache = (now, value)
+        _bot_plan_cache[_key("plan")] = (now, value)
         return copy.deepcopy(value)

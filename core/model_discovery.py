@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from core import model_catalog
+from core import cli_env, model_catalog
 
 _TTL_SECONDS = 300
 _MAX_MODELS = 1000
@@ -47,12 +47,14 @@ def provider_for_endpoint(endpoint: dict) -> str | None:
     return None
 
 
-def _claude_cli_token() -> str | None:
-    """Borrow the current access token, read-only. Claude Code owns refresh."""
-    root = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+def _claude_cli_token(account_id: str | None = None) -> str | None:
+    """Borrow the current access token, read-only. Claude Code owns refresh. The account's own sign-in
+    (core/cli_env.py): the current account's, or the one named, e.g. a shared connection's owner."""
+    root = cli_env.claude_dir(account_id)
     path = os.path.join(root, ".credentials.json")
     candidates = []
-    if platform.system() == "Darwin":
+    # The macOS keychain entry is one per machine (the first admin's), so another account never reads it.
+    if platform.system() == "Darwin" and not cli_env.homes(account_id):
         try:
             result = subprocess.run(
                 ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
@@ -139,14 +141,14 @@ async def _openai_models(token: str) -> list[dict]:
     return sorted(out[:_MAX_MODELS], key=lambda m: m["id"], reverse=True)
 
 
-async def _codex_cli_models() -> list[dict]:
+async def _codex_cli_models(account_id: str | None = None) -> list[dict]:
     """Ask the installed CLI's app server, so discovery uses its own login."""
     from core.codex_cli import find_codex
     executable = find_codex()
     if not executable:
         return []
     process = await asyncio.create_subprocess_exec(
-        executable, "app-server", stdin=asyncio.subprocess.PIPE,
+        executable, "app-server", stdin=asyncio.subprocess.PIPE, env=cli_env.env_for(account_id),
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
     async def send(message: dict) -> None:
         process.stdin.write((json.dumps(message) + "\n").encode())
@@ -230,12 +232,13 @@ async def list_for_endpoint(endpoint: dict, *, force: bool = False) -> list[dict
             return []
         return cached[1] if cached else model_catalog.list_models(kind)
     if kind == "codex_cli":
-        cache_key = "codex_cli"
+        owner = cli_env.account_for_endpoint(endpoint)
+        cache_key = "codex_cli:" + cli_env.codex_dir(owner)
         cached = _cache.get(cache_key)
         if cached and not force and time.monotonic() - cached[0] < _TTL_SECONDS:
             return cached[1]
         try:
-            live = await _codex_cli_models()
+            live = await _codex_cli_models(owner)
         except (OSError, ValueError, asyncio.TimeoutError):
             live = []
         if live:
@@ -245,13 +248,13 @@ async def list_for_endpoint(endpoint: dict, *, force: bool = False) -> list[dict
                 if cached and not entry.get("context_window"):
                     entry["context_window"] = cached.get("context_window")
                     entry["effective_context_percent"] = cached.get("effective_context_percent")
-            model_catalog.remember_codex_live(live, _TTL_SECONDS)
+            model_catalog.remember_codex_live(live, _TTL_SECONDS, owner)
             _cache[cache_key] = (time.monotonic(), live)
             return live
         return cached[1] if cached else model_catalog.list_models(kind)
     if provider is None:
         return []
-    token = _claude_cli_token() if kind == "claude_cli" else _api_key(endpoint)
+    token = _claude_cli_token(cli_env.account_for_endpoint(endpoint)) if kind == "claude_cli" else _api_key(endpoint)
     fallback = model_catalog.list_models("claude_cli") if kind == "claude_cli" else []
     if not token:
         return fallback

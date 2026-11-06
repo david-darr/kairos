@@ -28,7 +28,7 @@ import tempfile
 
 import httpx
 
-from core import ollama_client
+from core import cli_env, ollama_client
 from core.codex_features import disabled_feature_args
 
 MAX_SPECIALISTS = 5
@@ -161,7 +161,7 @@ async def _ask_claude(endpoint: dict, goal: str) -> str:
     # scratch cwd exists only because the CLI wants somewhere to be.
     options = ClaudeAgentOptions(cwd=scratch, max_turns=1, setting_sources=[], allowed_tools=[],
                                  system_prompt="Answer with JSON only.", model=endpoint.get("model") or None,
-                                 permission_mode="default")
+                                 permission_mode="default", env=cli_env.homes(cli_env.account_for_endpoint(endpoint)))
     client = ClaudeSDKClient(options=options)
     parts: list[str] = []
     try:
@@ -191,7 +191,7 @@ async def _ask_codex(endpoint: dict, goal: str) -> str:
     if endpoint.get("model"):
         args += ["-m", endpoint["model"]]
     args.append("-")
-    environment = {**os.environ}
+    environment = cli_env.env_for(cli_env.account_for_endpoint(endpoint))
     environment.pop("JARVIS_TOOL_TOKEN", None)
     process = await asyncio.create_subprocess_exec(
         *args, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,

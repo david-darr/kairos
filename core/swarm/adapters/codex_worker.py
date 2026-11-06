@@ -90,9 +90,9 @@ def config_args(values):
     return result
 
 
-def model_record(model):
+def model_record(model, home=None):
     """Public CLI model metadata only; authentication files are never read."""
-    home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+    home = Path(home or os.environ.get("CODEX_HOME") or Path.home() / ".codex")
     path = home / "models_cache.json"
     try:
         if path.stat().st_size > 8 * 1024 * 1024:
@@ -214,7 +214,7 @@ class CodexWorker:
 
     def _args(self, codex, scratch, assignment):
         model = self.context.model or (self.context.endpoint or {}).get("model")
-        record = model_record(model)
+        record = model_record(model, (getattr(self.context, "env", None) or {}).get("CODEX_HOME"))
         if record is None:
             raise RuntimeError("Choose a model from the Codex CLI catalog before starting this worker.")
         # Native file editing is selected by model metadata, independently of

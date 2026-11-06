@@ -10,7 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from core import model_catalog, model_discovery, model_endpoints, model_marks, quota_usage, token_usage
+from core import cli_env, model_catalog, model_discovery, model_endpoints, model_marks, quota_usage, token_usage
 from core.middleware import require_admin, require_user
 from core.providers import openai_compatible
 
@@ -194,6 +194,7 @@ async def test_endpoint(endpoint_id: str, user: str = Depends(require_admin)) ->
         # a chat would use, not a fake "always ok" response.
         from core.brain import Brain
         brain = Brain(model=ep.get("model") or None)
+        brain.cli_account = cli_env.account_for_endpoint(ep)
         try:
             await brain.connect()
             await brain.run_turn("ping")
@@ -215,6 +216,7 @@ async def test_endpoint(endpoint_id: str, user: str = Depends(require_admin)) ->
         # chat would use rather than faking an "always ok" response.
         from core.codex_brain import CodexBrain
         brain = CodexBrain(model=ep.get("model") or None)
+        brain.cli_account = cli_env.account_for_endpoint(ep)
         try:
             await brain.connect()
             await brain.run_turn("ping")

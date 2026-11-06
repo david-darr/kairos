@@ -13,7 +13,7 @@ from claude_agent_sdk import (
 )
 from fastapi import HTTPException
 
-from core import model_endpoints
+from core import cli_env, model_endpoints
 from core.codex_brain import _kill_process_tree
 from core.codex_features import disabled_feature_args
 from core.providers import openai_compatible
@@ -96,11 +96,11 @@ async def _deny_tool(name, arguments, context):
     return PermissionResultDeny(message="Chat summaries cannot use tools", interrupt=True)
 
 
-async def _claude_summary(prompt: str, model: str | None) -> str:
+async def _claude_summary(prompt: str, model: str | None, cli_account: str | None = None) -> str:
     with tempfile.TemporaryDirectory(prefix="jarvis-summary-") as cwd:
         options = ClaudeAgentOptions(
             cwd=cwd, model=model or None, tools=[], mcp_servers={}, allowed_tools=[],
-            can_use_tool=_deny_tool, permission_mode="default",
+            can_use_tool=_deny_tool, permission_mode="default", env=cli_env.homes(cli_account),
         )
         client = ClaudeSDKClient(options=options)
         parts = []
@@ -120,7 +120,7 @@ async def _claude_summary(prompt: str, model: str | None) -> str:
             await client.disconnect()
 
 
-async def _codex_summary(prompt: str, model: str | None) -> str:
+async def _codex_summary(prompt: str, model: str | None, cli_account: str | None = None) -> str:
     codex = shutil.which("codex")
     if not codex:
         raise RuntimeError("Codex CLI is unavailable")
@@ -133,7 +133,7 @@ async def _codex_summary(prompt: str, model: str | None) -> str:
         if model:
             args += ["-m", model]
         args.append("-")
-        env = {key: value for key, value in os.environ.items()
+        env = {key: value for key, value in cli_env.env_for(cli_account).items()
                if key not in ("JARVIS_TOOL_TOKEN", "JARVIS_API_BASE")}
         proc = await asyncio.create_subprocess_exec(*args, stdin=asyncio.subprocess.PIPE,
                                                      stdout=asyncio.subprocess.PIPE,
@@ -161,16 +161,17 @@ async def _codex_summary(prompt: str, model: str | None) -> str:
 
 async def _model_summary(endpoint: dict, model: str | None, prompt: str) -> str:
     if endpoint["kind"] == "claude_cli":
-        return await _claude_summary(prompt, model)
+        return await _claude_summary(prompt, model, cli_env.account_for_endpoint(endpoint))
     if endpoint["kind"] == "antigravity_cli":
         from core.antigravity_brain import AntigravityBrain
         brain = AntigravityBrain(model=model, read_only=True)
+        brain.cli_account = cli_env.account_for_endpoint(endpoint)
         try:
             return (await brain.run_turn(prompt)).strip()
         finally:
             await brain.disconnect()
     if endpoint["kind"] == "codex_cli":
-        return await _codex_summary(prompt, model)
+        return await _codex_summary(prompt, model, cli_env.account_for_endpoint(endpoint))
     base_url, runtime_model, api_key, num_ctx = model_endpoints.resolve_runtime(endpoint["id"])
     return (await openai_compatible.run_turn(
         base_url, model if model is not None else runtime_model, api_key,

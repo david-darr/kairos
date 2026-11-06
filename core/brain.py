@@ -34,7 +34,7 @@ from claude_agent_sdk import (
 )
 from claude_agent_sdk.types import StreamEvent
 
-from core import chat_tasks, claude_cli, custom_tabs, hive_mind_server, image_gen, integrations, mcp_oauth, permissions, projects, runs, settings as settings_store, system_prompt, tool_registry
+from core import chat_tasks, claude_cli, cli_env, custom_tabs, hive_mind_server, image_gen, integrations, mcp_oauth, permissions, projects, runs, settings as settings_store, system_prompt, tool_registry
 from core.constants import DATA_DIR, REPO_CODE_DIRS
 from core.middleware import local_api_base
 from core.vault import resolve_vault_dir
@@ -116,6 +116,10 @@ class Brain:
     """One Brain per conversation session. Create one, call connect() once, then
     run_turn(text)/run_turn_stream(text) per incoming message, and disconnect()
     on shutdown."""
+
+    # The account whose Claude sign-in this brain's turns use; None is the current account. The chat builder
+    # sets the OWNER's account on a shared connection (core/cli_env.py).
+    cli_account: str | None = None
 
     def __init__(self, vault_dir: str | None = None, cwd_override: str | None = None,
                  integration_ids: list[str] | None = None, session_id: str | None = None,
@@ -387,6 +391,8 @@ class Brain:
 
         return ClaudeAgentOptions(
             cli_path=claude_cli.preferred_cli_path(),
+            # This account's own Claude sign-in ({} for the first admin: the machine default).
+            env=cli_env.homes(self.cli_account),
             can_use_tool=self._permission,
             cwd=self.cwd_override or self.vault_dir,
             # Full read/write on jarvis-app's own source (David's ask
