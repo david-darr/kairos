@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "4d3385eb5f9dd65e5e5bdb751fdc5f38b88a83446219fb2148340559fade163b",
+  "app.js": "ed775d44c11e8ae27252dca7110b3be2955d7e454028c56da6c571fabc7c7b6e",
   "fixtures.js": "3d2bfea869aebb649fde25b11598a456f82df6b977236f8f0ab61d269bb329da",
   "index.html": "14d95158c3292ac91495f3ec8395c0acb68f67bf3e3a4097a9f287e6c12d3c71",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -1735,7 +1735,8 @@
   "static/js/views/library.js": "07179a2a54bfa81e727447d341052570bb50f88a67478e36a3aa9fbad06726b0",
   "static/js/views/mobileLaunch.js": "a5872b9d87e27c219b140095c39655e1b3622c3a03cd1c945ffc7c57c85c5c16",
   "static/js/views/notes.js": "6691d323ca3aa03b0d8422ab4b368cc70076dc57b217e53f420283361d2642be",
-  "static/js/views/settings.js": "0ec153b1d360cf9531bdabfd569f6ec3f24c0574f6430bb346b478b07a074e62",
+  "static/js/views/phonePanel.js": "c0ee26fbf44f11dbeb20556afc028dc8c5dfbe571f7ffe840b1d8ca4d1fb8bc2",
+  "static/js/views/settings.js": "d184c8950ddd10dfbeca0d1e6f989f9775b155c06d7ea9d658d0f6de6e711b17",
   "static/js/views/settingsChannels.js": "55542d563e6b62ba1f6284de5b2bcfaaed16ab3a3c644b4463f61b32ee8d7e47",
   "static/js/views/settingsHooks.js": "aff3d447199c55e266cbc4f20dbe734c6cf526d9dc3bd750ef5e60da645293a8",
   "static/js/views/settingsNotifications.js": "9a7beaa36d355c83f8c5398c1594d7f1183c1ae528af897eb56133fa8b57619e",
