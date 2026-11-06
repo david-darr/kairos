@@ -18,6 +18,30 @@ import numpy as np
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from core import call_voices, kokoro_voice, speech_optional, turn_detect
+
+# No test here may reach the network (a pinned entry would otherwise really download). Every client
+# refuses to connect unless a test hands it its own transport.
+_RealAsyncClient = httpx.AsyncClient
+
+
+def _no_network(request):
+    raise AssertionError(f"test tried to reach the network: {request.url}")
+
+
+def _guarded_client(**kw):
+    kw.setdefault("transport", httpx.MockTransport(_no_network))
+    return _RealAsyncClient(**kw)
+
+
+_network_guard = patch.object(httpx, "AsyncClient", _guarded_client)
+
+
+def setUpModule():
+    _network_guard.start()
+
+
+def tearDownModule():
+    _network_guard.stop()
 from core.middleware import require_admin, require_user
 from routes.speech_routes import router
 
@@ -123,7 +147,7 @@ class Catalog(Base):
         good = b'onnx-bytes' * 1000
         entry = {'name': 'fake', 'label': 'Fake', 'kind': 'turn', 'needs': [], 'description': 'd',
                  'files': [{'file': 'fake.onnx', 'size_mb': 1, 'url': 'https://example.test/fake.onnx', 'sha256': hashlib.sha256(good).hexdigest()}]}
-        real = httpx.AsyncClient
+        real = _RealAsyncClient
 
         def run(payload):
             def handler(request):
@@ -148,7 +172,9 @@ class Catalog(Base):
         self.assertFalse(Path(self.dir.name, 'fake.onnx.part').exists())
 
     def test_state_is_honest(self):
-        self.assertEqual(speech_optional.state('smart-turn')['state'], 'not_pinned')
+        self.assertEqual(speech_optional.state('kokoro')['state'], 'not_pinned')
+        self.assertTrue(speech_optional.is_pinned(speech_optional.item('smart-turn')) if hasattr(speech_optional, 'item') else True)
+        self.assertEqual(speech_optional.state('smart-turn')['state'], 'not_downloaded', 'Smart Turn is pinned to its official file')
         with patch.object(speech_optional, 'is_pinned', return_value=True):
             self.assertEqual(speech_optional.state('smart-turn')['status'], 'Not downloaded')
             self.install('smart-turn')
@@ -238,7 +264,8 @@ class SmartTurn(Base):
         self.assertEqual({o['name'] for o in body['optional']}, {'smart-turn', 'kokoro'})
         self.assertFalse(body['turn_detect']['ready'])
         self.assertFalse(any(Path(self.dir.name).iterdir()))
-        response = self.client.post('/api/speech/optional/smart-turn/download')
+        # Kokoro is still unpinned (its publisher lists no digest), so asking for it is refused before any network call.
+        response = self.client.post('/api/speech/optional/kokoro/download')
         self.assertEqual(response.status_code, 400)
         self.assertIn('not pinned', response.json()['detail'])
         self.assertEqual(self.client.post('/api/speech/optional/nope/download').status_code, 400)

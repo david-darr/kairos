@@ -29,12 +29,16 @@ OPTIONAL_DIR = os.path.join(DATA_DIR, "speech_models", "onnx")
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
-# TODO(pin): url and sha256 for each file come from the official release (Smart Turn: github.com/pipecat-ai/smart-turn
-# model card; Kokoro: the Kokoro-82M ONNX release). Left None on purpose: download is refused until both are filled.
+# Pins come only from the publisher's own listing, never a mirror. Smart Turn v3.2 CPU: Hugging Face's file API for
+# pipecat-ai/smart-turn-v3 (LFS sha256, 8,679,182 bytes), read 2026-11-06. Kokoro: TODO(pin): GitHub publishes no
+# digest for the thewh1teagle/kokoro-onnx model-files-v1.0 assets (kokoro-v1.0.onnx 325,532,387 bytes, voices-v1.0.bin
+# 28,214,398 bytes); pin once the files have been fetched and hashed with the user's OK. Unpinned entries never download.
 CATALOG = [
     {"name": "smart-turn", "label": "Smart Turn", "kind": "turn", "needs": ["onnxruntime"],
      "description": "Decides whether you have finished your sentence, so Kairos answers sooner without cutting you off. Runs on the processor in about 12 ms.",
-     "files": [{"file": "smart-turn.onnx", "size_mb": 8, "url": None, "sha256": None}]},
+     "files": [{"file": "smart-turn.onnx", "size_mb": 8,
+                "url": "https://huggingface.co/pipecat-ai/smart-turn-v3/resolve/main/smart-turn-v3.2-cpu.onnx",
+                "sha256": "2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f"}]},
     {"name": "kokoro", "label": "Kokoro voice", "kind": "voice", "needs": ["onnxruntime", "kokoro_onnx"],
      "description": "A natural local voice that speaks sentence by sentence. The device voice stays as the fallback.",
      "files": [{"file": "kokoro-model.onnx", "size_mb": 310, "url": None, "sha256": None},
