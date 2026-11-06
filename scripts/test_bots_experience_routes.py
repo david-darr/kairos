@@ -108,18 +108,18 @@ class BotsRoutesTests(unittest.TestCase):
         # Device enrollment keeps its own meaning, and nothing of the Bots feed sits on its path.
         self.assertEqual([m for m, t in paths() if t == "/api/notifications"], ["GET"])
 
-    def test_the_sidebars_routes_refuse_members_and_anonymous_callers(self):
+    def test_the_sidebars_routes_let_members_in_and_refuse_anonymous_callers(self):
         swept = 0
         for method, template in paths():
             if not (template in SIDEBAR or any(template.startswith(prefix) for prefix in PHASE1.values())):
                 continue
             path = re.sub(r"\{[^}]+\}", "probe-id", template)
-            # The agent routes can raise a bot's reach on this machine: a member waits for the gate (phase 4c).
-            # The chat and attention routes only touch the caller's own account, so a member is let in.
-            member_refused = template in SIDEBAR
+            # Since multi-account phase 4c every one of these routes works on the caller's own account (a bot
+            # without machine access is capped at "ask"), so a member is let in and reaches only their own bots
+            # (another account's id is simply not found); nobody signed in is refused.
             for who, caller in (("member", self.member), ("anonymous", self.anon)):
                 got = caller.request(method, path, json=None if method == "GET" else {})
-                if who == "member" and not member_refused:
+                if who == "member":
                     self.assertNotIn(got.status_code, (401, 403), f"{who} {method} {path} -> {got.status_code}")
                 else:
                     self.assertIn(got.status_code, (401, 403), f"{who} {method} {path} -> {got.status_code}")
