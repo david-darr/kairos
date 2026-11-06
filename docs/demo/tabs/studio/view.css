@@ -45,3 +45,5 @@
 .studio-note{white-space:pre-wrap;overflow-wrap:anywhere}
 @media(max-width:1100px){.studio-columns{grid-template-columns:minmax(160px,.7fr) minmax(240px,1.7fr)}.studio-inspector{grid-column:1/-1}}
 @media(max-width:650px){.studio-columns{display:flex;flex-direction:column}.studio-columns>*{width:100%}.studio-centre{order:-1}.studio-stage{height:300px}.studio-actions>*{flex-grow:1}.studio-view{padding:8px}.studio-editor-top{position:static}}
+.studio-sections{margin:4px 0 12px}
+.studio-sections[hidden]{display:none}
