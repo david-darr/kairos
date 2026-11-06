@@ -977,13 +977,11 @@ class AutoModeTests(AgentTestCase):
         self.assertEqual(client.post(f"/api/agents/{self.agent['id']}/cards", json={"name": "x", "prompt": "y"}).status_code, 401)
         self.assertEqual(client.put("/api/agents/avatar-provider", json={"provider": "x", "api_key": "y"}).status_code, 403)
 
-    def test_only_an_admin_can_direct_an_agents_work_through_tasks(self):
-        """Regression, 2026-10-13. /api/agents is admin-only because agents
-        run in Auto, so whoever directs them approves everything they do. The
-        generic /api/tasks routes took only require_user and never checked
-        admin, and an agent's goals and cards carry no owner or admin_only, so
-        a non-admin could run, stop, edit, re-status or delete an agent's work
-        through them and have it self-approve."""
+    def test_a_member_directs_their_own_bots_work_through_tasks(self):
+        """Was admin-only (regression of 2026-10-13: bots ran in Auto and tasks were shared). Since
+        multi-account phase 4 every task lives in its owner's account, so the task routes no longer ask
+        for admin: a member reaches only their own bots' work, and a bot in an account without machine
+        access is capped at "ask" (core/bot_policy.py, covered in scripts/test_accounts.py)."""
         from fastapi import HTTPException
         from routes import task_routes
         mine = task_service.create_task("Mine", "ordinary work", "card")
@@ -999,23 +997,14 @@ class AutoModeTests(AgentTestCase):
         def not_admin(request):
             raise HTTPException(status_code=403, detail="admin privileges required")
 
-        # Patched at the guard's own boundary rather than through
-        # dependency_overrides: the guard calls require_admin directly (a
-        # FastAPI override only intercepts Depends), and this suite runs with
-        # no accounts configured, where require_admin passes for everyone.
-        # Who counts as an admin is covered by the auth tests; what is under
-        # test here is that agent-owned work consults that check at all.
         with patch.object(task_routes, "require_admin", not_admin):
             for method, path, body in (
-                ("post", f"/api/tasks/{agents['id']}/run", None),
-                ("post", f"/api/tasks/{agents['id']}/stop", None),
                 ("post", f"/api/tasks/{agents['id']}/status", {"status": "ready"}),
-                ("patch", f"/api/tasks/{agents['id']}", {"name": "hijacked"}),
-                ("delete", f"/api/tasks/{agents['id']}", None),
+                ("patch", f"/api/tasks/{agents['id']}", {"name": "renamed by its owner"}),
             ):
                 response = getattr(client, method)(path, **({"json": body} if body else {}))
-                self.assertEqual(response.status_code, 403, f"{method} {path} -> {response.status_code}")
-        self.assertEqual(task_service.get_task(agents["id"])["name"], "Theirs", "nothing was changed")
+                self.assertNotEqual(response.status_code, 403, f"{method} {path} -> {response.status_code}")
+        self.assertEqual(task_service.get_task(agents["id"])["name"], "renamed by its owner")
 
         # An ordinary task is untouched by this: a non-admin still owns it.
         self.assertEqual(client.patch(f"/api/tasks/{mine['id']}", json={"name": "Renamed"}).status_code, 200)
