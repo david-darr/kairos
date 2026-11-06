@@ -1209,6 +1209,7 @@ input[type="checkbox"]:checked::after {
   flex: 1; width: 100%; min-height: 38px; resize: none;
   background: transparent; border: none; padding: 4px 6px 8px;
   font-size: 15px; line-height: 1.6; max-height: 200px; box-shadow: none;
+  field-sizing: content; /* grows with its text, without a page layout per key (Chat Speed 2.3.0) */
 }
 #chat-input:focus { outline: none; box-shadow: none; }
 #chat-input::placeholder { color: var(--text-faint); }

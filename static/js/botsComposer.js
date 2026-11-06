@@ -240,7 +240,8 @@ export function mountBotsComposer(host, o) {
     const items = o.uploader?.items() || [];
     staged.hidden = !items.length; staged.replaceChildren(...stagedStrip(items, { remove: key => { o.uploader.remove(key); sync(); }, disabled: locked }));
     paintQueue(); paintOutbox();
-    input.style.height = 'auto'; input.style.height = `${Math.min(144, Math.max(36, input.scrollHeight || 36))}px`;
+    // CSS grows the box (field-sizing, bots-composer.css); measuring it laid out the chat on every change (Chat Speed 2.3.0).
+    if (!globalThis.CSS?.supports?.('field-sizing', 'content')) { input.style.height = 'auto'; input.style.height = `${Math.min(144, Math.max(36, input.scrollHeight || 36))}px`; }
     o.onChange?.(d);
   }
   // The draft keeps only server IDs; the uploader owns the live state.

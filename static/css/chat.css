@@ -644,7 +644,7 @@
 .side-messages > .msg { width: 100%; font-size: 14px; }
 .side-chat-composer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin: 0 12px 12px; padding: 10px; border-radius: 14px; flex-shrink: 0; }
 .side-chat-input { flex: 1; min-width: 0; resize: none; background: transparent; border: none; box-shadow: none; font-size: 14px;
-  line-height: 1.5; max-height: 160px; padding: 4px 6px; }
+  line-height: 1.5; max-height: 160px; padding: 4px 6px; field-sizing: content; }
 .side-chat-input:focus { outline: none; box-shadow: none; }
 .side-chat-send { flex-shrink: 0; font-size: 12px; padding: 6px 12px; }
 /* sessionChat.js: one embedded conversation (Agents, tab chats). It fills
@@ -922,3 +922,17 @@
   .kairos-redesign .computer-steps-dialog .computer-steps-footer .btn { width: 100%; box-sizing: border-box; white-space: normal; }
   .kairos-redesign .computer-steps-dialog .computer-steps-nav .btn { flex: 1; }
 }
+
+/* Chat speed (2.3.0, 2026-11-05): in a long chat, messages older than the newest 24 are not
+   laid out or painted until they come near the view, so typing and opening no longer lay out
+   every message (3.4 s per key in a 134-message chat). `auto` keeps each message's last real
+   size once shown. The newest 24 are always laid out, so a short chat behaves exactly as before
+   and the bottom of any chat stays exact for pinning and anchoring. Main chats, bot chats and
+   Forge turns. See Chat Speed (2.3.0) in the vault. */
+#chat-messages .msg:nth-last-child(n+25), .side-messages > .msg:nth-last-child(n+25),
+[data-app-mode="bots"] .bots-msg:nth-last-child(n+25), .forge-turn:nth-last-child(n+25) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
+}
+/* Only the newest reply's Kip moves; earlier ones keep their face, still. */
+#chat-messages .msg:not(:last-child) kairos-mascot * { animation: none !important; }

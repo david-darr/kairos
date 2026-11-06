@@ -6,8 +6,8 @@ const path = require('node:path');
 const requestedSuite = path.basename(process.argv[2] || '').replace(/\.cjs$/, '');
 // The phone sidebar checks share the mobile-tabs synthetic backend and layout helpers.
 const suite = requestedSuite === 'mobile-sidebar-checks' ? 'mobile-tabs-checks' : requestedSuite;
-if (!['bg-tasks-smoke', 'browser-smoke', 'preview-smoke', 'chat-smoke', 'ui-smoke', 'usage-overlay-smoke', 'crm-smoke', 'roblox-smoke', 'mobile-tabs-checks', 'ask-user-checks', 'chat-scroll-checks'].includes(suite)) {
-  throw new Error('Choose bg-tasks-smoke, browser-smoke, preview-smoke, chat-smoke, ui-smoke, usage-overlay-smoke, crm-smoke, roblox-smoke, mobile-tabs-checks, ask-user-checks, or chat-scroll-checks');
+if (!['bg-tasks-smoke', 'browser-smoke', 'preview-smoke', 'chat-smoke', 'ui-smoke', 'usage-overlay-smoke', 'crm-smoke', 'roblox-smoke', 'mobile-tabs-checks', 'ask-user-checks', 'chat-scroll-checks', 'chat-speed-checks'].includes(suite)) {
+  throw new Error('Choose bg-tasks-smoke, browser-smoke, preview-smoke, chat-smoke, ui-smoke, usage-overlay-smoke, crm-smoke, roblox-smoke, mobile-tabs-checks, ask-user-checks, chat-scroll-checks, or chat-speed-checks');
 }
 if (suite === 'crm-smoke') {
   require('node:fs').accessSync(path.join(__dirname, '..', 'tabs', 'crm', 'view.js'));

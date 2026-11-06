@@ -84,6 +84,9 @@ class BriefTests(Harness):
             self.assertEqual(self.run_async(brief.presence("UTC", "en", now=self.now)), {})
 
     def test_a_new_time_zone_redraws_the_brief_without_opening_it(self):
+        # 17:00 UTC is noon in New York: one date in both zones, whatever the real clock says
+        # (it failed after midnight UTC, when New York was still on the day before).
+        self.now = datetime.now(timezone.utc).replace(hour=17, minute=0, second=0, microsecond=0).timestamp()
         self.reference()
         with patch("services.chat_live.is_processing", return_value=False),                 patch.object(brief, "refresh", AsyncMock(return_value={"has_content": True})) as redraw:
             self.run_async(brief.presence("UTC", "en", now=self.now))

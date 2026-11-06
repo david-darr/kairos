@@ -32,7 +32,7 @@
 
 /* The field */
 [data-app-mode="bots"] .bots-composer-row { display: flex; align-items: flex-end; gap: 6px; padding: 6px 8px; background: var(--bots-composer); border-radius: 22px; box-shadow: var(--bots-composer-ring); }
-[data-app-mode="bots"] .bots-composer-input { flex: 1; min-width: 0; max-height: 9rem; padding: 7px 4px; resize: none; font: 400 var(--bots-text-bubble)/1.5 var(--bots-font-prose); color: var(--bots-ink); background: transparent; border: 0; outline: none; }
+[data-app-mode="bots"] .bots-composer-input { field-sizing: content; min-height: 36px; flex: 1; min-width: 0; max-height: 9rem; padding: 7px 4px; resize: none; font: 400 var(--bots-text-bubble)/1.5 var(--bots-font-prose); color: var(--bots-ink); background: transparent; border: 0; outline: none; }
 [data-app-mode="bots"] .bots-composer-input::placeholder { color: var(--bots-ink-tertiary); }
 [data-app-mode="bots"] .bots-composer-input:disabled { opacity: .6; }
 [data-app-mode="bots"] .bots-composer-row .bots-icon-btn { width: 32px; height: 32px; }

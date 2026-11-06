@@ -1201,10 +1201,19 @@ export async function render(container, tabId, options = {}) {
   // through this chat's own messages; Down steps forward and finally
   // restores what was being typed. Typing anything ends the recall.
   let historyIndex = -1, historyDraft = "";
-  const setComposer = (text) => {
-    input.value = text;
+  // The box grows with CSS (field-sizing, static/css/style.css). Measuring it here set its
+  // height and read it back on every key, which laid out the whole chat each time: 3.4 s
+  // per key in a 134-message chat (2026-11-05, Chat Speed (2.3.0)). Only a browser without
+  // field-sizing (the website demo in some browsers) still measures.
+  const measureComposer = !globalThis.CSS?.supports?.('field-sizing', 'content');
+  const fitComposer = () => {
+    if (!measureComposer) return;
     input.style.height = "auto";
     input.style.height = Math.min(input.scrollHeight, 200) + "px";
+  };
+  const setComposer = (text) => {
+    input.value = text;
+    fitComposer();
     input.setSelectionRange(text.length, text.length);
   };
   input.addEventListener("keydown", (e) => {
@@ -1232,8 +1241,7 @@ export async function render(container, tabId, options = {}) {
   });
   input.addEventListener("input", () => {
     historyIndex = -1;
-    input.style.height = "auto";
-    input.style.height = Math.min(input.scrollHeight, 200) + "px";
+    fitComposer();
   });
   input.addEventListener("paste", async event => {
     const images = [...(event.clipboardData?.files || [])].filter(file => file.type.startsWith("image/"));

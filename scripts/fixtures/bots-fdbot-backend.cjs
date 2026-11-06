@@ -21,6 +21,7 @@ const CARD_DATA_SCHEMA = {
   checkin: obj({ at: { type: 'number' }, summary: str }),
   welcome: obj({ title: str, text: str, lines: arr(str, 3) }, ['title']),
   reach: obj({ title: str, connected: obj({ mail: { type: 'boolean' }, calendar: { type: 'boolean' }, forge_projects: { type: 'number' } }) }),
+  watching: obj({ routine_id: str, title: str, lines: arr(str, 4) }, ['routine_id']),
 };
 
 // Python's store tests consume this exact JSON too. Keep it valid JSON.

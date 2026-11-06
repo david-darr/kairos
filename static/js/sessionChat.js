@@ -531,7 +531,8 @@ export async function mountSessionChat(host, options = {}) {
   input.addEventListener('keydown', (event) => {
     if (shouldSendOnEnter(event)) { event.preventDefault(); submit({ fromKeyboard: true }); }
   });
-  input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 160) + 'px'; });
+  // CSS grows the box (field-sizing, chat.css); only a browser without it measures (Chat Speed 2.3.0).
+  input.addEventListener('input', () => { if (!globalThis.CSS?.supports?.('field-sizing', 'content')) { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 160) + 'px'; } });
 
   await load();
   const unsubscribeLive = chatStream.subscribeAll((id, entry) => {
