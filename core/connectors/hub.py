@@ -118,6 +118,13 @@ class Hub:
     # -- messages ------------------------------------------------------------------
 
     async def receive(self, adapter: Connector, inbound: Inbound) -> None:
+        # Everything a message starts runs as the account that set this connector up (Multi-Account group 6).
+        from core import accounts
+        from core.connectors import store as connector_store
+        with accounts.as_account(connector_store.account_of(adapter.record)):
+            await self._receive(adapter, inbound)
+
+    async def _receive(self, adapter: Connector, inbound: Inbound) -> None:
         record = adapter.record
         allowed = set(record.get("allowed_senders") or [])
         open_to_anyone = bool(record.get("open"))
@@ -188,7 +195,9 @@ class Hub:
         """Task output and agent notifications to the connector's default
         destination. False, never an exception, on any failure."""
         adapter = self.adapters.get(connector_id)
-        if adapter is None or not adapter.default_target:
+        from core.connectors import store as connector_store
+        # Only this account's own connectors (Multi-Account group 6): the outbox sends as the row's account.
+        if adapter is None or not adapter.default_target or not connector_store.mine(adapter.record):
             return False
         try:
             await self.send_reply(adapter, adapter.default_target, text)

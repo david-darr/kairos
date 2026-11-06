@@ -2621,7 +2621,7 @@ class McpOAuthTests(unittest.TestCase):
         listed = json.dumps(integrations.list_integrations())
         self.assertNotIn(token, listed)
         self.assertIn('"signed_in": true', listed)
-        self.assertNotIn(token, open(integrations.INTEGRATIONS_FILE, encoding="utf-8").read(), "stored encrypted")
+        self.assertNotIn(token, open(integrations.integrations_file(), encoding="utf-8").read(), "stored encrypted")
 
     def test_a_token_near_expiry_is_refreshed_and_a_dead_one_asks_for_sign_in_again(self):
         from core import integrations, mcp_client, mcp_oauth
@@ -2634,7 +2634,7 @@ class McpOAuthTests(unittest.TestCase):
         def expire():
             data = integrations._load()
             data[self.item["id"]]["oauth"]["expires_at"] = time.time() + 10
-            write_json_atomic(integrations.INTEGRATIONS_FILE, data)
+            write_json_atomic(integrations.integrations_file(), data)
         expire()
         asyncio.run(mcp_oauth.refresh_due([self.item["id"]]))
         after = self.runtime()["Fixture"]
@@ -2647,7 +2647,7 @@ class McpOAuthTests(unittest.TestCase):
         tokens = json.loads(decrypt(oauth["tokens"]))
         tokens["refresh_token"] = "revoked"
         oauth["tokens"] = encrypt(json.dumps(tokens))
-        write_json_atomic(integrations.INTEGRATIONS_FILE, data)
+        write_json_atomic(integrations.integrations_file(), data)
         expire()
         asyncio.run(mcp_oauth.refresh_due([self.item["id"]]))
         status = mcp_oauth.status(self.item["id"])
@@ -2664,7 +2664,7 @@ class McpOAuthTests(unittest.TestCase):
         self.assertFalse(brain.tool_config_changed())
         data = integrations._load()
         data[self.item["id"]]["oauth"]["expires_at"] = time.time() + 10
-        write_json_atomic(integrations.INTEGRATIONS_FILE, data)
+        write_json_atomic(integrations.integrations_file(), data)
         asyncio.run(mcp_oauth.refresh_due())
         self.assertTrue(brain.tool_config_changed(), "the new header makes the chat reconnect at its next turn")
 
@@ -2695,7 +2695,7 @@ class McpOAuthTests(unittest.TestCase):
         # drop them, as a dead token would be, keeping the registration.
         data = integrations._load()
         data[self.item["id"]]["oauth"].pop("tokens")
-        write_json_atomic(integrations.INTEGRATIONS_FILE, data)
+        write_json_atomic(integrations.integrations_file(), data)
         ok, message, second = asyncio.run(self._sign_in("http://127.0.0.1:2/api/integrations/oauth/callback"))
         self.assertTrue(ok, message)
         self.assertNotEqual(httpx.URL(first).params["client_id"], httpx.URL(second).params["client_id"])

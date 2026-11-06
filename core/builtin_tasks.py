@@ -416,18 +416,25 @@ def autoenable_builtins() -> list[str]:
     on the next launch, which is worse than never enabling it at all.
     """
     from core import accounts
-    # The first admin's account only, where these always ran (Multi-Account group 5: tasks are per account).
-    # Mail and the synced sources are still one per install until group 6; switching triage on in every
-    # account would read the same mailbox into each. Group 6 turns them on per account.
-    with accounts.as_account(accounts.local_account()):
-        return _autoenable()
+    # Every account gets its own copy (tasks, mail and synced sources are per account). The first admin's
+    # account keeps the install-wide auto_enabled_builtins setting as its guard, where it always was; every
+    # other account keeps the guard in its own settings.
+    turned_on: list[str] = []
+    for account_id in accounts.all_accounts():
+        with accounts.as_account(account_id):
+            turned_on += _autoenable()
+    return turned_on
 
 
 def _autoenable() -> list[str]:
-    from core.settings import get_setting, update_settings
+    from core import accounts
+    from core.settings import get_account_setting, get_setting, update_account_settings, update_settings
     from services.task_service import task_service
 
-    already = set(get_setting("auto_enabled_builtins") or [])
+    account_id = accounts.effective_account()
+    is_first = account_id == accounts.local_account()
+    already = set((get_setting("auto_enabled_builtins") if is_first
+                   else get_account_setting("auto_enabled_builtins", account_id)) or [])
     existing_actions = {t.get("builtin_action") for t in task_service.list_tasks()}
     turned_on = []
     for action_id in AUTO_ENABLE:
@@ -451,7 +458,11 @@ def _autoenable() -> list[str]:
             logger.exception("builtin_tasks: couldn't auto-enable %s", action_id)
 
     if turned_on:
-        update_settings(auto_enabled_builtins=sorted(already | set(turned_on)))
+        done = sorted(already | set(turned_on))
+        if is_first:
+            update_settings(auto_enabled_builtins=done)
+        else:
+            update_account_settings(account_id, auto_enabled_builtins=done)
     return turned_on
 
 

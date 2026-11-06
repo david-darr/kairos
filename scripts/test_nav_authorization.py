@@ -128,21 +128,28 @@ class NavAuthorizationTests(unittest.TestCase):
                     self.assertIn(anon.status_code, (401, 403), f"anonymous {method} {path} -> {anon.status_code}")
 
     def test_members_see_only_their_own_permissions(self):
-        from core import permissions
-        data = permissions._load()
-        data["rules"] = [{"id": "r-boss", "tool": "Bash", "content": "git status", "granted_by": "boss", "scope": "forever"},
-                         {"id": "r-member", "tool": "read_file", "content": "notes", "granted_by": "member", "scope": "forever"}]
-        data["audit"] = [{"at": 1, "decision": "allowed", "tool": "Bash", "content": "secret-command", "by": "boss"},
-                         {"at": 2, "decision": "allowed", "tool": "read_file", "content": "notes", "by": "member"},
-                         {"at": 3, "decision": "revoked", "rule_id": "x"}]
-        permissions._save(data)
+        # Every account has its own grants and audit trail (Multi-Account group 6, decision D2: the admin
+        # cannot read another account's either).
+        from core import accounts, permissions
+        from core.auth import auth_manager
+        for user, rule, audit in (("boss", {"id": "r-boss", "tool": "Bash", "content": "git status", "granted_by": "boss", "scope": "forever"},
+                                   [{"at": 1, "decision": "allowed", "tool": "Bash", "content": "secret-command", "by": "boss"},
+                                    {"at": 3, "decision": "revoked", "rule_id": "x"}]),
+                                  ("member", {"id": "r-member", "tool": "read_file", "content": "notes", "granted_by": "member", "scope": "forever"},
+                                   [{"at": 2, "decision": "allowed", "tool": "read_file", "content": "notes", "by": "member"}])):
+            with accounts.as_account(auth_manager.account_id(user)):
+                data = permissions._load()
+                data["rules"] = [rule]
+                data["audit"] = audit
+                permissions._save(data)
         mine = self.member.get("/api/permissions").json()
         self.assertEqual([r["id"] for r in mine["rules"]], ["r-member"])
         self.assertEqual([e.get("by") for e in mine["audit"]], ["member"])
         self.assertNotIn("secret-command", str(mine))
-        everything = self.admin.get("/api/permissions").json()
-        self.assertEqual({r["id"] for r in everything["rules"]} >= {"r-boss", "r-member"}, True)
-        self.assertEqual(len(everything["audit"]), 3)
+        theirs = self.admin.get("/api/permissions").json()
+        self.assertEqual([r["id"] for r in theirs["rules"]], ["r-boss"])
+        self.assertEqual(len(theirs["audit"]), 2)
+        self.assertNotIn("notes", str(theirs["rules"]))
 
     def test_admins_can_read_them(self):
         for path, where in sorted(self.paths.items()):

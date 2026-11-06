@@ -152,8 +152,12 @@ async def callback(state: str = "", code: str | None = None, error: str | None =
     # ten minutes and bound to the Kairos user who started the sign-in, plus
     # PKCE (the code is useless without that sign-in's verifier) and a
     # redirect that only reaches 127.0.0.1.
+    from core import accounts
+    started_by = google.pending_account(state)
     try:
-        account = await google.finish_sign_in(state, code, local_api_base() + CALLBACK, error)
+        # The account that started this sign-in (Multi-Account group 6); an unknown state fails as before.
+        with accounts.as_account(started_by or accounts.local_account()):
+            account = await google.finish_sign_in(state, code, local_api_base() + CALLBACK, error)
         message, status_code = f"Connected {html.escape(account)}. Return to Kairos.", 200
     except google.GoogleError as problem:
         message, status_code = html.escape(str(problem)), problem.status

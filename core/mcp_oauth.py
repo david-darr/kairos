@@ -75,7 +75,7 @@ def _save_oauth(item_id: str, oauth: Optional[dict]) -> None:
         data[item_id].pop("oauth", None)
     else:
         data[item_id]["oauth"] = oauth
-    write_json_atomic(integrations.INTEGRATIONS_FILE, data)
+    write_json_atomic(integrations.integrations_file(), data)
 
 
 def _oauth(item_id: str) -> dict:
@@ -187,7 +187,7 @@ async def start_sign_in(item_id: str, redirect_uri: str) -> dict:
     if item.get("auth") != "oauth":
         data = integrations._load()
         data[item_id]["auth"] = "oauth"
-        write_json_atomic(integrations.INTEGRATIONS_FILE, data)
+        write_json_atomic(integrations.integrations_file(), data)
     _last_error.pop(item_id, None)
     for state, pending in list(_pending.items()):
         if pending.item_id == item_id:  # a new attempt replaces an abandoned one

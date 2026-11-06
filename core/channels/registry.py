@@ -11,11 +11,13 @@ from core.channels import discord_channel
 
 
 def list_channels() -> list[dict]:
+    """The current account's delivery targets (Multi-Account group 6): its own Discord bots and connectors."""
+    bots = [b for b in discord_bots_store.list_bots() if discord_bots_store.mine(b)]
     channels = [
         {
             "id": "discord",
             "label": "Discord",
-            "configured": len(discord_bots_store.list_bots()) > 0,
+            "configured": len(bots) > 0,
         },
     ]
     # Named per-channel targets (David's ask 2026-09-10: always deliver to a
@@ -23,7 +25,7 @@ def list_channels() -> list[dict]:
     # per configured named channel, across every bot. "discord" above still
     # means "DM the allowed user" and keeps working for any task already
     # pointed at it.
-    for bot in discord_bots_store.list_bots():
+    for bot in bots:
         for entry in bot.get("channels", []):
             channels.append({
                 "id": f"discord:{bot['id']}:{entry['id']}",
@@ -35,7 +37,7 @@ def list_channels() -> list[dict]:
     from core.connectors import KINDS, store as connector_store
     for record in connector_store.list_records():
         cls = KINDS.get(record["kind"])
-        if not cls or not record.get("enabled"):
+        if not cls or not record.get("enabled") or not connector_store.mine(record):
             continue
         has_target = not cls.two_way or bool((record.get("settings") or {}).get(cls.target_field or ""))
         if has_target:

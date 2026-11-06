@@ -26,10 +26,10 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
-from core.constants import DATA_DIR
+from core import accounts
 from core.atomic_io import write_json_atomic
 
-PERMISSIONS_FILE = os.path.join(DATA_DIR, "permissions.json")
+PERMISSIONS_FILE = None  # tests may point this at their own file; else the current account's permissions.json
 DEFAULT_TIMEOUT_SECONDS = 120
 QUESTION_TIMEOUT_SECONDS = 1800
 AUDIT_LIMIT = 500
@@ -84,9 +84,13 @@ def _clip(value, limit=4000):
     return text if len(text) <= limit else text[:limit] + "…"
 
 
+def permissions_file() -> str:
+    return PERMISSIONS_FILE or accounts.path("permissions.json")
+
+
 def _load() -> dict:
     try:
-        with open(PERMISSIONS_FILE, encoding="utf-8") as handle:
+        with open(permissions_file(), encoding="utf-8") as handle:
             data = json.load(handle)
     except (OSError, ValueError):
         data = {}
@@ -98,7 +102,7 @@ def _load() -> dict:
 
 def _save(data: dict) -> None:
     data["audit"] = data["audit"][-AUDIT_LIMIT:]
-    write_json_atomic(PERMISSIONS_FILE, data)
+    write_json_atomic(permissions_file(), data)
 
 
 def _matches(rule: dict, tool: str, target: str | None, is_admin: bool = False) -> bool:

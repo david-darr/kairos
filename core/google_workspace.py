@@ -76,13 +76,43 @@ class GoogleError(Exception):
         self.status = status
 
 
+# Multi-Account group 6: the OAuth app (client id and secret, set once by an admin) stays in FILE for the
+# whole install; each account's signed-in Google accounts and choices live in its own folder.
+PERSONAL = ("accounts", "default_account", "active_account", "calendar_account", *ACCOUNT_KEYS)
+ACCOUNTS_FILE = None  # a test can point the personal half at its own file
+
+
+def _accounts_file() -> str:
+    from core import accounts
+    return ACCOUNTS_FILE or accounts.path("google_accounts.json")
+
+
 def _load() -> dict:
-    return read_json(FILE, {})
+    """The install's OAuth app with the current account's Google accounts. Sign-ins made before accounts had
+    folders were all in FILE and are the first admin's (decision D7): they move to that account's file the first
+    time it loads, and no other account ever sees them."""
+    from core import accounts
+    with _lock:
+        shared = read_json(FILE, {})
+        path = _accounts_file()
+        personal = read_json(path, {})
+        if any(key in shared for key in PERSONAL) and accounts.effective_account() == accounts.local_account():
+            moved = {key: shared.pop(key) for key in PERSONAL if key in shared}
+            personal = {**moved, **personal}
+            write_json_atomic(path, personal)
+            write_json_atomic(FILE, shared)
+        return {**{k: v for k, v in shared.items() if k not in PERSONAL}, **personal}
 
 
 def _save(data: dict) -> None:
     with _lock:
-        write_json_atomic(FILE, data)
+        write_json_atomic(_accounts_file(), {k: v for k, v in data.items() if k in PERSONAL})
+        write_json_atomic(FILE, {k: v for k, v in data.items() if k not in PERSONAL})
+
+
+def pending_account(state: str):
+    """The account that started a sign-in, for the callback, which nobody is signed in to."""
+    return (_pending.get(state) or {}).get("kairos_account")
 
 
 def _state() -> dict:
@@ -292,8 +322,10 @@ def start_sign_in(redirect_uri: str, owner: str | None = None, add: bool = False
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).rstrip(b"=").decode("ascii")
     # Single use, expiring, and bound to the Kairos user who started it: the
     # callback can only finish a sign-in begun here, for that user.
+    from core import accounts
     _pending[state] = {"verifier": verifier, "expires": time.time() + 600, "owner": owner, "add": add,
-                       "account": account_id, "client_id": client_id}
+                       "account": account_id, "client_id": client_id,
+                       "kairos_account": accounts.effective_account()}
     for stale, pending in list(_pending.items()):
         if pending["expires"] < time.time():
             _pending.pop(stale, None)

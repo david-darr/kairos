@@ -62,6 +62,23 @@ def _load() -> dict:
 CHANNEL_MODES = {"normal", "open", "silent"}
 
 
+def account_of(bot: dict) -> str:
+    """The account a Discord bot answers as (Multi-Account group 6: "channel bots answer as the account
+    that set them up"). One made before accounts had folders is the first admin's, where it always ran.
+    The gateways themselves stay one per bot for the whole install."""
+    from core import accounts
+    return bot.get("account") or accounts.local_account()
+
+
+def mine(bot: dict) -> bool:
+    """Whether a bot belongs to the account this work runs as."""
+    from core import accounts
+    try:
+        return account_of(bot) == accounts.effective_account()
+    except accounts.NoAccount:
+        return False
+
+
 def _masked(bot: dict) -> dict:
     return {
         "id": bot["id"],
@@ -69,6 +86,7 @@ def _masked(bot: dict) -> dict:
         "allowed_user_id": bot.get("allowed_user_id"),
         "model_endpoint_id": bot.get("model_endpoint_id"),
         "has_token": bool(bot.get("token_encrypted")),
+        "account": account_of(bot),
         # Per-Discord-channel overrides (David's ask 2026-09-10): "open"
         # answers anyone in that channel regardless of allowed_user_id;
         # "silent" never answers there at all, no matter who; anything not
@@ -94,9 +112,11 @@ def create_bot(name: str, token: str, allowed_user_id: Optional[str] = None,
                 model_endpoint_id: Optional[str] = None) -> dict:
     data = _load()
     bot_id = uuid.uuid4().hex[:12]
+    from core import accounts
     data[bot_id] = {
         "id": bot_id,
         "name": name,
+        "account": accounts.effective_account(),
         "token_encrypted": encrypt(token),
         "allowed_user_id": allowed_user_id or None,
         "model_endpoint_id": model_endpoint_id or None,

@@ -92,6 +92,15 @@ STEPS: list[Step] = [
     # against the installed tabs and add-ons: the job tab only goes through task_service.
     Step(5, "tasks, routines, triggers and hooks", ("tasks.json", "tasks.json.*", "task_runs.json",
                                                     "triggers.json", "hooks.json")),
+    # Mail, its triage, standing permission grants, integrations (MCP servers, API services, calendar and
+    # contact feeds) and each person's Google sign-ins. google_accounts.json is new: the shared
+    # google_workspace.json keeps the install's OAuth app, and the first admin's sign-ins move out of it
+    # the first time that account loads (core/google_workspace.py). Discord bots and connectors stay one
+    # file per install, each record naming the account it answers as; the GitHub publishing identity is
+    # install-level; the creative add-on's connections move with add-on data (group 7).
+    Step(6, "mail, Google, permissions and integrations", ("email_accounts.json", "email_triage.json",
+                                                            "permissions.json", "integrations.json",
+                                                            "google_accounts.json")),
 ]
 
 

@@ -184,12 +184,19 @@ async def setup_vault(body: VaultSetupRequest, user: str = Depends(require_admin
     return {"ok": True, "vault_dir": vault_dir, "applied": applied}
 
 
+def _own_discord_bot(bot_id: str) -> None:
+    """An admin manages their own account's Discord bots (Multi-Account group 6); another account's is 404."""
+    bot = discord_bots_store.get_bot(bot_id)
+    if bot is None or not discord_bots_store.mine(bot):
+        raise HTTPException(status_code=404, detail="no such Discord bot")
+
+
 @router.get("/discord-bots")
 async def list_discord_bots(user: str = Depends(require_admin)) -> list[dict]:
     """David's ask 2026-09-01: "you should be able to see all the bots you
     have connected to" — multiple bots, not the original single-token
     design (see core/discord_bots_store.py)."""
-    return discord_bots_store.list_bots()
+    return [b for b in discord_bots_store.list_bots() if discord_bots_store.mine(b)]
 
 
 @router.post("/discord-bots")
@@ -201,6 +208,7 @@ async def create_discord_bot(body: CreateDiscordBotRequest, user: str = Depends(
 
 @router.patch("/discord-bots/{bot_id}")
 async def update_discord_bot(bot_id: str, body: UpdateDiscordBotRequest, user: str = Depends(require_admin)) -> dict:
+    _own_discord_bot(bot_id)
     try:
         bot = discord_bots_store.update_bot(
             bot_id, name=body.name, token=body.token,
@@ -224,6 +232,7 @@ async def update_discord_bot(bot_id: str, body: UpdateDiscordBotRequest, user: s
 
 @router.delete("/discord-bots/{bot_id}")
 async def delete_discord_bot(bot_id: str, user: str = Depends(require_admin)) -> dict:
+    _own_discord_bot(bot_id)
     discord_bots_store.delete_bot(bot_id)
     await discord_channel.restart()
     return {"ok": True}
@@ -234,6 +243,7 @@ async def delete_discord_bot(bot_id: str, user: str = Depends(require_admin)) ->
 
 @router.post("/discord-bots/{bot_id}/channels")
 async def add_discord_channel(bot_id: str, body: AddDiscordChannelRequest, user: str = Depends(require_admin)) -> dict:
+    _own_discord_bot(bot_id)
     if not body.discord_channel_id.strip().isdigit():
         raise HTTPException(status_code=400, detail=(
             "That doesn't look like a Discord channel ID (numbers only). "
@@ -252,6 +262,7 @@ async def add_discord_channel(bot_id: str, body: AddDiscordChannelRequest, user:
 
 @router.patch("/discord-bots/{bot_id}/channels/{entry_id}")
 async def update_discord_channel(bot_id: str, entry_id: str, body: UpdateDiscordChannelRequest, user: str = Depends(require_admin)) -> dict:
+    _own_discord_bot(bot_id)
     try:
         bot = discord_bots_store.update_channel(bot_id, entry_id, label=body.label, mode=body.mode)
     except KeyError as e:
@@ -264,6 +275,7 @@ async def update_discord_channel(bot_id: str, entry_id: str, body: UpdateDiscord
 
 @router.delete("/discord-bots/{bot_id}/channels/{entry_id}")
 async def delete_discord_channel(bot_id: str, entry_id: str, user: str = Depends(require_admin)) -> dict:
+    _own_discord_bot(bot_id)
     try:
         bot = discord_bots_store.remove_channel(bot_id, entry_id)
     except KeyError as e:

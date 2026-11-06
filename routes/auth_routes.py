@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
+from core import accounts
 from core import auth as auth_module
 from core.auth import auth_manager, auth_enabled, SESSION_COOKIE_NAME, SESSION_TTL_SECONDS, SINGLE_USER, UI_COOKIE_NAME
 from core.middleware import get_current_user, require_admin, require_user
@@ -128,10 +129,12 @@ async def forgot_password(body: ForgotPasswordRequest) -> dict:
         raise HTTPException(status_code=400, detail="AUTH_ENABLED is false — no accounts to reset")
 
     entered_email = body.email.strip().lower()
-    account = next(
-        (a for a in email_service.list_accounts() if a.get("email", "").strip().lower() == entered_email),
-        None,
-    )
+    # Nobody is signed in here: look in the install's own mail (the first admin's account), where it always was.
+    with accounts.as_account(accounts.local_account()):
+        account = next(
+            (a for a in email_service.list_accounts() if a.get("email", "").strip().lower() == entered_email),
+            None,
+        )
     if account is None:
         return _FORGOT_PASSWORD_GENERIC_RESPONSE
 
@@ -140,16 +143,17 @@ async def forgot_password(body: ForgotPasswordRequest) -> dict:
         return _FORGOT_PASSWORD_GENERIC_RESPONSE
 
     try:
-        email_service.send_message(
-            account["id"],
-            to=account["email"],
-            subject="Kairos password reset code",
-            body=(
-                f"Your Kairos password reset code is: {code}\n\n"
-                "This code expires in 15 minutes and can only be used once. "
-                "If you didn't request this, you can safely ignore this email."
-            ),
-        )
+        with accounts.as_account(accounts.local_account()):
+            email_service.send_message(
+                account["id"],
+                to=account["email"],
+                subject="Kairos password reset code",
+                body=(
+                    f"Your Kairos password reset code is: {code}\n\n"
+                    "This code expires in 15 minutes and can only be used once. "
+                    "If you didn't request this, you can safely ignore this email."
+                ),
+            )
     except Exception:
         # Still the generic response - a real send failure (bad SMTP creds,
         # network blip) shouldn't tell an attacker their guess was closer

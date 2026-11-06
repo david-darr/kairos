@@ -14,18 +14,23 @@ import os
 import time
 from typing import Optional
 
+from core import accounts
 from core.atomic_io import read_json, write_json_atomic
-from core.constants import DATA_DIR
 
-TRIAGE_FILE = os.path.join(DATA_DIR, "email_triage.json")
+# Each account's own email_triage.json (Multi-Account phase 2); a test may point this at its own file.
+TRIAGE_FILE = None
+
+
+def triage_file() -> str:
+    return TRIAGE_FILE or accounts.path("email_triage.json")
 
 
 def load() -> dict:
     """{"generated_at": float|None, "items": [...], "scanned": int, "error": str|None}"""
-    return read_json(TRIAGE_FILE, {"generated_at": None, "items": [], "scanned": 0, "error": None})
+    return read_json(triage_file(), {"generated_at": None, "items": [], "scanned": 0, "error": None})
 
 
 def save(items: list[dict], scanned: int, error: Optional[str] = None) -> dict:
     payload = {"generated_at": time.time(), "items": items, "scanned": scanned, "error": error}
-    write_json_atomic(TRIAGE_FILE, payload)
+    write_json_atomic(triage_file(), payload)
     return payload

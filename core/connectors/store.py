@@ -51,6 +51,21 @@ def _split(values: dict, fields: tuple) -> tuple[dict, dict]:
     return settings, secrets
 
 
+def account_of(record: dict) -> str:
+    """The account a connector answers as (Multi-Account group 6). One made before accounts had folders is the
+    first admin's. The listeners themselves stay one per connector for the whole install (core/connectors/hub.py)."""
+    from core import accounts
+    return record.get("account") or accounts.local_account()
+
+
+def mine(record: dict) -> bool:
+    from core import accounts
+    try:
+        return account_of(record) == accounts.effective_account()
+    except accounts.NoAccount:
+        return False
+
+
 def create(kind: str, name: str, values: dict, fields: tuple, allowed_senders: list, open_to_anyone: bool,
            model_endpoint_id: Optional[str]) -> dict:
     name = " ".join((name or "").split())
@@ -65,11 +80,17 @@ def create(kind: str, name: str, values: dict, fields: tuple, allowed_senders: l
         "settings": settings, "secrets": {k: encrypt(v) for k, v in secrets.items() if v},
         "allowed_senders": _senders(allowed_senders), "open": bool(open_to_anyone),
         "model_endpoint_id": model_endpoint_id or None, "created_at": time.time(),
+        "account": _current_account(),
     }
     data = _load()
     data[record["id"]] = record
     _save(data)
     return record
+
+
+def _current_account() -> str:
+    from core import accounts
+    return accounts.effective_account()
 
 
 def update(connector_id: str, fields: tuple, *, name=None, values=None, allowed_senders=None,

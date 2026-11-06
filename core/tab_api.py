@@ -302,9 +302,9 @@ def message_connections():
     from core.connectors import store
     from core import discord_bots_store
     choices = [{"kind": "connector", "id": c["id"], "label": c["name"] + " · " + c["kind"]}
-               for c in store.list_records() if c["kind"] in ("slack", "telegram", "email")]
+               for c in store.list_records() if c["kind"] in ("slack", "telegram", "email") and store.mine(c)]
     return choices + [{"kind": "discord", "id": b["id"], "label": b["name"] + " · Discord"}
-                      for b in discord_bots_store.list_bots()]
+                      for b in discord_bots_store.list_bots() if discord_bots_store.mine(b)]
 
 
 def documents():

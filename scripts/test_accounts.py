@@ -268,7 +268,7 @@ class Migration(unittest.TestCase):
                                      backup=kwargs.pop("backup", self.backup), **kwargs)
 
     def test_group_one_moves_its_five_stores(self):
-        self.assertEqual([s.version for s in account_migration.STEPS], [1, 2, 3, 4, 5], "group 5 added the tasks step")
+        self.assertEqual([s.version for s in account_migration.STEPS], [1, 2, 3, 4, 5, 6], "group 6 added the mail step")
         self.assertEqual(set(account_migration.STEPS[0].entries), {
             "notes.json", "calendar_events.json", "documents", "documents_index.json", "projects.json", "contacts.json"})
         (self.data / "documents").mkdir()
@@ -360,8 +360,8 @@ class Stores(unittest.TestCase):
         with accounts.as_account(self.ids["bea"]):
             self.assertEqual(accounts.path("documents", "a.md"),
                              os.path.join(accounts.ACCOUNTS_DIR, self.ids["bea"], "documents", "a.md"))
-            self.assertEqual(accounts.path("email_accounts.json"), os.path.join(_DATA.name, "email_accounts.json"),
-                             "mail has not moved yet")
+            self.assertEqual(accounts.path("designs"), os.path.join(_DATA.name, "designs"),
+                             "designs have not moved yet")
 
     def setUp(self):
         fresh_users()
@@ -1354,16 +1354,17 @@ class TasksPerAccount(unittest.TestCase):
         seen.clear()
         with patch.object(builtin_tasks, "_autoenable",
                           side_effect=lambda: seen.append(accounts.current_account()) or ["sync_all"]):
-            self.assertEqual(builtin_tasks.autoenable_builtins(), ["sync_all"])
-        self.assertEqual(seen, [accounts.local_account()])
-        self.assertEqual(seen, [self.first], "only the first admin's account")
+            turned_on = builtin_tasks.autoenable_builtins()
+        # Every account since group 6 (mail and synced sources are per account now).
+        self.assertEqual(sorted(seen), sorted(accounts.all_accounts()))
+        self.assertEqual(turned_on, ["sync_all"] * len(accounts.all_accounts()))
 
 
 class TasksMigration(unittest.TestCase):
     """Migration step 5: tasks, routines, triggers and hooks move into the account folder."""
 
     MOVES = ("tasks.json", "tasks.json.pre-routines.bak", "task_runs.json", "triggers.json", "hooks.json")
-    STAYS = ("email_accounts.json", "jobs.json", "settings.json")
+    STAYS = ("google_workspace.json", "jobs.json", "settings.json")
 
     def setUp(self):
         self.root = TemporaryDirectory(prefix="kairos-layout5-", dir=tempfile.gettempdir())
@@ -1389,7 +1390,323 @@ class TasksMigration(unittest.TestCase):
             self.assertFalse((self.account / name).exists(), f"{name} must not be in the account folder")
         self.assertEqual(account_migration.layout_version(str(self.data)), 5)
         self.assertTrue(account_migration.is_moved("tasks.json.pre-routines.bak", str(self.data)))
-        self.assertFalse(account_migration.is_moved("email_accounts.json", str(self.data)))
+        self.assertFalse(account_migration.is_moved("google_workspace.json", str(self.data)))
+        account_migration._moved.pop(str(self.data), None)
+
+
+class MailAndSettingsPerAccount(unittest.TestCase):
+    """Group 6: mail, its triage, standing permissions and integrations are each account's own."""
+
+    @classmethod
+    def setUpClass(cls):
+        account_migration.run(_DATA.name, backup=lambda path: None)  # layout 6, as app.py leaves it
+        assert "email_accounts.json" in account_migration.moved_names()
+
+    def setUp(self):
+        fresh_users()
+        auth_manager.create_user("david-darr", "password-one-1", is_admin=True)
+        auth_manager.create_user("bea", "password-two-2")
+        self.first, self.second = (auth_manager.account_id(n) for n in ("david-darr", "bea"))
+
+    def folder(self, account_id, name):
+        return os.path.join(accounts.ACCOUNTS_DIR, account_id, name)
+
+    def forget_file(self, account_id, name):
+        self.addCleanup(lambda: Path(self.folder(account_id, name)).unlink(missing_ok=True))
+
+    def test_a_mail_account_is_listed_only_under_the_account_that_added_it(self):
+        from core import email_triage
+        from services import email_service as mail
+        for account_id in (self.first, self.second):
+            self.forget_file(account_id, "email_accounts.json")
+        self.addCleanup(mail.email_service.forget)  # its instances were built from files that are gone after this
+        with accounts.as_account(self.first):
+            added = mail.email_service.create_account("david@example.test", "pw", "imap.example.test", 993,
+                                                      "smtp.example.test", 465)
+            self.assertEqual([a["id"] for a in mail.email_service.list_accounts()], [added["id"]])
+            self.assertEqual(mail.accounts_file(), self.folder(self.first, "email_accounts.json"))
+            self.assertEqual(email_triage.triage_file(), self.folder(self.first, "email_triage.json"))
+        with accounts.as_account(self.second):
+            self.assertEqual(mail.email_service.list_accounts(), [])
+            self.assertIsNone(mail.email_service.get_account(added["id"]))
+            self.assertEqual(mail.accounts_file(), self.folder(self.second, "email_accounts.json"))
+            self.assertEqual(email_triage.triage_file(), self.folder(self.second, "email_triage.json"))
+        self.assertTrue(os.path.exists(self.folder(self.first, "email_accounts.json")))
+        self.assertFalse(os.path.exists(os.path.join(_DATA.name, "email_accounts.json")), "not at the shared place")
+
+    def test_triage_results_are_kept_per_account(self):
+        from core import email_triage
+        self.forget_file(self.first, "email_triage.json")
+        with accounts.as_account(self.first):
+            email_triage.save([{"subject": "first's mail"}], 1)
+        with accounts.as_account(self.second):
+            self.assertEqual(email_triage.load()["items"], [])
+        with accounts.as_account(self.first):
+            self.assertEqual(email_triage.load()["items"], [{"subject": "first's mail"}])
+
+    def test_a_standing_grant_is_in_the_granting_accounts_rules_only(self):
+        from core import permissions
+        for account_id in (self.first, self.second):
+            self.forget_file(account_id, "permissions.json")
+        with accounts.as_account(self.first):
+            permissions.grant_standing(["Read"], "david-darr")
+            self.assertIn("Read", permissions.standing_grants())
+            self.assertEqual(permissions.permissions_file(), self.folder(self.first, "permissions.json"))
+        with accounts.as_account(self.second):
+            self.assertNotIn("Read", permissions.standing_grants())
+            self.assertNotIn("Read", [rule["tool"] for rule in permissions.list_rules()])
+            self.assertEqual(permissions.permissions_file(), self.folder(self.second, "permissions.json"))
+        self.assertTrue(os.path.exists(self.folder(self.first, "permissions.json")))
+
+    def test_an_integration_is_listed_only_under_the_account_that_made_it(self):
+        from core import integrations
+        for account_id in (self.first, self.second):
+            self.forget_file(account_id, "integrations.json")
+        with accounts.as_account(self.first):
+            feed = integrations.create_ical_feed("First's feed", "https://example.test/first.ics")
+            service = integrations.create_api_service("First's API", "https://api.example.test", "key-1")
+            self.assertEqual(integrations.integrations_file(), self.folder(self.first, "integrations.json"))
+            self.assertEqual({i["id"] for i in integrations.list_integrations()}, {feed["id"], service["id"]})
+        with accounts.as_account(self.second):
+            self.assertEqual(integrations.list_integrations(), [])
+            self.assertIsNone(integrations.get_integration(feed["id"]))
+            self.assertEqual(integrations.integrations_file(), self.folder(self.second, "integrations.json"))
+        self.assertFalse(os.path.exists(os.path.join(_DATA.name, "integrations.json")))
+
+
+class GoogleSplitPerAccount(unittest.TestCase):
+    """Group 6: the OAuth app is shared; each account's Google sign-ins are its own."""
+
+    @classmethod
+    def setUpClass(cls):
+        account_migration.run(_DATA.name, backup=lambda path: None)
+
+    def setUp(self):
+        from core import google_workspace
+        self.gw = google_workspace
+        fresh_users()
+        auth_manager.create_user("david-darr", "password-one-1", is_admin=True)
+        auth_manager.create_user("bea", "password-two-2")
+        self.first, self.second = (auth_manager.account_id(n) for n in ("david-darr", "bea"))
+        self.shared_dir = TemporaryDirectory(prefix="kairos-google-", dir=tempfile.gettempdir())
+        self.addCleanup(self.shared_dir.cleanup)
+        self.shared = Path(self.shared_dir.name) / "google_workspace.json"
+        patcher = patch.object(self.gw, "FILE", str(self.shared))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.files = {n: Path(accounts.ACCOUNTS_DIR) / a / "google_accounts.json"
+                      for n, a in (("first", self.first), ("second", self.second))}
+        for path in self.files.values():
+            path.unlink(missing_ok=True)
+            self.addCleanup(lambda p=path: p.unlink(missing_ok=True))
+
+    @staticmethod
+    def read(path):
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+
+    def test_the_first_admins_sign_ins_move_out_of_the_shared_file_when_it_loads(self):
+        david = {"id": "g1", "email": "david@example.test", "refresh_token": "r"}
+        self.shared.write_text(json.dumps({"client_id": "app-id", "client_secret": "app-secret",
+                                           "accounts": {"g1": david}, "default_account": "g1"}), encoding="utf-8")
+        with accounts.as_account(self.first):
+            data = self.gw._load()
+            self.assertEqual(self.gw._accounts_file(), str(self.files["first"]))
+        self.assertEqual(data["client_id"], "app-id")
+        self.assertEqual(data["accounts"], {"g1": david})
+        self.assertEqual(data["default_account"], "g1")
+        self.assertEqual(self.read(self.files["first"]), {"accounts": {"g1": david}, "default_account": "g1"})
+        self.assertEqual(self.read(self.shared), {"client_id": "app-id", "client_secret": "app-secret"},
+                         "only the app is left in the shared file")
+
+    def test_another_account_sees_the_app_but_none_of_the_first_admins_sign_ins(self):
+        self.shared.write_text(json.dumps({"client_id": "app-id", "client_secret": "app-secret",
+                                           "accounts": {"g1": {"id": "g1"}}, "default_account": "g1"}),
+                               encoding="utf-8")
+        with accounts.as_account(self.second):
+            data = self.gw._load()
+        self.assertEqual(data["client_id"], "app-id")
+        self.assertNotIn("accounts", data)
+        self.assertNotIn("default_account", data)
+        self.assertFalse(self.files["second"].exists(), "loading writes nothing for bea")
+        self.assertIn("accounts", self.read(self.shared), "and nothing left the shared file: not bea's to take")
+
+    def test_a_save_by_another_account_goes_to_its_own_file_and_keeps_the_app(self):
+        self.shared.write_text(json.dumps({"client_id": "app-id", "client_secret": "app-secret"}), encoding="utf-8")
+        bea = {"id": "b1", "email": "bea@example.test"}
+        with accounts.as_account(self.second):
+            data = self.gw._load()
+            data["accounts"] = {"b1": bea}
+            data["default_account"] = "b1"
+            self.gw._save(data)
+            self.assertEqual(self.gw._load()["accounts"], {"b1": bea})
+        self.assertEqual(self.read(self.files["second"]), {"accounts": {"b1": bea}, "default_account": "b1"})
+        self.assertEqual(self.read(self.shared), {"client_id": "app-id", "client_secret": "app-secret"})
+        with accounts.as_account(self.first):
+            self.assertNotIn("accounts", self.gw._load(), "bea's sign-in is not the first admin's")
+
+    def test_a_sign_in_remembers_the_account_that_started_it(self):
+        self.shared.write_text(json.dumps({"client_id": "app-id"}), encoding="utf-8")
+        with accounts.as_account(self.second):
+            url = self.gw.start_sign_in("http://127.0.0.1:8000/api/google/oauth/callback", owner="bea")
+        state = url.split("state=")[1].split("&")[0]
+        self.addCleanup(self.gw._pending.pop, state, None)
+        self.assertEqual(self.gw.pending_account(state), self.second)
+        self.assertIsNone(self.gw.pending_account("unknown"))
+
+
+class DiscordAndConnectorsPerAccount(unittest.TestCase):
+    """Group 6: bots and connectors stay one file per install; each record names the account it answers as."""
+
+    @classmethod
+    def setUpClass(cls):
+        account_migration.run(_DATA.name, backup=lambda path: None)
+
+    def setUp(self):
+        from core import discord_bots_store
+        from core.connectors import KINDS, store as connector_store
+        self.bots, self.connectors, self.kind = discord_bots_store, connector_store, KINDS["teams"]
+        fresh_users()
+        auth_manager.create_user("david-darr", "password-one-1", is_admin=True)
+        auth_manager.create_user("bea", "password-two-2")
+        self.first, self.second = (auth_manager.account_id(n) for n in ("david-darr", "bea"))
+        self.temp = TemporaryDirectory(prefix="kairos-bots-", dir=tempfile.gettempdir())
+        self.addCleanup(self.temp.cleanup)
+        for owner, name, filename in ((discord_bots_store, "BOTS_FILE", "discord_bots.json"),
+                                      (connector_store, "CONNECTORS_FILE", "connectors.json")):
+            patcher = patch.object(owner, name, os.path.join(self.temp.name, filename))
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def make_connector(self, account_id, name="Bea's Teams"):
+        with accounts.as_account(account_id):
+            return self.connectors.create("teams", name, {"webhook_url": "https://hook.example.test/x"},
+                                          self.kind.fields, ["me"], False, None)
+
+    def test_a_bot_records_the_account_that_made_it(self):
+        with accounts.as_account(self.second):
+            bot = self.bots.create_bot("Bea's bot", "fake-token", allowed_user_id="42")
+        self.assertEqual(bot["account"], self.second)
+        record = self.bots.get_bot(bot["id"])
+        self.assertEqual(record["account"], self.second)
+        self.assertEqual(self.bots.account_of(record), self.second)
+        with accounts.as_account(self.second):
+            self.assertTrue(self.bots.mine(record))
+        with accounts.as_account(self.first):
+            self.assertFalse(self.bots.mine(record))
+        token = accounts.set_current(None)
+        try:
+            self.assertFalse(self.bots.mine(record), "nobody signed in owns nothing")
+        finally:
+            accounts.reset_current(token)
+
+    def test_a_bot_from_before_accounts_belongs_to_the_local_user(self):
+        legacy = {"id": "legacy1", "name": "Old bot", "token_encrypted": "x"}
+        self.assertEqual(self.bots.account_of(legacy), accounts.local_account())
+        self.assertEqual(self.bots.account_of(legacy), self.first, "the first admin")
+        with accounts.as_account(self.first):
+            self.assertTrue(self.bots.mine(legacy))
+        with accounts.as_account(self.second):
+            self.assertFalse(self.bots.mine(legacy))
+        self.assertEqual(self.bots._masked(legacy)["account"], self.first)
+
+    def test_the_channel_list_shows_only_the_current_accounts_bots_and_connectors(self):
+        from core.channels import registry
+        with accounts.as_account(self.first):
+            mine = self.bots.create_bot("First bot", "fake-token")
+            self.bots.add_channel(mine["id"], "1001", "firsts-room", "normal")
+        with accounts.as_account(self.second):
+            theirs = self.bots.create_bot("Bea bot", "fake-token")
+            entry = self.bots.add_channel(theirs["id"], "2002", "beas-room", "normal")["channels"][0]
+        theirs_id = f"discord:{theirs['id']}:{entry['id']}"
+        made = self.make_connector(self.second)
+
+        def ids():
+            return {c["id"] for c in registry.list_channels()}
+        with accounts.as_account(self.first):
+            self.assertNotIn(theirs_id, ids(), "another account's named channel is not a delivery target")
+            self.assertTrue(any(i.startswith(f"discord:{mine['id']}:") for i in ids()))
+            self.assertNotIn(f"conn:{made['id']}", ids())
+        with accounts.as_account(self.second):
+            self.assertIn(theirs_id, ids())
+            self.assertFalse(any(i.startswith(f"discord:{mine['id']}:") for i in ids()))
+            self.assertIn(f"conn:{made['id']}", ids())
+
+    def test_a_connector_records_its_account_and_mine_follows_it(self):
+        record = self.make_connector(self.second)
+        self.assertEqual(record["account"], self.second)
+        self.assertEqual(self.connectors.get_record(record["id"])["account"], self.second)
+        self.assertEqual(self.connectors.account_of(record), self.second)
+        with accounts.as_account(self.second):
+            self.assertTrue(self.connectors.mine(record))
+        with accounts.as_account(self.first):
+            self.assertFalse(self.connectors.mine(record))
+        legacy = {key: value for key, value in record.items() if key != "account"}
+        self.assertEqual(self.connectors.account_of(legacy), accounts.local_account(), "a legacy one is the local user's")
+        with accounts.as_account(self.first):
+            self.assertTrue(self.connectors.mine(legacy))
+
+    def test_a_connector_delivers_only_for_the_account_it_answers_as(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+        from core.connectors import hub
+        record = {"id": "c1", "name": "First's", "kind": "teams", "account": self.first}
+        adapter = SimpleNamespace(record=record, default_target="room")
+        sent = AsyncMock()
+        with patch.object(hub, "adapters", {"c1": adapter}), patch.object(hub, "send_reply", sent):
+            with accounts.as_account(self.second):
+                self.assertFalse(asyncio.run(hub.deliver("c1", "hello")))
+            sent.assert_not_awaited()
+            with accounts.as_account(self.first):
+                self.assertTrue(asyncio.run(hub.deliver("c1", "hello")))
+            sent.assert_awaited_once_with(adapter, "room", "hello")
+
+    def test_a_message_runs_as_the_connectors_account(self):
+        from types import SimpleNamespace
+        from core.connectors import hub
+        from core.connectors.base import Inbound
+        seen = []
+
+        async def fake_receive(adapter, inbound):
+            seen.append(accounts.current_account())
+        adapter = SimpleNamespace(record={"id": "c2", "name": "Bea's", "account": self.second})
+        with patch.object(hub, "_receive", fake_receive):
+            asyncio.run(hub.receive(adapter, Inbound(conversation="c", sender="s", text="hi")))
+        self.assertEqual(seen, [self.second])
+
+
+class MailMigration(unittest.TestCase):
+    """Migration step 6: mail, triage, permissions, integrations and Google sign-ins move."""
+
+    MOVES = ("email_accounts.json", "email_triage.json", "permissions.json", "integrations.json",
+             "google_accounts.json")
+    STAYS = ("google_workspace.json", "discord_bots.json", "connectors.json", "github-account.json",
+             "creative-connections.json")
+
+    def setUp(self):
+        self.root = TemporaryDirectory(prefix="kairos-layout6-", dir=tempfile.gettempdir())
+        self.addCleanup(self.root.cleanup)
+        self.data = Path(self.root.name)
+        self.account = self.data / "accounts" / "abc123"
+
+    def test_the_mail_stores_move_and_the_install_level_files_stay(self):
+        for name in self.MOVES + self.STAYS:
+            (self.data / name).write_text(name, encoding="utf-8")
+        (self.data / "layout.json").write_text(json.dumps({"version": 5}), encoding="utf-8")
+        step = account_migration.STEPS[5]
+        self.assertEqual(step.version, 6)
+        result = account_migration.run(str(self.data), [step], account="abc123",
+                                       backup=lambda path: Path(path).write_text("backup", encoding="utf-8"))
+        self.assertTrue(result["ok"], result)
+        self.assertEqual((result["from_version"], result["to_version"]), (5, 6))
+        for name in self.MOVES:
+            self.assertEqual((self.account / name).read_text(encoding="utf-8"), name, f"{name} moved")
+            self.assertFalse((self.data / name).exists(), f"{name} left the top level")
+        for name in self.STAYS:
+            self.assertEqual((self.data / name).read_text(encoding="utf-8"), name, f"{name} stays at the top")
+            self.assertFalse((self.account / name).exists(), f"{name} must not be in the account folder")
+        self.assertEqual(account_migration.layout_version(str(self.data)), 6)
+        self.assertTrue(account_migration.is_moved("integrations.json", str(self.data)))
+        self.assertFalse(account_migration.is_moved("google_workspace.json", str(self.data)))
         account_migration._moved.pop(str(self.data), None)
 
 

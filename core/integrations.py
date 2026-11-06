@@ -49,10 +49,10 @@ import uuid
 from typing import Any, Optional
 
 from core.atomic_io import read_json, write_json_atomic
-from core.constants import DATA_DIR
+from core import accounts
 from core.secret_storage import decrypt, encrypt
 
-INTEGRATIONS_FILE = os.path.join(DATA_DIR, "integrations.json")
+INTEGRATIONS_FILE = None  # tests may point this at their own file; else the current account's integrations.json
 CLEAN_LAUNCHER = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "mcp_servers", "clean_launch.py")
 CHECK_EVERY_SECONDS = 30 * 60
 
@@ -64,8 +64,12 @@ DEFAULT_CALL_MINUTES = 10
 DEFAULT_RESULT_BUDGET = 8_000
 
 
+def integrations_file() -> str:
+    return INTEGRATIONS_FILE or accounts.path("integrations.json")
+
+
 def _load() -> dict:
-    return read_json(INTEGRATIONS_FILE, {})
+    return read_json(integrations_file(), {})
 
 
 def _masked(item: dict) -> dict:
@@ -240,7 +244,7 @@ def record_check(item_id: Optional[str] = None, tools: Optional[list[dict]] = No
                               for n, c in current.items() if pinned.get(n) != c["fingerprint"]}
         item["status"] = {"state": "working", "tools": len(current) - len(item["held_tools"]), "checked_at": now,
                           "error": None}
-    write_json_atomic(INTEGRATIONS_FILE, data)
+    write_json_atomic(integrations_file(), data)
     return _masked(item)
 
 
@@ -305,7 +309,7 @@ def accept_tools(item_id: str, names: list[str]) -> dict:
         item.setdefault("pinned_tools", {})[name] = held.pop(name)["fingerprint"]
     if item.get("status", {}).get("state") == "working":
         item["status"]["tools"] = (item["status"].get("tools") or 0) + len(names)
-    write_json_atomic(INTEGRATIONS_FILE, data)
+    write_json_atomic(integrations_file(), data)
     return _masked(item)
 
 
@@ -323,7 +327,7 @@ def create_api_service(name: str, base_url: str, api_key: Optional[str] = None) 
         "base_url": base_url.rstrip("/"),
         "api_key_encrypted": encrypt(api_key) if api_key else None,
     }
-    write_json_atomic(INTEGRATIONS_FILE, data)
+    write_json_atomic(integrations_file(), data)
     return _masked(data[item_id])
 
 
@@ -360,7 +364,7 @@ def create_mcp_server(name: str, mcp_type: str, command: Optional[str] = None,
                 data[item_id][key] = previous[key]
         if previous.get("url") == url and previous.get("auth") == auth and previous.get("oauth"):
             data[item_id]["oauth"] = previous["oauth"]
-    write_json_atomic(INTEGRATIONS_FILE, data)
+    write_json_atomic(integrations_file(), data)
     return _masked(data[item_id])
 
 
@@ -423,7 +427,7 @@ def save_mcp_config(fields: dict, replace_id: Optional[str] = None) -> dict:
         if previous.get("url") == item["url"] and previous.get("auth") == item.get("auth") and previous.get("oauth"):
             item["oauth"] = previous["oauth"]
     data[item_id] = item
-    write_json_atomic(INTEGRATIONS_FILE, data)
+    write_json_atomic(integrations_file(), data)
     return _masked(item)
 
 
@@ -475,7 +479,7 @@ def create_dav(kind: str, name: str, url: str, username: str, password: str) -> 
         "username": username, "password_encrypted": encrypt(password),
         "last_synced_count": None,
     }
-    write_json_atomic(INTEGRATIONS_FILE, data)
+    write_json_atomic(integrations_file(), data)
     return _masked(data[item_id])
 
 
@@ -501,7 +505,7 @@ def create_ical_feed(name: str, url: str, username: Optional[str] = None, passwo
         "username": username or "", "password_encrypted": encrypt(password) if password else None,
         "last_synced_count": None,
     }
-    write_json_atomic(INTEGRATIONS_FILE, data)
+    write_json_atomic(integrations_file(), data)
     return _masked(data[item_id])
 
 
@@ -517,13 +521,13 @@ def record_sync_count(item_id: str, count: int) -> None:
     data = _load()
     if item_id in data:
         data[item_id]["last_synced_count"] = count
-        write_json_atomic(INTEGRATIONS_FILE, data)
+        write_json_atomic(integrations_file(), data)
 
 
 def delete_integration(item_id: str) -> None:
     data = _load()
     data.pop(item_id, None)
-    write_json_atomic(INTEGRATIONS_FILE, data)
+    write_json_atomic(integrations_file(), data)
 
 
 def set_enabled(item_id: str, enabled: bool) -> dict:
@@ -532,7 +536,7 @@ def set_enabled(item_id: str, enabled: bool) -> dict:
     if item_id not in data:
         raise KeyError(item_id)
     data[item_id]["enabled"] = enabled
-    write_json_atomic(INTEGRATIONS_FILE, data)
+    write_json_atomic(integrations_file(), data)
     return _masked(data[item_id])
 
 

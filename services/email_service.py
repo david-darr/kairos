@@ -21,20 +21,26 @@ from email.mime.text import MIMEText
 from email.header import decode_header
 from typing import Optional
 
+from core import accounts
 from core.atomic_io import read_json, write_json_atomic
-from core.constants import DATA_DIR
 from core.secret_storage import encrypt, decrypt
 import os
 
-ACCOUNTS_FILE = os.path.join(DATA_DIR, "email_accounts.json")
+# Each account's own email_accounts.json (Multi-Account phase 2); a test may point this at its own file.
+ACCOUNTS_FILE = None
+
+
+def accounts_file() -> str:
+    return ACCOUNTS_FILE or accounts.path("email_accounts.json")
 
 
 class EmailService:
-    def __init__(self) -> None:
-        self._accounts: dict = read_json(ACCOUNTS_FILE, {})
+    def __init__(self, path: Optional[str] = None) -> None:
+        self._file = path or accounts_file()
+        self._accounts: dict = read_json(self._file, {})
 
     def _save(self) -> None:
-        write_json_atomic(ACCOUNTS_FILE, self._accounts)
+        write_json_atomic(self._file, self._accounts)
 
     def _masked(self, account: dict) -> dict:
         return {k: v for k, v in account.items() if k != "password_encrypted"}
@@ -290,4 +296,4 @@ def _decode_header(raw: str) -> str:
     return decoded
 
 
-email_service = EmailService()
+email_service = accounts.PerAccount(EmailService, accounts_file)

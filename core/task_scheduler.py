@@ -554,7 +554,17 @@ def _check_mcp_servers(loop) -> None:
             clock.time() - _mcp_check["last"] < integrations.CHECK_EVERY_SECONDS:
         return
     _mcp_check["last"] = clock.time()
-    _mcp_check["task"] = loop.create_task(mcp_client.check_all())
+    _mcp_check["task"] = loop.create_task(_check_all_accounts(mcp_client.check_all))
+
+
+async def _check_all_accounts(check_all) -> None:
+    """One check pass over every account's MCP servers, one account at a time."""
+    for account_id in accounts.all_accounts():
+        try:
+            with accounts.as_account(account_id):
+                await check_all()
+        except Exception:
+            logger.exception("MCP check failed for account %s", account_id)
 
 
 async def _poll_loop() -> None:

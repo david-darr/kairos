@@ -43,6 +43,13 @@ def _shown(record: dict) -> dict:
             "webhook_path": f"/api/connectors/{record['id']}/webhook" if cls and cls.webhook else None}
 
 
+def _own_connector(connector_id: str) -> None:
+    """An admin manages their own account's connectors (Multi-Account group 6); another account's is 404."""
+    record = store.get_record(connector_id)
+    if record is None or not store.mine(record):
+        raise HTTPException(status_code=404, detail="no such connector")
+
+
 @router.get("/kinds")
 async def kinds(user: str = Depends(require_admin)) -> list[dict]:
     return [{"kind": c.kind, "label": c.label, "description": c.description, "docs_url": c.docs_url,
@@ -52,7 +59,7 @@ async def kinds(user: str = Depends(require_admin)) -> list[dict]:
 
 @router.get("")
 async def list_connectors(user: str = Depends(require_admin)) -> list[dict]:
-    return [_shown(r) for r in store.list_records()]
+    return [_shown(r) for r in store.list_records() if store.mine(r)]
 
 
 @router.post("")
@@ -71,6 +78,7 @@ async def create_connector(body: ConnectorBody, user: str = Depends(require_admi
 
 @router.patch("/{connector_id}")
 async def update_connector(connector_id: str, body: ConnectorBody, user: str = Depends(require_admin)) -> dict:
+    _own_connector(connector_id)
     record = store.get_record(connector_id)
     if record is None:
         raise HTTPException(status_code=404, detail="connector not found")
@@ -91,6 +99,7 @@ async def update_connector(connector_id: str, body: ConnectorBody, user: str = D
 
 @router.delete("/{connector_id}")
 async def delete_connector(connector_id: str, user: str = Depends(require_admin)) -> dict:
+    _own_connector(connector_id)
     await hub.stop(connector_id)
     store.delete(connector_id)
     hub.status.pop(connector_id, None)
@@ -99,6 +108,7 @@ async def delete_connector(connector_id: str, user: str = Depends(require_admin)
 
 @router.post("/{connector_id}/test")
 async def test_connector(connector_id: str, body: TestBody, user: str = Depends(require_admin)) -> dict:
+    _own_connector(connector_id)
     record = store.get_record(connector_id)
     if record is None:
         raise HTTPException(status_code=404, detail="connector not found")

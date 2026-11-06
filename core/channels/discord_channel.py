@@ -175,6 +175,12 @@ def _build_client(discord, bot: dict):
 
     @client.event
     async def on_message(message):
+        # Everything a message starts runs as the account that set this bot up (Multi-Account group 6).
+        from core import accounts
+        with accounts.as_account(discord_bots_store.account_of(bot)):
+            await _on_message(message)
+
+    async def _on_message(message):
         if message.author == client.user:
             return
         if not _should_respond(str(message.channel.id), str(message.author.id), channel_modes, allowed_user_id):
@@ -344,7 +350,8 @@ async def send_direct_message(text: str) -> bool:
     for bot in discord_bots_store.list_bots():
         client = _clients.get(bot["id"])
         allowed_user_id = bot.get("allowed_user_id")
-        if not client or not allowed_user_id:
+        # Only this account's own bots (Multi-Account group 6): one account's task never DMs through another's.
+        if not client or not allowed_user_id or not discord_bots_store.mine(bot):
             continue
         try:
             user = await client.fetch_user(int(allowed_user_id))
@@ -366,7 +373,7 @@ async def send_to_named_channel(bot_id: str, entry_id: str, text: str) -> bool:
     if not client:
         return False
     bot = discord_bots_store.get_bot(bot_id)
-    if not bot:
+    if not bot or not discord_bots_store.mine(bot):  # another account's bot (Multi-Account group 6)
         return False
     entry = next((c for c in bot.get("channels", []) if c["id"] == entry_id), None)
     if not entry:
