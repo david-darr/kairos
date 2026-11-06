@@ -188,6 +188,45 @@ export async function renderSpeechPanel(content, status) {
       ? `Using the ${state.active_model} model.`
       : 'No model downloaded yet. Dictation stays unavailable until one is.' }, modelRows));
 
+    // Optional ONNX downloads. Each row says plainly what is missing; nothing downloads unless Download is pressed.
+    const optionalRows = (state.optional || []).map(item => {
+      const status = el('span', { class: 'meta', role: 'status', text: item.status });
+      const parts = [status];
+      if (item.state === 'ready') parts.unshift(pill('Ready', 'ok'));
+      if (item.downloaded && isAdmin) {
+        parts.push(el('button', { type: 'button', class: 'btn quiet', text: 'Remove', onclick: async () => {
+          try { await api(`/api/speech/optional/${item.name}`, { method: 'DELETE' }); refreshSpeechStatus(); draw(); }
+          catch (error) { toast(error.message || 'Could not remove it.', 'error'); }
+        } }));
+      } else if (!item.downloaded && item.pinned && item.state !== 'downloading') {
+        if (!isAdmin) parts.push(el('span', { class: 'meta', text: 'An admin can download this' }));
+        else {
+          const button = el('button', { type: 'button', class: 'btn', text: 'Download' });
+          button.addEventListener('click', async () => {
+            button.disabled = true; status.textContent = 'Starting…';
+            try { await api(`/api/speech/optional/${item.name}/download`, { method: 'POST' }); }
+            catch (error) { status.textContent = item.status; button.disabled = false; toast(error.message || 'Download could not be started.', 'error'); return; }
+            const timer = setInterval(async () => {
+              if (!root.isConnected) { clearInterval(timer); timers.delete(timer); return; }
+              let info; try { info = await api(`/api/speech/optional/${item.name}/progress`); } catch { return; }
+              if (info.total) status.textContent = `${Math.min(100, Math.round((info.completed / info.total) * 100))}%`;
+              if (info.done) {
+                clearInterval(timer); timers.delete(timer);
+                if (info.error) { status.textContent = item.status; button.disabled = false; toast(`Download failed: ${info.error}`, 'error'); return; }
+                refreshSpeechStatus(); toast(`${item.label} downloaded`, 'success'); draw();
+              }
+            }, POLL_MS);
+            timers.add(timer);
+          });
+          parts.push(button);
+        }
+      }
+      // Not yet downloaded but the runtime is also missing: say so up front rather than after a long download.
+      const needs = !item.downloaded && item.missing_runtime?.length ? ` Also needs ${item.missing_runtime.map(m => m === 'onnxruntime' ? 'the ONNX runtime' : 'the Kokoro engine package').join(' and ')}.` : '';
+      return row({ title: `${item.label} · ${item.size_mb} MB`, description: (item.description || '') + needs, control: el('div', { class: 'speech-model-actions' }, parts), cls: 'speech-optional' });
+    });
+    if (optionalRows.length) parts.push(group({ title: 'Optional voice features', description: 'Not needed for dictation. They need the ONNX runtime and stay off until you download them.', cls: 'speech-optional-group' }, optionalRows));
+
     const deviceSection = await drawDevices();
     if (deviceSection && root.isConnected) parts.push(deviceSection);
     const voiceSection = await drawVoice();

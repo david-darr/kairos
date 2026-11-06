@@ -118,8 +118,11 @@ def engine_available() -> bool:
 
 
 def status() -> dict:
-    from core import speech_acceleration
+    from core import speech_acceleration, speech_optional, turn_detect
     return {
+        # Optional ONNX downloads (Smart Turn, Kokoro): honest per-item state, nothing auto-downloads.
+        "optional": speech_optional.status(),
+        "turn_detect": turn_detect.status(),
         "engine_available": engine_available(),
         "active_model": installed_model(),
         "models": list_models(),

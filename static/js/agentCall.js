@@ -3,9 +3,10 @@ import { api, el, toast } from './api.js';
 import { liveVoice } from './callLive.js';
 import { callTransport } from './callTransport.js';
 import { voiceSettings, neuralSpeaker } from './callVoice.js';
-import { transcribeBlob, transcribePartial, refreshSpeechStatus } from './voiceInput.js';
+import { transcribeBlob, transcribePartial, refreshSpeechStatus, encodeWav } from './voiceInput.js';
 import { createPartialTranscriber } from './partialTranscript.js';
 import { createCallRecorder, isCallRecordingSupported } from './callRecorder.js';
+import { createTurnEndpoint, postTurn } from './turnEndpoint.js';
 import { createSpeaker, isSpeechOutputSupported, whenVoicesReady, resolveVoice } from './voiceOutput.js';
 import { createMascot } from './mascot.js';
 import { createVoiceTrace } from './voiceTrace.js';
@@ -67,6 +68,7 @@ export function agentCall(agent, controller) {
   };
   let microphoneMuted = false, assistantMuted = false, state = 'setup';
   let pending = null, startedAt = 0, timer = null, downloadTimer = null;
+  const turnEndpoint = createTurnEndpoint({ post: postTurn, encode: pcm => encodeWav(pcm, 16000) });
   let voices = [], speech = null, wordTimer = null, speechFlushTimer = null;
   let speechActive = false, audioQueue = [], texts = [], transcribing = false, dispatching = false, revision = 0;
   let response = null, deferredReply = null, recognitionTiming = {};
@@ -375,6 +377,8 @@ export function agentCall(agent, controller) {
       mode: inputMode.value,
       onLevel: level => { if (active && !microphoneMuted && state !== 'speaking') orb.style.setProperty('--level', String(level)); },
       onChunk: pcm => { if (active && !microphoneMuted && epoch === token) partials.push(pcm); },
+      // Smart Turn: at a short pause, ask whether the sentence is finished. No answer (not set up, slow) = today's silence wait.
+      onPause: (id, pcm) => { turnEndpoint.ask(pcm).then(verdict => { if (verdict && active && epoch === token && recorder === next) next.verdict(id, verdict.complete); else if (turnEndpoint.off && recorder === next) next.setSmartTurn(false); }); },
       onBargeIn: () => { if (epoch === token) bargeIn(); },
       onSpeechStart: () => { if (active && !microphoneMuted) { partials.begin(); speechActive = true; status.textContent = inputMode.value === 'hold' ? 'Recording your full sentence...' : voiceBusy ? 'Listening to your next sentence...' : 'Listening...'; } },
       onSegment: (blob, measured, pcm) => {
@@ -397,6 +401,7 @@ export function agentCall(agent, controller) {
     recorder = next;
     try { await next.start(); } catch (problem) { next.close(); if (recorder === next) recorder = null; throw problem; }
     if (!active || disposed || epoch !== token || microphoneMuted || recorder !== next) { next.close(); return; }
+    if (inputMode.value === 'automatic' && speech?.turn_detect?.ready && !turnEndpoint.off) next.setSmartTurn(true);
     applyMicrophone();
   }
   // The user's voice held for ~250 ms over Kairos speaking (the worklet decided; see speechSegments.js for the thresholds).

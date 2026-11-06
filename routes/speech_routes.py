@@ -120,6 +120,55 @@ async def download_progress(name: str, user: str = Depends(require_user)) -> dic
     return speech.get_download_progress(name)
 
 
+@router.post("/optional/{name}/download")
+async def download_optional(name: str, user: str = Depends(require_admin)) -> dict:
+    """Start a user-requested download of an optional ONNX model. Refused (400) while its URL or SHA-256 is not pinned."""
+    from core import speech_optional
+    try:
+        speech_optional.start_download(name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@router.get("/optional/{name}/progress")
+async def optional_progress(name: str, user: str = Depends(require_user)) -> dict:
+    from core import speech_optional
+    return speech_optional.get_progress(name)
+
+
+@router.delete("/optional/{name}")
+async def remove_optional(name: str, user: str = Depends(require_admin)) -> dict:
+    from core import speech_optional
+    try:
+        await asyncio.to_thread(speech_optional.remove, name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@router.post("/turn")
+async def end_of_turn(audio: UploadFile = File(...), user: str = Depends(require_user)) -> dict:
+    """Has the speaker finished their sentence? Smart Turn on the utterance so far (16 kHz mono WAV).
+
+    Always 200 with `available`. When the model or onnxruntime is missing it answers {"available": false} and the
+    caller keeps its fixed silence wait, exactly as before; this is never an error the user has to see. Otherwise
+    {"available": true, "complete": bool, "probability": float}: complete means end the turn now, incomplete means keep
+    listening (the caller caps how long).
+    """
+    from core import turn_detect
+    data = await audio.read(speech.MAX_AUDIO_BYTES + 1)
+    if len(data) > speech.MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="That recording is too large.")
+    try:
+        result = await asyncio.to_thread(turn_detect.predict, data)
+    except turn_detect.TurnUnavailable as e:
+        return {"available": False, "complete": True, "probability": None, "reason": str(e)}
+    except speech.SpeechUnavailable as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return {"available": True, **result}
+
+
 @router.post("/partial")
 async def transcribe_partial(audio: UploadFile = File(...), model: str = Form(...), backend: Literal['auto', 'cpu'] = Form(default='auto'), user: str = Depends(require_user)) -> dict:
     """Rolling transcript of the audio so far, while the user is still talking.

@@ -53,6 +53,64 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
     assert.deepEqual(Array.from(joined.subarray(0,segments[0].pcm.length)),Array.from(segments[0].pcm),'The chunks, joined, are the segment audio sample for sample (so a tail can be cut at any committed offset)');
     const off=run([silence(500),tone(2400),silence(900)]);assert.ok(off.segments.length===1,'Without a chunk callback nothing changes');
   }
+  // ---- end of turn by meaning (Smart Turn): pause -> complete / incomplete -> cap, and the fallbacks ----
+  {
+    const srcTurn=fs.readFileSync(path.join(__dirname,'../static/js/turnEndpoint.js'),'utf8');
+    const {createTurnEndpoint}=await import('data:text/javascript;base64,'+Buffer.from(srcTurn).toString('base64'));
+    const {endOfTurn,SMART_CAP_MS}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+    // The pure decision.
+    assert.equal(endOfTurn({quietMs:300,verdict:null}),false,'No verdict: the ordinary 700 ms silence wait');
+    assert.equal(endOfTurn({quietMs:700,verdict:null}),true,'No verdict: ends at 700 ms exactly as before');
+    assert.equal(endOfTurn({quietMs:200,verdict:true}),true,'Complete ends the turn right at the pause');
+    assert.equal(endOfTurn({quietMs:1500,verdict:false}),false,'Incomplete keeps listening past the ordinary wait');
+    assert.equal(endOfTurn({quietMs:SMART_CAP_MS,verdict:false}),true,'Incomplete is capped at 2.5 s of silence');
+    assert.equal(endOfTurn({quietMs:900,verdict:null,silenceMs:900}),true,'Open Mic keeps its own 900 ms');
+    // The segmenter: feed an utterance, answer the pause question, count where it ends.
+    function smartRun(parts,{verdict,delayMs=0,smart=true}={}){
+      const segments=[],asked=[];let heard=0;let pending=null;
+      const d=new SpeechSegments({onSegment:(pcm,timing)=>{if(pcm.length)segments.push({pcm,timing});},onPause:(id,pcm)=>{asked.push({id,len:pcm.length});pending={id,at:heard+delayMs/1000*rate};}});
+      d.smartTurn(smart);
+      for(const part of parts)for(let at=0;at<part.length;at+=128){
+        d.push(part.subarray(at,at+128));heard+=Math.min(128,part.length-at);
+        if(pending&&verdict!==undefined&&heard>=pending.at){const p=pending;pending=null;d.answer(p.id,verdict);}
+      }
+      return {segments,asked,d};
+    }
+    const talk=[silence(500),tone(1200)];
+    const base=smartRun([...talk,silence(1500)]);   // smart on, never answered
+    assert.equal(base.asked.length,1,'One question per pause');
+    assert.equal(base.segments.length,1);
+    assert.ok(base.segments[0].timing.endpoint_ms>=700&&base.segments[0].timing.endpoint_ms<720,'Unanswered: exactly today\'s 700 ms');
+    const complete=smartRun([...talk,silence(1500)],{verdict:true});
+    assert.equal(complete.segments.length,1);
+    assert.ok(complete.segments[0].timing.endpoint_ms>=200&&complete.segments[0].timing.endpoint_ms<240,`Complete ends at the ~200 ms pause (${complete.segments[0].timing.endpoint_ms} ms)`);
+    const incomplete=smartRun([...talk,silence(3000)],{verdict:false});
+    assert.equal(incomplete.segments.length,1);
+    assert.ok(incomplete.segments[0].timing.endpoint_ms>=2500&&incomplete.segments[0].timing.endpoint_ms<2520,`Incomplete waits until the 2.5 s cap (${incomplete.segments[0].timing.endpoint_ms} ms)`);
+    const resumed=smartRun([...talk,silence(800),tone(600),silence(3000)],{verdict:false});
+    assert.equal(resumed.segments.length,1,'Speaking again during an incomplete wait continues the same utterance');
+    assert.equal(resumed.asked.length,2,'The next pause asks a fresh question');
+    assert.ok(resumed.segments[0].pcm.length>rate*2.4,'Both phrases are in the one segment');
+    const slow=smartRun([...talk,silence(1500)],{verdict:false,delayMs:600});   // verdict arrives after 800 ms of quiet
+    assert.ok(slow.segments[0].timing.endpoint_ms>=700&&slow.segments[0].timing.endpoint_ms<720,'A verdict that arrives after the ordinary wait changes nothing');
+    const stale=smartRun([...talk,silence(150)],{});stale.d.answer(99,true);assert.equal(stale.segments.length,0,'An answer for another pause id is ignored');
+    const off=smartRun([...talk,silence(1500)],{verdict:true,smart:false});
+    assert.equal(off.asked.length,0,'Smart Turn off asks nothing');
+    assert.ok(off.segments[0].timing.endpoint_ms>=700&&off.segments[0].timing.endpoint_ms<720,'Smart Turn off: exactly today\'s 700 ms');
+    const win=smartRun([silence(500),tone(12000),silence(400)],{});
+    assert.ok(win.asked[0].len<=rate*8,'The pause question carries at most the last 8 seconds');
+    // The client endpoint module: no opinion on failure, latches off when unavailable.
+    let calls=0;const live=createTurnEndpoint({encode:p=>p,post:async()=>{calls++;return {available:true,complete:true,probability:.9};}});
+    assert.deepEqual(await live.ask(new Float32Array(10)),{complete:true,probability:.9});
+    const missing=createTurnEndpoint({encode:p=>p,post:async()=>{calls++;return {available:false};}});
+    calls=0;assert.equal(await missing.ask(new Float32Array(10)),null);assert.equal(await missing.ask(new Float32Array(10)),null);
+    assert.equal(calls,1,'A server without the model/runtime is asked once, then the endpoint stays off');
+    calls=0;const broken=createTurnEndpoint({encode:p=>p,post:async()=>{calls++;throw new Error('x');}});
+    for(let i=0;i<5;i++)assert.equal(await broken.ask(new Float32Array(10)),null);
+    assert.equal(calls,3,'Three failures in a row turn it off for the session');
+    const hung=createTurnEndpoint({timeoutMs:20,encode:p=>p,post:(w,signal)=>new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(new Error('abort'))))});
+    assert.equal(await hung.ask(new Float32Array(10)),null,'A verdict that never arrives is abandoned after the timeout');
+  }
   // ---- barge-in: the user's voice over Kairos's own echo ----
   {
     const leak=(ms,volume=.008,hz=180)=>Float32Array.from({length:Math.round(rate*ms/1000)},(_,i)=>volume*Math.sin(i*2*Math.PI*hz/rate));

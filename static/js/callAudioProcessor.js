@@ -13,6 +13,8 @@ class KairosCallProcessor extends AudioWorkletProcessor {
       onSegment: (pcm, timing) => this.port.postMessage({ type: 'segment', pcm, timing }, [pcm.buffer]),
       // New audio of the running utterance for rolling transcription (see partialTranscript.js).
       chunkMs: CHUNK_MS, onChunk: (pcm, meta) => this.port.postMessage({ type: 'chunk', pcm, pause: meta.pause }, [pcm.buffer]),
+      // A short pause: ask the page whether the sentence is finished (Smart Turn); its answer comes back as 'verdict'.
+      onPause: (id, pcm) => this.port.postMessage({ type: 'pause', id, pcm }, [pcm.buffer]),
     });
     // While Kairos speaks the segmenter rests and this listens for the user over the echo (speechSegments.js).
     this.bargeIn = new BargeIn({ rate: sampleRate, onBarge: ({ parts, voiced }) => {
@@ -29,6 +31,8 @@ class KairosCallProcessor extends AudioWorkletProcessor {
         this.barge = data.value && this.enabled && !this.manual;
         if (this.barge) this.bargeIn.reset(this.segmenter.noise);
       }
+      if (data.type === 'smart_turn') this.segmenter.smartTurn(data.value);
+      if (data.type === 'verdict') this.segmenter.answer(data.id, data.complete);
       if (data.type === 'mode') { this.manual = data.value === 'hold'; this.held.cancel(); this.segmenter.reset(true); }
       if (data.type === 'hold_start' && this.enabled && this.manual) this.held.begin();
       if (data.type === 'hold_end') this.held.release();

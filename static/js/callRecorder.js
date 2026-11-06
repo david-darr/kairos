@@ -4,7 +4,7 @@ import { getInputDevice, setInputDevice, encodeWav } from './voiceInput.js';
 export function isCallRecordingSupported() {
   return !!(navigator.mediaDevices?.getUserMedia && window.AudioContext && window.AudioWorkletNode);
 }
-export function createCallRecorder({ onLevel, onSpeechStart, onSegment, onChunk, onBargeIn, onError, mode = 'automatic' } = {}) {
+export function createCallRecorder({ onLevel, onSpeechStart, onSegment, onChunk, onPause, onBargeIn, onError, mode = 'automatic' } = {}) {
   let stream = null, context = null, source = null, node = null, gain = null, closed = false, enabled = false, settleReady = null, readyTimer = null;
   const close = () => {
     closed = true; enabled = false;
@@ -38,6 +38,7 @@ export function createCallRecorder({ onLevel, onSpeechStart, onSegment, onChunk,
           if (data.type === 'level') onLevel?.(data.level);
           if (data.type === 'speech_start') onSpeechStart?.();
           if (data.type === 'chunk') onChunk?.(data.pcm, data.pause);
+          if (data.type === 'pause') onPause?.(data.id, data.pcm);
           if (data.type === 'barge_in') onBargeIn?.();
           // The raw samples ride along (third argument) so a rolling transcript can send just the tail.
           if (data.type === 'segment') onSegment?.(data.pcm.length ? encodeWav(data.pcm, 16000) : null, data.timing, data.pcm.length ? data.pcm : null);
@@ -51,6 +52,9 @@ export function createCallRecorder({ onLevel, onSpeechStart, onSegment, onChunk,
     },
     // `barge` keeps the microphone open while Kairos speaks: no segmenting, only a watch for the user's voice over the echo.
     setEnabled(value, barge = false) { enabled = !!value && !closed; node?.port.postMessage({ type: 'enabled', value: enabled }); node?.port.postMessage({ type: 'barge', value: enabled && !!barge }); },
+    // End of turn by meaning: on, the processor asks onPause(id, pcm) at a short pause; answer with verdict(id, complete).
+    setSmartTurn(value) { node?.port.postMessage({ type: 'smart_turn', value: !!value }); },
+    verdict(id, complete) { if (!closed) node?.port.postMessage({ type: 'verdict', id, complete: !!complete }); },
     beginHold() { if (enabled && !closed) node?.port.postMessage({ type: 'hold_start' }); },
     endHold() { if (!closed) node?.port.postMessage({ type: 'hold_end' }); },
     cancelHold() { node?.port.postMessage({ type: 'hold_cancel' }); },

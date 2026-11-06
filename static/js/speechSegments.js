@@ -7,9 +7,27 @@ export const TRAILING_KEEP_MS = 160;
 // partial transcript that covers all the voiced audio can already be on its way when the endpoint fires.
 export const CHUNK_MS = 1000;
 export const PAUSE_FLUSH_MS = 300;
+// End of turn by meaning (core/turn_detect.py, Smart Turn). Only when the owner switches it on with `smartTurn(true)`.
+// A pause of SMART_PAUSE_MS asks "is this sentence finished?" once, handing out the last SMART_WINDOW_MS of the utterance
+// with an id. The answer decides the pause: complete ends the turn at once; incomplete keeps listening until the speaker
+// has been quiet for SMART_CAP_MS, then ends anyway; no answer by the ordinary silence wait (slow, failed, off) ends it
+// exactly as without Smart Turn. Voice resuming forgets the question.
+export const SMART_PAUSE_MS = 200;
+export const SMART_CAP_MS = 2500;
+export const SMART_WINDOW_MS = 8000;
+
+// The pure decision, shared by the segmenter and by any other endpointer (Open Mic) that counts silence its own way:
+// given how long the speaker has been quiet and the verdict so far (null = none yet, true = complete, false =
+// incomplete), may the turn end now?
+export function endOfTurn({ quietMs, verdict = null, silenceMs = 700, capMs = SMART_CAP_MS }) {
+  if (verdict === true) return quietMs >= SMART_PAUSE_MS;
+  if (verdict === false) return quietMs >= Math.max(capMs, silenceMs);
+  return quietMs >= silenceMs;
+}
 
 export class SpeechSegments {
-  constructor({ rate = 16000, preRollMs = 400, silenceMs = 700, chunkMs = 0, pauseFlushMs = PAUSE_FLUSH_MS, onStart = () => {}, onSegment = () => {}, onChunk = null } = {}) {
+  constructor({ rate = 16000, preRollMs = 400, silenceMs = 700, chunkMs = 0, pauseFlushMs = PAUSE_FLUSH_MS, onStart = () => {}, onSegment = () => {}, onChunk = null, onPause = null, capMs = SMART_CAP_MS } = {}) {
+    this.onPause = onPause; this.smart = false; this.silenceMs = silenceMs; this.capMs = capMs; this.pauseId = 0; this.asked = 0; this.verdict = null;
     this.rate = rate; this.preRoll = Math.round(rate * preRollMs / 1000);
     this.silence = rate * silenceMs / 1000; this.onStart = onStart; this.onSegment = onSegment;
     this.chunk = Math.round(rate * chunkMs / 1000); this.pause = Math.round(rate * pauseFlushMs / 1000); this.onChunk = onChunk;
@@ -19,9 +37,15 @@ export class SpeechSegments {
     const previousNoise = this.noise, calibrated = this.calibrated;
     this.ring = []; this.ringSize = 0; this.parts = []; this.length = 0;
     this.active = false; this.attack = 0; this.voiced = 0; this.quiet = 0;
-    this.pending = []; this.pendingSize = 0; this.paused = false;
+    this.pending = []; this.pendingSize = 0; this.paused = false; this.asked = 0; this.verdict = null;
     this.noise = .002; this.calibration = []; this.calibrated = 0; this.lastVoice = 0;
     if (keepNoise && calibrated >= this.rate * .2) { this.noise = previousNoise; this.calibrated = calibrated; }
+  }
+  smartTurn(value) { this.smart = !!value && !!this.onPause; this.verdict = null; }
+  // The answer to a pause question (ignored when it is for an older pause).
+  answer(id, complete) { if (this.active && id === this.pauseId && this.asked) { this.verdict = !!complete; this.decide(); } }
+  decide() {
+    if (this.active && endOfTurn({ quietMs: this.quiet / this.rate * 1000, verdict: this.smart ? this.verdict : null, silenceMs: this.silenceMs, capMs: this.capMs })) this.finish();
   }
   push(samples) {
     let square = 0; for (const sample of samples) square += sample * sample;
@@ -49,9 +73,16 @@ export class SpeechSegments {
       if (this.onChunk) { this.pending.push(copy); this.pendingSize += copy.length; }
       if (rms > Math.max(.0025, this.noise * 1.6)) {
         this.voiced += samples.length; this.lastVoice = this.length; this.quiet = 0; this.paused = false;
+        this.asked = 0; this.verdict = null;
       } else this.quiet += samples.length;
-      if (this.quiet >= this.silence || this.length >= this.rate * 30) this.finish();
-      else this.flushChunk(this.quiet >= this.pause && !this.paused);
+      if (this.length >= this.rate * 30) this.finish();
+      else {
+        if (this.smart && !this.asked && this.quiet >= this.rate * SMART_PAUSE_MS / 1000 && this.voiced >= this.rate * .12) this.ask();
+        if (!this.active) return rms;
+        if (this.smart && this.verdict !== null) this.decide();
+        else if (this.quiet >= this.silence) this.finish();
+        if (this.active) this.flushChunk(this.quiet >= this.pause && !this.paused);
+      }
     }
     return rms;
   }
@@ -62,7 +93,19 @@ export class SpeechSegments {
     this.ring = []; this.ringSize = 0; this.active = true; this.attack = 0; this.voiced = voiced; this.quiet = 0; this.lastVoice = this.length;
     this.startChunks(); this.onStart(); this.flushChunk(false);
   }
-  startChunks() { this.pending = this.onChunk ? this.parts.slice() : []; this.pendingSize = this.onChunk ? this.length : 0; this.paused = false; }
+  // Hands the last SMART_WINDOW_MS of the utterance to the owner with a fresh id; the verdict comes back through answer().
+  ask() {
+    const keep = Math.round(this.rate * SMART_WINDOW_MS / 1000), end = Math.min(this.length, this.lastVoice + Math.round(this.rate * TRAILING_KEEP_MS / 1000));
+    const out = new Float32Array(Math.min(end, keep)); let skip = Math.max(0, end - keep), at = 0, taken = 0;
+    for (const part of this.parts) {
+      if (taken >= end) break;
+      const from = Math.max(0, skip - taken), to = Math.min(part.length, end - taken);
+      if (to > from) { out.set(part.subarray(from, to), at); at += to - from; }
+      taken += part.length;
+    }
+    this.asked = ++this.pauseId; this.verdict = null; this.onPause(this.pauseId, out);
+  }
+  startChunks() { this.pending = this.onChunk ? this.parts.slice() : []; this.pendingSize = this.onChunk ? this.length : 0; this.paused = false; this.asked = 0; this.verdict = null; }
   // Hands out the audio that arrived since the last chunk: when a chunk's worth is waiting, or when `pause` says the
   // speaker just went quiet for long enough to be at a likely end of turn.
   flushChunk(pause) {
@@ -83,7 +126,7 @@ export class SpeechSegments {
     let at = 0; if (accepted) for (const part of this.parts) { const n = Math.min(part.length, length-at); if (n <= 0) break; pcm.set(part.subarray(0,n),at); at += n; }
     const endpointMs = Math.round(this.quiet / this.rate * 1000);
     this.active = false; this.attack = 0; this.voiced = 0; this.quiet = 0; this.parts = []; this.length = 0; this.lastVoice = 0;
-    this.pending = []; this.pendingSize = 0; this.paused = false;
+    this.pending = []; this.pendingSize = 0; this.paused = false; this.asked = 0; this.verdict = null;
     this.ring = []; this.ringSize = 0;
     if (tail) { this.ring = [tail]; this.ringSize = tail.length; }
     this.onSegment(pcm, { endpoint_ms: endpointMs, audio_ms: Math.round(pcm.length / this.rate * 1000) });

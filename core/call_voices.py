@@ -24,13 +24,31 @@ def validate_url(value):
     if not parsed.port: raise ValueError('Include the voice server port.')
     return value.rstrip('/')
 
+# The built-in Kokoro engine has no server, so it carries a fixed marker where a server address would be. Callers that
+# only check "is a voice engine configured" (voice notes) keep working unchanged.
+KOKORO_URL = 'kokoro://local'
+
 def configure(url, protocol):
+    if protocol == 'kokoro':
+        from core import kokoro_voice
+        ok, reason = kokoro_voice.ready()
+        if not ok: raise ValueError(f'Kokoro is not ready yet. {reason}. Use Settings > Speech, or keep the device voice.')
+        value = {'url':KOKORO_URL, 'protocol':'kokoro'}
+        write_json_atomic(str(settings_file()), value)
+        return value
     value = {'url':validate_url(url), 'protocol':protocol}
     write_json_atomic(str(settings_file()), value)
     return value
 
 async def catalog():
     config = configuration()
+    if config.get('protocol') == 'kokoro':
+        # Unavailable is an answer, not a failure: no voices and the reason, so the dialog falls back to the device voice.
+        from core import kokoro_voice
+        ok, reason = kokoro_voice.ready()
+        found = await asyncio.to_thread(kokoro_voice.voices) if ok else []
+        if ok and not found: ok, reason = False, 'Kokoro could not list its voices'
+        return {**config, 'voices':found, 'models':[kokoro_voice.NAME] if ok else [], **({} if ok else {'error':f'{reason}. The device voice is used instead.'})}
     if not config['url']: return {**config, 'voices':[], 'models':[]}
     validate_url(config['url'])
     async with httpx.AsyncClient(timeout=5, trust_env=False, follow_redirects=False) as client:
@@ -48,7 +66,17 @@ async def catalog():
     return {**config,'voices':result,'models':engines}
 
 async def pcm(text, model, voice):
-    config = configuration(); origin = validate_url(config['url'])
+    config = configuration()
+    if config.get('protocol') == 'kokoro':
+        from core import kokoro_voice
+        # One sentence per call (the speaker already cuts text into sentences and prefetches the next while one plays).
+        # Rendered in a worker thread, then handed out in ~100 ms pieces so playback can start on the first piece.
+        try: data = await asyncio.to_thread(kokoro_voice.synthesize, text, voice)
+        except kokoro_voice.KokoroUnavailable as error: raise ValueError(str(error)) from error
+        yield {'sample_rate':kokoro_voice.SAMPLE_RATE}
+        for at in range(0, len(data), 4800): yield {'audio':data[at:at+4800]}
+        return
+    origin = validate_url(config['url'])
     if config['protocol'] == 'voicestudio':
         # VoiceStudio's WebSocket supplies the real engine rate, unlike its
         # compatible endpoint which buffers a whole render before delivery.
