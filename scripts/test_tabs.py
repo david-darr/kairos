@@ -588,6 +588,28 @@ def value(): return {{"answer": answer}}
         for source, target in ((route, self.routes), (service, self.services), (view, self.views)):
             shutil.copyfile(source, target / source.name)
 
+    def test_a_legacy_tab_opens_only_in_the_first_admins_account(self):
+        from core import accounts
+        self.legacy()
+        self.legacy("minecraft")
+        route = self.routes / "tab_minecraft.py"
+        route.write_text(route.read_text(encoding="utf-8") + "TAB_PER_ACCOUNT = True\n", encoding="utf-8")
+        self.approve("jobs")
+        self.approve("minecraft")
+        tabs.mount_all(self.app)
+        with patch.object(accounts, "local_account", return_value="aaaaaaaaaaaa"):
+            with patch.object(accounts, "effective_account", return_value="aaaaaaaaaaaa"):
+                self.assertEqual(self.client.get("/legacy/jobs").json(), {"answer": 99})
+                self.assertIn("jobs", [m["id"] for m in tabs.list_manifests()])
+            with patch.object(accounts, "effective_account", return_value="bbbbbbbbbbbb"):
+                self.assertEqual(self.client.get("/legacy/jobs").status_code, 404)
+                ids = [m["id"] for m in tabs.list_manifests()]
+                self.assertNotIn("jobs", ids, "a shared legacy tab is hidden from other accounts")
+                self.assertIn("minecraft", ids, "a legacy tab that keeps accounts apart is listed")
+                self.assertEqual(self.client.get("/legacy/minecraft").json(), {"answer": 99})
+            with patch.object(accounts, "effective_account", side_effect=accounts.NoAccount("nobody")):
+                self.assertEqual(self.client.get("/legacy/jobs").status_code, 404)
+
     def test_legacy_absolute_imports_urls_and_whole_tree_approval_survive(self):
         self.legacy()
         self.legacy("minecraft")

@@ -483,6 +483,21 @@ def mount_all(app) -> None:
         _mount(app, slug, mod)
 
 
+def _first_admin_only(entry: dict, mod: ModuleType) -> bool:
+    """An old-format tab reads and writes the data folder directly (fixed paths, one copy for the whole
+    install), so its data is the first admin's (D7) and no other account may open it. A legacy tab that
+    keeps each account's data apart itself declares TAB_PER_ACCOUNT = True in its routes module."""
+    return entry["format"] == "legacy" and getattr(mod, "TAB_PER_ACCOUNT", False) is not True
+
+
+def _is_first_admins_account() -> bool:
+    from core import accounts
+    try:
+        return accounts.effective_account() == accounts.local_account()
+    except accounts.NoAccount:
+        return False
+
+
 def _mount(app, slug: str, mod: ModuleType) -> bool:
     # Track the tab slug instead of prefix collisions: another tab may
     # legitimately share a prefix, and an empty prefix is valid too.
@@ -494,8 +509,11 @@ def _mount(app, slug: str, mod: ModuleType) -> bool:
     if not _entry_allowed(entry):
         return False
     from fastapi import Depends, HTTPException
+    first_admin_only = _first_admin_only(entry, mod)
     async def active():
         import asyncio
+        if first_admin_only and not await asyncio.to_thread(_is_first_admins_account):
+            raise HTTPException(404, "This tab is not available in this account.")
         allowed = await asyncio.to_thread(_entry_allowed, entry)
         if not allowed:
             reason = "This tab was removed or changed. Restart Kairos to load the current version."
@@ -580,7 +598,7 @@ def list_manifests() -> list[dict]:
         user = entry["kind"] == "user"
         if entry["format"] == "legacy":
             manifest = getattr(mod, "TAB_MANIFEST", None)
-            if not manifest:
+            if not manifest or (_first_admin_only(entry, mod) and not _is_first_admins_account()):
                 continue
             view_url = f"{USER_VIEWS_URL}/{slug}.js" if user else None
             style_url = None

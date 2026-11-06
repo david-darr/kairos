@@ -17,4 +17,5 @@ The CRM tab's own design and guarantees are in `crm/README.md`.
 
 - No base-app module imports tab code; the app calls declared hooks.
 - Tab code imports only `core/tab_api.py` from Kairos.
+- Data is per account: `data_dir` is `tab-data/<slug>/` in the current account. Old-format tabs (`tabs/routes|services|views` in the data folder) read fixed paths, so they open only in the first admin's account unless their routes module sets `TAB_PER_ACCOUNT = True` (core/custom_tabs.py).
 - Tests: `scripts/test_crm.py`, `scripts/test_tabs.py`.
