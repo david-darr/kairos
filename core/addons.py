@@ -13,7 +13,7 @@ import sys
 import threading
 import uuid
 
-from core import atomic_io, settings
+from core import accounts, atomic_io, settings
 from core.constants import BASE_DIR, DATA_DIR
 
 SOURCE = Path(BASE_DIR) / 'addon_packages'
@@ -209,10 +209,37 @@ def migrate():
         if state.get('migrated'): return
         active = set()
         if 'roblox' in (settings.get_setting('enabled_tab_templates') or []): active.add('roblox')
-        connections = atomic_io.read_json(str(Path(DATA_DIR) / 'creative-connections.json'), {})
+        connections = atomic_io.read_json(accounts.path('creative-connections.json'), {})
         for row in connections.get('accounts', {}).values():
             if row.get('token'): active.add('blender')
             if row.get('oauth'): active.add('higgsfield')
         for ident in active:
             if ident not in _load()['packages']: change(ident, 'install')
         state = _load(); state['migrated'] = True; _save(state)
+
+
+def _stale(ident):
+    """True when any manifest-listed installed file is missing or differs from the manifest."""
+    for relative, digest in manifest(ident)['files'].items():
+        path = _safe_file(ROOT / ident, relative)
+        if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+            return True
+    return False
+
+
+def refresh():
+    """Re-install the payload of every installed package whose files no longer match the app's manifest
+    (an app update changed them). Only manifest-listed files are written; projects, account secrets,
+    style profiles and skills are never touched. Returns the package ids refreshed."""
+    done = []
+    with _lock:
+        state = _load(); rows = state['packages']
+        installed = [i for i in IDS if rows.get(i, {}).get('installed')]
+        targets = list(installed)
+        if any(i in installed for i in ('blender', 'higgsfield')): targets.append('_creative')
+        for ident in targets:
+            if _stale(ident):
+                _payload(ident); done.append(ident)
+            if ident in rows and rows[ident].get('version') != manifest(ident)['version']:
+                rows[ident]['version'] = manifest(ident)['version']; _save(state)
+    return done

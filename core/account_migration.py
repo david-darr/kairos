@@ -113,6 +113,7 @@ STEPS: list[Step] = [
     # Token and image usage counts (the daily image limit itself stays an install setting; each account
     # counts its own). Bots' usage moved with step 4.
     Step(8, "usage counts", ("token_usage.json", "token_usage_daily.json", "image_usage.json")),
+    Step(9, "tab data and creative add-on connections", ("tab-data", "creative-connections.json")),
 ]
 
 

@@ -2,10 +2,10 @@
   "id": "_creative",
   "name": "Creative connection runtime",
   "description": "Shared optional Blender/Higgsfield connection runtime.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "skills": [],
   "files": {
-    "runtime/creative_tools.py": "cd349231519170f5b3357db7fe56ae2a8b36a9798505f703f58273320d952760",
+    "runtime/creative_tools.py": "8690555a8afe0f397476351e79abd3782fce449c25951b316eca02c394ae1e76",
     "static/creativeConnections.js": "d6cd0b04abc7ee76e5cfde0bc3179899b22bb487fd30bdfb28e42e273b6811ea"
   }
 }

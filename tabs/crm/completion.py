@@ -160,6 +160,19 @@ async def reconcile_cards(owner):
 async def process():
     if not api.is_on:
         return
+    for account in tab_api.all_accounts():
+        try:
+            with tab_api.as_account(account):
+                await _process_account()
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.warning("CRM completion pass failed category=%s", type(error).__name__)
+
+
+async def _process_account():
+    if not api.is_on:
+        return
     # Completion reconciliation is independent of mailbox scan scheduling.
     for owner in crm_service.owners():
         try:

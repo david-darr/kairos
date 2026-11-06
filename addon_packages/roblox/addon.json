@@ -2,7 +2,7 @@
   "id": "roblox",
   "name": "Roblox Development",
   "description": "Build games in native Roblox Studio with a project workspace, personal UI/model style and asset provenance.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "skills": [
     "roblox-dev-skill",
     "roblox-ui-design",
@@ -10,8 +10,8 @@
   ],
   "files": {
     "runtime/roblox_assets.py": "8031dff645ee8e0b9584ba327f3e5549fd5a35a3f7b080092dd26231a845669d",
-    "runtime/roblox_style.py": "a5a38b53b661425b1d7f4bb4cafd7191cdba88af880c2a3ae06db1c9ac74aeb3",
-    "runtime/roblox_workspace.py": "3f683e0cb913f74077a61255bb0308204117354200938a67ccf28a2574d0f6b3",
+    "runtime/roblox_style.py": "27daadd3c81d8f0e4f33e6e4257bd86493262f197b3306c80366e891322f1a3f",
+    "runtime/roblox_workspace.py": "fd3841fbe747b4a7c3c9a807ac153481ca16e45c49d1d8d74e0cec1c31ce75c7",
     "skills/roblox-asset-pipeline/SKILL.md": "40db083f32f4ae2a4b93265bb55fd9b707abc1b274fa3a37542bcbf6fa21c286",
     "skills/roblox-dev-skill/.gitattributes": "553e47fdb70fffb42eac726446ad2c7b61ccaf42bfa71373ec12a92ea9ab0995",
     "skills/roblox-dev-skill/LICENSE": "1126322e2cc8d165adc4c792eeb195717de2bcc7b39be1ce77959d78e87ef685",

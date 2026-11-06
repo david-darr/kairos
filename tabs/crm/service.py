@@ -5,6 +5,7 @@ message marker commit together; a failed write rolls back in-memory state.
 """
 import copy
 import hashlib
+import os
 import re
 import threading
 import time
@@ -543,4 +544,4 @@ class CRMService:
         return items
 
 
-crm_service = CRMService()
+crm_service = tab_api.per_account(lambda _path: CRMService(), lambda: os.path.join(api.data_dir, "crm.json"))

@@ -27,6 +27,7 @@ message in that course's chat. Re-opening the same assignment with an
 unchanged draft is a no-op (fingerprint check) so browsing around doesn't
 spam the transcript with duplicate notes.
 """
+import os
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -340,4 +341,4 @@ class SchoolService:
         return {"session_id": session_id, "updated": True}
 
 
-school_service = SchoolService()
+school_service = tab_api.per_account(lambda _path: SchoolService(), lambda: os.path.join(api.data_dir, "school.json"))

@@ -831,7 +831,7 @@ def calendar_items(user, start, end):
         self.folder()
         self.approve("alpha")
         tabs.discover()
-        with patch.object(tab_api, "DATA_DIR", str(self.root / "data")):
+        with patch.object(tab_api, "DATA_DIR", str(self.root / "data")), patch.object(tab_api, "TAB_DATA_DIR", str(self.root / "data" / "tab-data")):
             api = tab_api.for_tab("kairos_tabs.alpha")
             directory = self.root / "data/tab-data/alpha"
             self.assertFalse(directory.exists())
@@ -866,7 +866,7 @@ def calendar_items(user, start, end):
         for token in (secret_storage.encrypt("email-password"), other.encrypt("model-key")):
             with self.assertRaises(ValueError):
                 api.decrypt(token)
-        with patch.object(tab_api, "DATA_DIR", str(self.root / "data")):
+        with patch.object(tab_api, "DATA_DIR", str(self.root / "data")), patch.object(tab_api, "TAB_DATA_DIR", str(self.root / "data" / "tab-data")):
             old = self.root / "data/alpha.json"
             legacy = secret_storage.encrypt("old-canvas-token")
             old.write_text(json.dumps({"nested": [{"token": legacy}], "plain": "kept"}), encoding="utf-8")
@@ -1037,7 +1037,7 @@ def calendar_items(user, start, end):
         self.folder()
         self.approve("alpha")
         tabs.discover()
-        with patch.object(tab_api, "DATA_DIR", str(self.root / "data")):
+        with patch.object(tab_api, "DATA_DIR", str(self.root / "data")), patch.object(tab_api, "TAB_DATA_DIR", str(self.root / "data" / "tab-data")):
             api = tab_api.for_tab("kairos_tabs.alpha")
             api.write_json("test.json", {})
             target = Path(api.data_dir) / "test.json"
@@ -1329,7 +1329,7 @@ def calendar_items(user, start, end):
         old = data / "school.json"
         old.write_text(json.dumps({"settings": {"canvas_base_url": "https://canvas.example",
             "canvas_api_token_encrypted": secret_storage.encrypt("legacy-canvas")}}), encoding="utf-8")
-        with patch.object(tabs, "PREBUILT_TABS_DIR", str(REPO / "tabs")), patch.object(tab_api, "DATA_DIR", str(data)):
+        with patch.object(tabs, "PREBUILT_TABS_DIR", str(REPO / "tabs")), patch.object(tab_api, "DATA_DIR", str(data)), patch.object(tab_api, "TAB_DATA_DIR", str(Path(data) / "tab-data")):
             self.client.post("/api/system/tab-templates/school", json={"enabled": True}).raise_for_status()
             service = sys.modules["kairos_tabs.school.service"]
             stored = service.school_service._data["settings"]["canvas_api_token_encrypted"]

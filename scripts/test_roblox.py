@@ -41,7 +41,7 @@ class Stores(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir=_data.name)
         self.addCleanup(self.tmp.cleanup)
-        self.patch = patch.object(workspace, "ROOT", Path(self.tmp.name))
+        self.patch = patch.object(workspace, "root", lambda: Path(self.tmp.name))
         self.patch.start(); self.addCleanup(self.patch.stop)
 
     def test_project_and_chat_ownership(self):
@@ -183,7 +183,7 @@ class OAuth(unittest.IsolatedAsyncioTestCase):
 class Studio(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir=_data.name); self.addCleanup(self.tmp.cleanup)
-        p = patch.object(workspace, "ROOT", Path(self.tmp.name)); p.start(); self.addCleanup(p.stop)
+        p = patch.object(workspace, "root", lambda: Path(self.tmp.name)); p.start(); self.addCleanup(p.stop)
         self.row = workspace.create("alice", "Private", "cloud", "10", "20")
         self.pid = self.row["id"]
         self.sid = workspace.chat("alice", self.pid)

@@ -86,7 +86,7 @@ class Addons(unittest.TestCase):
     def test_migration_adopts_explicit_setups_once_only(self):
         self.values['enabled_tab_templates'] = ['roblox']
         (self.root / 'creative-connections.json').write_text(json.dumps({'accounts': {'alice': {'token': 'encrypted'}}}))
-        addons.migrate()
+        with patch.object(addons.accounts, 'path', side_effect=lambda *p: str(self.root.joinpath(*p))): addons.migrate()
         self.assertTrue(addons.enabled('roblox')); self.assertTrue(addons.enabled('blender'))
         self.assertFalse(addons.enabled('higgsfield'))
         addons.change('roblox', 'remove'); addons.change('blender', 'disable')
@@ -143,5 +143,26 @@ class Addons(unittest.TestCase):
         self.assertEqual(client.post('/api/addons/blender', json={'action': 'disable'}).status_code, 200)
         self.assertEqual(client.post('/api/creative/blender', json={'port':9876,'token':'long-pairing-token-12345'}).status_code, 409)
 
+    def test_refresh_updates_stale_installed_package_and_skips_uninstalled(self):
+        addons.change('blender', 'install')
+        stale = addons.ROOT / '_creative' / 'runtime' / 'creative_tools.py'
+        stale.write_bytes(b'# old build\n')
+        with self.assertRaises(ValueError): addons.module('creative_tools')
+        rows = addons._load(); rows['packages']['blender']['version'] = '0.9.0'; addons._save(rows)
+        self.assertEqual(addons.refresh(), ['_creative'])
+        self.assertEqual(addons._load()['packages']['blender']['version'], addons.manifest('blender')['version'])
+        self.assertTrue(addons.module('creative_tools'))
+        self.assertEqual(addons.refresh(), [])
+        self.assertFalse((addons.ROOT / 'roblox').exists())
+
+    def test_refresh_recovers_missing_file_and_leaves_user_data(self):
+        addons.change('roblox', 'install')
+        runtime = addons.ROOT / 'roblox' / 'runtime' / 'roblox_style.py'
+        runtime.unlink()
+        keep = addons.ROOT / 'roblox' / 'projects.json'
+        keep.write_text('{"mine": 1}')
+        self.assertEqual(addons.refresh(), ['roblox'])
+        self.assertTrue(runtime.is_file())
+        self.assertEqual(keep.read_text(), '{"mine": 1}')
 
 if __name__ == '__main__': unittest.main()

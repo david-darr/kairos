@@ -30,11 +30,11 @@ def _scope(user, account_id):
 
 
 def _load():
-    return atomic_io.read_json(str(workspace._safe(workspace.ROOT / "style-profiles.json")), {})
+    return atomic_io.read_json(str(workspace._safe(workspace.root() / "style-profiles.json")), {})
 
 
 def _save(data):
-    atomic_io.write_json_atomic(str(workspace._safe(workspace.ROOT / "style-profiles.json")), data)
+    atomic_io.write_json_atomic(str(workspace._safe(workspace.root() / "style-profiles.json")), data)
 
 
 def _preset(data, user, account_id, name="default"):

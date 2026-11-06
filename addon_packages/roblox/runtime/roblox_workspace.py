@@ -17,11 +17,15 @@ import threading
 import time
 import uuid
 
-from core import atomic_io, mcp_client, settings
+from core import accounts, atomic_io, mcp_client, settings
 from core.constants import DATA_DIR
 from core.session_manager import session_manager
 
-ROOT = Path(DATA_DIR) / "tab-data" / "roblox"
+
+def root():
+    return Path(accounts.path("tab-data", "roblox"))
+
+
 _store_lock = threading.RLock()
 _studio_locks = {}
 _client = None
@@ -55,11 +59,11 @@ def _safe(path):
 
 
 def _load():
-    return atomic_io.read_json(str(_safe(ROOT / "projects.json")), {})
+    return atomic_io.read_json(str(_safe(root() / "projects.json")), {})
 
 
 def _save(value):
-    atomic_io.write_json_atomic(str(_safe(ROOT / "projects.json")), value)
+    atomic_io.write_json_atomic(str(_safe(root() / "projects.json")), value)
 
 
 def project(user, project_id):
@@ -72,7 +76,7 @@ def project(user, project_id):
 def folder(project_id):
     if not re.fullmatch(r"[a-f0-9]{32}", project_id):
         raise ValueError("Invalid project")
-    path = _safe(ROOT / "projects" / project_id)
+    path = _safe(root() / "projects" / project_id)
     path.mkdir(parents=True, exist_ok=True)
     return path
 

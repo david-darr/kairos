@@ -268,7 +268,7 @@ class Migration(unittest.TestCase):
                                      backup=kwargs.pop("backup", self.backup), **kwargs)
 
     def test_group_one_moves_its_five_stores(self):
-        self.assertEqual([s.version for s in account_migration.STEPS], [1, 2, 3, 4, 5, 6, 7, 8], "group 8 added the usage step")
+        self.assertEqual([s.version for s in account_migration.STEPS], [1, 2, 3, 4, 5, 6, 7, 8, 9], "group 7b added the tab data step")
         self.assertEqual(set(account_migration.STEPS[0].entries), {
             "notes.json", "calendar_events.json", "documents", "documents_index.json", "projects.json", "contacts.json"})
         (self.data / "documents").mkdir()
@@ -360,8 +360,8 @@ class Stores(unittest.TestCase):
         with accounts.as_account(self.ids["bea"]):
             self.assertEqual(accounts.path("documents", "a.md"),
                              os.path.join(accounts.ACCOUNTS_DIR, self.ids["bea"], "documents", "a.md"))
-            self.assertEqual(accounts.path("tab-data"), os.path.join(_DATA.name, "tab-data"),
-                             "tab data has not moved")
+            self.assertEqual(accounts.path("jobs.json"), os.path.join(_DATA.name, "jobs.json"),
+                             "the legacy job tab's file stays install-wide")
 
     def setUp(self):
         fresh_users()
@@ -1707,6 +1707,79 @@ class MailMigration(unittest.TestCase):
         self.assertEqual(account_migration.layout_version(str(self.data)), 6)
         self.assertTrue(account_migration.is_moved("integrations.json", str(self.data)))
         self.assertFalse(account_migration.is_moved("google_workspace.json", str(self.data)))
+        account_migration._moved.pop(str(self.data), None)
+
+
+class TabDataPerAccount(unittest.TestCase):
+    """Group 7b: a tab's data folder, the bundled CRM and School stores and the creative add-on's connections."""
+
+    @classmethod
+    def setUpClass(cls):
+        account_migration.run(_DATA.name, backup=lambda path: None)
+        assert "tab-data" in account_migration.moved_names()
+
+    def setUp(self):
+        fresh_users()
+        auth_manager.create_user("david-darr", "password-one-1", is_admin=True)
+        auth_manager.create_user("bea", "password-two-2")
+        self.first, self.second = (auth_manager.account_id(n) for n in ("david-darr", "bea"))
+
+    def test_a_tabs_data_folder_is_inside_the_current_account(self):
+        from core import tab_api
+        api = tab_api.TabAPI("g7b_probe", {})
+        folders = {}
+        for account_id in (self.first, self.second):
+            with accounts.as_account(account_id):
+                folders[account_id] = api.data_dir
+                self.addCleanup(shutil.rmtree, folders[account_id], True)
+                api.write_json("probe.json", {"who": account_id})
+        for account_id in (self.first, self.second):
+            self.assertEqual(Path(folders[account_id]).parent.parent, Path(accounts.ACCOUNTS_DIR, account_id))
+            with accounts.as_account(account_id):
+                self.assertEqual(api.read_json("probe.json", None), {"who": account_id})
+
+    def test_the_creative_connections_file_is_each_accounts_own(self):
+        paths = set()
+        for account_id in (self.first, self.second):
+            with accounts.as_account(account_id):
+                paths.add(accounts.path("creative-connections.json"))
+        self.assertEqual(len(paths), 2)
+        self.assertTrue(all(str(accounts.ACCOUNTS_DIR) in p for p in paths))
+
+
+class TabDataMigration(unittest.TestCase):
+    """Migration step 9: tab data and the creative add-on's connections move; the job tab's files stay."""
+
+    MOVES = ("creative-connections.json",)
+    STAYS = ("jobs.json", "minecraft.json", "addons.json")
+
+    def setUp(self):
+        self.root = TemporaryDirectory(prefix="kairos-layout9-", dir=tempfile.gettempdir())
+        self.addCleanup(self.root.cleanup)
+        self.data = Path(self.root.name)
+        self.account = self.data / "accounts" / "abc123"
+
+    def test_tab_data_moves_and_the_legacy_tab_files_stay(self):
+        for name in self.MOVES + self.STAYS:
+            (self.data / name).write_text(name, encoding="utf-8")
+        (self.data / "tab-data" / "crm").mkdir(parents=True)
+        (self.data / "tab-data" / "crm" / "crm.json").write_text("crm", encoding="utf-8")
+        (self.data / "jobs" / "resumes").mkdir(parents=True)
+        (self.data / "layout.json").write_text(json.dumps({"version": 8}), encoding="utf-8")
+        step = account_migration.STEPS[8]
+        self.assertEqual(step.version, 9)
+        result = account_migration.run(str(self.data), [step], account="abc123",
+                                       backup=lambda path: Path(path).write_text("backup", encoding="utf-8"))
+        self.assertTrue(result["ok"], result)
+        self.assertEqual((self.account / "tab-data" / "crm" / "crm.json").read_text(encoding="utf-8"), "crm")
+        self.assertFalse((self.data / "tab-data").exists())
+        for name in self.MOVES:
+            self.assertEqual((self.account / name).read_text(encoding="utf-8"), name, f"{name} moved")
+            self.assertFalse((self.data / name).exists(), f"{name} left the top level")
+        for name in self.STAYS:
+            self.assertEqual((self.data / name).read_text(encoding="utf-8"), name, f"{name} stays at the top")
+        self.assertTrue((self.data / "jobs" / "resumes").is_dir())
+        self.assertEqual(account_migration.layout_version(str(self.data)), 9)
         account_migration._moved.pop(str(self.data), None)
 
 

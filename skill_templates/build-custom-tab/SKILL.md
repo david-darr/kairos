@@ -159,12 +159,15 @@ Module functions (call as `tab_api.<name>`):
 - `video_delete_project(video_id, user)`: delete a video this person can edit.
 - `video_copy_design_asset(video_id, design_id, asset, user)`: copy an image from a design this person can open into the video.
 - `video_link_session(video_id, session_id, user)`: link this person's own chat to the video so a model can edit it there.
+- `per_account(factory, path_for)`: keep a service that loads its store once as one instance per account, behind one module-level name; `factory(path)` builds it and `path_for()` names its store, e.g. `per_account(lambda _p: MyService(), lambda: os.path.join(api.data_dir, "store.json"))`.
+- `all_accounts()`: every account on this Kairos, for a background pass.
+- `as_account(account_id)`: context manager that runs background work as one account; wrap each account's pass, catching per account. Requests already run as the signed-in person's account.
 
 Bound handle members (call as `api.<name>`):
 
 - `slug`: this tab's identity.
 - `is_on`: whether current source is approved and enabled.
-- `data_dir`: this tab's runtime store in `data/tab-data/<slug>/`.
+- `data_dir`: this tab's runtime store, `tab-data/<slug>/` inside the current account's folder, so each account has its own.
 - `read_json(name, default)`: read a plain filename inside that store.
 - `write_json(name, value)`: atomically save JSON inside that store.
 - `adopt_data_file(old_name)`: migrate only this tab's legacy `<slug>.json`, including old tab-owned encrypted values.

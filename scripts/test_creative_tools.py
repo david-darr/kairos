@@ -29,8 +29,8 @@ class Isolated:
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir=_data.name); self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        for obj, field, value in [(workspace, "ROOT", self.root / "roblox"),
-                                  (creative, "FILE", str(self.root / "creative.json")),
+        for obj, field, value in [(workspace, "root", lambda: self.root / "roblox"),
+                                  (creative, "file", lambda: str(self.root / "creative.json")),
                                   (permissions, "PERMISSIONS_FILE", str(self.root / "permissions.json"))]:
             p = patch.object(obj, field, value); p.start(); self.addCleanup(p.stop)
         settings.update_settings(enabled_tab_templates=["roblox"])
@@ -149,7 +149,7 @@ class Connections(Isolated, unittest.IsolatedAsyncioTestCase):
             await creative.callback(state, 'returned-code')
         self.assertTrue(creative.catalog('alice')[1]['connected'])
         self.assertFalse(creative.catalog('bob')[1]['connected'])
-        self.assertNotIn('private-access-token', Path(creative.FILE).read_text())
+        self.assertNotIn('private-access-token', Path(creative.file()).read_text())
         with self.assertRaises(ValueError): await creative.callback(state, 'returned-code')
 
     async def test_full_python_is_visible_in_approval_and_oversized_requests_are_rejected(self):
@@ -179,7 +179,7 @@ class Connections(Isolated, unittest.IsolatedAsyncioTestCase):
         self.pair()
         raw = creative._account("alice", "blender")
         self.assertEqual(decrypt(raw["token"]), "private-pairing-token-12345")
-        self.assertNotIn("private-pairing", Path(creative.FILE).read_text())
+        self.assertNotIn("private-pairing", Path(creative.file()).read_text())
         self.assertNotIn("token", json.dumps(creative.catalog("alice")))
         self.assertFalse(creative.catalog("bob")[0]["connected"])
         with self.assertRaises(ValueError): creative.choices("bob", sid=self.sid)

@@ -459,18 +459,29 @@ async def _loop():
         await asyncio.sleep(30)
         if not api.is_on:
             continue
-        for owner in crm_service.owners():
-            settings = crm_service.settings(owner)
-            if not settings["auto_scan"] or not settings["endpoint_id"]:
-                continue
-            latest = max((r["at"] for r in crm_service.snapshot(owner)["runs"]), default=0)
-            if any(s["enabled"] for s in crm_service.sources(owner)) and scan_due(settings, latest, time.time()):
-                try:
-                    await scan(owner)
-                except ValueError:
-                    pass
-                except Exception:
-                    logger.exception("CRM scheduled scan failed")
+        for account in tab_api.all_accounts():
+            try:
+                with tab_api.as_account(account):
+                    await _scheduled_pass()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("CRM scheduled scan account pass failed")
+
+
+async def _scheduled_pass():
+    for owner in crm_service.owners():
+        settings = crm_service.settings(owner)
+        if not settings["auto_scan"] or not settings["endpoint_id"]:
+            continue
+        latest = max((r["at"] for r in crm_service.snapshot(owner)["runs"]), default=0)
+        if any(s["enabled"] for s in crm_service.sources(owner)) and scan_due(settings, latest, time.time()):
+            try:
+                await scan(owner)
+            except ValueError:
+                pass
+            except Exception:
+                logger.exception("CRM scheduled scan failed")
 
 
 def start():

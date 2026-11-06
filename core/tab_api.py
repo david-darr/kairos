@@ -345,6 +345,32 @@ def delete_backlog_card(card_id):
     task_service.delete_task(card_id)
 
 
+TAB_DATA_DIR = None  # override (tests); else the current account's tab-data folder
+
+
+def _tab_data_dir():
+    from core import accounts
+    return TAB_DATA_DIR or accounts.path("tab-data")
+
+
+def per_account(factory, path_for):
+    """A tab service kept once per account: factory(path) builds it, path_for() names its store."""
+    from core import accounts
+    return accounts.PerAccount(factory, path_for)
+
+
+def all_accounts():
+    """Every account, for a tab's background pass (run each under as_account)."""
+    from core import accounts
+    return accounts.all_accounts()
+
+
+def as_account(account_id):
+    """Run a tab's background work as one account."""
+    from core import accounts
+    return accounts.as_account(account_id)
+
+
 class TabAPI:
     def __init__(self, slug, entry):
         self.slug, self._entry = slug, entry
@@ -356,7 +382,7 @@ class TabAPI:
 
     @property
     def data_dir(self):
-        parent = os.path.join(DATA_DIR, "tab-data")
+        parent = _tab_data_dir()
         directory = os.path.join(parent, self.slug)
         if tab_folders.is_link(parent) or tab_folders.is_link(directory):
             raise ValueError("Tab data directories cannot be links")

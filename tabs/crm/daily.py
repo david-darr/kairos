@@ -188,13 +188,20 @@ async def run(owner, now=None):
 
 async def process():
     async with _lock:
-        for owner in crm_service.owners():
+        for account in tab_api.all_accounts():
             try:
-                await run(owner)
+                with tab_api.as_account(account):
+                    for owner in crm_service.owners():
+                        try:
+                            await run(owner)
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception:
+                            logger.exception("CRM daily completion worker failed")
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.exception("CRM daily completion worker failed")
+                logger.exception("CRM daily completion account pass failed")
 
 
 async def _loop():

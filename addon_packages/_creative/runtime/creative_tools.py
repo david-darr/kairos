@@ -15,12 +15,16 @@ import uuid
 
 import httpx
 
-from core import addons, atomic_io, mcp_client, mcp_oauth, permissions
+from core import accounts, addons, atomic_io, mcp_client, mcp_oauth, permissions
 from core.constants import DATA_DIR
 from core.secret_storage import encrypt, decrypt
 from core.session_manager import session_manager
 
-FILE = str(Path(DATA_DIR) / "creative-connections.json")
+
+def file():
+    return accounts.path("creative-connections.json")
+
+
 HIGGSFIELD = "https://mcp.higgsfield.ai/mcp"
 _lock = threading.RLock()
 _pending = {}
@@ -29,11 +33,11 @@ _refresh_locks = {}
 
 
 def _load():
-    return atomic_io.read_json(FILE, {"accounts": {}, "bindings": {}, "jobs": []})
+    return atomic_io.read_json(file(), {"accounts": {}, "bindings": {}, "jobs": []})
 
 
 def _save(data):
-    atomic_io.write_json_atomic(FILE, data)
+    atomic_io.write_json_atomic(file(), data)
 
 
 def _key(user, provider):

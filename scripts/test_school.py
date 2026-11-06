@@ -70,7 +70,8 @@ class SchoolBase(T.TabTests):
         super().setUp()
         (self.root / "data").mkdir(exist_ok=True)
         for p in (patch.object(tabs, "PREBUILT_TABS_DIR", str(REPO / "tabs")),
-                  patch.object(T.tab_api, "DATA_DIR", str(self.root / "data"))):
+                  patch.object(T.tab_api, "DATA_DIR", str(self.root / "data")),
+                  patch.object(T.tab_api, "TAB_DATA_DIR", str(self.root / "data" / "tab-data"))):
             p.start(); self.addCleanup(p.stop)
         self.client.post("/api/system/tab-templates/school", json={"enabled": True}).raise_for_status()
         self.svc = sys.modules["kairos_tabs.school.service"]
