@@ -2113,7 +2113,8 @@ def _register_bots_tool_data() -> None:
             raise
         voice_tools = []
     front_desk_tools.register_all(register)
-    for spec in bot_data.TOOLS + bot_widgets.TOOLS + bot_apps.TOOLS + voice_tools:
+    from services import phone_tools  # a bot calls or texts the person's own phone (build spec step 8)
+    for spec in bot_data.TOOLS + bot_widgets.TOOLS + bot_apps.TOOLS + voice_tools + phone_tools.TOOLS:
         if spec["name"] not in _REGISTRY:
             register(spec["name"], spec["description"], spec["schema"], agent_only=True, effect=spec["effect"])(spec["handler"])
     # Computer help (Phase 6 U1): a bot asks the person to take over its computer, or to sign in to one site.

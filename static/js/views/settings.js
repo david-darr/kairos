@@ -6,6 +6,7 @@ import { openModelSetup } from "../modelSetup.js";
 import { shortcutGroups, readQuickEntry } from '../shortcuts.js';
 import { suppressBrowser, releaseBrowser } from "../browserPane.js";
 import { renderSpeechPanel } from "./speechPanel.js";
+import { renderPhonePanel } from "./phonePanel.js";
 import { renderAppearancePanel } from './appearancePanel.js';
 import { renderLayoutPanel } from './layoutPanel.js';
 import { renderChannelsPanel } from "./settingsChannels.js";
@@ -91,6 +92,7 @@ const NAV_ICONS = {
   "bot-templates": I('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'),
   "bot-computers": I('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>'),
   "bots": I('<circle cx="12" cy="12" r="7"/><path d="M12 2v3M8 11h.01M16 11h.01M8 16h8"/>'),
+  "phone": I('<path d="M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a2 2 0 01-2 2A16 16 0 013 6a2 2 0 012-2z"/>'),
   "bot-voice": I('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/>'),
   "file-checkpoints": I('<path d="M3 12a9 9 0 109-9 9 9 0 00-6.4 2.6L3 8"/><path d="M3 3v5h5M12 8v4l3 2"/>'),
 };
@@ -185,6 +187,9 @@ const SECTION_GROUPS = [
       { id: "account", label: "Account", render: renderAccountPanel,
         description: "Your sign-in, password and two-factor authentication.",
         keywords: ["password", "2fa", "two factor", "totp", "authenticator", "username", "sign out", "security"] },
+      { id: "phone", label: "Phone", render: renderPhonePanel,
+        description: "Call a bot from your own mobile, and let your bots call or text you, through your own Twilio or Telnyx number.",
+        keywords: ["phone", "call", "calls", "sms", "text", "twilio", "telnyx", "number", "mobile", "voice call", "kip"] },
       { id: "shortcuts", label: "Shortcuts", render: renderShortcutsPanel,
         description: "Keys and commands that save a trip to the mouse.",
         keywords: ["keyboard", "hotkey", "command palette", "keys"] },
@@ -607,7 +612,7 @@ function visibleSections() {
     if (section) sections.set(id, { ...section, label, keywords: [...section.keywords, section.label.toLowerCase()] });
   }
   return [
-    ['general', 'General', ['appearance', 'layout', 'notifications', 'speech', 'shortcuts']],
+    ['general', 'General', ['appearance', 'layout', 'notifications', 'speech', 'shortcuts', 'phone']],
     ['models', 'Models', ['added-models', 'add-models']],
     ['connections', 'Connections', ['integrations', 'images', 'channels', 'remote']],
     ['agents', 'Agents', ['agent-tools', 'permissions', 'hooks', 'computer-use']],
