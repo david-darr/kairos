@@ -893,8 +893,10 @@ class ChatsMigration(unittest.TestCase):
 
     STEP3_FILES = ("sessions.db", "sessions.db-wal", "sessions.db-shm", "sessions.db.pre-v6", "sessions.db.pre-v7-wal",
                    "chat_tasks/x.json", "attachments/a_b.txt", "events.json", "agent_conversations.json",
-                   "jobs/resumes/r.txt", "jobs.json", "sessions.pre-sqlite-backup/sessions_index.json")
-    SHARED_FILES = ("mobile_activity.db", "sessions.json")
+                   "sessions.pre-sqlite-backup/sessions_index.json")
+    # The phone database and sign-ins are install-level; the job tab's files are read by the tab's own
+    # code at the top of the data folder until tab data moves (group 7).
+    SHARED_FILES = ("mobile_activity.db", "sessions.json", "jobs.json", "jobs/resumes/r.txt")
 
     def setUp(self):
         self.root = TemporaryDirectory(prefix="kairos-layout3-", dir=tempfile.gettempdir())
@@ -920,7 +922,7 @@ class ChatsMigration(unittest.TestCase):
         for name in self.STEP3_FILES:
             self.assertEqual((self.account / name).read_text(encoding="utf-8"), name, f"{name} moved")
             self.assertFalse((self.data / name).exists(), f"{name} left the top level")
-        for name in ("chat_tasks", "attachments", "jobs", "sessions.pre-sqlite-backup"):
+        for name in ("chat_tasks", "attachments", "sessions.pre-sqlite-backup"):
             self.assertFalse((self.data / name).exists(), f"{name} folder moved whole")
         for name in self.SHARED_FILES:
             self.assertEqual((self.data / name).read_text(encoding="utf-8"), name, f"{name} stays shared")

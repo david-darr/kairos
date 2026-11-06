@@ -64,13 +64,14 @@ STEPS: list[Step] = [
     # Obsidian folder, is not in the data folder and does not move.
     Step(2, "memory and the vault", ("memory", "vault"), copy_first=("vault",), keep=_vault_in_use),
     # Chats: the database with its write-ahead files and the copies kept before each schema upgrade, the
-    # JSON chats it replaced, background work per chat, uploads waiting to be sent, the activity feed,
-    # agent conversation choices, and the job-search files (personal, read by nothing now). The phone
-    # activity database stays shared: its rows already name their owner and it holds the install's
-    # push key.
+    # JSON chats it replaced, background work per chat, uploads waiting to be sent, the activity feed and
+    # agent conversation choices. The phone activity database stays shared: its rows already name their
+    # owner and it holds the install's push key. jobs.json and jobs/ stay too: an installed tab's own code
+    # (tabs/services/jobs_service.py) reads them at the top of the data folder; tab data moves with
+    # group 7 (found when step 3 first ran on David's dev profile and the tab made a new empty file).
     Step(3, "chats", ("sessions.db", "sessions.db-wal", "sessions.db-shm", "sessions.db.pre-v*",
                       "sessions.pre-sqlite-backup", "chat_tasks", "attachments", "events.json",
-                      "agent_conversations.json", "jobs", "jobs.json")),
+                      "agent_conversations.json")),
 ]
 
 
