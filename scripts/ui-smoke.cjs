@@ -279,7 +279,20 @@ app.whenReady().then(async () => {
   const base = "http://127.0.0.1:" + server.address().port;
   const outside = [];
   const docsOnDisk = require("node:url").pathToFileURL(path.join(root, "docs")).href + "/";  // the demo opened from disk
+  // --record-coverage=<file> (Changed-Only Tests, 2026-11-05): every app file this run loads, for
+  // scripts/test_changed.py to pick the checks a change touches. The app serves .js and .css uncached
+  // (core/middleware.py), so every load is a request here, page reloads and dynamic imports included.
+  const coverageFile = process.argv.find(arg => arg.startsWith('--record-coverage='))?.slice('--record-coverage='.length);
+  const covered = new Set();
+  const cover = url => {
+    if (!coverageFile) return;
+    const file = decodeURIComponent(new URL(url).pathname).replace(/^\//, '');
+    if (!/^(static|tabs|demo|docs)\//.test(file) || covered.has(file)) return;
+    covered.add(file);
+    fs.writeFileSync(coverageFile, JSON.stringify([...covered].sort(), null, 1));
+  };
   session.defaultSession.webRequest.onBeforeRequest((details, cb) => {
+    if (details.url.startsWith(base + "/")) cover(details.url);
     if (details.url.startsWith(base + "/") || details.url.startsWith(docsOnDisk)) return cb({});
     outside.push(details.url);
     if (details.url === "https://api.github.com/repos/david-darr/kairos/releases/latest") return cb({ redirectURL: base + "/__github-latest" });
@@ -389,6 +402,16 @@ app.whenReady().then(async () => {
     // --mascot-off runs the suite with Settings > Appearance > Show the mascot off (saved, so reloads keep it).
     const mascotOff = () => process.argv.includes('--mascot-off') ? js("import('/static/js/appearance.js').then(m => { m.updateAppearance({ mascot: false }); return true; })") : null;
     await mascotOff();
+    // --boot-only (Changed-Only Tests): the app starts, Home fills, a new chat opens, and nothing logs an error.
+    // scripts/test_changed.py runs it with every selection, so a change that breaks everything never slips through.
+    if (process.argv.includes('--boot-only')) {
+      await js("document.querySelector('#sidebar .rd-new-chat, #sidebar .nav-item[data-tab=chat]')?.click(); true");
+      await waitFor("!!document.getElementById('chat-input') && document.getElementById('chat-input').getClientRects().length > 0");
+      await capture('boot-chat');
+      assert.deepEqual(errors, [], 'Boot renderer errors');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['boot'], errors }, null, 2));
+      console.log('PASS: boot (Home filled, a chat opened, no renderer errors).'); return;
+    }
     if (process.argv.includes('--design-only')) {  // The Design canvas alone (design-canvas-checks.cjs).
       await designChecks.run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, overflow, liveRuns, liveFinish, writes });
       assert.deepEqual(errors, [], 'Design canvas renderer errors');
