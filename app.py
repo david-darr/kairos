@@ -12,6 +12,9 @@ from fastapi.responses import FileResponse
 # their files when imported.
 from core import backup as _backup
 _RESTORED = _backup.apply_pending_restore()
+# Then personal data moves into account folders, still before anything opens it (core/account_migration.py).
+from core import account_migration as _account_migration
+_LAYOUT = _account_migration.run()
 
 from core.constants import STATIC_DIR
 from core.middleware import SecurityHeadersMiddleware
@@ -260,6 +263,8 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Kairos", lifespan=lifespan)
 
 app.add_middleware(SecurityHeadersMiddleware)
+# Added last, so outermost: every request knows its account before anything else runs (core/accounts.py).
+from core.middleware import AccountContextMiddleware; app.add_middleware(AccountContextMiddleware)
 
 app.include_router(auth_routes.router)
 app.include_router(session_routes.router)

@@ -145,14 +145,51 @@ class AuthManager:
         if username in self._users["users"]:
             raise ValueError(f"user '{username}' already exists")
         password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+        account_id = self._new_account_id(first=not self._users["users"])
         self._users["users"][username] = {
             "password_hash": password_hash,
             "is_admin": is_admin,
             "totp_secret": None,
             "totp_enabled": False,
             "created_at": time.time(),
+            "account_id": account_id,
         }
         write_json_atomic(AUTH_FILE, self._users)
+
+    # -- account folders (core/accounts.py, Multi-Account phase 1) ----
+
+    def _new_account_id(self, first: bool) -> str:
+        """A folder id for a new account: random, so it is safe on every file system and two names that
+        differ only by letter case never share a folder. The first account on an install that so far had
+        none takes over the "local" folder the single local user worked in, so nothing has to move."""
+        from core.accounts import ACCOUNTS_DIR, LOCAL_ID
+        taken = {u.get("account_id") for u in self._users["users"].values()}
+        if first and LOCAL_ID not in taken and os.path.isdir(os.path.join(ACCOUNTS_DIR, LOCAL_ID)):
+            return LOCAL_ID
+        while True:
+            candidate = secrets.token_hex(6)
+            if candidate not in taken and candidate != LOCAL_ID:
+                return candidate
+
+    def account_id(self, username: str) -> Optional[str]:
+        """The folder id of an account, or None if there is no such account. Accounts made before folders
+        get theirs the first time they are asked for."""
+        user = self._users["users"].get(username)
+        if not user:
+            return None
+        if not user.get("account_id"):
+            user["account_id"] = self._new_account_id(first=len(self._users["users"]) == 1)
+            write_json_atomic(AUTH_FILE, self._users)
+        return user["account_id"]
+
+    def account_ids(self) -> list[str]:
+        return [self.account_id(name) for name in list(self._users["users"])]
+
+    def first_admin_account(self) -> Optional[str]:
+        """The account the single local user works in when accounts are off: the earliest admin's."""
+        admins = sorted((info.get("created_at") or 0, name) for name, info in self._users["users"].items()
+                        if info.get("is_admin"))
+        return self.account_id(admins[0][1]) if admins else None
 
     def verify_password(self, username: str, password: str) -> bool:
         user = self._users["users"].get(username)

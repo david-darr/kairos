@@ -153,6 +153,31 @@ def get_current_user(request: Request) -> Optional[str]:
     return auth_manager.validate_session(token)
 
 
+class AccountContextMiddleware:
+    """Sets the account every request and websocket works in (core/accounts.py, Multi-Account phase 1),
+    from the same sign-in check the routes use. No sign-in, no account: personal data is then refused,
+    never guessed. A plain ASGI layer, so the account follows the request into the endpoint and any work
+    it starts; it is added outermost in app.py."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in ("http", "websocket"):
+            return await self.app(scope, receive, send)
+        from starlette.requests import HTTPConnection
+        from core import accounts
+        try:
+            account = accounts.account_for_user(get_current_user(HTTPConnection(scope)))
+        except Exception:  # an unreadable sign-in is no sign-in, never a crashed request
+            account = None
+        token = accounts.set_current(account)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            accounts.reset_current(token)
+
+
 def require_user(request: Request) -> str:
     user = get_current_user(request)
     if user is None:

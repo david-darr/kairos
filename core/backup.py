@@ -49,7 +49,8 @@ RESTORE_DIR = ".restore"
 PENDING = "pending.zip"
 LAST = "last.json"
 # Never backed up: rebuilt or large history, and the restore area itself.
-SKIPPED_DIRS = {"logs", "file_checkpoints", RESTORE_DIR, "worktrees", "ui-review", "chat-review",
+LAYOUT_DIR = ".layout"  # the account-folder migration's own safety backups (core/account_migration.py)
+SKIPPED_DIRS = {"logs", "file_checkpoints", RESTORE_DIR, LAYOUT_DIR, "worktrees", "ui-review", "chat-review",
                 "browser-review", "usage-overlay-review", "swarm-codex-review", "__pycache__",
                 # Saved logins and their own key never travel, even when keys are asked for (Phase 2 unit U5);
                 # held MCP results are rebuilt history; lifecycle state is temporary (Phase 6 unit U4).
@@ -252,7 +253,7 @@ def _entries(data_dir: str) -> list[str]:
     kept inside the data folder (the default one is), which is the person's
     own and never in a backup."""
     vault = _vault_inside(data_dir)
-    return [name for name in os.listdir(data_dir) if name != RESTORE_DIR
+    return [name for name in os.listdir(data_dir) if name not in (RESTORE_DIR, LAYOUT_DIR)
             and os.path.realpath(os.path.join(data_dir, name)) != vault]
 
 
