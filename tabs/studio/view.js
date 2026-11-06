@@ -19,6 +19,7 @@ const jobLabel = status => {
 };
 const go = (tab, options = {}) => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab, ...options } }));
 const write = (path, body, method = 'POST') => api(path, { method, body: JSON.stringify(body), toast: false });
+let lastSection = 'videos';
 const sessions = new Map();
 const tokenCache = new Map();
 
@@ -93,9 +94,17 @@ export async function render(container, tabId, options = {}) {
   const root = el('div', { class: 'studio-view view-constrained' });
   const banner = el('div');
   const content = el('div');
-  root.append(el('header', { class: 'view-header' }, [el('div', {}, [el('h2', { text: 'Studio' }), el('p', { class: 'meta', text: 'Make a video. Shape each beat. Download it in your look.' })])]), banner, content);
+  // Videos and Content (the Content Studio team's channels, pipeline and approvals) share the Studio home.
+  let section = lastSection, contentControl = null;
+  const sectionBar = el('div', { class: 'studio-actions studio-sections', role: 'tablist', 'aria-label': 'Studio sections' },
+    [['videos', 'Videos'], ['content', 'Content']].map(([id, name]) => {
+      const node = el('button', { type: 'button', role: 'tab', class: 'btn', 'data-section': id, text: name });
+      node.addEventListener('click', () => { section = lastSection = id; home(); });
+      return node;
+    }));
+  root.append(el('header', { class: 'view-header' }, [el('div', {}, [el('h2', { text: 'Studio' }), el('p', { class: 'meta', text: 'Make a video. Shape each beat. Download it in your look.' })])]), sectionBar, banner, content);
   container.replaceChildren(root);
-  const cleanup = () => { disposed = true; homeGeneration++; editorCleanup(); };
+  const cleanup = () => { disposed = true; homeGeneration++; contentControl?.abort(); editorCleanup(); };
   options.registerCleanup?.(cleanup);
   const results = await Promise.allSettled([api(`${BASE}/looks`), api('/api/videos/ffmpeg')]);
   if (disposed) return cleanup;
@@ -113,7 +122,7 @@ export async function render(container, tabId, options = {}) {
     banner.append(notice);
   }
   async function open(id) {
-    editorCleanup();
+    editorCleanup(); contentControl?.abort(); sectionBar.hidden = true; banner.hidden = false;
     const generation = ++homeGeneration;
     history.replaceState(null, '', `#/studio/${id}`);
     const close = await editor(content, id, looks, home, () => disposed || generation !== homeGeneration);
@@ -127,6 +136,16 @@ export async function render(container, tabId, options = {}) {
     editorCleanup(); editorCleanup = () => {};
     history.replaceState(null, '', '#/studio');
     const generation = ++homeGeneration;
+    contentControl?.abort(); contentControl = null; sectionBar.hidden = false;
+    for (const node of sectionBar.children) { const on = node.dataset.section === section; node.setAttribute('aria-selected', String(on)); node.classList.toggle('primary', on); }
+    banner.hidden = section === 'content';
+    if (section === 'content') {
+      content.replaceChildren(el('p', { role: 'status', text: 'Loading Content...' }));
+      contentControl = new AbortController();
+      try { await (await import('/static/js/studioContent.js')).mountContent(content, { signal: contentControl.signal }); }
+      catch (error) { if (!disposed && generation === homeGeneration) content.replaceChildren(el('p', { role: 'alert', text: error.message }), button('Try again', home)); }
+      return;
+    }
     content.replaceChildren(el('p', { role: 'status', text: 'Loading videos...' }));
     try {
       const projects = await api('/api/videos');

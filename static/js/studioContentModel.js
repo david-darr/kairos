@@ -1,0 +1,295 @@
+// Pure logic for the Content section of Studio (no DOM): pipeline columns, ages, channel status, score text,
+// decision numbers and the metrics CSV mapping. studioContent.js draws it; scripts/test_studio_content_model.cjs checks it.
+
+export const OWNERS = { producer: 'Producer', researcher: 'Researcher', evaluator: 'Evaluator', script_writer: 'Script Writer',
+  editor: 'Editor', publisher: 'Publisher', executor: 'Executor', user: 'You' };
+export const PLATFORMS = [['youtube', 'YouTube'], ['tiktok', 'TikTok'], ['instagram', 'Instagram']];
+export const platformName = id => PLATFORMS.find(p => p[0] === id)?.[1] || id || '';
+export const ownerName = id => OWNERS[id] || id || '';
+
+// The six steps from the spec, in order. Rejected posts get a seventh column only when there are some.
+export const COLUMNS = [
+  { id: 'topic', title: 'Topic', steps: ['pick'] },
+  { id: 'scripting', title: 'Scripting', steps: ['script'] },
+  { id: 'rendering', title: 'Rendering', steps: ['render', 'queue'] },
+  { id: 'approval', title: 'Awaiting approval', steps: ['approval'] },
+  { id: 'approved', title: 'Approved', steps: ['publish'] },
+  { id: 'posted', title: 'Posted', steps: ['tracking'] },
+];
+const REJECTED = { id: 'rejected', title: 'Rejected', steps: ['rejected'] };
+
+export function boardColumns(items) {
+  const columns = COLUMNS.map(c => ({ ...c, items: [] }));
+  const rejected = { ...REJECTED, items: [] };
+  for (const item of items || []) {
+    const column = [...columns, rejected].find(c => c.steps.includes(item.step));
+    if (column) column.items.push(item);
+  }
+  for (const c of [...columns, rejected]) c.items.sort((a, b) => (b.age_h || 0) - (a.age_h || 0));
+  return rejected.items.length ? [...columns, rejected] : columns;
+}
+
+export function formatAge(hours) {
+  const h = Number(hours);
+  if (!Number.isFinite(h) || h < 0) return '';
+  if (h < 1) return `${Math.max(1, Math.round(h * 60))}m`;
+  if (h < 48) return `${Math.round(h)}h`;
+  return `${Math.round(h / 24)}d`;
+}
+
+export function cardFlags(item) {
+  const flags = [];
+  if (item.status === 'failed') flags.push(['Render failed', 'error']);
+  else if (item.overdue) flags.push(['Overdue', 'warn']);
+  if (item.rejection_count >= 2 && item.state !== 'posted') flags.push([`Rejected ${item.rejection_count} times`, 'warn']);
+  return flags;
+}
+
+export function overdueText(item) {
+  if (!item.overdue) return '';
+  const window = item.window_h;
+  return `${formatAge(item.in_step_h)} in this step${window ? `, expected within ${formatAge(window)}` : ''}.`;
+}
+
+// A channel's status pill: paused (a platform warning), archived or live.
+export function channelState(channel) {
+  if (channel.status === 'archived') return { label: 'Archived', tone: 'muted' };
+  if (channel.paused) return { label: 'Paused', tone: 'error' };
+  return { label: 'Live', tone: 'ok' };
+}
+
+// The watch names each open platform warning in its message: "<Platform> warned <handle>: <text> The channel is paused."
+export function warningFor(channelId, findings) {
+  const found = (findings || []).find(f => f.kind === 'platform_warning' && f.channel_id === channelId);
+  if (!found) return '';
+  return String(found.message || '').replace(/\s*The channel is paused\.$/, '');
+}
+
+export function urgentFindings(findings) {
+  return (findings || []).filter(f => f.severity === 'urgent' && f.kind !== 'platform_warning');
+}
+
+// The user's channels grouped by niche, live niches first. A niche with no channels still shows, so it can be filled.
+export function groupChannels(niches, channels) {
+  const rank = n => (n.status === 'live' ? 0 : 1);
+  return [...(niches || [])].sort((a, b) => rank(a) - rank(b) || a.id - b.id)
+    .map(niche => ({ niche, channels: (channels || []).filter(c => c.niche_id === niche.id) }));
+}
+
+export function aiLabel(platform) {
+  return platform === 'youtube' || platform === 'tiktok'
+    ? { required: true, text: `${platformName(platform)} needs the AI-content label. The Editor sets it when it prepares the post.` }
+    : { required: false, text: `${platformName(platform)} does not need an AI-content label here.` };
+}
+
+// A render reference is a link, a Studio video id, or free text from the Editor.
+export function renderLink(ref) {
+  const text = String(ref || '').trim();
+  if (!text) return null;
+  if (/^[a-f0-9]{12}$/.test(text)) return { href: `#/studio/${text}`, label: 'Open in Studio', external: false };
+  if (/^https?:\/\/\S+$/i.test(text)) return { href: text, label: 'Open render', external: true };
+  if (/^\/(?!\/)\S*$/.test(text)) return { href: text, label: 'Open render', external: false };
+  return { href: '', label: text, external: false };
+}
+
+// -- scoreboard ---------------------------------------------------------------------------------
+
+export function scoreText(row) {
+  return row.eligible && row.score != null ? row.score.toFixed(1) : '';
+}
+
+// Rows that have enough data first, best first; the rest keep their order under them.
+export function rankRows(rows) {
+  const enough = rows.filter(r => r.eligible && r.score != null).sort((a, b) => b.score - a.score);
+  return [...enough, ...rows.filter(r => !(r.eligible && r.score != null))];
+}
+
+export function minimumText(minimum) {
+  return `Judged after ${minimum.weeks} weeks and ${minimum.posts} posts.`;
+}
+
+export function weightsText(weights) {
+  const pct = v => Math.round((v / Object.values(weights).reduce((a, b) => a + b, 0)) * 100);
+  return `Score out of 100: views ${pct(weights.views)}, watch time ${pct(weights.watch)}, follows and engagement ${pct(weights.engagement)}. Each part is ranked within its platform.`;
+}
+
+const ROLE_TITLES = { script_writer: 'Script Writer strategies', evaluator: 'Evaluator strategies' };
+export const roleTitle = role => ROLE_TITLES[role] || role;
+
+// -- decisions ------------------------------------------------------------------------------------
+
+export const DECISION_WORDS = { retire: 'Retire', promote: 'Promote', replace: 'Replace' };
+export function decisionTitle(d) {
+  const noun = d.subject_type === 'channel' ? 'channel' : d.subject_type === 'strategy' ? 'strategy' : 'niche';
+  return `${DECISION_WORDS[d.kind] || d.kind} ${noun} ${d.subject_name}`.trim();
+}
+
+const num = v => (typeof v === 'number' && Number.isFinite(v) ? (Number.isInteger(v) ? String(v) : v.toFixed(1)) : null);
+export function decisionNumbers(d) {
+  const n = d.numbers || {};
+  const bits = [];
+  if (num(n.score) != null) bits.push(`score ${num(n.score)}`);
+  if (num(n.team_median) != null) bits.push(`team median ${num(n.team_median)}`);
+  if (n.winner && num(n.winner.score) != null) bits.push(`${n.winner.name || 'winner'} ${num(n.winner.score)}`);
+  if (num(n.posts_scored) != null) bits.push(`${num(n.posts_scored)} posts scored`);
+  if (num(n.age_days) != null) bits.push(`${Math.round(n.age_days)} days of data`);
+  if (num(n.freed_slots) != null) bits.push(`${num(n.freed_slots)} slot${n.freed_slots === 1 ? '' : 's'} freed`);
+  if (num(n.slots_after) != null) bits.push(`${num(n.slots_after)} slots after`);
+  if (n.niche) bits.push(`niche ${n.niche}`);
+  return bits.join(', ');
+}
+
+export function decisionStatus(d) {
+  return ({ proposed: ['With the Producer', 'accent'], awaiting_user: ['Needs you', 'warn'], confirmed: ['Confirmed', 'ok'],
+    rejected: ['Rejected', 'muted'], open: ['Open', 'accent'] })[d.status] || [d.status, 'muted'];
+}
+
+// Split decisions into what waits for the user, what waits for the Producer, and what is done.
+export function sortDecisions(decisions) {
+  const list = [...(decisions || [])].sort((a, b) => (b.at || 0) - (a.at || 0));
+  return {
+    awaiting: list.filter(d => d.status === 'awaiting_user'),
+    producer: list.filter(d => d.status === 'proposed'),
+    recent: list.filter(d => ['confirmed', 'rejected', 'open'].includes(d.status)),
+  };
+}
+
+// -- failures -------------------------------------------------------------------------------------
+
+export function loadFailure(error) {
+  const text = String(error?.message || error || '');
+  if (/^401\b/.test(text)) return 'You were signed out. Reload Kairos to sign in again.';
+  if (/^403\b/.test(text)) return 'Your account cannot open Content Studio. Ask an admin of this Kairos.';
+  return text.replace(/^\d{3}:\s*/, '') || 'Content Studio could not load.';
+}
+
+// -- metrics import -------------------------------------------------------------------------------
+
+export const IMPORT_FIELDS = [
+  { key: 'post', label: 'Post (id, link or title)', required: true,
+    aliases: ['post id', 'post', 'video id', 'video link', 'video url', 'permalink', 'link', 'url', 'video title', 'title', 'video', 'content'] },
+  { key: 'views', label: 'Views', required: true, aliases: ['views', 'video views', 'plays', 'video plays'] },
+  { key: 'avg_view_duration_s', label: 'Average view duration', required: true,
+    aliases: ['average view duration', 'avg view duration', 'average watch time', 'avg watch time', 'average time watched', 'watch time per view'] },
+  { key: 'video_length_s', label: 'Video length', required: false, aliases: ['video length', 'video duration', 'duration', 'length'] },
+  { key: 'likes', label: 'Likes', required: false, aliases: ['likes', 'like'] },
+  { key: 'comments', label: 'Comments', required: false, aliases: ['comments', 'comment'] },
+  { key: 'shares', label: 'Shares', required: false, aliases: ['shares', 'share', 'reposts'] },
+  { key: 'follows_gained', label: 'Follows gained', required: false,
+    aliases: ['follows gained', 'follows', 'new followers', 'followers gained', 'subscribers gained', 'new subscribers', 'subscribers', 'net follows'] },
+  { key: 'taken_at', label: 'Date of the numbers', required: false, aliases: ['date', 'taken at', 'as of'] },
+];
+
+const plain = s => String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+// Quoted fields, doubled quotes and CRLF are handled; the delimiter is the commonest of comma, tab and semicolon in line one.
+export function parseCsv(text) {
+  const source = String(text || '').replace(/^﻿/, '');
+  const firstLine = source.split(/\r?\n/, 1)[0] || '';
+  const delimiter = [',', '\t', ';'].map(d => [d, firstLine.split(d).length]).sort((a, b) => b[1] - a[1])[0][0];
+  const rows = []; let row = [], cell = '', quoted = false;
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    if (quoted) {
+      if (ch === '"' && source[i + 1] === '"') { cell += '"'; i++; }
+      else if (ch === '"') quoted = false;
+      else cell += ch;
+    } else if (ch === '"' && cell === '') quoted = true;
+    else if (ch === delimiter) { row.push(cell); cell = ''; }
+    else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && source[i + 1] === '\n') i++;
+      row.push(cell); cell = '';
+      if (row.some(c => c.trim() !== '')) rows.push(row);
+      row = [];
+    } else cell += ch;
+  }
+  row.push(cell);
+  if (row.some(c => c.trim() !== '')) rows.push(row);
+  const [headers = [], ...body] = rows;
+  return { headers: headers.map(h => h.trim()), rows: body };
+}
+
+// Best guess of which column feeds each field: an exact header first, then a header that contains the alias.
+export function guessMapping(headers) {
+  const names = headers.map(plain), used = new Set(), mapping = {};
+  for (const field of IMPORT_FIELDS) {
+    let at = -1;
+    for (const alias of field.aliases) { at = names.findIndex((n, i) => !used.has(i) && n === alias); if (at >= 0) break; }
+    if (at < 0) for (const alias of field.aliases) { at = names.findIndex((n, i) => !used.has(i) && n.includes(alias)); if (at >= 0) break; }
+    mapping[field.key] = at;
+    if (at >= 0) used.add(at);
+  }
+  return mapping;
+}
+
+export function parseSeconds(value) {
+  const t = String(value ?? '').trim().toLowerCase();
+  if (!t) return NaN;
+  const clock = /^(?:(\d+):)?(\d{1,2}):(\d{1,2}(?:\.\d+)?)$/.exec(t);
+  if (clock) return Number(clock[1] || 0) * 3600 + Number(clock[2]) * 60 + Number(clock[3]);
+  const words = /^(?:(\d+)\s*m(?:in)?)?\s*(?:(\d+(?:\.\d+)?)\s*s(?:ec)?)?$/.exec(t);
+  if (words && (words[1] || words[2])) return Number(words[1] || 0) * 60 + Number(words[2] || 0);
+  const plainNumber = /^(\d+(?:\.\d+)?)$/.exec(t.replace(/,/g, ''));
+  return plainNumber ? Number(plainNumber[1]) : NaN;
+}
+
+export function parseCount(value) {
+  const t = String(value ?? '').trim().replace(/[,\s]/g, '');
+  if (!t) return 0;
+  return /^\d+(?:\.\d+)?$/.test(t) ? Math.round(Number(t)) : NaN;
+}
+
+const normalLink = s => String(s || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/[?#].*$/, '').replace(/\/+$/, '');
+
+// Finds the posted post a row means: by id, by posted link, then by an unambiguous title.
+export function matchPost(value, posts) {
+  const text = String(value ?? '').trim();
+  if (!text) return { error: 'no post named' };
+  if (/^\d+$/.test(text)) {
+    const byId = posts.find(p => p.id === Number(text));
+    return byId ? { id: byId.id } : { error: `post ${text} is not a posted post` };
+  }
+  const a = normalLink(text);
+  const byLink = posts.filter(p => p.posted_url && (normalLink(p.posted_url) === a
+    || (a.length >= 8 && normalLink(p.posted_url).includes(a)) || (normalLink(p.posted_url).length >= 8 && a.includes(normalLink(p.posted_url)))));
+  if (byLink.length === 1) return { id: byLink[0].id };
+  const byTitle = posts.filter(p => plain(p.title) === plain(text));
+  if (byTitle.length === 1) return { id: byTitle[0].id };
+  return { error: byLink.length > 1 || byTitle.length > 1 ? `"${text}" matches more than one post` : `no posted post matches "${text}"` };
+}
+
+// rows: parsed body rows; mapping: field key -> column index (-1 for none); posts: posted posts.
+// Returns the request body for POST /metrics/import plus a line-numbered list of problems.
+export function buildImport(rows, mapping, posts, { defaultLength = null } = {}) {
+  const out = [], problems = [];
+  const cell = (row, key) => (mapping[key] >= 0 ? row[mapping[key]] : undefined);
+  if (rows.length > 500) problems.push({ line: 0, text: 'Import up to 500 rows at a time.' });
+  rows.slice(0, 500).forEach((row, index) => {
+    const line = index + 2, fail = text => problems.push({ line, text });
+    const post = matchPost(cell(row, 'post'), posts);
+    if (post.error) return fail(post.error);
+    const views = parseCount(cell(row, 'views'));
+    if (!Number.isFinite(views) || cell(row, 'views') === undefined || String(cell(row, 'views')).trim() === '') return fail('views is not a number');
+    const avg = parseSeconds(cell(row, 'avg_view_duration_s'));
+    if (!Number.isFinite(avg)) return fail('average view duration is not a time');
+    let length = mapping.video_length_s >= 0 ? parseSeconds(cell(row, 'video_length_s')) : NaN;
+    if (!Number.isFinite(length) && defaultLength) length = defaultLength;
+    if (!Number.isFinite(length)) return fail('video length is missing');
+    const entry = { post_id: post.id, views, avg_view_duration_s: avg, video_length_s: length };
+    for (const key of ['likes', 'comments', 'shares', 'follows_gained']) {
+      const raw = cell(row, key);
+      if (raw === undefined || String(raw).trim() === '') continue;
+      const n = parseCount(raw);
+      if (!Number.isFinite(n)) return fail(`${key.replace('_', ' ')} is not a number`);
+      entry[key] = n;
+    }
+    const when = cell(row, 'taken_at');
+    if (when !== undefined && String(when).trim()) {
+      const ms = Date.parse(String(when).trim());
+      if (!Number.isFinite(ms)) return fail('date is not a date');
+      entry.taken_at = ms / 1000;
+    }
+    out.push(entry);
+  });
+  return { body: { rows: out }, problems };
+}

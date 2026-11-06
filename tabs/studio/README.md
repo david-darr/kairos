@@ -30,6 +30,18 @@ video, with the request as an editable draft. It does not send the draft.
 Video/design content marks the linked chat as untrusted through the tab API.
 The tab does not invoke model tools or bypass their permission gate.
 
+## Content
+
+The Content button beside Videos opens the Content Studio team's screens
+(`static/js/studioContent.js`, logic in `studioContentModel.js`, styles in
+`static/css/studio-content.css`; the routes are `/api/content-studio/`). With no
+channels it explains the team and offers the Bots template and Add a channel.
+Otherwise: Approvals (approve, edit, reject with a note, redraft; approving only
+marks a post approved, Prepare post comes later), the Pipeline board, Channels
+(registered by you, never created by Kairos; platform warnings show at the top
+until resolved), the Scoreboard with pending decisions, and the weekly Report with
+a CSV import for platform analytics.
+
 ## Integration prerequisite
 
 The current stable tab API has no video/design store methods. The proposed
@@ -52,6 +64,8 @@ node --check static/js/chatContent.js
 node --check static/js/app.js
 node --check scripts/studio-checks.cjs
 node scripts/studio-checks.cjs
+node scripts/test_studio_content_model.cjs
+node scripts/studio-content-checks.cjs
 ```
 
 The Electron script launches the real app shell against a synthetic local
