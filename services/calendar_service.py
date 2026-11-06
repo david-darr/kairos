@@ -5,18 +5,22 @@ Odysseus-scale integration work (OAuth, two-way writeback) — deliberately out
 of this pass; this is the local event model + Notes-merge it would sync on
 top of.
 """
-import os
 import time
 import uuid
 from copy import deepcopy
 from typing import Optional
 
+from core import accounts
 from core.atomic_io import read_json, write_json_atomic
-from core.constants import DATA_DIR
 from core import calendar_recurrence as repeats
 from services.notes_service import notes_service
 
-EVENTS_FILE = os.path.join(DATA_DIR, "calendar_events.json")
+# Each account's own calendar_events.json (Multi-Account phase 2); a test may point this at its own file.
+EVENTS_FILE = None
+
+
+def events_file() -> str:
+    return EVENTS_FILE or accounts.path("calendar_events.json")
 
 
 def _overlaps(ev_start: str, ev_end: str, start_iso: str, end_iso: str, *, end_exclusive=False, time_zone="UTC") -> bool:
@@ -38,11 +42,12 @@ def _overlaps(ev_start: str, ev_end: str, start_iso: str, end_iso: str, *, end_e
 
 
 class CalendarService:
-    def __init__(self) -> None:
-        self._events: dict = read_json(EVENTS_FILE, {})
+    def __init__(self, path: Optional[str] = None) -> None:
+        self._file = path or events_file()
+        self._events: dict = read_json(self._file, {})
 
     def _save(self) -> None:
-        write_json_atomic(EVENTS_FILE, self._events)
+        write_json_atomic(self._file, self._events)
 
     def create_event(self, title: str, start: str, end: str, all_day: bool = False, location: str = "", description: str = "",
                       sync_id: Optional[str] = None, external_uid: Optional[str] = None, completed: bool = False,
@@ -358,4 +363,5 @@ class CalendarService:
         return sorted(events + note_events, key=lambda e: e["start"])
 
 
-calendar_service = CalendarService()
+# One CalendarService per account, behind the name every caller imports.
+calendar_service = accounts.PerAccount(CalendarService, events_file)

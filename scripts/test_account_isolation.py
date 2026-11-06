@@ -5,6 +5,9 @@ reach through the real routes, with markers unique to that account (a model API 
 Then every GET route that takes no parameters, and every GET route that takes one id (tried with
 the OTHER account's ids), is called as each account, and the response is searched for the other
 account's markers. The spec's rule (D2): not even the admin may see another account's data.
+After the reads, every PATCH, PUT and then DELETE route that takes one id is tried as each account on
+the other's ids (phase 2, group 1 on): any success is a finding ("changes"), since an account must not
+be able to touch what it cannot see.
 
 This is a ratchet. Today's leaks are listed in scripts/fixtures/account_leaks_known.json. The test
 fails on any leak not in that list, and also on any listed leak that no longer happens, so the list
@@ -124,6 +127,50 @@ ID_PARAMS = {"session": "session", "note": "note", "event": "event", "document":
              "bot": "agent", "design": "design", "skill": "skill", "slug": "skill", "hook": "hook", "trigger": "trigger"}
 
 
+# Fields the edit routes accept; extra ones are ignored. A route that refuses the body (422) proves nothing
+# either way, so a refusal is only counted when it is a 403 or 404.
+EDIT_BODY = {"text": "LEAKEDIT", "title": "LEAKEDIT", "name": "LEAKEDIT", "content": "LEAKEDIT", "instructions": "LEAKEDIT"}
+
+
+def owner_view(owner, paths, path, target):
+    """What the owner sees of the item: its own GET at the same path, else the list it sits in. None when
+    there is no way to look."""
+    for look in (target if "get" in paths.get(path, {}) else None,
+                 target.rsplit("/", 1)[0] if "get" in paths.get(path.rsplit("/{", 1)[0], {}) else None):
+        if look:
+            r, _ = call(owner.client, "GET", look)
+            return r.text if r is not None and r.status_code < 300 else ""
+    return None
+
+
+def changes_for(viewer, owner, paths, methods):
+    """A change counts when the call succeeds AND the owner then finds the item gone (delete) or edited.
+    Delete routes answer 200 for an id they do not have, so success alone proves nothing; when the owner
+    has no way to look, success is counted."""
+    found = set()
+    for path, ops in paths.items():
+        params = re.findall(r"{([^}]+)}", path)
+        if len(params) != 1 or SKIP.search(path):
+            continue
+        kind = next((v for k, v in ID_PARAMS.items() if k in params[0].lower()), None)
+        for method in methods:
+            if method not in ops:
+                continue
+            for ident in (owner.ids.get(kind) or [])[:1]:
+                target = path.replace("{" + params[0] + "}", ident)
+                before = owner_view(owner, paths, path, target)
+                body = None if method == "delete" else EDIT_BODY
+                r, err = call(viewer.client, method.upper(), target, json=body)
+                if r is None or r.status_code >= 300:
+                    continue
+                after = owner_view(owner, paths, path, target)
+                unknown = before is None or ident not in before
+                took = (ident not in (after or "")) if method == "delete" else ("LEAKEDIT" in (after or "") and "LEAKEDIT" not in before)
+                if unknown or took:
+                    found.add(f"{viewer.name} changes {owner.name}'s data via {method.upper()} {path}")
+    return found
+
+
 def leaks_for(viewer, owner, paths):
     found = set()
     markers = owner.markers()
@@ -172,7 +219,10 @@ class AccountIsolation(unittest.TestCase):
             fill(account)
         paths = kairos.app.openapi()["paths"]
         david, bea = cls.accounts["david"], cls.accounts["bea"]
-        cls.leaks = sorted(leaks_for(bea, david, paths) | leaks_for(david, bea, paths))
+        leaks = leaks_for(bea, david, paths) | leaks_for(david, bea, paths)
+        for methods in (("patch", "put"), ("delete",)):  # deletes last: the edits need the items there
+            leaks |= changes_for(bea, david, paths, methods) | changes_for(david, bea, paths, methods)
+        cls.leaks = sorted(leaks)
         cls.denied = sorted(f"bea cannot create {store}: {state}" for store, state in bea.seeded.items() if state not in ("ok", "file"))
         report = {"leaks": cls.leaks, "bea_denied": cls.denied, "seeded": {n: a.seeded for n, a in cls.accounts.items()}}
         out = ROOT / "data" / "account-isolation-report.json"; out.parent.mkdir(exist_ok=True)

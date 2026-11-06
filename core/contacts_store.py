@@ -4,16 +4,19 @@ minimal: a flat synced-contacts store, viewable from the Integrations panel
 itself rather than a full contacts feature. Real data, honestly scoped
 surface — not a stub, just not a whole new tab.
 """
-import os
-
+from core import accounts
 from core.atomic_io import read_json, write_json_atomic
-from core.constants import DATA_DIR
 
-CONTACTS_FILE = os.path.join(DATA_DIR, "contacts.json")
+# Each account's own contacts.json (Multi-Account phase 2); a test may point this at its own file.
+CONTACTS_FILE = None
+
+
+def contacts_file() -> str:
+    return CONTACTS_FILE or accounts.path("contacts.json")
 
 
 def _load() -> dict:
-    return read_json(CONTACTS_FILE, {})
+    return read_json(contacts_file(), {})
 
 
 def list_contacts(sync_id: str | None = None) -> list[dict]:
@@ -31,5 +34,5 @@ def replace_synced_contacts(sync_id: str, contacts: list[dict]) -> int:
     for c in contacts:
         cid = f"{sync_id}:{c['uid']}"
         data[cid] = {"id": cid, "name": c["name"], "email": c.get("email"), "phone": c.get("phone"), "sync_id": sync_id}
-    write_json_atomic(CONTACTS_FILE, data)
+    write_json_atomic(contacts_file(), data)
     return len(contacts)

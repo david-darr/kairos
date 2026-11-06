@@ -16,25 +16,35 @@ import time
 import uuid
 from typing import Optional
 
+from core import accounts
 from core.atomic_io import read_json, write_json_atomic
-from core.constants import DATA_DIR
 
-DOCUMENTS_DIR = os.path.join(DATA_DIR, "documents")
-DOCUMENTS_INDEX_FILE = os.path.join(DATA_DIR, "documents_index.json")
+# Each account's own documents/ and documents_index.json (Multi-Account phase 2); a test may point these
+# at its own folder and file.
+DOCUMENTS_DIR = None
+DOCUMENTS_INDEX_FILE = None
+
+
+def documents_dir() -> str:
+    return DOCUMENTS_DIR or accounts.path("documents")
+
+
+def index_file() -> str:
+    return DOCUMENTS_INDEX_FILE or accounts.path("documents_index.json")
 
 SNIPPET_RADIUS = 200  # matches core/memory_tools.py's token-efficiency convention
 
 
 def _content_path(doc_id: str) -> str:
-    return os.path.join(DOCUMENTS_DIR, f"{doc_id}.md")
+    return os.path.join(documents_dir(), f"{doc_id}.md")
 
 
 def _load_index() -> dict:
-    return read_json(DOCUMENTS_INDEX_FILE, {})
+    return read_json(index_file(), {})
 
 
 def _save_index(index: dict) -> None:
-    write_json_atomic(DOCUMENTS_INDEX_FILE, index)
+    write_json_atomic(index_file(), index)
 
 
 def list_documents() -> list[dict]:
@@ -59,7 +69,7 @@ def get_document(doc_id: str) -> Optional[dict]:
 def create_document(title: str, content: str = "", tags: Optional[list[str]] = None) -> dict:
     doc_id = uuid.uuid4().hex[:12]
     now = time.time()
-    os.makedirs(DOCUMENTS_DIR, exist_ok=True)
+    os.makedirs(documents_dir(), exist_ok=True)
     with open(_content_path(doc_id), "w", encoding="utf-8", newline="") as f:
         f.write(content)
     meta = {"id": doc_id, "title": title, "tags": tags or [], "created_at": now, "updated_at": now}
@@ -83,7 +93,7 @@ def update_document(doc_id: str, title: Optional[str] = None, content: Optional[
             with open(_content_path(doc_id), "r", encoding="utf-8", newline="") as f:
                 content = f.read()
     else:
-        os.makedirs(DOCUMENTS_DIR, exist_ok=True)
+        os.makedirs(documents_dir(), exist_ok=True)
         with open(_content_path(doc_id), "w", encoding="utf-8", newline="") as f:
             f.write(content)
     if title is not None:

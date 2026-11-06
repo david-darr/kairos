@@ -23,24 +23,28 @@ and works identically across every connected model kind.
 
 JSON-backed, same atomic-write convention as model_endpoints.py.
 """
-import os
 import time
 import uuid
 from typing import Optional
 
+from core import accounts
 from core.atomic_io import read_json, write_json_atomic
-from core.constants import DATA_DIR
 from services import documents_service
 
-PROJECTS_FILE = os.path.join(DATA_DIR, "projects.json")
+# Each account's own projects.json (Multi-Account phase 2); a test may point this at its own file.
+PROJECTS_FILE = None
+
+
+def projects_file() -> str:
+    return PROJECTS_FILE or accounts.path("projects.json")
 
 
 def _load() -> dict:
-    return read_json(PROJECTS_FILE, {})
+    return read_json(projects_file(), {})
 
 
 def _save(data: dict) -> None:
-    write_json_atomic(PROJECTS_FILE, data)
+    write_json_atomic(projects_file(), data)
 
 
 def list_projects() -> list[dict]:

@@ -47,6 +47,9 @@ class Grant:
     integration_ids: tuple[str, ...] | None = None
     read_only: bool = False
     owner_user: str | None = None
+    # The account whose data the turn's tool calls read and write (core/accounts.py): the one the turn ran
+    # in when it was issued. core/middleware.py sets it for each call carrying this token.
+    account: str | None = None
     mcp_catalog: dict = field(default_factory=dict, compare=False)
     mcp_lock: asyncio.Lock = field(default_factory=asyncio.Lock, compare=False)
 
@@ -68,8 +71,16 @@ def issue(session_id: Optional[str], is_admin: bool, agent_id: Optional[str] = N
     _grants[token] = Grant(session_id, bool(is_admin), agent_id, model, now + TOKEN_LIFETIME_SECONDS,
                            TurnTaint(), folder, context.run_id if context else None, active.get("card_id"),
                            tuple(integration_ids) if integration_ids is not None else None, read_only,
-                           owner_user=task_scope.current_owner(agent_id))
+                           owner_user=task_scope.current_owner(agent_id), account=_turn_account())
     return token
+
+
+def _turn_account():
+    from core import accounts
+    try:
+        return accounts.effective_account()
+    except accounts.NoAccount:
+        return None
 
 
 def issue_proxy(session_id, is_admin: bool, agent_id: str, model, integration_ids, lifetime: float = 1800) -> str:

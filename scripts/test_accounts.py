@@ -1,5 +1,6 @@
-"""Account folders: ids, the resolver, the per-request account, and the layout migration
-(Multi-Account (Build Spec), phase 1, 2026-11-05).
+"""Account folders: ids, the resolver, the per-request account, the layout migration (Multi-Account
+(Build Spec), phase 1, 2026-11-05) and the per-account stores (phase 2 group 1: notes, calendar,
+documents, projects, contacts).
 
 Runs on a throwaway data folder. The leak test (scripts/test_account_isolation.py) covers what each
 account can read through the real routes; this covers the machinery underneath it.
@@ -24,8 +25,10 @@ import httpx  # noqa: E402
 from fastapi import FastAPI, WebSocket  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from core import account_migration, accounts, auth, backup  # noqa: E402
+from core import account_migration, accounts, auth, backup, contacts_store, projects, tool_access  # noqa: E402
 from core import middleware  # noqa: E402
+from services import calendar_service as calendar_module, documents_service  # noqa: E402
+from services import notes_service as notes_module  # noqa: E402
 from core.auth import SESSION_COOKIE_NAME, SINGLE_USER, auth_manager  # noqa: E402
 
 
@@ -55,6 +58,14 @@ def mini_app():
             return accounts.current_account()
         return {"task": await asyncio.create_task(later())}
 
+    @app.get("/notes")
+    def notes_route():
+        return notes_module.notes_service.list_notes()
+
+    @app.post("/tool")
+    def tool_route():
+        return {"account": accounts.current_account()}
+
     @app.websocket("/ws")
     async def ws_route(socket: WebSocket):
         await socket.accept()
@@ -62,6 +73,11 @@ def mini_app():
         await socket.close()
 
     app.add_middleware(middleware.AccountContextMiddleware)
+
+    @app.exception_handler(accounts.NoAccount)
+    async def no_account(request, exc):  # the same handler app.py installs
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": "authentication required"}, status_code=401)
     return app
 
 
@@ -106,10 +122,23 @@ class Resolver(unittest.TestCase):
     def setUp(self):
         fresh_users()
 
-    def test_no_account_means_no_folder(self):
-        self.assertIsNone(accounts.current_account())
-        with self.assertRaises(accounts.NoAccount):
-            accounts.account_dir()
+    def test_a_request_with_nobody_signed_in_gets_no_folder(self):
+        token = accounts.set_current(None)
+        try:
+            self.assertIsNone(accounts.current_account())
+            with self.assertRaises(accounts.NoAccount):
+                accounts.account_dir()
+            with patch.object(account_migration, "moved_names", return_value=frozenset({"notes.json"})):
+                with self.assertRaises(accounts.NoAccount):
+                    notes_module.notes_service.list_notes()
+        finally:
+            accounts.reset_current(token)
+
+    def test_background_work_not_yet_per_account_uses_the_first_admins(self):
+        self.assertIsNone(accounts.current_account(), "nothing set: start-up or a background loop")
+        self.assertTrue(accounts.account_dir().endswith(accounts.LOCAL_ID), "no accounts yet: local")
+        auth_manager.create_user("david-darr", "password-one-1", is_admin=True)
+        self.assertTrue(accounts.account_dir().endswith(auth_manager.account_id("david-darr")))
 
     def test_ids_cannot_leave_the_accounts_folder(self):
         for bad in ("../auth", "a/b", "A1", "", ".", "x" * 33, "a b"):
@@ -234,11 +263,26 @@ class Migration(unittest.TestCase):
         return account_migration.run(str(self.data), self.steps if steps is None else steps, account="abc123",
                                      backup=kwargs.pop("backup", self.backup), **kwargs)
 
-    def test_phase_one_moves_nothing(self):
-        self.assertEqual(account_migration.STEPS, [])
-        self.assertIsNone(account_migration.run(str(self.data)))
-        self.assertFalse((self.data / "layout.json").exists())
-        self.assertFalse((self.data / "accounts").exists())
+    def test_group_one_moves_its_five_stores(self):
+        self.assertEqual([s.version for s in account_migration.STEPS], [1])
+        self.assertEqual(set(account_migration.STEPS[0].entries), {
+            "notes.json", "calendar_events.json", "documents", "documents_index.json", "projects.json", "contacts.json"})
+        (self.data / "documents").mkdir()
+        (self.data / "documents" / "a.md").write_text("doc", encoding="utf-8")
+        result = account_migration.run(str(self.data), account="abc123", backup=self.backup)
+        self.assertTrue(result["ok"], result)
+        account = self.data / "accounts" / "abc123"
+        self.assertTrue((account / "notes.json").exists() and (account / "documents" / "a.md").exists())
+        self.assertTrue((self.data / "chats" / "one.json").exists(), "chats wait for their own group")
+
+    def test_a_new_install_records_the_layout_without_a_backup(self):
+        empty = TemporaryDirectory(prefix="kairos-layout-new-", dir=tempfile.gettempdir())
+        self.addCleanup(empty.cleanup)
+        result = account_migration.run(empty.name, account="abc123", backup=self.backup)
+        self.assertTrue(result["ok"])
+        self.assertEqual(self.backups, [], "nothing to back up")
+        self.assertEqual(account_migration.layout_version(empty.name), account_migration.STEPS[-1].version)
+        self.assertIsNone(account_migration.run(empty.name, account="abc123", backup=self.backup))
 
     def test_pending_steps_move_into_the_account_after_a_backup(self):
         result = self.run_steps()
@@ -249,6 +293,7 @@ class Migration(unittest.TestCase):
         self.assertFalse((self.data / "chats").exists())
         self.assertTrue((self.data / "settings.json").exists(), "install-level files stay")
         self.assertEqual(account_migration.layout_version(str(self.data)), 2)
+        self.assertIn("notes.json", account_migration.moved_names(str(self.data)), "group 1's names now read the account")
         self.assertEqual(len(self.backups), 1)
         self.assertIn(os.sep + ".layout" + os.sep, self.backups[0])
         self.assertIsNone(self.run_steps(), "a second start has nothing to do")
@@ -271,6 +316,11 @@ class Migration(unittest.TestCase):
         self.assertFalse((account / "chats").exists())
         self.assertEqual((account / "notes.json").read_text(encoding="utf-8"), "someone else's", "never merged")
         self.assertEqual(account_migration.layout_version(str(self.data)), 0, "still on the old layout")
+        self.assertEqual(account_migration.moved_names(str(self.data)), frozenset(),
+                         "so the stores keep reading the old place")
+        record = json.loads((self.data / ".layout" / "last-run.json").read_text(encoding="utf-8"))
+        self.assertFalse(record["ok"])
+        self.assertIn("already in the account folder", record["error"], "the failure is kept where it can be read")
 
     def test_no_backup_no_move(self):
         def broken(path):
@@ -287,6 +337,88 @@ class Migration(unittest.TestCase):
         self.assertFalse([rel for rel in listed if rel.startswith(".layout/")], "not inside later backups")
         self.assertIn("accounts/abc123/notes.json", listed, "account folders are backed up")
         self.assertNotIn(".layout", backup._entries(str(self.data)), "a restore does not delete them")
+
+
+
+class Stores(unittest.TestCase):
+    """Group 1: each account has its own notes, calendar, documents, projects and contacts."""
+
+    @classmethod
+    def setUpClass(cls):
+        account_migration.run(_DATA.name, backup=lambda path: None)  # what app.py does at start
+        assert "notes.json" in account_migration.moved_names()
+
+    def test_until_the_move_the_stores_stay_where_they_were(self):
+        with patch.object(account_migration, "moved_names", return_value=frozenset()):
+            self.assertEqual(accounts.path("notes.json"), os.path.join(_DATA.name, "notes.json"))
+            with accounts.as_account(self.ids["bea"]):
+                self.assertEqual(accounts.path("documents", "a.md"), os.path.join(_DATA.name, "documents", "a.md"))
+        with accounts.as_account(self.ids["bea"]):
+            self.assertEqual(accounts.path("documents", "a.md"),
+                             os.path.join(accounts.ACCOUNTS_DIR, self.ids["bea"], "documents", "a.md"))
+            self.assertEqual(accounts.path("sessions.db"), os.path.join(_DATA.name, "sessions.db"),
+                             "chats have not moved yet")
+
+    def setUp(self):
+        fresh_users()
+        auth_manager.create_user("david-darr", "password-one-1", is_admin=True)
+        auth_manager.create_user("bea", "password-two-2")
+        self.ids = {n: auth_manager.account_id(n) for n in ("david-darr", "bea")}
+
+    def test_each_account_has_its_own_of_every_store(self):
+        made = {}
+        for name, account_id in self.ids.items():
+            with accounts.as_account(account_id):
+                made[name] = {
+                    "note": notes_module.notes_service.create_note(f"{name} note")["id"],
+                    "event": calendar_module.calendar_service.create_event(
+                        f"{name} event", "2026-11-10T10:00:00Z", "2026-11-10T11:00:00Z")["id"],
+                    "document": documents_service.create_document(f"{name} document", "body")["id"],
+                    "project": projects.create_project(f"{name} project")["id"],
+                }
+                contacts_store.replace_synced_contacts("sync", [{"uid": "1", "name": f"{name} contact"}])
+        for name, account_id in self.ids.items():
+            other = "bea" if name == "david-darr" else "david-darr"
+            with accounts.as_account(account_id):
+                self.assertEqual([n["text"] for n in notes_module.notes_service.list_notes()], [f"{name} note"])
+                self.assertIsNone(notes_module.notes_service.get_note(made[other]["note"]))
+                with self.assertRaises(KeyError):
+                    calendar_module.calendar_service.get_event(made[other]["event"])
+                self.assertIsNone(documents_service.get_document(made[other]["document"]))
+                self.assertEqual([d["title"] for d in documents_service.list_documents()], [f"{name} document"])
+                self.assertIsNone(projects.get_project(made[other]["project"]))
+                self.assertEqual([c["name"] for c in contacts_store.list_contacts()], [f"{name} contact"])
+                folder = Path(accounts.account_dir())
+                for entry in ("notes.json", "calendar_events.json", "documents", "documents_index.json",
+                              "projects.json", "contacts.json"):
+                    self.assertTrue((folder / entry).exists(), f"{entry} lives in {name}'s folder")
+        self.assertFalse((Path(_DATA.name) / "notes.json").exists(), "nothing at the old shared place")
+
+    def test_a_test_can_still_point_a_store_at_its_own_file(self):
+        own = TemporaryDirectory(prefix="kairos-own-", dir=tempfile.gettempdir())
+        self.addCleanup(own.cleanup)
+        with patch.object(notes_module, "NOTES_FILE", str(Path(own.name) / "notes.json")):
+            notes_module.notes_service.create_note("pinned")
+            self.assertTrue((Path(own.name) / "notes.json").exists())
+
+    def test_a_signed_out_request_for_notes_is_refused(self):
+        app = mini_app()
+        with patch.object(middleware, "auth_enabled", return_value=True):
+            self.assertEqual(TestClient(app).get("/notes").status_code, 401)
+            client = TestClient(app)
+            client.cookies.set(SESSION_COOKIE_NAME, auth_manager.create_session("bea"))
+            self.assertEqual(client.get("/notes").status_code, 200)
+
+    def test_a_model_tool_call_works_in_its_turns_account(self):
+        with accounts.as_account(self.ids["bea"]):
+            token = tool_access.issue(None, False)
+        self.addCleanup(tool_access.revoke, token)
+        self.assertEqual(tool_access.resolve(token).account, self.ids["bea"])
+        with patch.object(middleware, "auth_enabled", return_value=True):
+            answer = TestClient(mini_app()).post("/tool", headers={"X-JARVIS-Tool-Token": token}).json()
+            self.assertEqual(answer, {"account": self.ids["bea"]})
+            wrong = TestClient(mini_app()).post("/tool", headers={"X-JARVIS-Tool-Token": "made-up"}).json()
+            self.assertEqual(wrong, {"account": None})
 
 
 if __name__ == "__main__":

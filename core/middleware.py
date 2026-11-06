@@ -155,9 +155,9 @@ def get_current_user(request: Request) -> Optional[str]:
 
 class AccountContextMiddleware:
     """Sets the account every request and websocket works in (core/accounts.py, Multi-Account phase 1),
-    from the same sign-in check the routes use. No sign-in, no account: personal data is then refused,
-    never guessed. A plain ASGI layer, so the account follows the request into the endpoint and any work
-    it starts; it is added outermost in app.py."""
+    from the same sign-in check the routes use, or a model tool call's turn token. No sign-in, no account:
+    personal data is then refused, never guessed. A plain ASGI layer, so the account follows the request
+    into the endpoint and any work it starts; it is added outermost in app.py."""
 
     def __init__(self, app):
         self.app = app
@@ -168,7 +168,14 @@ class AccountContextMiddleware:
         from starlette.requests import HTTPConnection
         from core import accounts
         try:
-            account = accounts.account_for_user(get_current_user(HTTPConnection(scope)))
+            connection = HTTPConnection(scope)
+            account = accounts.account_for_user(get_current_user(connection))
+            if account is None and connection.headers.get("X-JARVIS-Tool-Token"):
+                # A model's tool call (mcp_servers/hive_mind_cli.py, the bot MCP proxy) carries its turn's
+                # token instead of a sign-in: it works in the account the turn ran in.
+                from core import tool_access
+                grant = tool_access.resolve(connection.headers["X-JARVIS-Tool-Token"])
+                account = grant.account if grant else None
         except Exception:  # an unreadable sign-in is no sign-in, never a crashed request
             account = None
         token = accounts.set_current(account)

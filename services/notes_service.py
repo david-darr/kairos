@@ -8,11 +8,15 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
+from core import accounts
 from core.atomic_io import read_json, write_json_atomic
-from core.constants import DATA_DIR
-import os
 
-NOTES_FILE = os.path.join(DATA_DIR, "notes.json")
+# Each account's own notes.json (Multi-Account phase 2); a test may point this at its own file.
+NOTES_FILE = None
+
+
+def notes_file() -> str:
+    return NOTES_FILE or accounts.path("notes.json")
 
 
 def _utc(value: str) -> Optional[datetime]:
@@ -25,11 +29,12 @@ def _utc(value: str) -> Optional[datetime]:
 
 
 class NotesService:
-    def __init__(self) -> None:
-        self._notes: dict = read_json(NOTES_FILE, {})
+    def __init__(self, path: Optional[str] = None) -> None:
+        self._file = path or notes_file()
+        self._notes: dict = read_json(self._file, {})
 
     def _save(self) -> None:
-        write_json_atomic(NOTES_FILE, self._notes)
+        write_json_atomic(self._file, self._notes)
 
     def list_notes(self, include_completed: bool = True, include_dismissed: bool = False) -> list[dict]:
         items = list(self._notes.values())
@@ -131,4 +136,5 @@ class NotesService:
             self.delete_note(note_id)
 
 
-notes_service = NotesService()
+# One NotesService per account, behind the name every caller imports.
+notes_service = accounts.PerAccount(NotesService, notes_file)

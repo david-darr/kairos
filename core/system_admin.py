@@ -18,7 +18,7 @@ from core.atomic_io import write_json_atomic
 from core.auth import auth_enabled
 from core.constants import DATA_DIR
 from core.vault import resolve_vault_dir
-from services.notes_service import NOTES_FILE, notes_service
+from services.notes_service import notes_service
 from services.skills_service import SKILLS_DIR, create_skill, get_skill, list_skills
 from services.task_service import TASKS_FILE, task_service
 
@@ -135,7 +135,7 @@ def wipe(kind: str) -> None:
         # absent) but left the file describing chats that no longer existed.
         session_store.delete_all_sessions()
     elif kind == "notes":
-        write_json_atomic(NOTES_FILE, [])
+        write_json_atomic(notes_service._file, [])  # this account's notes only
         notes_service._notes = {}
     elif kind == "tasks":
         write_json_atomic(TASKS_FILE, [])

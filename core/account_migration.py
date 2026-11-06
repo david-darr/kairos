@@ -16,8 +16,9 @@ their files when imported), so nothing is open while it moves.
   is left as it was, and the app starts on the old layout; the failure is logged and returned.
 - An entry already present in the account folder stops the run: two copies are never merged.
 
-Phase 1 ships this with no steps. Phase 2 adds one step per store group in the same change that makes that
-store read from account_dir(), so nothing moves before its code is ready.
+Phase 2 adds one step per store group in the same change that makes that store read from account_dir(),
+so nothing moves before its code is ready. A data folder with none of a step's names (a new install) just
+records the version, with no backup.
 """
 import json
 import logging
@@ -41,11 +42,28 @@ class Step:
 
 
 # Phase 2 appends here, one group at a time, with the code that reads each group from account_dir().
-STEPS: list[Step] = []
+STEPS: list[Step] = [
+    Step(1, "notes, calendar, documents, projects and contacts",
+         ("notes.json", "calendar_events.json", "documents", "documents_index.json", "projects.json", "contacts.json")),
+]
 
 
 def layout_version(data_dir: str = DATA_DIR) -> int:
     return int(read_json(os.path.join(data_dir, "layout.json"), {}).get("version") or 0)
+
+
+_moved: dict = {}
+
+
+def moved_names(data_dir: str = DATA_DIR) -> frozenset:
+    """The data folder's names that now live in account folders: those of every step its layout has
+    reached. core/accounts.py's path() sends every other name to the shared place it always had, so a
+    migration that failed and moved everything back leaves the app reading the old layout."""
+    names = _moved.get(data_dir)
+    if names is None:
+        version = layout_version(data_dir)
+        names = _moved[data_dir] = frozenset(n for s in STEPS if s.version <= version for n in s.entries)
+    return names
 
 
 def _target_account() -> str:
@@ -55,8 +73,22 @@ def _target_account() -> str:
 
 def run(data_dir: Optional[str] = None, steps: Optional[list] = None, account: Optional[str] = None,
         backup=None) -> Optional[dict]:
-    """Run the pending steps. Returns None when there is nothing to do, else what happened."""
+    """Run the pending steps. Returns None when there is nothing to do, else what happened, which is also
+    kept in .layout/last-run.json: this runs before the app's logging is set up, so the log files would
+    not show a failure."""
     data_dir = data_dir or DATA_DIR
+    result = _run(data_dir, steps, account, backup)
+    if result is not None:
+        try:
+            os.makedirs(os.path.join(data_dir, ".layout"), exist_ok=True)
+            write_json_atomic(os.path.join(data_dir, ".layout", "last-run.json"), {**result, "at": time.time()})
+        except OSError as error:
+            log.error("Account layout: could not record the run: %s", error)
+    return result
+
+
+def _run(data_dir, steps, account, backup) -> Optional[dict]:
+    _moved.pop(data_dir, None)  # re-read the layout after this run, whatever it does
     steps = sorted(STEPS if steps is None else steps, key=lambda s: s.version)
     current = layout_version(data_dir)
     pending = [s for s in steps if s.version > current]
@@ -67,6 +99,13 @@ def run(data_dir: Optional[str] = None, steps: Optional[list] = None, account: O
     target = os.path.join(data_dir, "accounts", _checked(account))
     result = {"ok": False, "from_version": current, "to_version": current, "account": account,
               "steps": [s.name for s in pending], "moved": [], "backup": None, "error": None}
+    if not any(os.path.lexists(os.path.join(data_dir, name)) for step in pending for name in step.entries):
+        # A new install, or one that never had these stores: nothing to back up or move.
+        write_json_atomic(os.path.join(data_dir, "layout.json"),
+                          {"version": pending[-1].version, "account": account, "updated_at": time.time()})
+        _moved.pop(data_dir, None)
+        result.update(ok=True, to_version=pending[-1].version)
+        return result
     try:
         folder = os.path.join(data_dir, ".layout")
         os.makedirs(folder, exist_ok=True)
@@ -92,6 +131,7 @@ def run(data_dir: Optional[str] = None, steps: Optional[list] = None, account: O
                 moved.append((source, destination))
         write_json_atomic(os.path.join(data_dir, "layout.json"),
                           {"version": pending[-1].version, "account": account, "updated_at": time.time()})
+        _moved.pop(data_dir, None)
     except Exception as error:
         result["error"] = str(error)
         for source, destination in reversed(moved):

@@ -14,6 +14,7 @@ from core import backup as _backup
 _RESTORED = _backup.apply_pending_restore()
 # Then personal data moves into account folders, still before anything opens it (core/account_migration.py).
 from core import account_migration as _account_migration
+from core import accounts as _accounts_module
 _LAYOUT = _account_migration.run()
 
 from core.constants import STATIC_DIR
@@ -265,6 +266,13 @@ app = FastAPI(title="Kairos", lifespan=lifespan)
 app.add_middleware(SecurityHeadersMiddleware)
 # Added last, so outermost: every request knows its account before anything else runs (core/accounts.py).
 from core.middleware import AccountContextMiddleware; app.add_middleware(AccountContextMiddleware)
+
+
+@app.exception_handler(_accounts_module.NoAccount)
+async def _no_account(request, exc):
+    # Personal data asked for with nobody signed in: the same answer as any route that needs a sign-in.
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"detail": "authentication required"}, status_code=401)
 
 app.include_router(auth_routes.router)
 app.include_router(session_routes.router)
