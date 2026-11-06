@@ -66,7 +66,7 @@ export async function run(overlay, identity, onComplete) {
           el("button", { class: "btn", text: "Continue", onclick: () => go("vault") }),
         ]),
       ]);
-      disposeGuide = mountModelSetup(host);
+      disposeGuide = mountModelSetup(host, { identity });
       return wrap;
     },
 

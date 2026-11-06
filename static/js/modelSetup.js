@@ -22,7 +22,7 @@ export function openModelSetup({ onConnected, kind } = {}) {
   return dialog;
 }
 
-export function mountModelSetup(host, { onConnected, initialKind } = {}) {
+export function mountModelSetup(host, { onConnected, initialKind, identity } = {}) {
   const controller = new AbortController();
   const { signal } = controller;
   let state = null, generation = 0, timer = null, disposed = false, jobId = null, localDispose = null;
@@ -62,13 +62,20 @@ export function mountModelSetup(host, { onConnected, initialKind } = {}) {
     state = await api("/api/model-setup/status", { signal });
     if (!identityLoaded) {
       identityLoaded = true;
-      const who = await api("/api/auth/status", { signal }).catch(() => null);
+      // The caller (onboarding) may already know who is signed in; otherwise ask.
+      const who = identity || await api("/api/auth/status", { signal }).catch(() => null);
       own = !!who?.own_sign_in;
       machine = !who || !!(who.is_admin || who.machine_access);
     }
     return state;
   }
-  const claudeLabel = () => state.claude.signed_in ? (own ? "Signed in to your Claude" : "Signed in on this computer") : "No download needed";
+  // Signing in opens Claude Code on this computer, and Antigravity's turns run on it, so an account
+  // without machine access uses an API key or a connection someone shared with it instead.
+  const claudeLabel = () => state.claude.signed_in ? (own ? "Signed in to your Claude" : "Signed in on this computer") : !machine ? "Signing in needs machine access. Ask an admin, or use an API key." : "No download needed";
+  const antigravityLabel = () => !machine ? "Needs machine access. Ask an admin." : state.antigravity?.installed ? `Installed${state.antigravity.version ? ` (${state.antigravity.version})` : ""} | ${state.antigravity.models_found} models found` : "Install Antigravity CLI (agy)";
+  const blocked = kind => !machine && (kind === "codex" || kind === "antigravity" || (kind === "claude" && !state.claude.signed_in));
+  // Codex and Antigravity never run for an account without machine access, even when already set up.
+  const runsHere = kind => machine || (kind !== "codex" && kind !== "antigravity");
   const codexLabel = () => !machine ? "Needs machine access. Ask an admin." : state.codex.installed ? `Installed${state.codex.version ? ` (${state.codex.version})` : ""}` : "Needs a one-time install";
   async function choices() {
     stop(); jobId = null;
@@ -81,12 +88,12 @@ export function mountModelSetup(host, { onConnected, initialKind } = {}) {
     for (const [kind, title, copy, ready, label] of [
       ["claude", "I pay for Claude", own ? "For Claude Pro or Max. Claude Code is already inside Kairos, so you only need to sign in to your own Claude. Your subscription's limits apply." : "For Claude Pro or Max. Claude Code is already inside Kairos, so you only need to sign in. Your subscription's limits apply.", has("claude_cli") && state.claude.signed_in, claudeLabel()],
       ["codex", "I pay for ChatGPT", "For ChatGPT Plus or Pro. Codex is OpenAI's agent app. Kairos can install it, then help you sign in. Your subscription's limits apply.", has("codex_cli") && state.codex.signed_in, codexLabel()],
-      ["antigravity", "Antigravity (Gemini)", "Use the Gemini models in your Antigravity account. Install agy and sign in in the Antigravity app or CLI; Kairos never handles your credentials.", has("antigravity_cli") && state.antigravity?.signed_in, state.antigravity?.installed ? `Installed${state.antigravity.version ? ` (${state.antigravity.version})` : ""} | ${state.antigravity.models_found} models found` : "Install Antigravity CLI (agy)"],
+      ["antigravity", "Antigravity (Gemini)", "Use the Gemini models in your Antigravity account. Install agy and sign in in the Antigravity app or CLI; Kairos never handles your credentials.", has("antigravity_cli") && state.antigravity?.signed_in, antigravityLabel()],
       ["api", "I have an API key", "Choose OpenAI, Anthropic, OpenRouter or Google. You pay the provider for what you use. Kairos tests and saves your key securely.", has("api"), "Pay for what you use"],
       ["local", "Free, on this computer", "Download a small model through Cookbook. No account or usage bill. Private, but slower and less capable than a cloud model.", has("local"), "Needs disk space"],
     ]) grid.append(el("section", { class: "model-setup-choice", "data-setup-kind": kind }, [
-      el("h3", { text: title }), el("p", { text: copy }), el("p", { class: "meta model-setup-card-status", text: ready ? "Already set up" : label }),
-      button(ready ? "Review setup" : "Choose this", () => choose(kind), kind === "codex" && !machine ? { disabled: true } : {}),
+      el("h3", { text: title }), el("p", { text: copy }), el("p", { class: "meta model-setup-card-status", text: ready && runsHere(kind) ? "Already set up" : label }),
+      button(ready && runsHere(kind) ? "Review setup" : "Choose this", () => choose(kind), blocked(kind) && !(ready && runsHere(kind)) ? { disabled: true } : {}),
     ]));
     screen.replaceChildren(grid);
     async function pollCards() {
@@ -100,10 +107,11 @@ export function mountModelSetup(host, { onConnected, initialKind } = {}) {
             (kind === 'claude' ? state.claude.available && state.claude.signed_in : kind === 'codex' ? state.codex.installed && state.codex.signed_in : kind === 'antigravity' ? state.antigravity?.installed && state.antigravity.signed_in : true);
           const label = kind === 'claude' ? claudeLabel() :
             kind === 'codex' ? codexLabel() :
-              kind === 'antigravity' ? state.antigravity?.installed ? `Installed${state.antigravity.version ? ` (${state.antigravity.version})` : ''} | ${state.antigravity.models_found} models found` : 'Install Antigravity CLI (agy)' : kind === 'api' ? 'Pay for what you use' : 'Needs disk space';
-          card.querySelector('.model-setup-card-status').textContent = ready ? 'Already set up' : label;
-          card.querySelector('button').textContent = ready ? 'Review setup' : 'Choose this';
-          if (kind === 'codex') card.querySelector('button').disabled = !machine;
+              kind === 'antigravity' ? antigravityLabel() : kind === 'api' ? 'Pay for what you use' : 'Needs disk space';
+          const usable = ready && runsHere(kind);
+          card.querySelector('.model-setup-card-status').textContent = usable ? 'Already set up' : label;
+          card.querySelector('button').textContent = usable ? 'Review setup' : 'Choose this';
+          card.querySelector('button').disabled = blocked(kind) && !usable;
         }
       } catch { /* Keep the last successful check during a brief outage. */ }
       if (!disposed && at === generation) timer = setTimeout(pollCards, 4000);

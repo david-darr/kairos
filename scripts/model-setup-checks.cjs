@@ -137,6 +137,14 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, demoState,
     assert.equal(await js("document.querySelectorAll('.onboarding-steps .dot').length"), 4, 'a member has four steps');
     await click('Get Started', '.onboarding-card');
     await waitFor("!!document.querySelector('.onboarding-card [data-setup-kind=claude]')");
+    // Signing in to Claude opens Claude Code on this computer and Codex/Antigravity run on it, so without
+    // machine access those cards point to an API key or a shared connection; the API key card stays open.
+    for (const kind of ['codex', 'antigravity']) {
+      assert.ok(await js(`document.querySelector('.onboarding-card [data-setup-kind=${kind}] button').disabled`), `a member without machine access can't start ${kind} here`);
+    }
+    // Claude: a member already signed in to their own Claude keeps it; otherwise the card is closed and says why.
+    assert.ok(await js("(() => { const card = document.querySelector('.onboarding-card [data-setup-kind=claude]'); const text = card.querySelector('.model-setup-card-status').textContent; return /Signed in|Already set up/.test(text) ? !card.querySelector('button').disabled : card.querySelector('button').disabled && /machine access/.test(text); })()"), 'the Claude card: kept when signed in, else closed with the reason');
+    assert.ok(await js("!document.querySelector('.onboarding-card [data-setup-kind=api] button').disabled"), 'a member can still add an API key');
     await click('Skip for now', '.onboarding-card');
     await waitFor("document.querySelector('.onboarding-card h2')?.textContent === 'Your vault'");
     assert.ok(await js("![...document.querySelectorAll('.onboarding-card button')].some(b => /Choose Existing|questionnaire/.test(b.textContent))"), 'a member without machine access gets no folder picker or questionnaire');
