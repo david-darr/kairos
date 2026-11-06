@@ -40,6 +40,8 @@ MEMBER_OK = {
     ("GET", "/api/system/tabs"): "members need the installed tabs to render their own sidebar",
     ("GET", "/api/permissions"): "scoped to the member's own grants and audit entries (test below)",
     ("POST", "/api/skills"): "members may create skills (David's decision, 2026-10-27)",
+    ("DELETE", "/api/permissions/{rule_id}"): "rules are kept per account (phase 4b): a member revokes only their own",
+    ("GET", "/api/runs"): "runs live in the account's own chat database (phase 4b): a member sees only their own",
 }
 # Answers the Electron window's cookie only, never a session (routes/cli_routes.py).
 APP_WINDOW_ONLY = {"/api/auth/cli/terminals"}

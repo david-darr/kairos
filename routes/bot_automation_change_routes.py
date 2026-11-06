@@ -7,7 +7,7 @@ Spec: Kairos Projects/Agents Redesign/phase-3-design.md, sections 6 and 9.
     POST /api/bot-automation-changes/{receipt_id}/undo       revision-checked inverse
 
 A receipt is created only by a bot's tool call (core/bot_automation_tools.py),
-never by these routes. Admin only; a receipt that belongs to someone else, or
+never by these routes. A receipt that belongs to someone else, or
 does not exist, is a 404. Undo is idempotent and refuses safely (409) when the
 target changed after the receipt.
 """
@@ -16,7 +16,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-from core.middleware import require_admin
+from core.middleware import require_user
 from services import bot_automation_changes as changes
 
 router = APIRouter(prefix="/api/bot-automation-changes", tags=["bot-automation-changes"])
@@ -28,12 +28,12 @@ def _refuse(error: changes.ChangeRefused) -> JSONResponse:
 
 @router.get("")
 async def list_changes(bot_id: Optional[str] = None, thread_id: Optional[str] = None,
-                       user: str = Depends(require_admin)) -> dict:
+                       user: str = Depends(require_user)) -> dict:
     return {"changes": changes.store().list_receipts(user, bot_id=bot_id, thread_id=thread_id)}
 
 
 @router.get("/{receipt_id}")
-async def get_change(receipt_id: str, user: str = Depends(require_admin)):
+async def get_change(receipt_id: str, user: str = Depends(require_user)):
     try:
         return changes.store().get(receipt_id, user)
     except changes.ChangeRefused as error:
@@ -41,7 +41,7 @@ async def get_change(receipt_id: str, user: str = Depends(require_admin)):
 
 
 @router.post("/{receipt_id}/undo")
-async def undo_change(receipt_id: str, user: str = Depends(require_admin)):
+async def undo_change(receipt_id: str, user: str = Depends(require_user)):
     try:
         return changes.store().undo(receipt_id, user)
     except changes.ChangeRefused as error:

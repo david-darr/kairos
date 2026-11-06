@@ -2,10 +2,10 @@
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
-from core.middleware import require_admin
+from core.middleware import require_user
 from services import bot_onboarding as onboarding
 
-router = APIRouter(prefix="/api/bot-onboarding", tags=["bot-onboarding"], dependencies=[Depends(require_admin)])
+router = APIRouter(prefix="/api/bot-onboarding", tags=["bot-onboarding"], dependencies=[Depends(require_user)])
 
 
 class Body(BaseModel):
@@ -30,12 +30,12 @@ class Patch(Body):
 
 
 @router.get("")
-def state(user: str = Depends(require_admin)):
+def state(user: str = Depends(require_user)):
     return onboarding.state(user)
 
 
 @router.patch("")
-def patch(body: Patch, user: str = Depends(require_admin)):
+def patch(body: Patch, user: str = Depends(require_user)):
     try:
         return onboarding.patch(user, body.model_dump(exclude_none=True))
     except onboarding.OnboardingError as error:
@@ -43,12 +43,12 @@ def patch(body: Patch, user: str = Depends(require_admin)):
 
 
 @router.get("/setup")
-async def setup(user: str = Depends(require_admin)):
+async def setup(user: str = Depends(require_user)):
     return await onboarding.setup(user)
 
 
 @router.post("/setup/recheck")
-async def recheck(user: str = Depends(require_admin)):
+async def recheck(user: str = Depends(require_user)):
     try:
         return await onboarding.setup(user, recheck=True)
     except onboarding.OnboardingError as error:

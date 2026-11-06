@@ -24,7 +24,7 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from core import bot_rooms_store as store  # noqa: E402
-from core.middleware import require_admin  # noqa: E402
+from core.middleware import require_admin, require_user  # noqa: E402
 from routes import bot_room_routes, trigger_routes  # noqa: E402
 from services import bot_room_events as feed, bot_room_turns as turns  # noqa: E402
 from services.agent_service import agent_service  # noqa: E402
@@ -34,7 +34,7 @@ CURRENT = {"user": "david"}
 app = FastAPI()
 app.include_router(bot_room_routes.router)
 app.include_router(trigger_routes.router)
-app.dependency_overrides[require_admin] = lambda: CURRENT["user"]
+app.dependency_overrides[require_admin] = lambda: CURRENT["user"]; app.dependency_overrides[require_user] = lambda: CURRENT["user"]
 BASE = "/api/bot-rooms"
 
 

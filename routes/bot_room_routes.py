@@ -1,6 +1,6 @@
 """Bots rooms: /api/bot-rooms. Thin over services/bot_rooms.py and services/bot_room_turns.py.
 
-Every route needs a signed-in admin and the room must be that person's. A
+Every route needs a signed-in user and the room must be that person's. A
 missing or foreign id is a 404; a stale revision, a busy room or a pending
 setup is a 409; unknown body fields are refused. Static routes (`/events`)
 come before the `/{room_id}` routes so they are never read as an id.
@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from core import bot_rooms_store as store
-from core.middleware import require_admin
+from core.middleware import require_user
 from services import bot_room_events as feed, bot_room_goals, bot_room_turns as turns, bot_rooms as rooms
 
 router = APIRouter(prefix="/api/bot-rooms", tags=["bot-rooms"])
@@ -106,12 +106,12 @@ def _fields(body: BaseModel) -> dict:
 # -- static routes first -------------------------------------------------------------
 
 @router.get("")
-async def list_rooms(include_archived: bool = False, user: str = Depends(require_admin)) -> dict:
+async def list_rooms(include_archived: bool = False, user: str = Depends(require_user)) -> dict:
     return {"rooms": rooms.list_rooms(user, include_archived)}
 
 
 @router.post("")
-async def create_room(body: CreateBody, user: str = Depends(require_admin)) -> dict:
+async def create_room(body: CreateBody, user: str = Depends(require_user)) -> dict:
     with _guard():
         return rooms.create(user, body.name, bot_ids=body.bot_ids, context=body.context, description=body.description,
                             default_responder=body.default_responder, turn_timeout_minutes=body.turn_timeout_minutes,
@@ -119,7 +119,7 @@ async def create_room(body: CreateBody, user: str = Depends(require_admin)) -> d
 
 
 @router.get("/events")
-async def events(request: Request, last_event_id: int | None = None, user: str = Depends(require_admin)):
+async def events(request: Request, last_event_id: int | None = None, user: str = Depends(require_user)):
     header = request.headers.get("last-event-id")
     last = last_event_id if last_event_id is not None else (int(header) if header and header.isdigit() else None)
     queue, hello = feed.subscribe(user, last)
@@ -145,12 +145,12 @@ async def events(request: Request, last_event_id: int | None = None, user: str =
 # -- one room ------------------------------------------------------------------------
 
 @router.get("/{room_id}")
-async def get_room(room_id: str, user: str = Depends(require_admin)) -> dict:
+async def get_room(room_id: str, user: str = Depends(require_user)) -> dict:
     return rooms.public(rooms.get(room_id, user))
 
 
 @router.patch("/{room_id}")
-async def patch_room(room_id: str, body: PatchBody, user: str = Depends(require_admin)) -> dict:
+async def patch_room(room_id: str, body: PatchBody, user: str = Depends(require_user)) -> dict:
     fields = _fields(body)
     expected = fields.pop("expected_revision", None)
     with _guard():
@@ -158,13 +158,13 @@ async def patch_room(room_id: str, body: PatchBody, user: str = Depends(require_
 
 
 @router.delete("/{room_id}")
-async def delete_room(room_id: str, user: str = Depends(require_admin)) -> dict:
+async def delete_room(room_id: str, user: str = Depends(require_user)) -> dict:
     with _guard():
         return rooms.delete(user, room_id)
 
 
 @router.post("/{room_id}/setup")
-async def setup_room(room_id: str, body: SetupBody, user: str = Depends(require_admin)) -> dict:
+async def setup_room(room_id: str, body: SetupBody, user: str = Depends(require_user)) -> dict:
     fields = _fields(body)
     with _guard():
         return rooms.setup(user, room_id, body.action, cwd=fields.get("cwd", "__keep__"), bulletin=body.bulletin,
@@ -172,7 +172,7 @@ async def setup_room(room_id: str, body: SetupBody, user: str = Depends(require_
 
 
 @router.post("/{room_id}/read")
-async def read_room(room_id: str, body: ReadBody, user: str = Depends(require_admin)) -> dict:
+async def read_room(room_id: str, body: ReadBody, user: str = Depends(require_user)) -> dict:
     with _guard():
         return rooms.mark_read(user, room_id, body.seq)
 
@@ -181,19 +181,19 @@ async def read_room(room_id: str, body: ReadBody, user: str = Depends(require_ad
 
 @router.get("/{room_id}/messages")
 async def get_messages(room_id: str, thread_id: str | None = None, limit: int = 50, before: int | None = None,
-                       around: str | None = None, user: str = Depends(require_admin)) -> dict:
+                       around: str | None = None, user: str = Depends(require_user)) -> dict:
     with _guard():
         return rooms.messages(user, room_id, thread_id=thread_id, limit=limit, before=before, around=around)
 
 
 @router.post("/{room_id}/messages", status_code=202)
-async def send_message(room_id: str, body: SendBody, user: str = Depends(require_admin)) -> dict:
+async def send_message(room_id: str, body: SendBody, user: str = Depends(require_user)) -> dict:
     with _guard():
         return turns.submit(room_id, body.thread_id, body.text, body.send_id, body.mode, user, body.reply_to_id)
 
 
 @router.post("/{room_id}/widgets/press")
-async def press_card(room_id: str, body: "Press", user: str = Depends(require_admin)):
+async def press_card(room_id: str, body: "Press", user: str = Depends(require_user)):
     """A card a bot showed in this room (services/bot_widgets.py press_room)."""
     from fastapi.responses import JSONResponse
     from services import bot_widgets
@@ -205,19 +205,19 @@ async def press_card(room_id: str, body: "Press", user: str = Depends(require_ad
 
 
 @router.post("/{room_id}/holds")
-async def set_hold(room_id: str, body: HoldBody, user: str = Depends(require_admin)) -> dict:
+async def set_hold(room_id: str, body: HoldBody, user: str = Depends(require_user)) -> dict:
     with _guard():
         return turns.hold(room_id, user, body.bot_id, body.held)
 
 
 @router.post("/{room_id}/stop")
-async def stop_room(room_id: str, body: StopBody, user: str = Depends(require_admin)) -> dict:
+async def stop_room(room_id: str, body: StopBody, user: str = Depends(require_user)) -> dict:
     with _guard():
         return turns.stop(room_id, user, body.bot_id, body.thread_id)
 
 
 @router.get("/{room_id}/queue")
-async def get_queue(room_id: str, thread_id: str | None = None, user: str = Depends(require_admin)) -> dict:
+async def get_queue(room_id: str, thread_id: str | None = None, user: str = Depends(require_user)) -> dict:
     rooms.get(room_id, user)
     rows = store.queue_list(room_id, thread_id)
     return {"items": [{"id": r["id"], "state": r["state"], "thread_id": r["thread_id"], "text": r["payload"].get("text", ""),
@@ -226,7 +226,7 @@ async def get_queue(room_id: str, thread_id: str | None = None, user: str = Depe
 
 
 @router.delete("/{room_id}/queue/{queue_id}")
-async def cancel_queue(room_id: str, queue_id: str, user: str = Depends(require_admin)) -> dict:
+async def cancel_queue(room_id: str, queue_id: str, user: str = Depends(require_user)) -> dict:
     rooms.get(room_id, user)
     row = store.queue_get(queue_id)
     if row is None or row["room_id"] != room_id:
@@ -241,37 +241,37 @@ async def cancel_queue(room_id: str, queue_id: str, user: str = Depends(require_
 # -- threads and goals ---------------------------------------------------------------
 
 @router.get("/{room_id}/threads")
-async def list_threads(room_id: str, user: str = Depends(require_admin)) -> dict:
+async def list_threads(room_id: str, user: str = Depends(require_user)) -> dict:
     rooms.get(room_id, user)
     return {"threads": [{"id": t["id"], "title": t["title"], "goal": t["goal"], "created_at": t["created_at"],
                          "working": turns.thread_busy(room_id, t["id"])} for t in store.threads(room_id)]}
 
 
 @router.post("/{room_id}/threads")
-async def create_thread(room_id: str, body: ThreadBody, user: str = Depends(require_admin)) -> dict:
+async def create_thread(room_id: str, body: ThreadBody, user: str = Depends(require_user)) -> dict:
     with _guard():
         return rooms.create_thread(user, room_id, body.title)
 
 
 @router.post("/{room_id}/threads/delete")
-async def delete_threads(room_id: str, body: ThreadsDeleteBody, user: str = Depends(require_admin)) -> dict:
+async def delete_threads(room_id: str, body: ThreadsDeleteBody, user: str = Depends(require_user)) -> dict:
     with _guard():
         return rooms.delete_threads(user, room_id, body.thread_ids)
 
 
 @router.patch("/{room_id}/threads/{thread_id}")
-async def rename_thread(room_id: str, thread_id: str, body: ThreadBody, user: str = Depends(require_admin)) -> dict:
+async def rename_thread(room_id: str, thread_id: str, body: ThreadBody, user: str = Depends(require_user)) -> dict:
     with _guard():
         return rooms.rename_thread(user, room_id, thread_id, body.title)
 
 
 @router.delete("/{room_id}/threads/{thread_id}")
-async def delete_thread(room_id: str, thread_id: str, user: str = Depends(require_admin)) -> dict:
+async def delete_thread(room_id: str, thread_id: str, user: str = Depends(require_user)) -> dict:
     with _guard():
         return rooms.delete_threads(user, room_id, [thread_id])
 
 
 @router.get("/{room_id}/threads/{thread_id}/goal")
-async def get_goal(room_id: str, thread_id: str, user: str = Depends(require_admin)) -> dict:
+async def get_goal(room_id: str, thread_id: str, user: str = Depends(require_user)) -> dict:
     rooms.get(room_id, user)
     return {"goal": bot_room_goals.current(room_id, thread_id)}

@@ -7,11 +7,11 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from typing import Literal
 
-from core.middleware import require_admin
+from core.middleware import require_user
 from core.atomic_io import read_json
 from services import bot_voice as voice
 
-router = APIRouter(prefix="/api/bot-voice", tags=["bot-voice"], dependencies=[Depends(require_admin)])
+router = APIRouter(prefix="/api/bot-voice", tags=["bot-voice"], dependencies=[Depends(require_user)])
 
 
 class Body(BaseModel):
@@ -73,17 +73,17 @@ async def block(body: Block):
 
 
 @router.get("/live-settings")
-def settings(user: str = Depends(require_admin)):
+def settings(user: str = Depends(require_user)):
     return voice.live_settings(user)
 
 
 @router.put("/live-settings")
-def put_settings(body: Settings, user: str = Depends(require_admin)):
+def put_settings(body: Settings, user: str = Depends(require_user)):
     return voice.live_settings(user, body.model_dump())
 
 
 @router.get("/notes/{ident}/audio")
-def audio(ident: str, user: str = Depends(require_admin)):
+def audio(ident: str, user: str = Depends(require_user)):
     try:
         return FileResponse(voice.note_file(user, ident, ".wav"), media_type="audio/wav", headers={"Cache-Control": "private, no-store"})
     except voice.VoiceError as error:
@@ -91,7 +91,7 @@ def audio(ident: str, user: str = Depends(require_admin)):
 
 
 @router.get("/notes/{ident}/transcript")
-def transcript(ident: str, user: str = Depends(require_admin)):
+def transcript(ident: str, user: str = Depends(require_user)):
     try:
         return {"transcript": read_json(str(voice.note_file(user, ident, ".json")), {})["transcript"]}
     except voice.VoiceError as error:
@@ -99,7 +99,7 @@ def transcript(ident: str, user: str = Depends(require_admin)):
 
 
 @router.post("/{bot_id}/notes")
-async def note(bot_id: str, body: Note, user: str = Depends(require_admin)):
+async def note(bot_id: str, body: Note, user: str = Depends(require_user)):
     try:
         return await voice.note(bot_id, body.text, user)
     except voice.VoiceError as error:

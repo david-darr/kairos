@@ -1,8 +1,8 @@
-"""Admin-only front-desk lifecycle and roster. Startup seeding is not a GET side effect."""
+"""Front-desk lifecycle and roster. Startup seeding is not a GET side effect."""
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 
-from core.middleware import require_admin
+from core.middleware import require_user
 from services import front_desk, front_desk_routing
 
 router = APIRouter(prefix="/api/front-desk", tags=["front-desk"])
@@ -13,7 +13,7 @@ class EnsureBody(BaseModel):
 
 
 @router.post("/ensure")
-def ensure(body: EnsureBody = EnsureBody(), user: str = Depends(require_admin)):
+def ensure(body: EnsureBody = EnsureBody(), user: str = Depends(require_user)):
     try:
         agent = front_desk.ensure(restore=True)
     except ValueError as error:
@@ -22,10 +22,10 @@ def ensure(body: EnsureBody = EnsureBody(), user: str = Depends(require_admin)):
 
 
 @router.get("/state")
-def state(user: str = Depends(require_admin)):
+def state(user: str = Depends(require_user)):
     return front_desk.state()
 
 
 @router.get("/roster")
-def roster(user: str = Depends(require_admin)):
+def roster(user: str = Depends(require_user)):
     return front_desk_routing.roster()

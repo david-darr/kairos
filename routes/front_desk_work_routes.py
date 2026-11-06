@@ -1,4 +1,4 @@
-"""Admin-only work projection and bounded task/suggestion actions."""
+"""Work projection and bounded task/suggestion actions."""
 from contextlib import contextmanager
 from typing import Literal
 
@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.bot_chat_store import Conflict
-from core.middleware import require_admin
+from core.middleware import require_user
 from services import front_desk_tasks as tasks, front_desk_work as work, front_desk_suggestions as suggestions
 
 router = APIRouter(prefix="/api/front-desk", tags=["front-desk-work"])
@@ -42,19 +42,19 @@ def guard():
 
 
 @router.get("/work")
-async def get_work(resolved: int = Query(default=0, ge=0, le=1), user: str = Depends(require_admin)):
+async def get_work(resolved: int = Query(default=0, ge=0, le=1), user: str = Depends(require_user)):
     with guard():
         return work.work(user=user, resolved=bool(resolved))
 
 
 @router.get("/suggestions")
-async def get_suggestions(user: str = Depends(require_admin)):
+async def get_suggestions(user: str = Depends(require_user)):
     with guard():
         return {"suggestions": suggestions.list_suggestions(user)}
 
 
 @router.post("/tasks")
-async def start_task(body: TaskBody, user: str = Depends(require_admin)):
+async def start_task(body: TaskBody, user: str = Depends(require_user)):
     with guard():
         tasks.require_owner(user)
         if not body.text.strip():
@@ -71,42 +71,42 @@ async def start_task(body: TaskBody, user: str = Depends(require_admin)):
 
 
 @router.get("/tasks/{task_id}/report")
-async def task_report(task_id: str, user: str = Depends(require_admin)):
+async def task_report(task_id: str, user: str = Depends(require_user)):
     with guard():
         return work.report(task_id, user=user)
 
 
 @router.get("/tasks/{task_id}")
-async def get_task(task_id: str, user: str = Depends(require_admin)):
+async def get_task(task_id: str, user: str = Depends(require_user)):
     with guard():
         return work.project(tasks.get(task_id, user))
 
 
 @router.post("/tasks/{task_id}/resolve")
-async def resolve_task(task_id: str, body: Body, user: str = Depends(require_admin)):
+async def resolve_task(task_id: str, body: Body, user: str = Depends(require_user)):
     with guard():
         return tasks.resolve(task_id, user=user)
 
 
 @router.post("/tasks/{task_id}/reopen")
-async def reopen_task(task_id: str, body: Body, user: str = Depends(require_admin)):
+async def reopen_task(task_id: str, body: Body, user: str = Depends(require_user)):
     with guard():
         return tasks.resolve(task_id, user=user, reopen=True)
 
 
 @router.post("/tasks/{task_id}/again")
-async def again_task(task_id: str, body: AgainBody, user: str = Depends(require_admin)):
+async def again_task(task_id: str, body: AgainBody, user: str = Depends(require_user)):
     with guard():
         return tasks.again(task_id, user=user, expected_turn_count=body.turn_count)
 
 
 @router.post("/suggestions/{suggestion_id}/start")
-async def start_suggestion(suggestion_id: str, body: Body, user: str = Depends(require_admin)):
+async def start_suggestion(suggestion_id: str, body: Body, user: str = Depends(require_user)):
     with guard():
         return work.project(suggestions.start(suggestion_id, user=user))
 
 
 @router.post("/suggestions/{suggestion_id}/hide")
-async def hide_suggestion(suggestion_id: str, body: Body, user: str = Depends(require_admin)):
+async def hide_suggestion(suggestion_id: str, body: Body, user: str = Depends(require_user)):
     with guard():
         return suggestions.hide(suggestion_id, user=user)

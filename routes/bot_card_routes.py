@@ -6,7 +6,7 @@ Spec: Kairos Projects/Agents Redesign/phase-3-design.md, sections 5.3 and 6.
     POST /api/bot-cards/{id}/respond                 allow, deny, answer or skip
     POST /api/bot-cards/{id}/resume                  finish or decline a typed card
 
-Admin only, and every card is checked against its owner: someone else's card,
+Every card is checked against its owner: someone else's card,
 or one that does not exist, is a 404. The services/bot_cards.py module owns the
 rules; these routes only check access and validate the body.
 """
@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from core.middleware import require_admin
+from core.middleware import require_user
 from services import bot_cards
 
 router = APIRouter(prefix="/api/bot-cards", tags=["bot-cards"])
@@ -67,7 +67,7 @@ def _refuse(error: bot_cards.CardError) -> JSONResponse:
 async def list_cards(thread_id: Optional[str] = None, bot_id: Optional[str] = None,
                      status: Optional[Literal["pending", "allowed", "denied", "answered", "skipped", "expired",
                                               "unavailable", "cancelled"]] = None,
-                     user: str = Depends(require_admin)) -> dict:
+                     user: str = Depends(require_user)) -> dict:
     if thread_id:
         _own_thread(thread_id, user)
     cards = bot_cards.store().list_cards(user, thread_id=thread_id, bot_id=bot_id, status=status)
@@ -75,7 +75,7 @@ async def list_cards(thread_id: Optional[str] = None, bot_id: Optional[str] = No
 
 
 @router.post("/{card_id}/respond")
-async def respond(card_id: str, body: RespondBody, user: str = Depends(require_admin)):
+async def respond(card_id: str, body: RespondBody, user: str = Depends(require_user)):
     try:
         result = bot_cards.store().respond(card_id, user, action=body.action, choice_id=body.choice_id,
                                            remember=body.remember, answers=body.answers,
@@ -93,7 +93,7 @@ async def respond(card_id: str, body: RespondBody, user: str = Depends(require_a
 
 
 @router.post("/{card_id}/resume")
-async def resume(card_id: str, body: ResumeBody, user: str = Depends(require_admin)):
+async def resume(card_id: str, body: ResumeBody, user: str = Depends(require_user)):
     try:
         return bot_cards.store().resume_card(card_id, user, body.outcome)
     except bot_cards.CardError as error:

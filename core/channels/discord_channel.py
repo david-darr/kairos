@@ -389,12 +389,16 @@ async def send_to_named_channel(bot_id: str, entry_id: str, text: str) -> bool:
         return False
 
 
-def connected_bots() -> list[str]:
+def connected_bots(mine_only: bool = False) -> list[str]:
     """Names of bots with a live client whose gateway connection is actually
     up (not just a supervisor task that exists) — /api/system/status's live
-    Discord health, distinct from diagnostics' static "configured" bool."""
+    Discord health, distinct from diagnostics' static "configured" bool.
+    `mine_only` keeps the bots of the account this work runs as: a signed-in
+    person never sees another account's bot names."""
     live = []
     for bot in discord_bots_store.list_bots():
+        if mine_only and not discord_bots_store.mine(bot):
+            continue
         client = _clients.get(bot["id"])
         # is_ready(), not is_closed() — is_closed() is False from construction
         # onward, so it would report "connected" while still logging in or

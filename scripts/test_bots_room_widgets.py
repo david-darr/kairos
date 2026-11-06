@@ -15,7 +15,7 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from core import bot_rooms_store as store  # noqa: E402
-from core.middleware import require_admin  # noqa: E402
+from core.middleware import require_admin, require_user  # noqa: E402
 from routes import bot_room_routes  # noqa: E402
 from services import bot_rooms, bot_widgets as widgets  # noqa: E402
 from services.agent_service import agent_service  # noqa: E402
@@ -115,7 +115,7 @@ class RoomCards(unittest.TestCase):
 
     def test_the_route(self):
         shown = widgets.show(self.seat, self.bo["id"], card())
-        app = FastAPI(); app.include_router(bot_room_routes.router); app.dependency_overrides[require_admin] = lambda: self.owner
+        app = FastAPI(); app.include_router(bot_room_routes.router); app.dependency_overrides[require_admin] = lambda: self.owner; app.dependency_overrides[require_user] = lambda: self.owner
         client = TestClient(app)
         bad = client.post(f"/api/bot-rooms/{self.room['id']}/widgets/press", json={"message_id": shown["message_id"], "ref": "confirm", "rev": 7, "values": {}, "send_id": "send-0005"})
         self.assertEqual(bad.status_code, 409)

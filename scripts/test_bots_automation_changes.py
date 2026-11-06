@@ -24,7 +24,7 @@ from fastapi import FastAPI  # noqa: E402
 
 from core import bot_automation_tools as tools  # noqa: E402
 from core import tool_registry  # noqa: E402
-from core.middleware import require_admin  # noqa: E402
+from core.middleware import require_admin, require_user  # noqa: E402
 from core.secret_storage import decrypt  # noqa: E402
 from core.session_manager import session_manager  # noqa: E402
 from core.turn_taint import TurnTaint  # noqa: E402
@@ -37,7 +37,7 @@ from services.trigger_service import trigger_service  # noqa: E402
 app = FastAPI()
 app.include_router(bot_automation_change_routes.router)
 USER = {"name": "david"}
-app.dependency_overrides[require_admin] = lambda: USER["name"]
+app.dependency_overrides[require_admin] = lambda: USER["name"]; app.dependency_overrides[require_user] = lambda: USER["name"]
 API = {"id": "api1", "kind": "api", "model": "m"}
 CLAUDE = {"id": "claude", "kind": "claude_cli"}
 

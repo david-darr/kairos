@@ -256,6 +256,51 @@ class AccountIsolation(unittest.TestCase):
                 r, _ = call(account.client, "GET", "/api/notes")
                 self.assertIn(account.mark, r.text, f"{account.name} reads their own notes")
 
+    def test_a_non_admin_reads_their_own_automation_and_bot_surfaces(self):
+        # Phase 4b opened these to every signed-in account (they were admin-only): each answers 200 for bea
+        # with her own (empty) data, never david's.
+        david, bea = self.accounts["david"], self.accounts["bea"]
+        for path in ("/api/bot-attention/inbox", "/api/bot-attention/notifications", "/api/bot-attention/needs-you",
+                     "/api/bot-cards", "/api/bot-automation-changes", "/api/bot-departments", "/api/bot-onboarding",
+                     "/api/bot-routines", "/api/bot-automations", "/api/bot-webhooks", "/api/bot-app-triggers",
+                     "/api/triggers", "/api/runs", "/api/front-desk/work", "/api/front-desk/state",
+                     "/api/bot-team/map", "/api/bot-peers/loop-guard", "/api/permissions", "/api/agent-calls/choices"):
+            r, err = call(bea.client, "GET", path)
+            self.assertIsNone(err, path)
+            self.assertLess(r.status_code, 300, f"{path} should be open to bea, got {r.status_code} {r.text[:120]}")
+            for mark in david.markers():
+                self.assertNotIn(mark, r.text, f"bea read david's data via {path}")
+
+    def test_what_stays_admin_only_in_these_areas(self):
+        # Creating a trigger or a webhook, repointing a call voice server, the machine's usage limits and connectors
+        # (an allow-listed sender reaches agents as an admin chat) stay with an admin until the bot reach cap
+        # (phase 4c) and the machine-access gate.
+        bea = self.accounts["bea"]
+        for method, path, body in (("POST", "/api/triggers", {"name": "x"}), ("PATCH", "/api/triggers/nope", {"name": "x"}),
+                                   ("POST", "/api/bot-webhooks", {"name": "x"}), ("PATCH", "/api/bot-webhooks/nope", {}),
+                                   ("PUT", "/api/agent-calls/voices", {"url": "http://127.0.0.1:9", "protocol": "voicestudio"}),
+                                   ("GET", "/api/connectors", None), ("POST", "/api/connectors", {"kind": "webhook"}),
+                                   ("GET", "/api/bot-limit-resets", None)):
+            r, err = call(bea.client, method, path, json=body)
+            self.assertIsNone(err, path)
+            self.assertEqual(r.status_code, 403, f"{method} {path} should stay admin-only, got {r.status_code}")
+
+    def test_system_status_names_only_the_callers_discord_bots(self):
+        from core.channels import discord_channel
+        david, bea = self.accounts["david"], self.accounts["bea"]
+        fake = {"d": {"id": "d", "name": "DavidBot", "account": auth_manager.account_id("david")},
+                "b": {"id": "b", "name": "BeaBot", "account": auth_manager.account_id("bea")}}
+
+        class Ready:
+            def is_ready(self):
+                return True
+
+        with patch.object(discord_channel.discord_bots_store, "_load", return_value=fake), \
+                patch.dict(discord_channel._clients, {"d": Ready(), "b": Ready()}):
+            seen = {name: call(account.client, "GET", "/api/system/status")[0].json()["discord_connected_bots"]
+                    for name, account in (("david", david), ("bea", bea))}
+        self.assertEqual(seen, {"david": ["DavidBot"], "bea": ["BeaBot"]})
+
     def test_no_leak_beyond_the_known_list(self):
         new = sorted(set(self.leaks) - set(self.known("leaks")))
         self.assertEqual(new, [], "new cross-account leaks:\n" + "\n".join(new))

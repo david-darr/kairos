@@ -108,7 +108,7 @@ class TranscriptTests(unittest.IsolatedAsyncioTestCase):
         older = runs.RunContext('chat', session_id=self.id, started_at=self.context.started_at - 30)
         runs.record(older, runs.Tally(), 'stopped')
         app = FastAPI(); app.include_router(run_routes.router)
-        app.dependency_overrides[middleware.require_admin] = lambda: 'admin'
+        app.dependency_overrides[middleware.require_admin] = lambda: 'admin'; app.dependency_overrides[middleware.require_user] = lambda: 'admin'
         with patch.object(run_routes.helpers, 'batch_rows_for_run', return_value=[]):
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://fixture') as client:
                 turns = (await client.get('/api/runs', params={'session_id': self.id})).json()
@@ -118,13 +118,13 @@ class TranscriptTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(response.json()['steps'], tally.timeline)
                 self.assertEqual([s['kind'] for s in response.json()['steps']], ['tool_started', 'tool_finished'] * 2)
 
-    async def test_history_admin_only(self):
+    async def test_history_needs_a_sign_in(self):
+        # Runs live in the account's own chat database (phase 4b), so any signed-in person reads their own.
         app = FastAPI(); app.include_router(run_routes.router)
-        with patch.object(middleware, 'auth_enabled', return_value=False), \
-             patch.object(middleware.auth_manager, 'is_admin', return_value=False):
+        with patch.object(middleware, 'auth_enabled', return_value=True):
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://fixture') as client:
                 for path in ('/api/runs?session_id=' + self.id, '/api/runs/fixture'):
-                    self.assertEqual((await client.get(path)).status_code, 403)
+                    self.assertEqual((await client.get(path)).status_code, 401)
 
     async def test_http_serialization_keeps_non_forge_bytes_unchanged(self):
         app = FastAPI(); app.include_router(chat_routes.router)

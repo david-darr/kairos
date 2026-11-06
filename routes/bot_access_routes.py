@@ -1,6 +1,6 @@
 """A bot's access: what it may reach and the grants that set it (Bots Phase 2 unit U4).
 
-GET/PUT /api/bots/{id}/access. Admin only. The owner is the signed-in user, never a request field.
+GET/PUT /api/bots/{id}/access. Signed-in users only. The owner is the signed-in user, never a request field.
 Saves are immediate and checked against the grants revision the client last read: a stale save is a
 409 carrying the current state. Spec: phase-2-design.md, sections 5 and 7 (U4).
 """
@@ -9,7 +9,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 
-from core.middleware import require_admin
+from core.middleware import require_user
 from services import bot_grants, bot_record
 from services.agent_service import agent_service
 
@@ -34,12 +34,12 @@ def _scope(bot_id: str, user: str) -> bot_grants.Scope:
 
 
 @router.get("/{bot_id}/access")
-async def get_access(bot_id: str, user: str = Depends(require_admin)) -> dict:
+async def get_access(bot_id: str, user: str = Depends(require_user)) -> dict:
     return bot_grants.effective(_scope(bot_id, user))
 
 
 @router.put("/{bot_id}/access")
-async def put_access(bot_id: str, body: AccessBody, user: str = Depends(require_admin)) -> dict:
+async def put_access(bot_id: str, body: AccessBody, user: str = Depends(require_user)) -> dict:
     scope = _scope(bot_id, user)
     sent = body.model_dump(exclude_unset=True)
     changes = {k: v for k, v in sent.items() if k in ("tool_scope", "connector_scopes", "integration_ids", "connector_tools")}

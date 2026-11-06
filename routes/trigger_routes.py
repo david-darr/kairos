@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from services.trigger_service import trigger_service
 
 router = APIRouter(prefix="/api/triggers", tags=["triggers"])
@@ -60,7 +60,7 @@ def _fields(body: TriggerBody) -> dict:
 
 
 @router.get("")
-async def list_triggers(user: str = Depends(require_admin)) -> dict:
+async def list_triggers(user: str = Depends(require_user)) -> dict:
     return {"triggers": [trigger_service.public(t) for t in trigger_service.triggers()],
             "pending": trigger_service.pending()}
 
@@ -87,7 +87,7 @@ async def update_trigger(trigger_id: str, body: TriggerBody, user: str = Depends
 
 
 @router.post("/{trigger_id}/secret")
-async def new_secret(trigger_id: str, user: str = Depends(require_admin)) -> dict:
+async def new_secret(trigger_id: str, user: str = Depends(require_user)) -> dict:
     try:
         return {"secret": trigger_service.new_secret(trigger_id)}
     except KeyError:
@@ -95,7 +95,7 @@ async def new_secret(trigger_id: str, user: str = Depends(require_admin)) -> dic
 
 
 @router.delete("/{trigger_id}")
-async def delete_trigger(trigger_id: str, user: str = Depends(require_admin)) -> dict:
+async def delete_trigger(trigger_id: str, user: str = Depends(require_user)) -> dict:
     try:
         trigger_service.delete(trigger_id)
     except KeyError:
@@ -104,7 +104,7 @@ async def delete_trigger(trigger_id: str, user: str = Depends(require_admin)) ->
 
 
 @router.post("/pending/{pending_id}")
-async def answer_pending(pending_id: str, body: AnswerBody, user: str = Depends(require_admin)) -> dict:
+async def answer_pending(pending_id: str, body: AnswerBody, user: str = Depends(require_user)) -> dict:
     try:
         outcome, run = trigger_service.answer(pending_id, body.approve)
     except KeyError as e:

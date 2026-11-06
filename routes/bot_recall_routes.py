@@ -1,12 +1,12 @@
 """Recall, forget, About you and Memory activity (Bots Phase 2, unit U2). Mounted by the aggregate
-routes/bot_resources_routes.py under /api/bots. Admin only; the owner is the signed-in account, never a body field.
+routes/bot_resources_routes.py under /api/bots. The owner is the signed-in account, never a body field.
 """
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.middleware import require_admin
+from core.middleware import require_user
 from services import bot_memory_recall, bot_memory_upkeep, bot_profile, bot_turn_context as ctx
 from services.agent_service import agent_service
 
@@ -43,7 +43,7 @@ def _scope(bot_id: str, user: str) -> dict:
 # -- About you (static routes first) ---------------------------------------------------------------------------
 
 @router.get("/profile")
-def get_profile(user: str = Depends(require_admin)) -> dict:
+def get_profile(user: str = Depends(require_user)) -> dict:
     try:
         return {**bot_profile.get_about(user), "learned": bot_profile.learned(user),
                 "limits": {"learned": bot_profile.MAX_LEARNED}}
@@ -52,7 +52,7 @@ def get_profile(user: str = Depends(require_admin)) -> dict:
 
 
 @router.put("/profile")
-def put_profile(body: AboutBody, user: str = Depends(require_admin)) -> dict:
+def put_profile(body: AboutBody, user: str = Depends(require_user)) -> dict:
     try:
         return bot_profile.put_about(user, body.text, body.expected_hash)
     except bot_profile.ProfileError as error:
@@ -60,7 +60,7 @@ def put_profile(body: AboutBody, user: str = Depends(require_admin)) -> dict:
 
 
 @router.post("/profile/learned/{fact}/remove")
-def remove_learned(fact: str, user: str = Depends(require_admin)) -> dict:
+def remove_learned(fact: str, user: str = Depends(require_user)) -> dict:
     try:
         return bot_profile.remove_learned(user, fact)
     except bot_profile.ProfileError as error:
@@ -73,7 +73,7 @@ def remove_learned(fact: str, user: str = Depends(require_admin)) -> dict:
 def recall(bot_id: str, q: Optional[str] = Query(default=None, max_length=600), since: Optional[str] = Query(default=None, max_length=40),
            until: Optional[str] = Query(default=None, max_length=40), kind: str = Query(default="all", max_length=20),
            limit: int = Query(default=bot_memory_recall.SEARCH_DEFAULT, ge=1, le=bot_memory_recall.SEARCH_MAX),
-           user: str = Depends(require_admin)) -> dict:
+           user: str = Depends(require_user)) -> dict:
     scope = _scope(bot_id, user)
     if not ctx.bot_flags(bot_id)["memory"]:
         return {"results": [], "count": 0, "disabled": True}
@@ -84,7 +84,7 @@ def recall(bot_id: str, q: Optional[str] = Query(default=None, max_length=600), 
 
 
 @router.get("/{bot_id}/recall/messages/{message}")
-def recall_message(bot_id: str, message: str, user: str = Depends(require_admin)) -> dict:
+def recall_message(bot_id: str, message: str, user: str = Depends(require_user)) -> dict:
     scope = _scope(bot_id, user)
     try:
         return bot_memory_recall.read_message(scope, message)
@@ -95,7 +95,7 @@ def recall_message(bot_id: str, message: str, user: str = Depends(require_admin)
 # -- forget and activity -----------------------------------------------------------------------------------------
 
 @router.post("/{bot_id}/memory/forget")
-async def forget(bot_id: str, body: ForgetBody, user: str = Depends(require_admin)) -> dict:
+async def forget(bot_id: str, body: ForgetBody, user: str = Depends(require_user)) -> dict:
     _bot(bot_id)
     try:
         result = bot_memory_upkeep.forget(bot_id, user, body.term)
@@ -107,6 +107,6 @@ async def forget(bot_id: str, body: ForgetBody, user: str = Depends(require_admi
 
 
 @router.get("/{bot_id}/memory/activity")
-def activity(bot_id: str, user: str = Depends(require_admin)) -> dict:
+def activity(bot_id: str, user: str = Depends(require_user)) -> dict:
     _bot(bot_id)
     return bot_memory_upkeep.status(bot_id)

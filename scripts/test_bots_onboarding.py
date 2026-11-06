@@ -10,7 +10,7 @@ os.environ['JARVIS_DATA_DIR'] = ENV.name
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from services import bot_onboarding as onboarding
 from routes.bot_onboarding_routes import router
 
@@ -19,7 +19,7 @@ class OnboardingTests(unittest.TestCase):
     def setUp(self):
         onboarding.file_path().unlink(missing_ok=True)
         self.app = FastAPI(); self.app.include_router(router)
-        self.app.dependency_overrides[require_admin] = lambda: 'alice'
+        self.app.dependency_overrides[require_admin] = lambda: 'alice'; self.app.dependency_overrides[require_user] = lambda: 'alice'
         self.client = TestClient(self.app)
 
     def test_state_roundtrip_owner_and_validation(self):
@@ -55,12 +55,15 @@ class OnboardingTests(unittest.TestCase):
             later = onboarding.state('alice')['setup_checked_at'] + 11
             self.assertTrue(asyncio.run(onboarding.setup('alice', recheck=True, now=later))['checks'])
 
-    def test_no_admin_no_state_access(self):
+    def test_no_sign_in_no_state_access(self):
         app = FastAPI(); app.include_router(router)
         from fastapi import HTTPException
-        def refused(): raise HTTPException(403)
-        app.dependency_overrides[require_admin] = refused
-        self.assertEqual(TestClient(app).get('/api/bot-onboarding').status_code, 403)
+        def refused(): raise HTTPException(401)
+        app.dependency_overrides[require_user] = refused
+        self.assertEqual(TestClient(app).get('/api/bot-onboarding').status_code, 401)
+        # Any signed-in person has their own onboarding state (phase 4b): the admin check is gone.
+        app.dependency_overrides[require_user] = lambda: 'bea'
+        self.assertEqual(TestClient(app).get('/api/bot-onboarding').status_code, 200)
 
 
 if __name__ == '__main__': unittest.main()

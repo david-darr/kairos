@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from core import bot_attention_store as store  # noqa: E402
 from core import session_manager_store as sessions  # noqa: E402
-from core.middleware import require_admin  # noqa: E402
+from core.middleware import require_admin, require_user  # noqa: E402
 from core.session_manager import session_manager  # noqa: E402
 from routes import bot_attention_routes  # noqa: E402
 from services import bot_attention  # noqa: E402
@@ -31,7 +31,7 @@ from services.agent_service import agent_service  # noqa: E402
 CURRENT = {"user": "david"}
 app = FastAPI()
 app.include_router(bot_attention_routes.router)
-app.dependency_overrides[require_admin] = lambda: CURRENT["user"]
+app.dependency_overrides[require_admin] = lambda: CURRENT["user"]; app.dependency_overrides[require_user] = lambda: CURRENT["user"]
 web = TestClient(app)
 BASE = "/api/bot-attention"
 SECRET = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789"

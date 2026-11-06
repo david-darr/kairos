@@ -590,18 +590,18 @@ class SendToolTests(GoogleFixture):
         names = {s.name for s in tool_registry.specs(tool_registry.CODEX, is_admin=True, read_only=True)}
         self.assertNotIn("send_email", names)
 
-    async def test_email_tab_lists_sending_accounts_for_admins_only(self):
+    async def test_email_tab_lists_sending_accounts_for_signed_in_users_only(self):
         from fastapi import FastAPI, HTTPException
-        from core.middleware import require_admin
+        from core.middleware import require_user
         from routes import email_routes
         app = FastAPI()
         app.include_router(email_routes.router)
-        async def get(admin):
+        async def get(signed_in):
             def identity():
-                if not admin:
-                    raise HTTPException(403, "admin privileges required")
+                if not signed_in:
+                    raise HTTPException(401, "authentication required")
                 return "fixture"
-            app.dependency_overrides[require_admin] = identity
+            app.dependency_overrides[require_user] = identity
             async with REAL_CLIENT(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
                 return await client.get("/api/email/sending-accounts")
         result = (await get(True)).json()
@@ -610,7 +610,7 @@ class SendToolTests(GoogleFixture):
                          {("chris@school.org", "Google", False), ("chris.coach@gmail.com", "Google", True),
                           ("office@club.org", "Email tab", True)})
         self.assertNotIn("refresh_token", json.dumps(result))
-        self.assertEqual((await get(False)).status_code, 403)
+        self.assertEqual((await get(False)).status_code, 401)
 
     async def test_google_chat_tools_accept_an_account(self):
         await self.call("google_drive", {"action": "list", "account": "chris.coach@gmail.com"})

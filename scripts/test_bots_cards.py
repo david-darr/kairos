@@ -21,7 +21,7 @@ import httpx  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 
 from core import permissions  # noqa: E402
-from core.middleware import require_admin  # noqa: E402
+from core.middleware import require_admin, require_user  # noqa: E402
 from core.session_manager import session_manager  # noqa: E402
 from routes import bot_card_routes  # noqa: E402
 from services import bot_cards  # noqa: E402
@@ -29,7 +29,7 @@ from services import bot_cards  # noqa: E402
 app = FastAPI()
 app.include_router(bot_card_routes.router)
 USER = {"name": "david"}
-app.dependency_overrides[require_admin] = lambda: USER["name"]
+app.dependency_overrides[require_admin] = lambda: USER["name"]; app.dependency_overrides[require_user] = lambda: USER["name"]
 
 
 def client():

@@ -37,7 +37,7 @@ from fastapi.testclient import TestClient
 
 from core import bot_app_events
 from core import bot_event_receipts as receipts_module
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from routes import bot_event_routes, trigger_routes
 from services import trigger_service as trigger_module
 from services.agent_service import agent_service
@@ -71,7 +71,7 @@ class WebhookTests(unittest.TestCase):
         app = FastAPI()
         app.include_router(trigger_routes.router)
         app.include_router(trigger_routes.bot_event_router)
-        app.dependency_overrides[require_admin] = lambda: self.user["name"]
+        app.dependency_overrides[require_admin] = lambda: self.user["name"]; app.dependency_overrides[require_user] = lambda: self.user["name"]
         self.client = TestClient(app)
         self.run_task = AsyncMock()
         patch("core.task_scheduler._run_task", self.run_task).start()

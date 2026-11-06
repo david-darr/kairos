@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from core.atomic_io import write_json_atomic
 from core import design_store, session_manager_store as store
 from core.session_manager import session_manager
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from routes.front_desk_make_routes import router
 from services import front_desk_make as make
 
@@ -135,7 +135,7 @@ class MakeTests(unittest.TestCase):
         app = FastAPI(); app.include_router(router)
         with TestClient(app) as client:
             self.assertIn(client.get("/api/front-desk/make").status_code, (401, 403))
-            app.dependency_overrides[require_admin] = lambda: "david"
+            app.dependency_overrides[require_admin] = lambda: "david"; app.dependency_overrides[require_user] = lambda: "david"
             self.assertEqual(client.get("/api/front-desk/make").status_code, 200)
             self.assertEqual(client.get("/api/front-desk/make?kind=slides").json(), {"items": [], "making": []})
             self.assertEqual(client.get("/api/front-desk/make?kind=bad").status_code, 422)

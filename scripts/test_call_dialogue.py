@@ -17,7 +17,7 @@ import httpx
 from core.session_manager import session_manager
 from core.voice_dialogue import SpeechFilter, Conversation
 from core import call_voices
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from services import agent_calls as calls, call_live
 from services.agent_service import agent_service
 from routes.call_routes import router
@@ -193,18 +193,21 @@ class Calls(unittest.IsolatedAsyncioTestCase):
         for fact in ('FIRST','MIDDLE','LAST'):self.assertIn(fact,self.record['summary'])
 
     async def test_http_access_admin_bounds_and_summary_rules(self):
-        app=FastAPI();app.include_router(router);app.dependency_overrides[require_admin]=lambda:'david'
+        app=FastAPI();app.include_router(router);app.dependency_overrides[require_admin]=lambda:'david';app.dependency_overrides[require_user]=lambda:'david'
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://test') as client:
             base=f"/api/agent-calls/{self.record['id']}"
             self.assertEqual((await client.post(base+'/summary')).status_code,409)
             self.assertEqual((await client.post(base+'/turn',json={'text':'x'*6001,'request_id':'one'})).status_code,422)
             response=await client.post(base+'/turn',json={'text':'Hi','request_id':'one'})
             self.assertEqual(response.status_code,200);self.assertIn('"type": "text"',response.text)
-            app.dependency_overrides[require_admin]=lambda:'other'
+            app.dependency_overrides[require_admin]=lambda:'other';app.dependency_overrides[require_user]=lambda:'other'
             self.assertEqual((await client.get(base)).status_code,404)
-            def denied():raise HTTPException(403,'Admin required')
+            def denied():raise HTTPException(401,'authentication required')
+            app.dependency_overrides[require_user]=denied
+            self.assertEqual((await client.post('/api/agent-calls/speak',json={'text':'Hi','model':'pockettts','voice':'default'})).status_code,401)
+            # Pointing the call voice server at a local address stays with an admin (it reaches host-only services).
             app.dependency_overrides[require_admin]=denied
-            self.assertEqual((await client.post('/api/agent-calls/speak',json={'text':'Hi','model':'pockettts','voice':'default'})).status_code,403)
+            self.assertEqual((await client.put('/api/agent-calls/voices',json={'url':'http://127.0.0.1:8000','protocol':'voicestudio'})).status_code,401)
 
 class Contracts(unittest.TestCase):
     def test_work_marker_never_reaches_speech_at_any_chunk_boundary(self):

@@ -14,7 +14,7 @@ os.environ['JARVIS_DATA_DIR'] = DATA.name
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi import FastAPI, HTTPException
 import httpx
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from core import bot_rooms_store
 from services import agent_calls as calls, bot_rooms
 from services.agent_service import agent_service
@@ -146,7 +146,7 @@ class GroupCalls(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException): calls.require(call['id'], 'someone-else')
 
     async def test_the_route_takes_a_room(self):
-        app = FastAPI(); app.include_router(router); app.dependency_overrides[require_admin] = lambda: 'david'
+        app = FastAPI(); app.include_router(router); app.dependency_overrides[require_admin] = lambda: 'david'; app.dependency_overrides[require_user] = lambda: 'david'
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
             made = await client.post('/api/agent-calls', json={'parent_id': '', 'agent_id': self.bo['id'], 'endpoint_id': 'fast', 'model': 'small', 'room_id': self.room['id']})
             self.assertEqual(made.status_code, 200, made.text)

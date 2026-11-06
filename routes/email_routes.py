@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 from core import builtin_tasks, email_triage
 from core.auth import auth_manager
-from core.middleware import require_admin, require_user
+from core.middleware import require_user
 from services.email_service import email_service
 
 router = APIRouter(prefix="/api/email", tags=["email"])
@@ -58,7 +58,7 @@ async def list_accounts(user: str = Depends(require_user)) -> list[dict]:
 # Every address agents can send from (send_email), Google sign-ins included,
 # so the Email tab is where people look for and add sending accounts.
 @router.get("/sending-accounts")
-async def sending_accounts(user: str = Depends(require_admin)) -> dict:
+async def sending_accounts(user: str = Depends(require_user)) -> dict:
     from core import email_send, google_workspace
     return {"accounts": email_send.accounts(user), "google_configured": google_workspace.status(user)["configured"]}
 

@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.auth import auth_manager
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from services import bot_limit_resets, bot_routines
 from services.bot_routines import RoutineError
 from services.task_service import task_service
@@ -121,14 +121,14 @@ def _fields(body: BaseModel) -> dict:
 
 @router.get("/api/bot-routines")
 async def list_routines(bot_id: Optional[str] = Query(default=None, max_length=80),
-                        start: Optional[float] = None, end: Optional[float] = None, user: str = Depends(require_admin)):
+                        start: Optional[float] = None, end: Optional[float] = None, user: str = Depends(require_user)):
     if (start is None) != (end is None) or (start is not None and (end < start or end - start > 70 * 86400)):
         return _fail(RoutineError("Give a start and an end, at most 70 days apart."))
     return {"routines": bot_routines.list_routines(user, _is_admin(user), bot_id, start, end)}
 
 
 @router.post("/api/bot-routines/preview")
-async def preview(body: PreviewBody, user: str = Depends(require_admin)):
+async def preview(body: PreviewBody, user: str = Depends(require_user)):
     try:
         return bot_routines.preview(body.schedule, body.count)
     except RoutineError as error:
@@ -136,7 +136,7 @@ async def preview(body: PreviewBody, user: str = Depends(require_admin)):
 
 
 @router.post("/api/bot-routines")
-async def create_routine(body: RoutineBody, user: str = Depends(require_admin)):
+async def create_routine(body: RoutineBody, user: str = Depends(require_user)):
     try:
         return bot_routines.create_for_owner(user, body.bot_id, _fields(body))
     except RoutineError as error:
@@ -144,7 +144,7 @@ async def create_routine(body: RoutineBody, user: str = Depends(require_admin)):
 
 
 @router.get("/api/bot-routines/{routine_id}")
-async def get_routine(routine_id: str, user: str = Depends(require_admin)):
+async def get_routine(routine_id: str, user: str = Depends(require_user)):
     try:
         return bot_routines.get_routine(user, _is_admin(user), routine_id)
     except RoutineError as error:
@@ -152,7 +152,7 @@ async def get_routine(routine_id: str, user: str = Depends(require_admin)):
 
 
 @router.get("/api/bot-routines/{routine_id}/runs")
-async def routine_runs(routine_id: str, limit: int = Query(default=30, ge=1, le=50), user: str = Depends(require_admin)):
+async def routine_runs(routine_id: str, limit: int = Query(default=30, ge=1, le=50), user: str = Depends(require_user)):
     try:
         return {"runs": bot_routines.list_runs(user, _is_admin(user), routine_id, limit)}
     except RoutineError as error:
@@ -160,7 +160,7 @@ async def routine_runs(routine_id: str, limit: int = Query(default=30, ge=1, le=
 
 
 @router.patch("/api/bot-routines/{routine_id}")
-async def patch_routine(routine_id: str, body: PatchBody, user: str = Depends(require_admin)):
+async def patch_routine(routine_id: str, body: PatchBody, user: str = Depends(require_user)):
     try:
         return bot_routines.patch(user, _is_admin(user), routine_id, _fields(body), body.expected_revision)
     except RoutineError as error:
@@ -168,7 +168,7 @@ async def patch_routine(routine_id: str, body: PatchBody, user: str = Depends(re
 
 
 @router.delete("/api/bot-routines/{routine_id}")
-async def delete_routine(routine_id: str, body: Optional[DeleteBody] = None, user: str = Depends(require_admin)):
+async def delete_routine(routine_id: str, body: Optional[DeleteBody] = None, user: str = Depends(require_user)):
     try:
         return bot_routines.delete(user, _is_admin(user), routine_id, body.expected_revision if body else None)
     except RoutineError as error:
@@ -176,7 +176,7 @@ async def delete_routine(routine_id: str, body: Optional[DeleteBody] = None, use
 
 
 @router.post("/api/bot-routines/{routine_id}/restore")
-async def restore_routine(routine_id: str, user: str = Depends(require_admin)):
+async def restore_routine(routine_id: str, user: str = Depends(require_user)):
     try:
         return bot_routines.restore_deleted(user, _is_admin(user), routine_id)
     except RoutineError as error:
@@ -184,7 +184,7 @@ async def restore_routine(routine_id: str, user: str = Depends(require_admin)):
 
 
 @router.post("/api/bot-routines/{routine_id}/run")
-async def run_routine(routine_id: str, body: Optional[RunBody] = None, user: str = Depends(require_admin)):
+async def run_routine(routine_id: str, body: Optional[RunBody] = None, user: str = Depends(require_user)):
     try:
         return await bot_routines.run_now(user, _is_admin(user), routine_id, body.request_id if body else None)
     except RoutineError as error:
@@ -192,7 +192,7 @@ async def run_routine(routine_id: str, body: Optional[RunBody] = None, user: str
 
 
 @router.post("/api/bot-routines/{routine_id}/defer")
-async def defer_routine(routine_id: str, body: Optional[DeferBody] = None, user: str = Depends(require_admin)):
+async def defer_routine(routine_id: str, body: Optional[DeferBody] = None, user: str = Depends(require_user)):
     try:
         if body is not None:
             from datetime import datetime
@@ -212,12 +212,12 @@ async def defer_routine(routine_id: str, body: Optional[DeferBody] = None, user:
 # -- runs --------------------------------------------------------------------------------------
 
 @router.post("/api/bot-routine-runs/seen-all")
-async def seen_all(bot_id: Optional[str] = Query(default=None, max_length=80), user: str = Depends(require_admin)):
+async def seen_all(bot_id: Optional[str] = Query(default=None, max_length=80), user: str = Depends(require_user)):
     return bot_routines.seen_all(user, _is_admin(user), bot_id)
 
 
 @router.post("/api/bot-routine-runs/{run_id}/cancel")
-async def cancel_run(run_id: str, user: str = Depends(require_admin)):
+async def cancel_run(run_id: str, user: str = Depends(require_user)):
     try:
         return bot_routines.cancel_run(user, _is_admin(user), run_id)
     except RoutineError as error:
@@ -225,7 +225,7 @@ async def cancel_run(run_id: str, user: str = Depends(require_admin)):
 
 
 @router.post("/api/bot-routine-runs/{run_id}/seen")
-async def seen_run(run_id: str, user: str = Depends(require_admin)):
+async def seen_run(run_id: str, user: str = Depends(require_user)):
     try:
         return bot_routines.mark_seen(user, _is_admin(user), run_id)
     except RoutineError as error:
@@ -235,7 +235,7 @@ async def seen_run(run_id: str, user: str = Depends(require_admin)):
 # -- the unified list --------------------------------------------------------------------------
 
 @router.get("/api/bot-automations")
-async def automations(user: str = Depends(require_admin)):
+async def automations(user: str = Depends(require_user)):
     rows: list[dict] = list(bot_routines.routine_summaries(user, _is_admin(user)))
     for source in list(_summary_sources):
         try:

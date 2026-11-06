@@ -1,7 +1,7 @@
-"""Admin team surfaces. Owner comes only from authentication."""
+"""Team surfaces. Owner comes only from authentication."""
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
-from core.middleware import require_admin
+from core.middleware import require_user
 from services import bot_departments as teams
 from services import bot_team_memory as memory
 
@@ -67,79 +67,79 @@ class Bulk(Body):
 
 
 @router.get("")
-def listing(user: str = Depends(require_admin)):
+def listing(user: str = Depends(require_user)):
     return {"departments": teams.list(user)}
 
 
 @router.post("", status_code=201)
-def create(body: Create, user: str = Depends(require_admin)):
+def create(body: Create, user: str = Depends(require_user)):
     return teams.create(body.name, body.bot_ids, user)
 
 
 @router.get("/{ident}")
-def get(ident: str, user: str = Depends(require_admin)):
+def get(ident: str, user: str = Depends(require_user)):
     return {**teams.get(ident, user), "members": teams.members(ident, user)}
 
 
 @router.patch("/{ident}")
-def edit(ident: str, body: Edit, user: str = Depends(require_admin)):
+def edit(ident: str, body: Edit, user: str = Depends(require_user)):
     team = teams.get(ident, user)
     return teams.rename(ident, body.name or team["name"], body.expected_revision, user, body.order)
 
 
 @router.delete("/{ident}")
-def delete(ident: str, user: str = Depends(require_admin)):
+def delete(ident: str, user: str = Depends(require_user)):
     return teams.delete(ident, user)
 
 
 @router.get("/{ident}/instructions")
-def instructions(ident: str, user: str = Depends(require_admin)):
+def instructions(ident: str, user: str = Depends(require_user)):
     return teams.instructions(ident, user)
 
 
 @router.put("/{ident}/instructions")
-def put_instructions(ident: str, body: Instructions, user: str = Depends(require_admin)):
+def put_instructions(ident: str, body: Instructions, user: str = Depends(require_user)):
     return teams.put_instructions(ident, body.text, body.expected_hash, user)
 
 
 @router.put("/{ident}/chief")
-def chief(ident: str, body: Chief, user: str = Depends(require_admin)):
+def chief(ident: str, body: Chief, user: str = Depends(require_user)):
     return teams.set_chief(ident, body.bot_id, body.also_manages, user)
 
 
 @router.get("/{ident}/memory")
-def memory_list(ident: str, user: str = Depends(require_admin)):
+def memory_list(ident: str, user: str = Depends(require_user)):
     return memory.listing(ident, user)
 
 
 @router.post("/{ident}/memory", status_code=201)
-def memory_add(ident: str, body: MemoryFields, user: str = Depends(require_admin)):
+def memory_add(ident: str, body: MemoryFields, user: str = Depends(require_user)):
     return memory.propose(ident, body.model_dump(), accept=True, user=user)
 
 
 @router.patch("/{ident}/memory/{entry}")
-def memory_edit(ident: str, entry: str, body: MemoryEdit, user: str = Depends(require_admin)):
+def memory_edit(ident: str, entry: str, body: MemoryEdit, user: str = Depends(require_user)):
     return memory.edit(ident, entry, body.model_dump(exclude_unset=True, exclude={"expected_revision"}),
                        body.expected_revision, user)
 
 
 @router.delete("/{ident}/memory/{entry}")
-def memory_delete(ident: str, entry: str, body: MemoryAction, user: str = Depends(require_admin)):
+def memory_delete(ident: str, entry: str, body: MemoryAction, user: str = Depends(require_user)):
     return memory.action(ident, entry, "delete", body.expected_revision, user=user)
 
 
 @router.post("/{ident}/memory/{entry}/{action}")
-def memory_action(ident: str, entry: str, action: str, body: MemoryAction, user: str = Depends(require_admin)):
+def memory_action(ident: str, entry: str, action: str, body: MemoryAction, user: str = Depends(require_user)):
     return memory.action(ident, entry, action, body.expected_revision, user=user, restore_revision=body.restore_revision)
 
 
 @router.post("/{ident}/bulk-preview")
-def bulk_preview(ident: str, body: Bulk, user: str = Depends(require_admin)):
+def bulk_preview(ident: str, body: Bulk, user: str = Depends(require_user)):
     from services import bot_team_changes
     return bot_team_changes.bulk_preview(ident, body.model_dump(exclude_unset=True, exclude={"expected_revisions"}), user)
 
 
 @router.post("/{ident}/bulk-apply")
-def bulk_apply(ident: str, body: Bulk, user: str = Depends(require_admin)):
+def bulk_apply(ident: str, body: Bulk, user: str = Depends(require_user)):
     from services import bot_team_changes
     return bot_team_changes.bulk_apply(ident, body.model_dump(exclude_unset=True, exclude={"expected_revisions"}), body.expected_revisions, user)

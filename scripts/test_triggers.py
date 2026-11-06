@@ -29,7 +29,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from core.channels import agent_routing
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from routes import trigger_routes
 from services import trigger_service as trigger_module
 from services.agent_service import agent_service
@@ -59,7 +59,7 @@ class TriggerTests(unittest.TestCase):
         self.bo = agent_service.create("Bo", role="Reviewer")
         app = FastAPI()
         app.include_router(trigger_routes.router)
-        app.dependency_overrides[require_admin] = lambda: "admin"
+        app.dependency_overrides[require_admin] = lambda: "admin"; app.dependency_overrides[require_user] = lambda: "admin"
         self.client = TestClient(app)
         self.run_task = AsyncMock()
         patch("core.task_scheduler._run_task", self.run_task).start()
@@ -224,11 +224,20 @@ class TriggerTests(unittest.TestCase):
         self.assertEqual(self.post(trigger, delivery="old").status_code, 403, "the old secret stops working")
         self.assertEqual(self.post(trigger, secret=fresh, delivery="new").status_code, 202)
 
-    def test_managing_triggers_is_admin_only(self):
+    def test_managing_triggers_needs_a_sign_in_and_making_one_an_admin(self):
+        # Seeing, deleting and answering a trigger work on the account's own triggers (phase 4b: any signed-in
+        # person); making one or changing what it starts stays admin until the bot reach cap (phase 4c).
+        admin_only = {("/api/triggers", "POST"), ("/api/triggers/{trigger_id}", "PATCH")}
         for route in trigger_routes.router.routes:
-            gated = any(dep.call is require_admin for dep in route.dependant.dependencies)
+            calls = [dep.call for dep in route.dependant.dependencies]
             public = route.path == "/api/triggers/{trigger_id}" and "POST" in route.methods and route.name == "receive"
-            self.assertEqual(gated, not public, f"{route.methods} {route.path}")
+            if public:
+                self.assertNotIn(require_user, calls)
+                self.assertNotIn(require_admin, calls)
+                continue
+            wants_admin = any((route.path, method) in admin_only for method in route.methods)
+            self.assertEqual(require_admin in calls, wants_admin, f"{route.methods} {route.path}")
+            self.assertTrue(require_admin in calls or require_user in calls, f"{route.methods} {route.path}")
 
     def test_bad_settings_are_refused(self):
         self.assertEqual(self.client.post("/api/triggers", json={"name": ""}).status_code, 400)

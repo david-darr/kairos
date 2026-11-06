@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from core.middleware import require_admin  # noqa: E402
+from core.middleware import require_admin, require_user  # noqa: E402
 from core.turn_taint import TurnTaint  # noqa: E402
 from routes import bot_data_routes  # noqa: E402
 from services import bot_data, bot_data_cards as cards, bot_data_charts as charts, bot_data_load as load  # noqa: E402
@@ -34,7 +34,7 @@ from services.bot_data import DataError  # noqa: E402
 
 app = FastAPI()
 app.include_router(bot_data_routes.router)
-app.dependency_overrides[require_admin] = lambda: "david"
+app.dependency_overrides[require_admin] = lambda: "david"; app.dependency_overrides[require_user] = lambda: "david"
 web = TestClient(app)
 
 SALES = "Region,Amount,Order Date,Note\nNorth,10,2026-01-01,a\nSouth,20.5,2026-01-02,\nNorth,5,2026-02-03,c\nWest,7,2026-02-04,d\n"
@@ -598,11 +598,14 @@ class RouteTests(DataCase):
         self.assertEqual(web.get("/api/bot-data/nobody").status_code, 404)
         self.assertEqual(web.post("/api/bot-data/nobody/run", json={"sql": "SELECT 1"}).status_code, 404)
 
-    def test_requires_admin(self):
+    def test_requires_a_sign_in_not_an_admin(self):
         locked = FastAPI()
         locked.include_router(bot_data_routes.router)
+        with patch("core.middleware.get_current_user", return_value=None):
+            self.assertEqual(TestClient(locked).get(self.url()).status_code, 401)
+        # Phase 4b: the data panel is the signed-in person's own (their account's bots only), admin or not.
         with patch("core.middleware.auth_manager.is_admin", return_value=False), patch("core.middleware.get_current_user", return_value="guest"):
-            self.assertEqual(TestClient(locked).get(self.url()).status_code, 403)
+            self.assertNotIn(TestClient(locked).get(self.url()).status_code, (401, 403))
 
 
 class ToolTests(DataCase):

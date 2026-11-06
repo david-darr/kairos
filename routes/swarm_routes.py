@@ -178,8 +178,9 @@ def human(request: Request):
 
 
 def agents_allowed(owner, body):
-    """Agents are admin-only (routes/agent_routes.py), so only an admin may
-    seat one on a team."""
+    """Agents are still admin-only (routes/agent_routes.py: a non-admin cannot make one yet), so only an
+    admin may seat one on a team. Lift this together with the bot reach cap (Multi-Account phase 4c);
+    team agents run with their bot's own reach."""
     if any(member.agent_id for member in [body.lead, *body.specialists]) and not auth_manager.is_admin(owner):
         raise HTTPException(403, "Only an admin can put agents on a team")
 

@@ -3,14 +3,14 @@
 turn, a task, card, goal, helper or agent run - and what it did, step by
 step (core/runs.py, the session store's `runs` and `run_events`).
 
-Admin only: a run's steps quote what tools were given and returned.
+A run's steps quote what tools were given and returned.
 """
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from core import helpers, runs, session_manager_store as store
-from core.middleware import require_admin
+from core.middleware import require_user
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
@@ -36,7 +36,7 @@ def _label(run: dict) -> str:
 
 @router.get("")
 async def list_runs(session_id: Optional[str] = None, task_id: Optional[str] = None, agent_id: Optional[str] = None,
-                    outcome: Optional[str] = None, limit: int = 100, user: str = Depends(require_admin)) -> list[dict]:
+                    outcome: Optional[str] = None, limit: int = 100, user: str = Depends(require_user)) -> list[dict]:
     if outcome and outcome not in ("finished", "failed", "stopped"):
         raise HTTPException(status_code=400, detail="outcome is finished, failed or stopped")
     return [{**run, "label": _label(run), "tokens_per_second": runs.tokens_per_second(run)}
@@ -45,7 +45,7 @@ async def list_runs(session_id: Optional[str] = None, task_id: Optional[str] = N
 
 
 @router.get("/{run_id}")
-async def get_run(run_id: str, user: str = Depends(require_admin)) -> dict:
+async def get_run(run_id: str, user: str = Depends(require_user)) -> dict:
     """One run: its row, its steps, and what hangs off it - the run that
     started it, the runs it started, its helpers, and for a task its
     delivery."""

@@ -1,4 +1,4 @@
-"""Bots widgets and apps routes (services/bot_widgets.py, services/bot_apps.py). Admin only.
+"""Bots widgets and apps routes (services/bot_widgets.py, services/bot_apps.py). Signed-in users only.
 
 The session comes from the path and is checked against the caller; the bot is the session's own."""
 from typing import Optional
@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.middleware import require_admin
+from core.middleware import require_user
 from services import bot_apps, bot_widgets
 from services.bot_widgets import WidgetError
 
@@ -40,7 +40,7 @@ def _fail(error: WidgetError) -> JSONResponse:
 
 
 @router.post("/{sid}/press")
-async def press(sid: str, body: Press, user: str = Depends(require_admin)):
+async def press(sid: str, body: Press, user: str = Depends(require_user)):
     try:
         return await bot_widgets.press(user, sid, body.model_dump())
     except WidgetError as error:
@@ -48,7 +48,7 @@ async def press(sid: str, body: Press, user: str = Depends(require_admin)):
 
 
 @router.get("/{sid}/apps/{mid}")
-def app_page(sid: str, mid: str, rev: Optional[int] = Query(default=None, ge=1, le=1_000_000), user: str = Depends(require_admin)):
+def app_page(sid: str, mid: str, rev: Optional[int] = Query(default=None, ge=1, le=1_000_000), user: str = Depends(require_user)):
     from services import bot_chat_service
     bot_chat_service.require(user, sid)
     try:
@@ -59,7 +59,7 @@ def app_page(sid: str, mid: str, rev: Optional[int] = Query(default=None, ge=1, 
 
 @router.get("/{sid}/apps/{mid}/frame")
 def app_frame(sid: str, mid: str, channel: str = Query(pattern=r"^[A-Za-z0-9_-]{4,40}$"),
-              rev: Optional[int] = Query(default=None, ge=1, le=1_000_000), user: str = Depends(require_admin)):
+              rev: Optional[int] = Query(default=None, ge=1, le=1_000_000), user: str = Depends(require_user)):
     """The page itself, for the sandboxed frame's address. It carries its own policy as a header (plus `sandbox`, so
     it stays sandboxed if opened on its own). X-Kairos-Design-Render asks core/middleware.py to keep this policy
     instead of the app's; the middleware honours that only on this path and a Design board's render path."""
@@ -75,7 +75,7 @@ def app_frame(sid: str, mid: str, channel: str = Query(pattern=r"^[A-Za-z0-9_-]{
 
 
 @router.post("/{sid}/apps/{mid}/rpc")
-async def app_rpc(sid: str, mid: str, body: Rpc, user: str = Depends(require_admin)):
+async def app_rpc(sid: str, mid: str, body: Rpc, user: str = Depends(require_user)):
     try:
         return await bot_apps.rpc(user, sid, mid, body.model_dump())
     except WidgetError as error:
@@ -83,7 +83,7 @@ async def app_rpc(sid: str, mid: str, body: Rpc, user: str = Depends(require_adm
 
 
 @router.post("/{sid}/apps/{mid}/context")
-def app_context(sid: str, mid: str, body: Context, user: str = Depends(require_admin)):
+def app_context(sid: str, mid: str, body: Context, user: str = Depends(require_user)):
     try:
         return bot_apps.set_page_context(user, sid, mid, body.model_dump())
     except WidgetError as error:

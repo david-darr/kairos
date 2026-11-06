@@ -38,7 +38,7 @@ from fastapi.testclient import TestClient
 from core import bot_app_events
 from core import bot_event_receipts as receipts_module
 from core.bot_app_event_adapters import ADAPTERS
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from routes import bot_event_routes
 from services import bot_app_triggers
 from services.agent_service import agent_service
@@ -87,7 +87,7 @@ class AppEventTests(unittest.TestCase):
         self.user = {"name": "local"}
         app = FastAPI()
         app.include_router(bot_event_routes.router)
-        app.dependency_overrides[require_admin] = lambda: self.user["name"]
+        app.dependency_overrides[require_admin] = lambda: self.user["name"]; app.dependency_overrides[require_user] = lambda: self.user["name"]
         self.client = TestClient(app)
         self.inbox = Inbox(5)
         patch("services.email_service.EmailService.list_messages", side_effect=self.inbox).start()

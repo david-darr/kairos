@@ -14,7 +14,7 @@ _DATA = TestDataDirectory("kairos-fdbot-")
 os.environ["JARVIS_DATA_DIR"] = _DATA.name
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from core.session_manager import session_manager
 from core import session_manager_store as store
 from routes import agent_routes, front_desk_routes
@@ -26,7 +26,7 @@ REAL_CONNECTIONS = front_desk.connections
 app = FastAPI()
 app.include_router(front_desk_routes.router)
 app.include_router(agent_routes.router)
-app.dependency_overrides[require_admin] = lambda: "david"
+app.dependency_overrides[require_admin] = lambda: "david"; app.dependency_overrides[require_user] = lambda: "david"
 web = TestClient(app)
 
 
@@ -177,7 +177,7 @@ class FrontDeskCase(unittest.TestCase):
 
     def test_routes_admin_and_extra_fields(self):
         for route in front_desk_routes.router.routes:
-            self.assertIn(require_admin, [d.call for d in route.dependant.dependencies])
+            self.assertIn(require_user, [d.call for d in route.dependant.dependencies])
         self.assertEqual(web.post("/api/front-desk/ensure", json={"owner": "other"}).status_code, 422)
         front_desk.ensure()
         hidden = agent_service.create("Hidden")

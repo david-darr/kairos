@@ -1,4 +1,4 @@
-"""Admin-only watch, brief and person-operated saved draft actions."""
+"""Watch, brief and person-operated saved draft actions."""
 import asyncio
 from typing import Annotated
 from zoneinfo import ZoneInfoNotFoundError
@@ -6,13 +6,13 @@ from zoneinfo import ZoneInfoNotFoundError
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.middleware import require_admin
+from core.middleware import require_user
 from services import front_desk_watch as watch, front_desk_brief as brief, front_desk_drafts as drafts
 
 router = APIRouter(prefix="/api/front-desk", tags=["front-desk-watch"])
 
 
-def owner(user: str = Depends(require_admin)):
+def owner(user: str = Depends(require_user)):
     watch.require_owner(user)
     return user
 

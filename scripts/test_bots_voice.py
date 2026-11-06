@@ -13,7 +13,7 @@ os.environ["JARVIS_DATA_DIR"] = ENV.name
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from routes.bot_voice_routes import router
 from services import bot_voice as voice
 
@@ -22,7 +22,7 @@ class VoiceTests(unittest.TestCase):
     def setUp(self):
         app = FastAPI()
         app.include_router(router)
-        app.dependency_overrides[require_admin] = lambda: "alice"
+        app.dependency_overrides[require_admin] = lambda: "alice"; app.dependency_overrides[require_user] = lambda: "alice"
         self.app = app
         self.client = TestClient(app)
 
@@ -80,7 +80,7 @@ class VoiceTests(unittest.TestCase):
         with wave.open(io.BytesIO(response.content), 'rb') as wav:
             self.assertEqual((wav.getnchannels(), wav.getnframes(), wav.getframerate()), (1, 2400, 24000))
         self.assertEqual(self.client.get(data['transcript_url']).json()['transcript'], 'Hello there.')
-        self.app.dependency_overrides[require_admin] = lambda: 'bob'
+        self.app.dependency_overrides[require_admin] = lambda: 'bob'; self.app.dependency_overrides[require_user] = lambda: 'bob'
         self.assertEqual(self.client.get(data['url']).status_code, 404)
 
     def test_engine_failure_leaves_no_files(self):

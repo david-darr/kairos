@@ -6,7 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.middleware import require_admin
+from core.middleware import require_user
 from core import bot_assignments
 from core.session_manager import session_manager
 from services import bot_peers, bot_record
@@ -70,39 +70,39 @@ def owned_assignment(aid, user):
 
 
 @router.get("/api/bot-peers/loop-guard")
-def get_loop(user: str = Depends(require_admin)):
+def get_loop(user: str = Depends(require_user)):
     with guard():
         return bot_peers.state()["loop_guard"]
 
 
 @router.put("/api/bot-peers/loop-guard")
-def put_loop(body: LoopBody, user: str = Depends(require_admin)):
+def put_loop(body: LoopBody, user: str = Depends(require_user)):
     with guard():
         return bot_peers.save_loop(body.model_dump())
 
 
 @router.get("/api/bot-peers/{bot_id}/reach")
-def get_reach(bot_id: str, user: str = Depends(require_admin)):
+def get_reach(bot_id: str, user: str = Depends(require_user)):
     with guard():
         return bot_peers.view(owned_bot(bot_id, user))
 
 
 @router.put("/api/bot-peers/{bot_id}/reach")
-def put_reach(bot_id: str, body: ReachBody, user: str = Depends(require_admin)):
+def put_reach(bot_id: str, body: ReachBody, user: str = Depends(require_user)):
     with guard():
         owned_bot(bot_id, user)
         return bot_peers.set_reach(bot_id, **body.model_dump())
 
 
 @router.get("/api/bot-peers/{bot_id}/roster")
-def get_roster(bot_id: str, user: str = Depends(require_admin)):
+def get_roster(bot_id: str, user: str = Depends(require_user)):
     with guard():
         return {"peers": bot_peers.roster(owned_bot(bot_id, user))}
 
 
 @router.get("/api/bot-assignments")
 def list_assignments(bot_id: str | None = None, root_id: str | None = None, status: str | None = Query(default=None, max_length=30),
-                     user: str = Depends(require_admin)):
+                     user: str = Depends(require_user)):
     with guard():
         if bot_id:
             owned_bot(bot_id, user)
@@ -117,13 +117,13 @@ def list_assignments(bot_id: str | None = None, root_id: str | None = None, stat
 
 
 @router.get("/api/bot-assignments/{aid}")
-def get_assignment(aid: str, user: str = Depends(require_admin)):
+def get_assignment(aid: str, user: str = Depends(require_user)):
     with guard():
         return owned_assignment(aid, user)
 
 
 @router.post("/api/bot-assignments/{aid}/cancel")
-def cancel_assignment(aid: str, body: CancelBody, user: str = Depends(require_admin)):
+def cancel_assignment(aid: str, body: CancelBody, user: str = Depends(require_user)):
     with guard():
         node = owned_assignment(aid, user)
         from services.task_service import task_service
@@ -134,7 +134,7 @@ def cancel_assignment(aid: str, body: CancelBody, user: str = Depends(require_ad
 
 
 @router.post("/api/bot-assignments/{aid}/retry")
-def retry_assignment(aid: str, user: str = Depends(require_admin)):
+def retry_assignment(aid: str, user: str = Depends(require_user)):
     with guard():
         node = owned_assignment(aid, user)
         if node["status"] not in bot_assignments.TERMINAL:

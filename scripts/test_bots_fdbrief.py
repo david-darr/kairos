@@ -195,11 +195,11 @@ class RoutesTests(Harness):
         super().setUp()
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
-        from core.middleware import require_admin
+        from core.middleware import require_admin, require_user
         from routes import front_desk_watch_routes as routes
         self.app = FastAPI()
         self.app.include_router(routes.router)
-        self.app.dependency_overrides[require_admin] = lambda: "david"
+        self.app.dependency_overrides[require_admin] = lambda: "david"; self.app.dependency_overrides[require_user] = lambda: "david"
         self.web = TestClient(self.app)
         p = patch.object(watch, "require_owner"); p.start(); self.addCleanup(p.stop)
 
@@ -216,14 +216,14 @@ class RoutesTests(Harness):
         self.assertEqual(self.web.delete("/api/front-desk/drafts/missing").status_code, 404)
         self.assertEqual(self.web.post("/api/front-desk/watch/run-now").status_code, 409)
 
-    def test_admin_dependency_is_required_on_every_route(self):
-        from core.middleware import require_admin
+    def test_sign_in_is_required_on_every_route(self):
+        from core.middleware import require_user
         from fastapi import HTTPException
-        def denied(): raise HTTPException(403, "Admin required")
-        self.app.dependency_overrides[require_admin] = denied
+        def denied(): raise HTTPException(401, "authentication required")
+        self.app.dependency_overrides[require_user] = denied
         for method, path in (("GET", "/watch"), ("GET", "/brief"), ("GET", "/today"), ("GET", "/drafts"), ("POST", "/watch/run-now"),
                              ("POST", "/brief/rows/m/draft"), ("POST", "/drafts/d/send"), ("DELETE", "/drafts/d")):
-            self.assertEqual(self.web.request(method, "/api/front-desk" + path).status_code, 403)
+            self.assertEqual(self.web.request(method, "/api/front-desk" + path).status_code, 401)
 
 
 if __name__ == "__main__":

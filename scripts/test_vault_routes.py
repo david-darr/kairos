@@ -228,15 +228,18 @@ class VaultRouteTests(unittest.TestCase):
         self.assertEqual(history["entries"][0]["restore_state"], "changed_since")
         self.assertEqual(history["outside"]["label"], "Edited outside Kairos")
 
-    def test_non_admin_reads_but_gets_403_on_every_write(self):
+    def test_a_non_admin_works_in_their_own_vault(self):
+        # Every account has its own vault (Multi-Account group 2), so phase 4b lets any signed-in person edit,
+        # create today's note and see what changed in theirs; the vault the route reaches is the caller's.
         note = self.note("Projects/Alpha.md", user="bob")
-        self.assertFalse(note["can_edit"])
-        self.assertNotIn("last_change", note)
-        before = (VAULT / "Projects/Alpha.md").read_bytes()
-        self.assertEqual(self.save("Projects/Alpha.md", "overwrite", note["version"], user="bob").status_code, 403)
-        self.assertEqual((VAULT / "Projects/Alpha.md").read_bytes(), before)
-        self.assertEqual(self.client.post("/api/vault/daily", headers={"x-test-user": "bob"}).status_code, 403)
-        self.assertEqual(self.get("/api/vault/activity", user="bob").status_code, 403)
+        self.assertTrue(note["can_edit"])
+        self.assertIn("last_change", note)
+        saved = self.save("Projects/Alpha.md", note["content"] + "Bob was here.", note["version"], user="bob")
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertIn("Bob was here.", (VAULT / "Projects/Alpha.md").read_text(encoding="utf-8"))
+        self.assertNotEqual(self.client.post("/api/vault/daily", headers={"x-test-user": "bob"}).status_code, 403)
+        self.assertEqual(self.get("/api/vault/activity", user="bob").status_code, 200)
+        self.assertTrue(self.get("/api/vault/daily", user="bob").json()["can_create"])
         self.assertEqual(self.get("/api/vault/graph", user="bob").status_code, 200)
         self.assertEqual(self.get("/api/vault/search", user="bob", q="quartz").status_code, 200)
 
@@ -348,7 +351,7 @@ class VaultRouteTests(unittest.TestCase):
         url = self.get("/api/vault/obsidian-url", path="Projects/Alpha.md").json()["url"]
         self.assertTrue(url.startswith("obsidian://open?path="))
         self.assertEqual(self.get("/api/vault/obsidian-url", path="../x.md").status_code, 404)
-        self.assertEqual(self.get("/api/vault/obsidian-url", user="bob", path="Projects/Alpha.md").status_code, 403)
+        self.assertEqual(self.get("/api/vault/obsidian-url", user="bob", path="Projects/Alpha.md").status_code, 200)
 
 
 if __name__ == "__main__":

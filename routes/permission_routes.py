@@ -1,8 +1,8 @@
 """Answering, listing and revoking permission requests.
 
-Answering is a normal user action - it is the person's own prompt. Revoking a
-saved rule is admin-gated like the other settings that change what models may
-do, because a rule is global to this install rather than to one chat.
+Answering is a normal user action - it is the person's own prompt. So is
+revoking a saved rule: rules are kept per account (Multi-Account group 5), so a
+person only ever sees and revokes their own.
 
 There is no route that creates a rule directly. A grant only ever comes from
 answering a real request, so nothing can be granted that was never asked for.
@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from core import cli_access, permissions
-from core.middleware import require_admin, require_user
+from core.middleware import require_user
 from services import chat_live
 
 router = APIRouter(prefix="/api/permissions", tags=["permissions"])
@@ -65,7 +65,7 @@ async def answer(request_id: str, body: Answer, request: Request, user: str = De
 
 
 @router.delete("/{rule_id}")
-async def revoke(rule_id: str, user: str = Depends(require_admin)) -> dict:
+async def revoke(rule_id: str, user: str = Depends(require_user)) -> dict:
     if not permissions.revoke(rule_id):
         raise HTTPException(404, "No such rule")
     return {"status": "revoked"}

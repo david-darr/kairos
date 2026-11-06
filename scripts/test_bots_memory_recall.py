@@ -21,7 +21,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from bots_chat_harness import OWNER, Harness  # noqa: E402
 from bots_memory_support import FakeNotebook  # noqa: E402
-from core.middleware import require_admin  # noqa: E402
+from core.middleware import require_admin, require_user  # noqa: E402
 from core.session_manager import session_manager  # noqa: E402
 from routes import bot_recall_routes  # noqa: E402
 from services import bot_memory_recall as recall, bot_profile, bot_threads, bot_turn_context as ctx  # noqa: E402
@@ -29,7 +29,7 @@ from services.agent_service import agent_service  # noqa: E402
 
 app = FastAPI()
 app.include_router(bot_recall_routes.router)
-app.dependency_overrides[require_admin] = lambda: OWNER
+app.dependency_overrides[require_admin] = lambda: OWNER; app.dependency_overrides[require_user] = lambda: OWNER
 web = TestClient(app)
 
 

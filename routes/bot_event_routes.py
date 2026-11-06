@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from core import bot_app_events
 from core import bot_event_receipts as receipts_module
 from core.bot_app_event_adapters import ADAPTERS
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from services import bot_app_triggers
 from services.trigger_service import (ADDRESS_MAX_BODY, DEFAULT_MAX_PENDING, MAX_PENDING_RANGE, trigger_service)
 
@@ -129,7 +129,7 @@ def _raise(error: bot_app_triggers.AppTriggerError):
 # -- connected-app event triggers -----------------------------------------------------------
 
 @router.get("/api/bot-app-triggers/events")
-async def app_capabilities(bot_id: Optional[str] = None, user: str = Depends(require_admin)) -> dict:
+async def app_capabilities(bot_id: Optional[str] = None, user: str = Depends(require_user)) -> dict:
     """What this person's connected accounts really offer, and why anything is unavailable."""
     if bot_id:
         from services.agent_service import agent_service
@@ -139,7 +139,7 @@ async def app_capabilities(bot_id: Optional[str] = None, user: str = Depends(req
 
 
 @router.get("/api/bot-app-triggers")
-async def list_app_triggers(bot_id: Optional[str] = None, user: str = Depends(require_admin)) -> dict:
+async def list_app_triggers(bot_id: Optional[str] = None, user: str = Depends(require_user)) -> dict:
     return {"triggers": [bot_app_triggers.public(s) for s in bot_app_triggers.list_subscriptions(user, bot_id)],
             "deleted": bot_app_triggers.deleted(user)}
 
@@ -165,7 +165,7 @@ async def update_app_trigger(trigger_id: str, body: AppTriggerPatch, user: str =
 
 
 @router.delete("/api/bot-app-triggers/{trigger_id}")
-async def delete_app_trigger(trigger_id: str, user: str = Depends(require_admin)) -> dict:
+async def delete_app_trigger(trigger_id: str, user: str = Depends(require_user)) -> dict:
     try:
         sub = bot_app_triggers.delete(user, trigger_id)
     except bot_app_triggers.AppTriggerError as error:
@@ -174,7 +174,7 @@ async def delete_app_trigger(trigger_id: str, user: str = Depends(require_admin)
 
 
 @router.post("/api/bot-app-triggers/{trigger_id}/test")
-async def test_app_trigger(trigger_id: str, user: str = Depends(require_admin)) -> dict:
+async def test_app_trigger(trigger_id: str, user: str = Depends(require_user)) -> dict:
     try:
         return await bot_app_triggers.test(user, trigger_id)
     except bot_app_triggers.AppTriggerError as error:
@@ -182,7 +182,7 @@ async def test_app_trigger(trigger_id: str, user: str = Depends(require_admin)) 
 
 
 @router.post("/api/bot-app-triggers/{trigger_id}/restore")
-async def restore_app_trigger(trigger_id: str, user: str = Depends(require_admin)) -> dict:
+async def restore_app_trigger(trigger_id: str, user: str = Depends(require_user)) -> dict:
     try:
         return bot_app_triggers.public(bot_app_triggers.restore(user, trigger_id))
     except bot_app_triggers.AppTriggerError as error:
@@ -190,7 +190,7 @@ async def restore_app_trigger(trigger_id: str, user: str = Depends(require_admin
 
 
 @router.post("/api/bot-app-triggers/{trigger_id}/sync")
-async def sync_app_trigger(trigger_id: str, user: str = Depends(require_admin)) -> dict:
+async def sync_app_trigger(trigger_id: str, user: str = Depends(require_user)) -> dict:
     try:
         return await bot_app_triggers.sync(user, trigger_id)
     except bot_app_triggers.AppTriggerError as error:
@@ -289,7 +289,7 @@ async def ingress_with_header(trigger_id: str, request: Request) -> JSONResponse
 
 
 @router.get("/api/bot-webhooks")
-async def list_webhooks(bot_id: Optional[str] = None, user: str = Depends(require_admin)) -> dict:
+async def list_webhooks(bot_id: Optional[str] = None, user: str = Depends(require_user)) -> dict:
     mine = [t for t in trigger_service.triggers() if (t.get("owner_user") or user) == user and t.get("agent_id")
             and (bot_id is None or t.get("agent_id") == bot_id)]
     return {"webhooks": [_shown(t) for t in mine], "deleted": trigger_service.deleted(user)}
@@ -318,14 +318,14 @@ async def update_webhook(trigger_id: str, body: WebhookPatch, user: str = Depend
 
 
 @router.delete("/api/bot-webhooks/{trigger_id}")
-async def delete_webhook(trigger_id: str, user: str = Depends(require_admin)) -> dict:
+async def delete_webhook(trigger_id: str, user: str = Depends(require_user)) -> dict:
     _mine(trigger_id, user)
     trigger_service.delete(trigger_id)
     return {"ok": True, "restorable_days": 7}
 
 
 @router.get("/api/bot-webhooks/{trigger_id}/address")
-async def webhook_address(trigger_id: str, user: str = Depends(require_admin)) -> JSONResponse:
+async def webhook_address(trigger_id: str, user: str = Depends(require_user)) -> JSONResponse:
     trigger = _mine(trigger_id, user)
     if trigger.get("ingress") != "address":
         raise HTTPException(status_code=409, detail="this webhook uses signed requests, not an address")
@@ -336,14 +336,14 @@ async def webhook_address(trigger_id: str, user: str = Depends(require_admin)) -
 
 
 @router.get("/api/bot-webhooks/{trigger_id}/attempts")
-async def webhook_attempts(trigger_id: str, user: str = Depends(require_admin)) -> dict:
+async def webhook_attempts(trigger_id: str, user: str = Depends(require_user)) -> dict:
     _mine(trigger_id, user)
     store = receipts_module.store()
     return {"attempts": store.attempts(trigger_id), "total": store.attempt_count(trigger_id)}
 
 
 @router.post("/api/bot-webhooks/{trigger_id}/capture")
-async def webhook_capture(trigger_id: str, user: str = Depends(require_admin)) -> dict:
+async def webhook_capture(trigger_id: str, user: str = Depends(require_user)) -> dict:
     """Wait for the next authenticated request, keep it as the one sample and start nothing."""
     trigger = _mine(trigger_id, user)
     if trigger.get("ingress") != "address":
@@ -354,13 +354,13 @@ async def webhook_capture(trigger_id: str, user: str = Depends(require_admin)) -
 
 
 @router.get("/api/bot-webhooks/{trigger_id}/sample")
-async def webhook_sample(trigger_id: str, user: str = Depends(require_admin)) -> dict:
+async def webhook_sample(trigger_id: str, user: str = Depends(require_user)) -> dict:
     trigger = _mine(trigger_id, user)
     return {"capturing": bool(trigger.get("capture")), "sample": trigger_service.sample(trigger_id)}
 
 
 @router.post("/api/bot-webhooks/{trigger_id}/test")
-async def webhook_test(trigger_id: str, body: WebhookTestBody, user: str = Depends(require_admin)) -> dict:
+async def webhook_test(trigger_id: str, body: WebhookTestBody, user: str = Depends(require_user)) -> dict:
     """A manual test with the sample (or a payload you give): what would happen, nothing started."""
     import json
     trigger = _mine(trigger_id, user)
@@ -380,7 +380,7 @@ async def webhook_test(trigger_id: str, body: WebhookTestBody, user: str = Depen
 
 
 @router.post("/api/bot-webhooks/{trigger_id}/rotate")
-async def webhook_rotate(trigger_id: str, user: str = Depends(require_admin)) -> JSONResponse:
+async def webhook_rotate(trigger_id: str, user: str = Depends(require_user)) -> JSONResponse:
     """An explicit replacement: the old address stops working at once."""
     trigger = _mine(trigger_id, user)
     trigger_service.new_secret(trigger_id)
@@ -392,7 +392,7 @@ async def webhook_rotate(trigger_id: str, user: str = Depends(require_admin)) ->
 
 
 @router.post("/api/bot-webhooks/{trigger_id}/restore")
-async def webhook_restore(trigger_id: str, user: str = Depends(require_admin)) -> dict:
+async def webhook_restore(trigger_id: str, user: str = Depends(require_user)) -> dict:
     try:
         return _shown(trigger_service.restore(user, trigger_id))
     except KeyError as error:

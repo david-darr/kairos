@@ -236,7 +236,7 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
     def headers(self, user):
         return {"Cookie": f"{middleware.SESSION_COOKIE_NAME}={user}"} if user else {}
 
-    async def test_answering_needs_a_user_and_revoking_needs_an_admin(self):
+    async def test_answering_and_revoking_need_a_user(self):
         self.assertEqual((await self.client.get("/api/permissions")).status_code, 401)
         # A real session, owned by this user. Answering a chat's prompt has
         # required ownership since the mobile merge (2026-10-13, services/
@@ -260,11 +260,10 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
 
         listed = await self.client.get("/api/permissions", headers=self.headers("b"))
         rule = listed.json()["rules"][0]
-        # Revoking a global rule is an admin action.
+        # Rules are kept per account (phase 4b), so revoking one is a user action; it needs a sign-in.
+        self.assertEqual((await self.client.delete(f"/api/permissions/{rule['id']}")).status_code, 401)
         self.assertEqual((await self.client.delete(f"/api/permissions/{rule['id']}",
-                                                   headers=self.headers("b"))).status_code, 403)
-        self.assertEqual((await self.client.delete(f"/api/permissions/{rule['id']}",
-                                                   headers=self.headers("a"))).status_code, 200)
+                                                   headers=self.headers("b"))).status_code, 200)
         self.assertEqual((await self.client.delete(f"/api/permissions/{rule['id']}",
                                                    headers=self.headers("a"))).status_code, 404)
 

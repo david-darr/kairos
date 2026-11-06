@@ -7,7 +7,8 @@ What these prove, with no browser and no network:
   - the fixed /api/agents paths ("inbox", "conversations", "presets", "defaults") are
     declared before the generic /{agent_id} route, so none is swallowed by it;
   - /api/notifications is still device enrollment, not the Bots feed;
-  - every Bots route is admin-only (require_admin is somewhere in its dependencies);
+  - the sidebar's agent routes stay admin-only until the machine-access gate (phase 4c), while the chat and
+    attention routers answer any signed-in person with their own account's data (phase 4b);
   - the static mount serves the new sidebar and navigation assets, and answers no /api path;
   - the retired Agents tab is gone from navigation and its view is only a redirect.
 
@@ -113,9 +114,15 @@ class BotsRoutesTests(unittest.TestCase):
             if not (template in SIDEBAR or any(template.startswith(prefix) for prefix in PHASE1.values())):
                 continue
             path = re.sub(r"\{[^}]+\}", "probe-id", template)
+            # The agent routes can raise a bot's reach on this machine: a member waits for the gate (phase 4c).
+            # The chat and attention routes only touch the caller's own account, so a member is let in.
+            member_refused = template in SIDEBAR
             for who, caller in (("member", self.member), ("anonymous", self.anon)):
                 got = caller.request(method, path, json=None if method == "GET" else {})
-                self.assertIn(got.status_code, (401, 403), f"{who} {method} {path} -> {got.status_code}")
+                if who == "member" and not member_refused:
+                    self.assertNotIn(got.status_code, (401, 403), f"{who} {method} {path} -> {got.status_code}")
+                else:
+                    self.assertIn(got.status_code, (401, 403), f"{who} {method} {path} -> {got.status_code}")
             swept += 1
         self.assertGreaterEqual(swept, len(SIDEBAR))
 

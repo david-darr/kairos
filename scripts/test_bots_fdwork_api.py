@@ -16,14 +16,14 @@ import httpx
 from fastapi import FastAPI
 from bots_chat_harness import Harness, OWNER
 from core.atomic_io import write_json_atomic
-from core.middleware import require_admin
+from core.middleware import require_admin, require_user
 from routes import front_desk_work_routes as routes
 from services import front_desk_tasks as tasks
 from services.agent_service import agent_service
 
 app = FastAPI()
 app.include_router(routes.router)
-app.dependency_overrides[require_admin] = lambda: OWNER
+app.dependency_overrides[require_admin] = lambda: OWNER; app.dependency_overrides[require_user] = lambda: OWNER
 
 
 class ApiTests(unittest.IsolatedAsyncioTestCase):
@@ -76,12 +76,12 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
                      {"text": "  ", "send_id": "long-enough"}):
             self.assertEqual((await self.client.post('/api/front-desk/tasks', json=body)).status_code, 422, body)
         self.assertEqual((await self.client.get('/api/front-desk/work?resolved=2')).status_code, 422)
-        app.dependency_overrides[require_admin] = lambda: "another-person"
+        app.dependency_overrides[require_admin] = lambda: "another-person"; app.dependency_overrides[require_user] = lambda: "another-person"
         try:
             self.assertEqual((await self.client.get('/api/front-desk/work')).status_code, 404)
             self.assertEqual((await self.client.get('/api/front-desk/suggestions')).status_code, 404)
         finally:
-            app.dependency_overrides[require_admin] = lambda: OWNER
+            app.dependency_overrides[require_admin] = lambda: OWNER; app.dependency_overrides[require_user] = lambda: OWNER
 
 
 if __name__ == '__main__':

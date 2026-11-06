@@ -54,7 +54,7 @@ async def status(user: str = Depends(require_user)) -> dict:
         "scheduler_running": task_scheduler.is_running(),
         "next_task": {"name": next_task["name"], "next_run_at": next_task["next_run_at"]} if next_task else None,
         "enabled_task_count": len(enabled_tasks),
-        "discord_connected_bots": discord_channel.connected_bots(),
+        "discord_connected_bots": discord_channel.connected_bots(mine_only=True),
         "model_endpoint_count": len(model_endpoints.list_endpoints()),
         "vault_ok": os.path.isdir(vault_dir),
     }
