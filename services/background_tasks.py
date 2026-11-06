@@ -8,7 +8,7 @@ from datetime import datetime
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException
-from core import chat_tasks, helpers, session_manager_store as store
+from core import accounts, chat_tasks, helpers, session_manager_store as store
 from core.auth import SINGLE_USER, auth_manager
 from core.runs import clip_ends
 
@@ -19,6 +19,7 @@ _broadcasts = {}
 _sent_notes = {}
 _task = None
 _tick_sources = None
+_account_of = {}  # session id -> the account whose chats hold it (Multi-Account group 3)
 
 
 def require_owner(sid, user):
@@ -230,6 +231,10 @@ def _broadcast(sid, sources=None):
     previous = _broadcasts.get(sid)
     _broadcasts[sid] = 'computing'
     try:
+        _account_of[sid] = accounts.effective_account()
+    except accounts.NoAccount:
+        pass
+    try:
         if sources is None and _tick_sources is not None:
             sources = _tick_sources.get(sid, dict(helpers=[], cards=[], computers=[], apps=[]))
         items = list_items(sid, sources)
@@ -246,39 +251,48 @@ def _broadcast(sid, sources=None):
         log.exception('Could not broadcast background work')
 
 
-async def _watch():
+def _forget_sid(sid):
+    for table in (_derived, _details, _broadcasts, _sent_notes, _account_of):
+        table.pop(sid, None)
+
+
+def _tick(account_id):
+    """One watcher pass over one account's chats. Every account has its own chat database, so a chat
+    only counts as gone when the account that showed it no longer has it."""
     global _tick_sources
+    try:
+        groups = _source_groups()
+        _tick_sources = groups
+        chat_tasks.sweep()  # this account's chats, sharing this pass's sources
+        cutoff = time.time() - 1800
+        candidates = {sid for sid, source in groups.items() if
+                      source['helpers'] or source['computers'] or source['apps'] or
+                      any(card.get('enabled') or card.get('schedule_kind') == 'card' or card.get('run_started_at') or
+                          (not card.get('enabled') and (receipt.get('ran_at') or 0) >= cutoff)
+                          for card, receipt, end in source['cards'])}
+        for sid, items in list(_derived.items()):
+            if _account_of.get(sid, account_id) != account_id:
+                continue
+            if any(i['status'] in ('running', 'queued', 'waiting') or (i.get('endedAt') or 0) >= cutoff for i in items.values()):
+                candidates.add(sid)
+            elif sid not in candidates:
+                _forget_sid(sid)
+        for sid in candidates:
+            if store.session_exists(sid):
+                _broadcast(sid, groups.get(sid, dict(helpers=[], cards=[], computers=[], apps=[])))
+            elif _account_of.get(sid) == account_id:
+                _forget_sid(sid)
+    except Exception:
+        log.exception('Background work watcher failed')
+    finally:
+        _tick_sources = None
+
+
+async def _watch():
     while True:
-        try:
-            groups = _source_groups()
-            _tick_sources = groups
-            chat_tasks.sweep()
-            cutoff = time.time() - 1800
-            candidates = {sid for sid, source in groups.items() if
-                          source['helpers'] or source['computers'] or source['apps'] or
-                          any(card.get('enabled') or card.get('schedule_kind') == 'card' or card.get('run_started_at') or
-                              (not card.get('enabled') and (receipt.get('ran_at') or 0) >= cutoff)
-                              for card, receipt, end in source['cards'])}
-            for sid, items in list(_derived.items()):
-                if any(i['status'] in ('running', 'queued', 'waiting') or (i.get('endedAt') or 0) >= cutoff for i in items.values()):
-                    candidates.add(sid)
-                elif sid not in candidates:
-                    _derived.pop(sid, None)
-                    _details.pop(sid, None)
-                    _broadcasts.pop(sid, None)
-                    _sent_notes.pop(sid, None)
-            for sid in candidates:
-                if store.session_exists(sid):
-                    _broadcast(sid, groups.get(sid, dict(helpers=[], cards=[], computers=[], apps=[])))
-                else:
-                    _derived.pop(sid, None)
-                    _details.pop(sid, None)
-                    _broadcasts.pop(sid, None)
-                    _sent_notes.pop(sid, None)
-        except Exception:
-            log.exception('Background work watcher failed')
-        finally:
-            _tick_sources = None
+        for account_id in accounts.all_accounts():
+            with accounts.as_account(account_id):
+                _tick(account_id)
         await asyncio.sleep(2)
 
 

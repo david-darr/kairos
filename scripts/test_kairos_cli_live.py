@@ -46,7 +46,15 @@ def remove_tree(path) -> None:
     def unlock(function, target, _error):
         os.chmod(target, stat.S_IWRITE)
         function(target)
-    shutil.rmtree(path, onexc=unlock) if sys.version_info >= (3, 12) else shutil.rmtree(path, onerror=unlock)
+    # The backend's child process can hold its chat database for a moment after the launcher is killed.
+    for attempt in range(50):
+        try:
+            shutil.rmtree(path, onexc=unlock) if sys.version_info >= (3, 12) else shutil.rmtree(path, onerror=unlock)
+            return
+        except PermissionError:
+            if attempt == 49:
+                raise
+            time.sleep(0.2)
 
 
 def free_port() -> int:

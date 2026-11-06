@@ -4,20 +4,25 @@ import threading
 from core.constants import DATA_DIR
 from core.atomic_io import read_json, write_json_atomic
 
-FILE = os.path.join(DATA_DIR, 'agent_conversations.json')
+FILE = None  # a test can point it at its own file
+
+
+def _file():
+    from core import accounts
+    return FILE or accounts.path('agent_conversations.json')
 _LOCK = threading.RLock()
 
 
 def preferences(user):
     with _LOCK:
-        return read_json(FILE, {}).get(user, {})
+        return read_json(_file(), {}).get(user, {})
 
 
 def change(user, key, action, message_count=0, session_id=None):
     if action not in {'pin', 'unpin', 'read', 'unread'}:
         raise ValueError('Choose pin, unpin, read or unread')
     with _LOCK:
-        data = read_json(FILE, {})
+        data = read_json(_file(), {})
         entry = data.setdefault(user, {}).setdefault(key, {})
         if action in {'pin', 'unpin'}:
             entry['pinned'] = action == 'pin'
@@ -26,7 +31,7 @@ def change(user, key, action, message_count=0, session_id=None):
             if action == 'read':
                 entry['read_count'] = message_count
                 entry['session_id'] = session_id
-        write_json_atomic(FILE, data)
+        write_json_atomic(_file(), data)
         return entry.copy()
 
 

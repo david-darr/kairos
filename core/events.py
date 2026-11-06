@@ -28,7 +28,15 @@ from core.constants import DATA_DIR
 
 logger = logging.getLogger(__name__)
 
-EVENTS_FILE = os.path.join(DATA_DIR, "events.json")
+EVENTS_FILE = None  # a test can point the feed at its own file
+
+
+def events_file() -> str:
+    """The current account's activity feed (Multi-Account group 3)."""
+    from core import accounts
+    return EVENTS_FILE or accounts.path("events.json")
+
+
 MAX_EVENTS_KEPT = 300
 
 _lock = threading.Lock()
@@ -37,11 +45,15 @@ _subscribers: list[Callable[[dict], None]] = []
 
 def emit(event_type: str, message: str, level: str = "info", **extra) -> None:
     event = {"ts": time.time(), "type": event_type, "message": message, "level": level, **extra}
+    from core.accounts import NoAccount
     try:
         with _lock:
-            events = read_json(EVENTS_FILE, [])
+            path = events_file()
+            events = read_json(path, [])
             events.append(event)
-            write_json_atomic(EVENTS_FILE, events[-MAX_EVENTS_KEPT:])
+            write_json_atomic(path, events[-MAX_EVENTS_KEPT:])
+    except NoAccount:
+        pass  # nobody signed in (a refused sign-in, say): there is no feed it belongs to
     except Exception:
         logger.exception("events: failed to persist %s", event_type)
     for fn in _subscribers:
@@ -56,5 +68,5 @@ def subscribe(fn: Callable[[dict], None]) -> None:
 
 
 def recent(limit: int = 50) -> list[dict]:
-    events = read_json(EVENTS_FILE, [])
+    events = read_json(events_file(), [])
     return list(reversed(events[-limit:]))

@@ -48,8 +48,16 @@ class PermissionScope(unittest.IsolatedAsyncioTestCase):
         rules = patch.object(permissions, "PERMISSIONS_FILE", os.path.join(_DATA.name, f"permissions-{self.id()}.json"))
         rules.start(); self.addCleanup(rules.stop)
         permissions._session_rules.clear(); permissions._channels.clear(); permissions._pending.clear()
-        self.chat = session_manager.create_session(owner_user="alice")["id"]
-        self.addCleanup(session_manager.delete_session, self.chat)
+        # Alice's chat lives in Alice's account (Multi-Account group 3: every account has its own chats).
+        from core import accounts
+        alice = auth_manager.account_id("alice")
+        with accounts.as_account(alice):
+            self.chat = session_manager.create_session(owner_user="alice")["id"]
+
+        def forget_chat():
+            with accounts.as_account(alice):
+                session_manager.delete_session(self.chat)
+        self.addCleanup(forget_chat)
 
     async def asyncTearDown(self):
         await self.http.aclose()
@@ -75,12 +83,14 @@ class PermissionScope(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await task).behavior, "allow")
         self.assertEqual(permissions.list_rules(), [], "allow-once stores nothing")
 
-    async def test_an_admin_may_answer_any_chats_prompt_and_the_grant_names_them(self):
+    async def test_an_admin_cannot_answer_another_accounts_chat_prompt(self):
+        # Multi-Account group 3: the chat is in Alice's account, which the admin cannot reach (decision D2).
         task, request = await self.ask(f"chat:{self.chat}")
-        self.assertEqual((await self.answer("boss", request, "forever")).status_code, 200)
+        self.assertEqual((await self.answer("boss", request, "forever")).status_code, 404)
+        self.assertEqual((await self.answer("alice", request, "forever")).status_code, 200)
         self.assertEqual((await task).behavior, "allow")
         rule = permissions.list_rules()[0]
-        self.assertEqual((rule["granted_by"], rule["scope"], rule["content"]), ("boss", "forever", "npm test"))
+        self.assertEqual((rule["granted_by"], rule["scope"], rule["content"]), ("alice", "forever", "npm test"))
 
     async def test_two_answers_at_once_settle_on_exactly_one(self):
         task, request = await self.ask(f"chat:{self.chat}")

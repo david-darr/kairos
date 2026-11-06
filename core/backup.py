@@ -356,6 +356,16 @@ def _write_last(folder: str, result: dict) -> None:
         json.dump(result, f, indent=2)
 
 
+def _store_paths(data_dir: str, filenames: tuple) -> list:
+    """Each store file that exists, at the top of the data folder (not yet moved) and in every account
+    folder (Multi-Account phase 2), as (filename, path)."""
+    folders = [data_dir] + [os.path.join(data_dir, "accounts", name)
+                            for name in sorted(os.listdir(os.path.join(data_dir, "accounts")))
+                            if os.path.isdir(os.path.join(data_dir, "accounts", name))]         if os.path.isdir(os.path.join(data_dir, "accounts")) else [data_dir]
+    return [(filename, os.path.join(folder, filename)) for filename in filenames for folder in folders
+            if os.path.exists(os.path.join(folder, filename))]
+
+
 def disable_restored_automations(data_dir: str) -> dict:
     """Before stores are opened: disable scheduled goals, webhooks and app
     subscriptions, and settle queued work. Any failure aborts the whole swap.
@@ -363,10 +373,7 @@ def disable_restored_automations(data_dir: str) -> dict:
     """
     from core.atomic_io import write_json_atomic
     result = {"routines": 0, "triggers": 0, "app_triggers": 0, "queued": 0}
-    for filename in ("tasks.json", "triggers.json", "task_runs.json", "bot_app_triggers.json"):
-        path = os.path.join(data_dir, filename)
-        if not os.path.exists(path):
-            continue
+    for filename, path in _store_paths(data_dir, ("tasks.json", "triggers.json", "task_runs.json", "bot_app_triggers.json")):
         with open(path, encoding="utf-8-sig") as file:
             value = json.load(file)
 
@@ -398,10 +405,7 @@ def disable_restored_automations(data_dir: str) -> dict:
         write_json_atomic(path, value)
     # Schema-aware SQL: identifiers come only from SQLite's own schema, quoted
     # defensively. Future P3 tables use the same enabled/status columns.
-    for filename in ("sessions.db", "sessions.sqlite3", "bot_automation_events.sqlite3"):
-        path = os.path.join(data_dir, filename)
-        if not os.path.exists(path):
-            continue
+    for filename, path in _store_paths(data_dir, ("sessions.db", "sessions.sqlite3", "bot_automation_events.sqlite3")):
         with closing(sqlite3.connect(path)) as db, db:
             for (table,) in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall():
                 quoted = '"' + table.replace('"', '""') + '"'

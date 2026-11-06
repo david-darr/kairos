@@ -35,9 +35,15 @@ def line(value, limit=120):
     return str(value or '').splitlines()[0][:limit] if str(value or '').splitlines() else ''
 
 
+_files = {}  # session id -> the file it was loaded from, so a later save goes back to that account
+
+
 def _path(sid):
+    if sid in _files:
+        return _files[sid]
     if isinstance(sid, str) and re.fullmatch(r'[A-Za-z0-9_-]+', sid):
-        return os.path.join(DATA_DIR, 'chat_tasks', sid + '.json')
+        from core import accounts
+        return os.path.join(accounts.path('chat_tasks'), sid + '.json')
 
 
 def _save(sid):
@@ -52,6 +58,8 @@ def _save(sid):
 def _session(sid):
     if sid not in _sessions:
         path = _path(sid)
+        if path:
+            _files[sid] = path
         data = read_json(path, {}) if path else {}
         data.setdefault('items', {})
         data.setdefault('notes', [])
@@ -138,8 +146,20 @@ def items(sid):
     return sorted(values, key=lambda i: (i['status'] != 'running', -(i['endedAt'] or i['startedAt'] or 0)))[:30]
 
 
+def _current_account_ids():
+    """The loaded chats that belong to the current account: their file is in its chat_tasks folder
+    (Multi-Account group 3), so the watcher's pass for one account never settles another's."""
+    from core import accounts
+    try:
+        folder = os.path.normcase(os.path.abspath(accounts.path('chat_tasks')))
+    except accounts.NoAccount:
+        return []
+    return [sid for sid in list(_sessions)
+            if sid not in _files or os.path.normcase(os.path.abspath(os.path.dirname(_files[sid]))) == folder]
+
+
 def sweep(sid=None):
-    for session_id in ([sid] if sid else list(_sessions)):
+    for session_id in ([sid] if sid else _current_account_ids()):
         data = _session(session_id)
         expired = [key for key, item in data['items'].items() if item.get('endedAt') is not None and time.time() - item['endedAt'] > 1800]
         for key in expired:
@@ -398,6 +418,7 @@ def forget(sid):
     if handle:
         handle.cancel()
     path = _path(sid)
+    _files.pop(sid, None)
     if path and os.path.exists(path):
         os.remove(path)
 

@@ -36,7 +36,7 @@ async def deliver_due(client):
             session = None
         else:
             run = store.read_run(item["run_id"])
-            session = session_manager.get_session(run["session_id"]) if run else None
+            session = _owners_session(item["owner"], run["session_id"]) if run else None
         if item["kind"] not in ("test", *store.BOT_KINDS) and (not session or (session.get("owner_user") not in (None, item["owner"])
                             and not auth_manager.is_admin(item["owner"]))):
             store.delivery_result(item, 403)
@@ -61,6 +61,16 @@ async def deliver_due(client):
         except (httpx.HTTPError, ValueError):
             # Endpoint/token/authorization and payload must never reach logs.
             store.delivery_result(item, 0)
+
+
+def _owners_session(owner, session_id):
+    """The chat as its owner's account has it (Multi-Account group 3: each account has its own chats)."""
+    from core import accounts
+    account_id = accounts.account_for_user(owner)
+    if account_id is None:
+        return None
+    with accounts.as_account(account_id):
+        return session_manager.get_session(session_id)
 
 
 async def _send_loop():

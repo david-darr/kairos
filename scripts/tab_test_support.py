@@ -25,7 +25,7 @@ class TemporaryDirectory:
     def cleanup(self):
         if os.path.exists(self.name):
             store = sys.modules.get("core.session_manager_store")
-            if store and os.path.commonpath((self.name, store.DB_FILE)) == self.name:
+            if store and any(os.path.commonpath((self.name, p)) == self.name for p in (*store._conns, store.DB_FILE or self.name)):
                 store.close()  # Windows cannot remove an open SQLite store
             for attempt in range(20):
                 try:

@@ -23,7 +23,14 @@ except ImportError:
 
 from core.constants import DATA_DIR
 
-STAGING_DIR = os.path.join(DATA_DIR, "attachments")
+STAGING_DIR = None  # a test can point staging at its own folder
+
+
+def staging_dir() -> str:
+    """The current account's uploads waiting to be sent (Multi-Account group 3)."""
+    from core import accounts
+    return STAGING_DIR or accounts.path("attachments")
+
 
 # A scanned PDF's pages are already full-resolution images by construction —
 # Claude's own Read tool renders every page and returns them all in one
@@ -187,22 +194,24 @@ def _safe_filename(name: str) -> str:
 
 def stage_file(filename: str, content: bytes) -> dict:
     """Save an uploaded file to staging, return {id, filename, size}."""
-    os.makedirs(STAGING_DIR, exist_ok=True)
+    folder = staging_dir()
+    os.makedirs(folder, exist_ok=True)
     attachment_id = uuid.uuid4().hex[:12]
     safe_name = _safe_filename(filename)
-    dest = os.path.join(STAGING_DIR, f"{attachment_id}_{safe_name}")
+    dest = os.path.join(folder, f"{attachment_id}_{safe_name}")
     with open(dest, "wb") as f:
         f.write(content)
     return {"id": attachment_id, "filename": safe_name, "size": len(content)}
 
 
 def _find_staged_path(attachment_id: str) -> str | None:
-    if not os.path.isdir(STAGING_DIR):
+    folder = staging_dir()
+    if not os.path.isdir(folder):
         return None
     prefix = f"{attachment_id}_"
-    for name in os.listdir(STAGING_DIR):
+    for name in os.listdir(folder):
         if name.startswith(prefix):
-            return os.path.join(STAGING_DIR, name)
+            return os.path.join(folder, name)
     return None
 
 

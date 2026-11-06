@@ -70,8 +70,20 @@ def make(data: str) -> None:
             f.write(body)
 
 
+def _at(data: str, name: str) -> str:
+    """Where a store is after a real start: in the account folder once the account layout moved it
+    (core/account_migration.py), else at the top of the data folder."""
+    try:
+        with open(os.path.join(data, "layout.json"), encoding="utf-8") as f:
+            account = json.load(f).get("account")
+    except (OSError, ValueError):
+        account = None
+    moved = os.path.join(data, "accounts", account, name) if account else None
+    return moved if moved and os.path.exists(moved) else os.path.join(data, name)
+
+
 def facts(data: str) -> dict:
-    db = sqlite3.connect(f"file:{os.path.join(data, 'sessions.db')}?mode=ro", uri=True)
+    db = sqlite3.connect(f"file:{_at(data, 'sessions.db')}?mode=ro", uri=True)
     try:
         version = int(db.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0])
         # Only the old chats: a real start also adds the front desk's main thread (Bots Phase 5).
@@ -80,11 +92,12 @@ def facts(data: str) -> dict:
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     finally:
         db.close()
-    with open(os.path.join(data, "task_runs.json"), encoding="utf-8") as f:
+    with open(_at(data, "task_runs.json"), encoding="utf-8") as f:
         runs = [r for r in json.load(f) if r.get("task_id") == LEGACY_TASK]
-    with open(os.path.join(data, "tasks.json"), encoding="utf-8") as f:
+    with open(_at(data, "tasks.json"), encoding="utf-8") as f:
         task = json.load(f).get(LEGACY_TASK, {})
-    snapshots = sorted(n for n in os.listdir(data) if n.startswith("sessions.db.pre-v"))
+    home = os.path.dirname(_at(data, "sessions.db"))
+    snapshots = sorted(n for n in os.listdir(home) if n.startswith("sessions.db.pre-v"))
     return {"schema_version": version, "chats": chats, "searchable_messages": words,
             "has_new_tables": {"runs", "deliveries", "helpers", "run_events"} <= tables, "snapshots": snapshots,
             "legacy_task_runs": [r.get("outcome") for r in runs], "legacy_task_still_marked": "run_started_at" in task,

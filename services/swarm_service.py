@@ -245,7 +245,9 @@ class SwarmService:
     def _worker_factory(self, system_id):
         system = self.store.get_system(system_id)
         configuration = json.loads(system.get("configuration") or "{}")
-        memory = SwarmMemory(configuration.get("memory"), self._memory_owner_scope(system.get("owner")))
+        from core.accounts import account_for_user
+        memory = SwarmMemory(configuration.get("memory"), self._memory_owner_scope(system.get("owner")),
+                             account=account_for_user(system.get("owner")))
         scheduled = configuration.get("mode") == "scheduled"
         scratch = self.directory / "systems" / system_id / "work"
         scratch.mkdir(parents=True, exist_ok=True)

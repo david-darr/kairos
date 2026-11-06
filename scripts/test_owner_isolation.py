@@ -4,7 +4,8 @@ A19 / "no cross-owner reads/mutations/runs/stops for chats, agents, teams,
 tasks, files, designs, Google, tab data, Forge", checked through the real app's
 HTTP routes with real session cookies (never a mocked user). Alice owns the
 objects; Bob is a second non-admin member; an anonymous client has no cookie;
-Boss is the admin who may reach everything.
+Boss is an admin. Since Multi-Account group 3 (2026-11-06) every account has its own chats and the admin
+cannot read another account's (decision D2), so Boss is refused like Bob.
 
 Teams (test_swarm_api.test_foreign_system_all_surfaces_not_found), Google
 accounts (test_google_accounts) and tab data (test_tabs, test_tab_boundaries)
@@ -61,6 +62,11 @@ class OwnerIsolation(unittest.TestCase):
         cls.alice, cls.bob, cls.anon, cls.boss = client("alice"), client("bob"), client(None), client("boss")
         cls.work = Path(tempfile.mkdtemp(prefix="g7-work-", dir=_DATA.name))
 
+    def as_owner(self, name):
+        """Direct store calls in a test run with no request: say whose account they work in."""
+        from core import accounts
+        return accounts.as_account(auth_manager.account_id(name))
+
     def refused(self, label, response):
         self.assertIn(response.status_code, REFUSED, f"{label} -> {response.status_code} {response.text[:120]}")
 
@@ -76,7 +82,8 @@ class OwnerIsolation(unittest.TestCase):
         listing = [s["id"] for s in self.bob.get("/api/sessions").json()]
         self.assertNotIn(sid, listing, "Bob's chat list must not contain Alice's chat")
         self.assertIn(sid, [s["id"] for s in self.alice.get("/api/sessions").json()])
-        self.assertIn(sid, [s["id"] for s in self.boss.get("/api/sessions").json()], "an admin sees every chat")
+        self.assertNotIn(sid, [s["id"] for s in self.boss.get("/api/sessions").json()],
+                         "an admin cannot read another account's chats (D2)")
         for path in (f"/api/sessions/{sid}", f"/api/sessions/{sid}/context", f"/api/chat/background/{sid}"):
             with self.subTest(path=path):
                 self.refused("bob GET " + path, self.bob.get(path))
@@ -120,17 +127,18 @@ class OwnerIsolation(unittest.TestCase):
 
     # -- files ---------------------------------------------------------------
 
-    def test_a_chats_files_are_readable_only_by_its_owner_or_an_admin(self):
+    def test_a_chats_files_are_readable_only_by_its_owner(self):
         from core import chat_files
         from core.session_manager import session_manager
         sid = self.new_chat()
         (self.work / "secret.txt").write_text("alice-only-contents", encoding="utf-8")
-        chat_files.record_local(sid, str(self.work), "secret.txt", "created")
-        entry = chat_files.list_for_session(sid)[0]
+        with self.as_owner("alice"):
+            chat_files.record_local(sid, str(self.work), "secret.txt", "created")
+            entry = chat_files.list_for_session(sid)[0]
         url = f"/chat-files/{entry['id']}"
         mine = self.alice.get("/api/chat/artifacts/content", params={"session_id": sid, "url": url})
         self.assertEqual((mine.status_code, mine.text), (200, "alice-only-contents"), "the owner can read it")
-        self.assertEqual(self.boss.get("/api/chat/files", params={"session_id": sid}).status_code, 200)
+        self.refused("an admin lists Alice's chat files", self.boss.get("/api/chat/files", params={"session_id": sid}))
         with self.subTest("per-chat list"):
             theirs = self.bob.get("/api/chat/files", params={"session_id": sid})
             self.refused("bob lists Alice's chat files", theirs)
@@ -144,7 +152,8 @@ class OwnerIsolation(unittest.TestCase):
                 self.refused("bob " + path, got)
                 self.assertNotIn("alice-only-contents", got.text)
                 self.refused("anon " + path, self.anon.get(path, params={"session_id": sid, "url": url}))
-        session_manager.delete_session(sid)
+        with self.as_owner("alice"):
+            session_manager.delete_session(sid)
 
     # -- reference picker, swarm memory, chat status/summary (batch 2) -------
 
@@ -153,7 +162,8 @@ class OwnerIsolation(unittest.TestCase):
         from core.session_manager import session_manager
         sid = self.new_chat()  # titled "alice private"
         (self.work / "picker.txt").write_text("x", encoding="utf-8")
-        chat_files.record_local(sid, str(self.work), "picker.txt", "created")
+        with self.as_owner("alice"):
+            chat_files.record_local(sid, str(self.work), "picker.txt", "created")
 
         def kinds(c, kind):
             got = c.get("/api/chat/references", params={"q": "picker" if kind == "file" else "alice private", "kind": kind})
@@ -163,9 +173,10 @@ class OwnerIsolation(unittest.TestCase):
         self.assertEqual(kinds(self.bob, "file"), [], "nor their chat files")
         self.assertIn(sid, [r["id"] for r in kinds(self.alice, "chat")], "the owner finds the chat")
         self.assertTrue(kinds(self.alice, "file"), "the owner finds the chat file")
-        self.assertIn(sid, [r["id"] for r in kinds(self.boss, "chat")], "an admin sees every chat")
-        self.assertTrue(kinds(self.boss, "file"), "an admin sees every chat file")
-        session_manager.delete_session(sid)
+        self.assertNotIn(sid, [r["id"] for r in kinds(self.boss, "chat")], "an admin cannot see another account's chat (D2)")
+        self.assertEqual(kinds(self.boss, "file"), [], "nor its chat files")
+        with self.as_owner("alice"):
+            session_manager.delete_session(sid)
 
     def test_the_reference_picker_searches_message_text_only_in_the_askers_own_chats(self):
         from core.session_manager import session_manager
@@ -174,8 +185,9 @@ class OwnerIsolation(unittest.TestCase):
         probe = {"q": "zebracorn", "kind": "chat"}
         self.assertEqual(self.bob.get("/api/chat/references", params=probe).json(), [], "member: another member's message text is not searchable")
         self.assertIn(sid, [r["id"] for r in self.alice.get("/api/chat/references", params=probe).json()])
-        self.assertIn(sid, [r["id"] for r in self.boss.get("/api/chat/references", params=probe).json()])
-        session_manager.delete_session(sid)
+        self.assertNotIn(sid, [r["id"] for r in self.boss.get("/api/chat/references", params=probe).json()])
+        with self.as_owner("alice"):
+            session_manager.delete_session(sid)
 
     def test_swarm_memory_chat_search_and_read_are_scoped_to_the_owner(self):
         from core.session_manager import session_manager
@@ -183,22 +195,26 @@ class OwnerIsolation(unittest.TestCase):
         sid = self.new_chat()
         self.assertEqual(self.alice.post(f"/api/sessions/{sid}/messages", json={"role": "user", "content": "quokkaberry launch plan"}).status_code, 200)
         settings = {"sources": ["sessions"]}
-        self.assertEqual(SwarmMemory(settings, owner_user="bob").search("quokkaberry"), [], "a member's company cannot find another member's chat")
+        ids = {n: auth_manager.account_id(n) for n in ("alice", "bob", "boss")}
+        bobs = SwarmMemory(settings, owner_user="bob", account=ids["bob"])
+        self.assertEqual(bobs.search("quokkaberry"), [], "a member's company cannot find another member's chat")
         with self.assertRaises(ValueError):
-            SwarmMemory(settings, owner_user="bob").read("session:" + sid)
-        mine = SwarmMemory(settings, owner_user="alice")
+            bobs.read("session:" + sid)
+        mine = SwarmMemory(settings, owner_user="alice", account=ids["alice"])
         self.assertEqual([r["ref"] for r in mine.search("quokkaberry")], ["session:" + sid])
         self.assertIn("quokkaberry", mine.read("session:" + sid))
-        self.assertEqual([r["ref"] for r in SwarmMemory(settings, owner_user=None).search("quokkaberry")], ["session:" + sid], "admin scope (None) sees all")
+        self.assertEqual(SwarmMemory(settings, owner_user=None, account=ids["boss"]).search("quokkaberry"), [],
+                         "an admin's company searches the admin's own account only (D2)")
         from services.swarm_service import SwarmService
         self.assertIsNone(SwarmService._memory_owner_scope("boss"), "an admin owner searches every chat")
         self.assertEqual(SwarmService._memory_owner_scope("bob"), "bob")
-        session_manager.delete_session(sid)
+        with self.as_owner("alice"):
+            session_manager.delete_session(sid)
 
     def test_chat_status_and_summary_are_owner_scoped(self):
         from core.session_manager import session_manager
         sid = self.new_chat()
-        for label, c, ok in (("owner", self.alice, True), ("admin", self.boss, True), ("member", self.bob, False), ("anonymous", self.anon, False)):
+        for label, c, ok in (("owner", self.alice, True), ("admin", self.boss, False), ("member", self.bob, False), ("anonymous", self.anon, False)):
             with self.subTest(label=label):
                 status = c.get("/api/chat/status", params={"session_id": sid})
                 summary = c.get("/api/chat/summary", params={"session_id": sid})
@@ -209,7 +225,8 @@ class OwnerIsolation(unittest.TestCase):
                     self.refused(f"{label} status", status)
                     self.refused(f"{label} summary", summary)
                     self.refused(f"{label} POST summary", regenerate)
-        session_manager.delete_session(sid)
+        with self.as_owner("alice"):
+            session_manager.delete_session(sid)
 
     # -- tasks ---------------------------------------------------------------
 

@@ -472,7 +472,9 @@ class DerivedTests(unittest.TestCase):
                 chat_tasks.sweep.side_effect = lambda sid=None: bg._broadcast(self.sid) if sid is None else None
                 with self.assertRaises(asyncio.CancelledError):
                     await bg._watch()
-                self.assertEqual(sources.call_count, 1)
+                # One source pass per account (Multi-Account group 3), each shared with its own sweep.
+                from core import accounts
+                self.assertEqual(sources.call_count, len(accounts.all_accounts()))
         asyncio.run(tick())
 
     def test_chat_deletion_and_bulk_wipe_forget_persistence(self):

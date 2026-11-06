@@ -94,12 +94,30 @@ import threading
 import time
 from typing import Any, Optional
 
+from core import accounts
 from core.atomic_io import read_json
 from core.constants import DATA_DIR
 
 logger = logging.getLogger(__name__)
 
-DB_FILE = os.path.join(DATA_DIR, "sessions.db")
+DB_FILE: Optional[str] = None  # a test can point the store at its own file
+
+
+def db_file() -> str:
+    """The current account's chat database (Multi-Account group 3): every account has its own, so
+    each sees only its own chats, runs and bot conversations."""
+    return DB_FILE or accounts.path("sessions.db")
+
+
+def _legacy_owner(path: str) -> bool:
+    """Only the first admin's database (or the shared one before the move) imports the old JSON chats,
+    which were all theirs: another account's new database must never pick them up."""
+    if DB_FILE:
+        return True
+    folder = os.path.normcase(os.path.realpath(os.path.dirname(path)))
+    mine = {os.path.normcase(os.path.realpath(DATA_DIR)),
+            os.path.normcase(os.path.realpath(accounts.account_dir(accounts.local_account(), create=False)))}
+    return folder in mine
 
 # Legacy JSON locations, read once by migrate_from_json() and then left alone.
 LEGACY_SESSIONS_DIR = os.path.join(DATA_DIR, "sessions")
@@ -296,7 +314,8 @@ CREATE TABLE IF NOT EXISTS run_events (
 );
 """
 
-_conn: Optional[sqlite3.Connection] = None
+_conns: dict = {}  # database path -> its connection, one per account (all under _LOCK)
+_conn: Optional[sqlite3.Connection] = None  # the connection _connect() last handed out
 # Result of the JSON import performed by this process's first connection,
 # kept so callers (and tests) can see what the boot-time migration did.
 _last_migration: Optional[dict] = None
@@ -304,12 +323,13 @@ _last_migration: Optional[dict] = None
 
 def _connect() -> sqlite3.Connection:
     global _conn
-    if _conn is not None:
-        return _conn
-    # Derived from DB_FILE rather than DATA_DIR so the two cannot point at
-    # different places if the file location is ever overridden.
-    os.makedirs(os.path.dirname(DB_FILE) or ".", exist_ok=True)
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    path = db_file()
+    conn = _conns.get(path)
+    if conn is not None:
+        _conn = conn
+        return conn
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    conn = sqlite3.connect(path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     # ON DELETE CASCADE on messages is only honoured with this pragma on, and
     # it is per-connection rather than stored in the file.
@@ -317,7 +337,7 @@ def _connect() -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode = WAL")
     # Before anything below touches an older database - even the CREATE IF
     # NOT EXISTS of a newer table - keep a copy of it as it was.
-    _snapshot_before_upgrade(conn)
+    _snapshot_before_upgrade(conn, path)
     conn.executescript(_SCHEMA)
     conn.execute(
         "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)",
@@ -327,9 +347,10 @@ def _connect() -> sqlite3.Connection:
     # Assigned BEFORE the upgrade/migration run, so the save_session() calls
     # inside them re-enter _connect() and get this same connection instead of
     # recursing into a second one.
-    _conn = conn
+    _conns[path] = _conn = conn
     _upgrade_schema(conn)
-    _migrate_if_needed(conn)
+    if _legacy_owner(path):
+        _migrate_if_needed(conn)
     _migrate_compaction_data(conn)
     return conn
 
@@ -343,14 +364,14 @@ def _stored_version(conn: sqlite3.Connection) -> Optional[int]:
     return int(row["value"]) if row else None
 
 
-def _snapshot_before_upgrade(conn: sqlite3.Connection) -> Optional[str]:
+def _snapshot_before_upgrade(conn: sqlite3.Connection, path: Optional[str] = None) -> Optional[str]:
     """Copy an older database whole before it is upgraded, with SQLite's
     backup API (consistent even under WAL). Kept once per version: a second
     start that finds the copy already there leaves it alone."""
     version = _stored_version(conn)
     if version is None or version >= SCHEMA_VERSION:
         return None
-    target = f"{DB_FILE}.pre-v{version}"
+    target = f"{path or db_file()}.pre-v{version}"
     if os.path.exists(target):
         return target
     copy = sqlite3.connect(target)
@@ -546,6 +567,7 @@ def migrate_tool_text_index(stop: Optional[threading.Event] = None, batch: int =
     stop = stop or threading.Event()
     with _LOCK:
         conn = _connect()
+        path = db_file()
         if conn.execute("SELECT 1 FROM meta WHERE key = ?", (TOOL_INDEX_MIGRATION_MARKER,)).fetchone():
             return True
         sessions = [r["id"] for r in conn.execute("SELECT id FROM sessions ORDER BY id")]
@@ -555,7 +577,7 @@ def migrate_tool_text_index(stop: Optional[threading.Event] = None, batch: int =
     last = 0
     while True:
         with _LOCK:
-            if stop.is_set() or _conn is not conn:
+            if stop.is_set() or _conns.get(path) is not conn:
                 return False
             rows = conn.execute("SELECT rowid, session_id, idx FROM messages_fts WHERE rowid > ? "
                                 "ORDER BY rowid LIMIT ?", (last, _FTS_MAP_CHUNK)).fetchall()
@@ -577,7 +599,7 @@ def migrate_tool_text_index(stop: Optional[threading.Event] = None, batch: int =
     def flush(items: list) -> bool:
         nonlocal count
         with _LOCK:
-            if stop.is_set() or _conn is not conn:
+            if stop.is_set() or _conns.get(path) is not conn:
                 return False
             with _atomic(conn):
                 count += sum(_reindex_tool_message(conn, sid, idx, rowids, extras, map_end) for sid, idx in items)
@@ -586,7 +608,7 @@ def migrate_tool_text_index(stop: Optional[threading.Event] = None, batch: int =
 
     for sid in sessions:
         with _LOCK:
-            if stop.is_set() or _conn is not conn:
+            if stop.is_set() or _conns.get(path) is not conn:
                 return False
             pending.extend((sid, r[0]) for r in conn.execute(
                 "SELECT idx FROM messages WHERE session_id = ? AND doc LIKE '%\"tool_rounds\"%' ORDER BY idx", (sid,)))
@@ -598,7 +620,7 @@ def migrate_tool_text_index(stop: Optional[threading.Event] = None, batch: int =
     if pending and not flush(pending):
         return False
     with _LOCK:
-        if stop.is_set() or _conn is not conn:
+        if stop.is_set() or _conns.get(path) is not conn:
             return False
         with _atomic(conn):
             conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')", (TOOL_INDEX_MIGRATION_MARKER,))
@@ -608,11 +630,18 @@ def migrate_tool_text_index(stop: Optional[threading.Event] = None, batch: int =
 
 
 def _run_tool_index_migration(stop: threading.Event) -> None:
-    try:
-        migrate_tool_text_index(stop)
-    except Exception:
-        # Not fatal: the marker stays unset, so the next start tries again.
-        logger.exception("session store: background tool-text re-index failed")
+    for account_id in ([None] if DB_FILE else accounts.all_accounts()):  # a test's own file, or each account's
+        if stop.is_set():
+            return
+        try:
+            if account_id is None:
+                migrate_tool_text_index(stop)
+            else:
+                with accounts.as_account(account_id):
+                    migrate_tool_text_index(stop)
+        except Exception:
+            # Not fatal: the marker stays unset, so the next start tries again.
+            logger.exception("session store: background tool-text re-index failed")
 
 
 def start_background_migration() -> Optional[threading.Thread]:
@@ -1427,8 +1456,9 @@ def close() -> None:
     global _conn, _last_migration
     stop_background_migration()  # before the lock: it takes the lock per batch
     with _LOCK:
-        if _conn is not None:
-            _conn.close()
+        for conn in _conns.values():
+            conn.close()
+        _conns.clear()
         _conn = None
         _last_migration = None
 

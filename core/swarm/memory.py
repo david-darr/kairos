@@ -6,7 +6,9 @@ semantic search. The two-step search/read shape keeps whole vaults, chats and
 documents out of every worker prompt and gives a later vector index one stable
 contract to implement.
 """
-from core import memory_tools, projects
+import contextlib
+
+from core import accounts, memory_tools, projects
 from core.session_manager import session_manager
 from services import documents_service
 
@@ -24,10 +26,13 @@ def _snippet(text, query, radius=200):
 
 
 class SwarmMemory:
-    def __init__(self, settings, owner_user=None):
-        # owner_user: None searches every chat (an admin or accounts off); a name limits
-        # chat search and reads to that member's own chats (same rule as tool_registry).
+    def __init__(self, settings, owner_user=None, account=None):
+        # owner_user: None searches every chat in the account (an admin or accounts off); a name
+        # limits chat search and reads to that member's own chats (same rule as tool_registry).
+        # account: whose data it reads (Multi-Account group 3). A company's workers run in the
+        # background with no account set, so the service passes its owner's.
         self.owner_user = owner_user
+        self.account = account
         settings = settings or {}
         self.sources = tuple(settings.get("sources") or ())
         self.project_id = settings.get("project_id")
@@ -37,7 +42,18 @@ class SwarmMemory:
     def enabled(self):
         return bool(self.sources)
 
+    def _in_account(self):
+        return accounts.as_account(self.account) if self.account else contextlib.nullcontext()
+
     def search(self, query):
+        with self._in_account():
+            return self._search(query)
+
+    def read(self, reference):
+        with self._in_account():
+            return self._read(reference)
+
+    def _search(self, query):
         query = str(query or "").strip()[:MAX_QUERY]
         if not query:
             raise ValueError("memory query is required")
@@ -77,7 +93,7 @@ class SwarmMemory:
                 add("library", "document:" + item["id"], item["title"], item["snippet"])
         return results
 
-    def read(self, reference):
+    def _read(self, reference):
         reference = str(reference or "").strip()
         kind, separator, identifier = reference.partition(":")
         if not separator or not identifier:

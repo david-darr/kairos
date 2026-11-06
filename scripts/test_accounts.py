@@ -268,7 +268,7 @@ class Migration(unittest.TestCase):
                                      backup=kwargs.pop("backup", self.backup), **kwargs)
 
     def test_group_one_moves_its_five_stores(self):
-        self.assertEqual([s.version for s in account_migration.STEPS], [1, 2], "group 2 added the vault step")
+        self.assertEqual([s.version for s in account_migration.STEPS], [1, 2, 3], "group 3 added the chats step")
         self.assertEqual(set(account_migration.STEPS[0].entries), {
             "notes.json", "calendar_events.json", "documents", "documents_index.json", "projects.json", "contacts.json"})
         (self.data / "documents").mkdir()
@@ -360,8 +360,8 @@ class Stores(unittest.TestCase):
         with accounts.as_account(self.ids["bea"]):
             self.assertEqual(accounts.path("documents", "a.md"),
                              os.path.join(accounts.ACCOUNTS_DIR, self.ids["bea"], "documents", "a.md"))
-            self.assertEqual(accounts.path("sessions.db"), os.path.join(_DATA.name, "sessions.db"),
-                             "chats have not moved yet")
+            self.assertEqual(accounts.path("tasks.json"), os.path.join(_DATA.name, "tasks.json"),
+                             "routines have not moved yet")
 
     def setUp(self):
         fresh_users()
@@ -736,6 +736,233 @@ class VaultBackup(unittest.TestCase):
         safety = Path(result["safety_copy"])
         self.assertFalse((safety / "accounts" / "abc123" / "vault").exists(), "put back, not left in the safety copy")
         self.assertEqual((safety / "accounts" / "abc123" / "notes.json").read_text(encoding="utf-8"), "current")
+
+
+class ChatsPerAccount(unittest.TestCase):
+    """Group 3: each account has its own chats, background work per chat, uploads and activity feed."""
+
+    @classmethod
+    def setUpClass(cls):
+        account_migration.run(_DATA.name, backup=lambda path: None)  # layout 3, as app.py leaves it
+        assert "sessions.db" in account_migration.moved_names()
+
+    def setUp(self):
+        from core import session_manager_store
+        self.store = session_manager_store
+        self.addCleanup(self.store.close)  # open connections would keep the temp folder's files locked
+        fresh_users()
+        auth_manager.create_user("david-darr", "password-one-1", is_admin=True)
+        auth_manager.create_user("bea", "password-two-2")
+        self.first, self.second = (auth_manager.account_id(n) for n in ("david-darr", "bea"))
+
+    def test_a_chat_is_listed_and_found_only_in_its_own_account(self):
+        from core.session_manager import session_manager
+        with accounts.as_account(self.first):
+            chat = session_manager.create_session("first's chat", owner_user="david-darr")
+        with accounts.as_account(self.second):
+            other = session_manager.create_session("bea's chat", owner_user="bea")
+        with accounts.as_account(self.first):
+            self.assertEqual([s["id"] for s in session_manager.list_sessions()], [chat["id"]])
+            self.assertEqual(session_manager.get_session(chat["id"])["title"], "first's chat")
+            self.assertIsNone(session_manager.get_session(other["id"]))
+        with accounts.as_account(self.second):
+            self.assertEqual([s["id"] for s in session_manager.list_sessions()], [other["id"]])
+            self.assertIsNone(session_manager.get_session(chat["id"]))
+            self.assertFalse(self.store.session_exists(chat["id"]))
+
+    def test_each_account_has_its_own_database_file_in_its_folder(self):
+        from core.session_manager import session_manager
+        paths = {}
+        for account_id in (self.first, self.second):
+            with accounts.as_account(account_id):
+                paths[account_id] = self.store.db_file()
+                session_manager.create_session("x")
+        self.assertNotEqual(*paths.values())
+        for account_id, path in paths.items():
+            self.assertEqual(path, os.path.join(accounts.ACCOUNTS_DIR, account_id, "sessions.db"))
+            self.assertTrue(os.path.exists(path), "created in the account folder")
+        self.assertFalse(os.path.exists(os.path.join(_DATA.name, "sessions.db")), "nothing at the shared place")
+        self.assertEqual(set(paths.values()) - set(self.store._conns), set(), "one open connection per account")
+
+    def test_only_the_first_admins_database_imports_the_old_json_chats(self):
+        mine = os.path.join(accounts.ACCOUNTS_DIR, self.first, "sessions.db")
+        theirs = os.path.join(accounts.ACCOUNTS_DIR, self.second, "sessions.db")
+        self.assertIsNone(self.store.DB_FILE)
+        self.assertTrue(self.store._legacy_owner(mine))
+        self.assertFalse(self.store._legacy_owner(theirs))
+        self.assertTrue(self.store._legacy_owner(os.path.join(_DATA.name, "sessions.db")), "the shared place, before the move")
+        with patch.object(self.store, "DB_FILE", os.path.join(_DATA.name, "own.db")):
+            self.assertTrue(self.store._legacy_owner(theirs), "a test's own file is its own legacy owner")
+
+    def test_background_work_is_saved_back_to_the_account_it_was_loaded_from(self):
+        from core import chat_tasks
+        sid = "bgwork-" + self.first
+        self.addCleanup(chat_tasks._sessions.pop, sid, None)
+        self.addCleanup(chat_tasks._files.pop, sid, None)
+        with accounts.as_account(self.first):
+            chat_tasks._session(sid)
+            loaded = chat_tasks._files[sid]
+        self.assertEqual(loaded, os.path.join(accounts.ACCOUNTS_DIR, self.first, "chat_tasks", sid + ".json"))
+        with accounts.as_account(self.second):
+            chat_tasks._save(sid)
+            self.assertEqual(chat_tasks._path(sid), loaded, "the file it came from, not this account's")
+        self.assertTrue(os.path.exists(loaded), "written in the first account's folder")
+        self.assertFalse(os.path.exists(os.path.join(accounts.ACCOUNTS_DIR, self.second, "chat_tasks", sid + ".json")))
+        with accounts.as_account(self.second):
+            chat_tasks.forget(sid)
+        self.assertFalse(os.path.exists(loaded))
+        self.assertNotIn(sid, chat_tasks._files)
+        self.assertNotIn(sid, chat_tasks._sessions)
+
+    def test_a_staged_upload_is_found_only_by_its_own_account(self):
+        from core import attachments
+        with accounts.as_account(self.first):
+            staged = attachments.stage_file("notes.txt", b"hello")
+            path, name = attachments.staged_file_info(staged["id"])
+            self.assertEqual(name, "notes.txt")
+            self.assertEqual(os.path.dirname(path), os.path.join(accounts.ACCOUNTS_DIR, self.first, "attachments"))
+        with accounts.as_account(self.second):
+            self.assertIsNone(attachments.staged_file_info(staged["id"]))
+        with accounts.as_account(self.first):
+            self.assertIsNotNone(attachments.staged_file_info(staged["id"]))
+
+    def test_an_event_shows_in_its_own_accounts_feed_only(self):
+        from core import events
+        with accounts.as_account(self.first):
+            events.emit("test.g3", "first's event")
+            self.assertEqual([e["message"] for e in events.recent() if e["type"] == "test.g3"], ["first's event"])
+        with accounts.as_account(self.second):
+            self.assertEqual([e for e in events.recent() if e["type"] == "test.g3"], [])
+
+    def test_an_event_with_nobody_signed_in_is_dropped_quietly(self):
+        from core import events
+        with accounts.as_account(self.first):
+            before = events.recent()
+        token = accounts.set_current(None)
+        try:
+            events.emit("test.nobody", "refused sign-in")  # must not raise
+        finally:
+            accounts.reset_current(token)
+        self.assertFalse(os.path.exists(os.path.join(_DATA.name, "events.json")), "nothing at the shared place")
+        for account_id in (self.first, self.second):
+            with accounts.as_account(account_id):
+                self.assertFalse([e for e in events.recent() if e["type"] == "test.nobody"])
+        with accounts.as_account(self.first):
+            self.assertEqual(events.recent(), before)
+
+    def test_a_phone_notification_reads_the_chat_from_its_owners_account(self):
+        from core.session_manager import session_manager
+        from services import mobile_notifications
+        with accounts.as_account(self.second):
+            chat = session_manager.create_session("bea's chat", owner_user="bea")
+        self.assertEqual(mobile_notifications._owners_session("bea", chat["id"])["id"], chat["id"])
+        self.assertIsNone(mobile_notifications._owners_session("david-darr", chat["id"]), "not in their chats")
+        self.assertIsNone(mobile_notifications._owners_session("deleted-user", chat["id"]), "a user that no longer exists")
+        self.assertIsNone(accounts.current_account(), "and the caller's own account is untouched")
+
+    def test_the_watcher_only_forgets_a_chat_when_the_account_that_showed_it_lacks_it(self):
+        from services import background_tasks
+        sid = "watched-" + self.first
+        groups = {sid: dict(helpers=[{"id": "h"}], cards=[], computers=[], apps=[])}
+        stale = {"h": {"status": "done", "endedAt": 1}}
+
+        def plant():
+            background_tasks._derived[sid] = dict(stale)
+            background_tasks._account_of[sid] = self.first
+
+        self.addCleanup(background_tasks._forget_sid, sid)
+        with patch.object(background_tasks, "_source_groups", return_value={}), \
+                patch.object(background_tasks.store, "session_exists", return_value=False):
+            plant()
+            background_tasks._tick(self.second)
+            self.assertIn(sid, background_tasks._derived, "finished, but another account's: left alone")
+            self.assertEqual(background_tasks._account_of[sid], self.first)
+            background_tasks._tick(self.first)
+            self.assertNotIn(sid, background_tasks._derived, "its own account's watcher does tidy it")
+        with patch.object(background_tasks, "_source_groups", return_value=groups), \
+                patch.object(background_tasks.store, "session_exists", return_value=False):
+            plant()
+            background_tasks._tick(self.second)
+            self.assertIn(sid, background_tasks._account_of, "a source names it, but this account has no such chat")
+            background_tasks._tick(self.first)
+            self.assertNotIn(sid, background_tasks._account_of, "gone from the account that showed it")
+
+
+class ChatsMigration(unittest.TestCase):
+    """Migration step 3, and what a backup and restore do with the per-account chat database."""
+
+    STEP3_FILES = ("sessions.db", "sessions.db-wal", "sessions.db-shm", "sessions.db.pre-v6", "sessions.db.pre-v7-wal",
+                   "chat_tasks/x.json", "attachments/a_b.txt", "events.json", "agent_conversations.json",
+                   "jobs/resumes/r.txt", "jobs.json", "sessions.pre-sqlite-backup/sessions_index.json")
+    SHARED_FILES = ("mobile_activity.db", "sessions.json")
+
+    def setUp(self):
+        self.root = TemporaryDirectory(prefix="kairos-layout3-", dir=tempfile.gettempdir())
+        self.addCleanup(self.root.cleanup)
+        self.data = Path(self.root.name)
+        self.account = self.data / "accounts" / "abc123"
+
+    def plant(self, names):
+        for name in names:
+            path = self.data / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(name, encoding="utf-8")
+
+    def test_the_chat_files_move_and_the_phone_database_and_logins_stay(self):
+        self.plant(self.STEP3_FILES + self.SHARED_FILES)
+        (self.data / "layout.json").write_text(json.dumps({"version": 2}), encoding="utf-8")
+        step = account_migration.STEPS[2]
+        self.assertEqual(step.version, 3)
+        result = account_migration.run(str(self.data), [step], account="abc123",
+                                       backup=lambda path: Path(path).write_text("backup", encoding="utf-8"))
+        self.assertTrue(result["ok"], result)
+        self.assertEqual((result["from_version"], result["to_version"]), (2, 3))
+        for name in self.STEP3_FILES:
+            self.assertEqual((self.account / name).read_text(encoding="utf-8"), name, f"{name} moved")
+            self.assertFalse((self.data / name).exists(), f"{name} left the top level")
+        for name in ("chat_tasks", "attachments", "jobs", "sessions.pre-sqlite-backup"):
+            self.assertFalse((self.data / name).exists(), f"{name} folder moved whole")
+        for name in self.SHARED_FILES:
+            self.assertEqual((self.data / name).read_text(encoding="utf-8"), name, f"{name} stays shared")
+            self.assertFalse((self.account / name).exists())
+        self.assertEqual(account_migration.layout_version(str(self.data)), 3)
+        self.assertIn("sessions.db", account_migration.moved_names(str(self.data)))
+        self.assertNotIn("mobile_activity.db", account_migration.moved_names(str(self.data)))
+
+    def test_the_wildcard_only_takes_the_database_copies(self):
+        self.plant(("sessions.db", "sessions.db.pre-v4", "sessions.dbx", "sessions.json", "sessions.db-journal"))
+        self.assertEqual(account_migration._expand(str(self.data), "sessions.db.pre-v*"), ["sessions.db.pre-v4"])
+        self.assertEqual(account_migration._expand(str(self.data), "sessions.db"), ["sessions.db"], "no wildcard: as given")
+        self.assertEqual(account_migration._expand(str(self.data / "missing"), "sessions.db.pre-v*"), [])
+
+    def test_a_backup_finds_the_stores_at_the_top_and_in_every_account(self):
+        self.plant(("sessions.db", "accounts/abc123/sessions.db", "accounts/def456/sessions.db",
+                    "accounts/def456/tasks.json", "accounts/ghi789/other.txt"))
+        found = backup._store_paths(str(self.data), ("sessions.db", "tasks.json", "triggers.json"))
+        shown = sorted((n, os.path.relpath(p, self.data).replace(os.sep, "/")) for n, p in found)
+        self.assertEqual(shown, [("sessions.db", "accounts/abc123/sessions.db"),
+                                 ("sessions.db", "accounts/def456/sessions.db"), ("sessions.db", "sessions.db"),
+                                 ("tasks.json", "accounts/def456/tasks.json")])
+        bare = TemporaryDirectory(prefix="kairos-nofolder-", dir=tempfile.gettempdir())
+        self.addCleanup(bare.cleanup)
+        (Path(bare.name) / "sessions.db").write_text("x", encoding="utf-8")
+        self.assertEqual([n for n, _ in backup._store_paths(bare.name, ("sessions.db",))], ["sessions.db"],
+                         "no accounts folder yet: just the top level")
+
+    def test_a_restore_settles_unfinished_runs_in_every_accounts_database(self):
+        import sqlite3
+        from contextlib import closing
+        paths = {"account": self.account / "sessions.db", "top": self.data / "sessions.db"}
+        for path in paths.values():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with closing(sqlite3.connect(path)) as db, db:
+                db.execute("CREATE TABLE runs (id TEXT PRIMARY KEY, status TEXT)")
+                db.executemany("INSERT INTO runs VALUES (?, ?)", [("r1", "running"), ("r2", "done")])
+        result = backup.disable_restored_automations(str(self.data))
+        self.assertEqual(result["queued"], 2)
+        for path in paths.values():
+            with closing(sqlite3.connect(path)) as db:
+                self.assertEqual(dict(db.execute("SELECT id, status FROM runs")), {"r1": "failed", "r2": "done"})
 
 
 if __name__ == "__main__":

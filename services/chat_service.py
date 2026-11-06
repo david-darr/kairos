@@ -408,7 +408,7 @@ def _apply_attachments(session_id: str, text: str, attachment_ids: list[str] | N
         original = attachments.staged_file_info(attachment_id)
         if original:
             path, display_name = original
-            chat_files.record_local(session_id, str(attachments.STAGING_DIR),
+            chat_files.record_local(session_id, attachments.staging_dir(),
                                     Path(path).name, "attachment", display_name, names)
     if not names:
         return text

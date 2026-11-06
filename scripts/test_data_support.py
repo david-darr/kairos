@@ -27,7 +27,7 @@ class TestDataDirectory:
             atexit.unregister(self.cleanup)
             return
         store = sys.modules.get('core.session_manager_store')
-        if store and Path(store.DB_FILE).resolve().is_relative_to(root):
+        if store and any(Path(p).resolve().is_relative_to(root) for p in (*store._conns, store.DB_FILE or root)):
             store.close()
         registry = sys.modules.get('core.chat_tasks')
         if registry and Path(registry.DATA_DIR).resolve().is_relative_to(root):

@@ -154,7 +154,7 @@ class NativeCalls(unittest.TestCase):
 
 class Organization(unittest.TestCase):
     def test_pins_unread_and_new_session_do_not_leak_between_users(self):
-        Path(agent_conversations.FILE).unlink(missing_ok=True)
+        Path(agent_conversations._file()).unlink(missing_ok=True)
         from core.session_manager import session_manager
         latest = {'id': 'one', 'updated_at': 10}
         messages = [{'role': 'user', 'content': 'Hi'}, {'role': 'assistant', 'content': 'Hello'}]

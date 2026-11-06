@@ -191,21 +191,30 @@ def recover():
         db.execute("DELETE FROM events WHERE run_id IN (SELECT id FROM activity WHERE updated<?)", (cutoff,))
         db.execute("DELETE FROM activity WHERE updated<?", (cutoff,))
         db.execute("DELETE FROM outbox WHERE expires<? OR status!='pending'", (time.time(),))
+    from core import accounts
     for run_id in ids:
         record = read_run(run_id)
         if record:
             publish(run_id, {"error": "The Kairos host restarted. This response was interrupted.", "done": True, "state": "interrupted"}, "interrupted")
-            from core.session_manager import session_manager
-            from core import runs, session_manager_store
-            session = session_manager.get_session(record["session_id"])
-            canonical_id = record["snapshot"].get("run_id") or run_id
-            if session and not any(m.get("run_id") == canonical_id and m["role"] == "assistant" for m in session.get("messages", [])):
-                session_manager.append_message(record["session_id"], "assistant", record["snapshot"]["text"],
-                                               status="interrupted", extra={"run_id": canonical_id})
-            if not session_manager_store.get_run(canonical_id):
-                runs.record(runs.RunContext("chat", run_id=canonical_id, session_id=record["session_id"],
-                                            started_at=record["snapshot"]["started_at"]),
-                            runs.Tally(), "stopped", detail="The Kairos host restarted; this run was interrupted.")
+            # The chat is in its owner's account (Multi-Account group 3); a user that no longer exists has none.
+            account_id = accounts.account_for_user(record["owner"])
+            if account_id is not None:
+                with accounts.as_account(account_id):
+                    _close_interrupted_chat(run_id, record)
+
+
+def _close_interrupted_chat(run_id, record):
+    from core.session_manager import session_manager
+    from core import runs, session_manager_store
+    session = session_manager.get_session(record["session_id"])
+    canonical_id = record["snapshot"].get("run_id") or run_id
+    if session and not any(m.get("run_id") == canonical_id and m["role"] == "assistant" for m in session.get("messages", [])):
+        session_manager.append_message(record["session_id"], "assistant", record["snapshot"]["text"],
+                                       status="interrupted", extra={"run_id": canonical_id})
+    if not session_manager_store.get_run(canonical_id):
+        runs.record(runs.RunContext("chat", run_id=canonical_id, session_id=record["session_id"],
+                                    started_at=record["snapshot"]["started_at"]),
+                    runs.Tally(), "stopped", detail="The Kairos host restarted; this run was interrupted.")
 
 
 def binding(token):

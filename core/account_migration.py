@@ -21,6 +21,7 @@ Phase 2 adds one step per store group in the same change that makes that store r
 so nothing moves before its code is ready. A data folder with none of a step's names (a new install) just
 records the version, with no backup.
 """
+import fnmatch
 import json
 import logging
 import os
@@ -39,7 +40,7 @@ log = logging.getLogger(__name__)
 class Step:
     version: int        # steps run in version order; each one only once per data folder
     name: str           # what moves, in plain words ("chats and sessions")
-    entries: tuple      # top-level names in the data folder to move into the account folder
+    entries: tuple      # top-level names in the data folder to move into the account folder (wildcards allowed)
     copy_first: tuple = ()  # entries no backup carries (the vault): copied into .layout before they move
     keep: Optional[Callable[[str], set]] = None  # names to leave where they are this time, given the data folder
 
@@ -62,7 +63,24 @@ STEPS: list[Step] = [
     # The vault's search index (memory/) and the default vault. A vault chosen in Settings, like David's
     # Obsidian folder, is not in the data folder and does not move.
     Step(2, "memory and the vault", ("memory", "vault"), copy_first=("vault",), keep=_vault_in_use),
+    # Chats: the database with its write-ahead files and the copies kept before each schema upgrade, the
+    # JSON chats it replaced, background work per chat, uploads waiting to be sent, the activity feed,
+    # agent conversation choices, and the job-search files (personal, read by nothing now). The phone
+    # activity database stays shared: its rows already name their owner and it holds the install's
+    # push key.
+    Step(3, "chats", ("sessions.db", "sessions.db-wal", "sessions.db-shm", "sessions.db.pre-v*",
+                      "sessions.pre-sqlite-backup", "chat_tasks", "attachments", "events.json",
+                      "agent_conversations.json", "jobs", "jobs.json")),
 ]
+
+
+def _expand(data_dir: str, entry: str) -> list:
+    if not any(ch in entry for ch in "*?["):
+        return [entry]
+    try:
+        return sorted(n for n in os.listdir(data_dir) if fnmatch.fnmatch(n, entry))
+    except OSError:
+        return []
 
 
 def layout_version(data_dir: str = DATA_DIR) -> int:
@@ -120,8 +138,10 @@ def _run(data_dir, steps, account, backup) -> Optional[dict]:
     for step in pending:
         if step.keep:
             kept |= step.keep(data_dir)
-    to_move = [(step, name) for step in pending for name in step.entries
-               if name not in kept and os.path.lexists(os.path.join(data_dir, name))]
+    def what_to_move():
+        return [(step, name) for step in pending for entry in step.entries for name in _expand(data_dir, entry)
+                if name not in kept and os.path.lexists(os.path.join(data_dir, name))]
+    to_move = what_to_move()
     if not to_move:
         # A new install, or one that never had these stores: nothing to back up or move.
         write_json_atomic(os.path.join(data_dir, "layout.json"),
@@ -148,6 +168,9 @@ def _run(data_dir, steps, account, backup) -> Optional[dict]:
         result["error"] = f"backup failed: {error}"
         log.error("Account layout: %s; nothing moved", result["error"])
         return result
+    # Again after the backup: copying a database opens it, and SQLite can leave a new -wal or -shm file
+    # beside it that must move with it (found rehearsing group 3 on a copy of David's dev profile).
+    to_move = what_to_move()
     moved = []
     try:
         os.makedirs(target, exist_ok=True)
