@@ -128,7 +128,10 @@ def opened(project_id: str):
 
 @router.delete('/projects/{project_id}')
 def remove(project_id: str):
-    forge_projects.remove(project_id)
+    try:
+        forge_projects.remove(project_id)
+    except KeyError:
+        raise HTTPException(404, 'project not found')  # this account has no such project
     return {'ok': True}
 
 

@@ -19,11 +19,16 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
-from core.constants import BASE_DIR, DATA_DIR
+from core import accounts
+from core.constants import BASE_DIR
 
 logger = logging.getLogger(__name__)
 
-SKILLS_DIR = os.path.join(DATA_DIR, "skills")
+SKILLS_DIR = None  # test override; normally the current account's skills folder
+
+
+def skills_dir() -> str:
+    return SKILLS_DIR or accounts.path("skills")
 
 # Skills that ship with the app (David's ask 2026-09-03). They live here
 # rather than in data/skills because data/ is deliberately excluded from
@@ -77,7 +82,7 @@ def _skill_path(slug: str) -> str:
     """The one place a slug becomes a path, so the one place it is checked."""
     if not isinstance(slug, str) or not _VALID_SLUG_RE.fullmatch(slug):
         raise ValueError(f"invalid skill name: {slug!r}")
-    return os.path.join(SKILLS_DIR, slug, "SKILL.md")
+    return os.path.join(skills_dir(), slug, "SKILL.md")
 
 
 class SkillUnreadable(ValueError):
@@ -165,22 +170,40 @@ def seed_default_skills() -> list[str]:
     ever seeded once. Refresh SKILL.md only while it still matches the last
     seed (or a known old bundled copy); never replace edits or resurrect deletions.
 
-    Returns the slugs actually seeded this call.
+    Seeds every account (each has its own skills folder); the first admin's
+    account keeps its tracking in the install settings, every other account
+    in its own settings. Returns the slugs actually seeded this call.
     """
+    seeded = []
+    for account_id in accounts.all_accounts():
+        with accounts.as_account(account_id):
+            for slug in _seed_account(account_id):
+                if slug not in seeded:
+                    seeded.append(slug)
+    return seeded
+
+
+def _seed_account(account_id: str) -> list[str]:
     from core import settings as settings_store
 
     if not os.path.isdir(SKILL_TEMPLATES_DIR):
         return []
 
-    already = set(settings_store.get_setting("seeded_skills") or [])
-    hashes = dict(settings_store.get_setting("seeded_skill_hashes") or {})
+    is_first = account_id == accounts.local_account()
+
+    def read(key):
+        return (settings_store.get_setting(key) if is_first
+                else settings_store.get_account_setting(key, account_id))
+
+    already = set(read("seeded_skills") or [])
+    hashes = dict(read("seeded_skill_hashes") or {})
     old_hashes = hashes.copy()
     seeded = []
     for slug in sorted(os.listdir(SKILL_TEMPLATES_DIR)):
         template_dir = os.path.join(SKILL_TEMPLATES_DIR, slug)
         if not os.path.isdir(template_dir):
             continue
-        target_dir = os.path.join(SKILLS_DIR, slug)
+        target_dir = os.path.join(skills_dir(), slug)
         try:
             src_skill = os.path.join(template_dir, "SKILL.md")
             dst_skill = os.path.join(target_dir, "SKILL.md")
@@ -219,7 +242,11 @@ def seed_default_skills() -> list[str]:
             logger.exception("skills_service: couldn't seed bundled skill '%s'", slug)
 
     if seeded or hashes != old_hashes:
-        settings_store.update_settings(seeded_skills=sorted(already | set(seeded)), seeded_skill_hashes=hashes)
+        fields = {"seeded_skills": sorted(already | set(seeded)), "seeded_skill_hashes": hashes}
+        if is_first:
+            settings_store.update_settings(**fields)
+        else:
+            settings_store.update_account_settings(account_id, **fields)
     if seeded:
         logger.info("skills_service: seeded bundled skills %s", ", ".join(seeded))
     return seeded
@@ -248,10 +275,10 @@ def read_supporting_file(slug: str, relative: str) -> str:
 
 def list_skills() -> list[dict]:
     from core import addons
-    if not os.path.isdir(SKILLS_DIR):
+    if not os.path.isdir(skills_dir()):
         return []
     skills = []
-    for slug in sorted(os.listdir(SKILLS_DIR)):
+    for slug in sorted(os.listdir(skills_dir())):
         # A folder the app could not have created (dotfiles, hand-made names)
         # is skipped rather than failing the whole listing.
         if not _VALID_SLUG_RE.fullmatch(slug) or not addons.skill_available(slug):
@@ -335,15 +362,15 @@ def import_skill(filename: str, raw_content: str, confirmed: bool = False, *,
         from core import tab_folders
         from core.store_schema import safe_path
         destination = Path(path).parent
-        if tab_folders.is_link(SKILLS_DIR) or tab_folders.is_link(str(destination)):
+        if tab_folders.is_link(skills_dir()) or tab_folders.is_link(str(destination)):
             raise ValueError("Skill destination cannot be a link")
         if destination.exists():
             tab_folders.code_files(str(destination), user=False)
             if not replace:
                 raise FileExistsError(f"skill '{slug}' already exists")
-        os.makedirs(SKILLS_DIR, exist_ok=True)
-        staged = Path(SKILLS_DIR) / (".install-" + uuid.uuid4().hex)
-        backup = Path(SKILLS_DIR) / (".previous-" + uuid.uuid4().hex)
+        os.makedirs(skills_dir(), exist_ok=True)
+        staged = Path(skills_dir()) / (".install-" + uuid.uuid4().hex)
+        backup = Path(skills_dir()) / (".previous-" + uuid.uuid4().hex)
         staged.mkdir()
         try:
             (staged / "SKILL.md").write_text(rendered, encoding="utf-8")

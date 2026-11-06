@@ -519,8 +519,7 @@ def video_resources(video_id, user):
     return {"assets": sorted("assets/" + p.name for p in (folder / "assets").iterdir()
                              if p.is_file() and video_store.ASSET.fullmatch("assets/" + p.name)),
             "renders": [p.name for p in files], "thumbnail": thumbs[-1] if thumbs else None,
-            "jobs": [{k: v for k, v in job.items() if k != "path"} for job in list(video_render._jobs.values())
-                     if job["video_id"] == video_id]}
+            "jobs": [{k: v for k, v in job.items() if k != "path"} for job in video_render.jobs_for(video_id)]}
 
 
 def video_create_project(user, project):

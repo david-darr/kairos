@@ -609,7 +609,7 @@ class ComputerLiveTests(unittest.TestCase):
                 profile = subprocess.run(["docker", "inspect", kept.name], capture_output=True, text=True, check=True)
                 mounts = __import__("json").loads(profile.stdout)[0]["Mounts"]
                 self.assertEqual(len(mounts), 1)
-                self.assertEqual(mounts[0]["Source"], str(computer.PROFILES / agent["id"]))
+                self.assertEqual(mounts[0]["Source"], str(computer.profiles_dir() / agent["id"]))
                 await manager.stop("agent:" + agent["id"])
                 agent_service.delete(agent["id"])
             finally:

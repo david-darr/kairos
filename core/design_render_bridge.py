@@ -23,7 +23,7 @@ import secrets
 import time
 from typing import Optional
 
-from core import design_formats, design_html, design_render, design_store
+from core import accounts, design_formats, design_html, design_render, design_store
 
 TOKEN = os.environ.pop("KAIROS_RENDER_TOKEN", None) or None
 JOB_SECONDS = 45
@@ -268,7 +268,7 @@ async def video(job: dict, consumer) -> dict:
     future = asyncio.get_running_loop().create_future()
     _pending[job_id] = future
     state = {"next": 0, "count": 0, "consumer": consumer, "expected": len(job.get("times", [])) if job.get("preview") else job["frames"],
-             "layouts": 0, "lock": asyncio.Lock()}
+             "layouts": 0, "lock": asyncio.Lock(), "account": accounts.effective_account()}
     _video_parts[job_id] = state
     await _q().put({**job, "kind": "video"})
     try:
@@ -316,7 +316,9 @@ async def complete_video(job_id: str, data: bytes, part=None, error=None) -> boo
             for sample in layouts:
                 if not isinstance(sample, dict) or not isinstance(sample.get("elements"), list) or len(sample["elements"]) > 500:
                     raise ValueError("Each video sample needs an elements list.")
-            await state["consumer"](frames, layouts)
+            # The worker's result request has no sign-in: the consumer runs as the account that started the job.
+            with accounts.as_account(state["account"]):
+                await state["consumer"](frames, layouts)
             state["count"] += len(frames)
             state["layouts"] += len(layouts)
             state["next"] += 1

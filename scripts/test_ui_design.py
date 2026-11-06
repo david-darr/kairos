@@ -76,7 +76,7 @@ class DesignTests(unittest.TestCase):
 class TeamGuideTests(unittest.TestCase):
     def setUp(self):
         skills_service.seed_default_skills()
-        self.user_root = Path(skills_service.SKILLS_DIR) / 'ui-ux-pro-max'
+        self.user_root = Path(skills_service.skills_dir()) / 'ui-ux-pro-max'
         paths = [self.user_root / name for name in (
             'SKILL.md', 'references/quick-reference.md', 'references/pro-rules.md')]
         paths.append(Path(skill_curator._provenance_path()))

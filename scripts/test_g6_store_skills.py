@@ -59,7 +59,7 @@ class Skills(unittest.TestCase):
         p = patch.object(skills_routes.auth_manager, "is_admin", lambda user: user == "admin")
         p.start()
         self.addCleanup(p.stop)
-        for entry in list(Path(skills_service.SKILLS_DIR).glob("*")) if Path(skills_service.SKILLS_DIR).exists() else []:
+        for entry in list(Path(skills_service.skills_dir()).glob("*")) if Path(skills_service.skills_dir()).exists() else []:
             if entry.is_dir():
                 for sub in sorted(entry.rglob("*"), reverse=True):
                     sub.unlink() if sub.is_file() else sub.rmdir()
@@ -91,7 +91,7 @@ class Skills(unittest.TestCase):
         self.assertEqual(self.slugs(), [])
 
     def test_slugs_cannot_reach_outside_the_skills_folder(self):
-        outside = Path(skills_service.SKILLS_DIR).parent / "victim"
+        outside = Path(skills_service.skills_dir()).parent / "victim"
         outside.mkdir(exist_ok=True)
         (outside / "SKILL.md").write_text(md("x", "x"), encoding="utf-8")
         for bad in ("..%5Cvictim", "..%2Fvictim", "%2E%2E", ".hidden", "a%5Cb"):
@@ -153,8 +153,8 @@ class Skills(unittest.TestCase):
         self.assertEqual(self.web.put("/api/skills/beta", json={"description": "fixed", "body": SAFE}).status_code, 200, "saving over it repairs it")
         self.assertNotIn("error", {s["slug"]: s for s in self.web.get("/api/skills").json()}["beta"])
         # A folder with a junk name and a hand-made empty folder are skipped, not fatal.
-        os.makedirs(os.path.join(skills_service.SKILLS_DIR, "Not Valid!"), exist_ok=True)
-        os.makedirs(os.path.join(skills_service.SKILLS_DIR, "empty-folder"), exist_ok=True)
+        os.makedirs(os.path.join(skills_service.skills_dir(), "Not Valid!"), exist_ok=True)
+        os.makedirs(os.path.join(skills_service.skills_dir(), "empty-folder"), exist_ok=True)
         self.assertEqual(self.web.get("/api/skills").status_code, 200)
 
     def test_seeded_skill_edit_and_removal_survive_the_next_seeding(self):

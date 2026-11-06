@@ -17,7 +17,7 @@ os.environ["JARVIS_VAULT_DIR"] = str(Path(DATA.name, "vault"))
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from PIL import Image
-from core import custom_tabs, design_store, design_systems, settings, tab_api, tab_folders, video_render, video_store
+from core import accounts, custom_tabs, design_store, design_systems, settings, tab_api, tab_folders, video_render, video_store
 from core.middleware import require_user
 settings.update_settings(enabled_tab_templates=["studio"])
 custom_tabs.discover()
@@ -116,7 +116,7 @@ class StudioTests(unittest.TestCase):
         for name in ["16-9-v1.mp4", "sheet-16-9.png", "thumb-16-9.png", "soundtrack.wav", "secret.txt", "16-9-v0.mp4"]:
             (folder / name).write_bytes(b"fixture")
         job = {"id": "studio-job", "video_id": p["id"], "aspect": "16:9", "status": "rendering 30/60", "path": "private-path"}
-        with patch.dict(video_render._jobs, {job["id"]: job}):
+        with patch.dict(video_render._jobs, {job["id"]: job}), patch.dict(video_render._owners, {job["id"]: accounts.effective_account()}):
             response = self.client.get(f'/api/tab-studio/videos/{p["id"]}/resources')
         self.assertEqual(response.status_code, 200, response.text)
         result = response.json()

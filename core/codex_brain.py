@@ -367,9 +367,9 @@ class CodexBrain:
             # _GENERATED_FILES_ADDENDUM), granted unconditionally: unlike
             # REPO_CODE_DIRS below this is just an output dropbox, not
             # source access, so it isn't admin-gated.
-            os.makedirs(image_gen.SCRATCH_DIR, exist_ok=True)  # inside generated files, so already writable
+            os.makedirs(image_gen.scratch_dir(), exist_ok=True)  # inside generated files, so already writable
             if not auto:
-                args += ["--add-dir", image_gen.GENERATED_FILES_DIR]
+                args += ["--add-dir", image_gen.generated_files_dir()]
             # Repo dev access mirrors core/brain.py's add_dirs=REPO_CODE_DIRS
             # for Claude — but unlike Claude (separate file tools vs. a
             # gateable Bash tool), Codex has one native tool surface whose
@@ -390,14 +390,14 @@ class CodexBrain:
         """Where an agent run may write besides its working folder (the
         vault): generated files and the agent's own folder."""
         from services.agent_service import agents_dir
-        roots = [image_gen.GENERATED_FILES_DIR]
+        roots = [image_gen.generated_files_dir()]
         if self.agent_id:
             roots.append(os.path.join(agents_dir(), self.agent_id))
             from services import bot_memory_store
             roots.append(str(bot_memory_store.workspace(self.agent_id)))
         for root in roots:
             os.makedirs(root, exist_ok=True)
-        os.makedirs(image_gen.SCRATCH_DIR, exist_ok=True)
+        os.makedirs(image_gen.scratch_dir(), exist_ok=True)
         return roots
 
     def _agent_args(self, codex: str) -> list[str]:

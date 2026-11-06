@@ -133,7 +133,7 @@ class WorkbenchTests(unittest.IsolatedAsyncioTestCase):
         root.mkdir(exist_ok=True)
         (root / "local.txt").write_text("local")
         (root / ".secret").write_text("private")
-        generated = Path(image_gen.GENERATED_FILES_DIR)
+        generated = Path(image_gen.generated_files_dir())
         generated.mkdir(parents=True, exist_ok=True)
         (generated / "report.txt").write_text("shared")
         session = {**self.session, "workspace_dir": str(root), "agent_id": self.bot["id"], "messages": [

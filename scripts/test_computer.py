@@ -954,12 +954,12 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         await self.open("agent:" + agent["id"], ctx)
         mounted = self.argv[2]
         self.assertEqual(mounted.count("--mount"), 1)
-        self.assertIn(str(computer.PROFILES / agent["id"]), " ".join(mounted))
+        self.assertIn(str(computer.profiles_dir() / agent["id"]), " ".join(mounted))
         with patch.object(computer, "manager", self.manager):
             with self.assertRaises(ValueError): agent_service.forget_logins(agent["id"])
             await self.manager.stop("agent:" + agent["id"])
             agent_service.forget_logins(agent["id"])
-            self.assertFalse((computer.PROFILES / agent["id"]).exists())
+            self.assertFalse((computer.profiles_dir() / agent["id"]).exists())
             agent_service.delete(agent["id"])
 
 
@@ -1317,7 +1317,7 @@ class RenderingTests(unittest.IsolatedAsyncioTestCase):
             response = TestClient(app, client=("127.0.0.1", 50000)).post("/api/tools/computer",
                 json={"arguments": {"action": "screenshot"}}, headers={"X-JARVIS-Tool-Token": token})
         path = Path(response.json()["result"].split("Screenshot saved: ")[1].split(". Look at it")[0])
-        self.assertEqual(path.parent.parent.resolve(), tool_access.SCREEN_ROOT.resolve())
+        self.assertEqual(path.parent.parent.resolve(), tool_access.screen_root().resolve())
         self.assertEqual(path.read_bytes(), PNG)
         grant = tool_access.resolve(token)
         outside = environment / "outside" / path.parent.name
@@ -1326,8 +1326,8 @@ class RenderingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(path.exists())
 
     async def test_screenshot_startup_sweep(self):
-        old = tool_access.SCREEN_ROOT / "0123456789abcdef"
-        fresh = tool_access.SCREEN_ROOT / "fedcba9876543210"
+        old = tool_access.screen_root() / "0123456789abcdef"
+        fresh = tool_access.screen_root() / "fedcba9876543210"
         old.mkdir(parents=True)
         fresh.mkdir(parents=True)
         (old / "image.png").write_bytes(PNG)

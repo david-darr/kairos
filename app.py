@@ -3,7 +3,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
@@ -130,9 +130,12 @@ async def lifespan(_app: FastAPI):
     # 2026-09-03: the app reported "no priorities" while the connected vault
     # was full of them). See core/vault_sync.py.
     from core import tool_access
-    tool_access.sweep_screens()
     from core import image_gen
-    image_gen.sweep_scratch()
+    from core import accounts as _startup_accounts
+    for _account in _startup_accounts.all_accounts():  # each account's own folders
+        with _startup_accounts.as_account(_account):
+            tool_access.sweep_screens()
+            image_gen.sweep_scratch()
     vault_sync.sync_on_startup()
     if _RESTORED:  # a backup swapped in before the imports (core/backup.py)
         from core import events
@@ -367,13 +370,32 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 # Generated images (David's ask 2026-09-10 — image generation for chat and
 # Discord). StaticFiles needs the directory to exist before mounting, same
 # reason custom_tabs.ensure_user_tab_dirs() runs before its own mount above.
-os.makedirs(image_gen.GENERATED_DIR, exist_ok=True)
-app.mount(image_gen.GENERATED_URL_PREFIX, StaticFiles(directory=image_gen.GENERATED_DIR), name="generated-images")
-# Generated Office/PDF files (David's ask 2026-09-10, same session — a
-# pptx/docx/xlsx/pdf a skill builds locally via Bash, not an image pulled
-# from a URL). See core/image_gen.py's GENERATED_FILES_DIR comment.
-os.makedirs(image_gen.GENERATED_FILES_DIR, exist_ok=True)
-app.mount(image_gen.GENERATED_FILES_URL_PREFIX, StaticFiles(directory=image_gen.GENERATED_FILES_DIR), name="generated-files")
+def _generated_file_response(folder, name):
+    """Serve one file from the current account's generated folder: a strict name (no .., drive, absolute path,
+    backslash, colon or NUL), and the real path must stay inside the folder, else 404."""
+    parts = name.split("/")
+    if (not name or any(c in name for c in ("\\", ":", "\x00")) or name.startswith("/")
+            or any(part in ("", ".", "..") for part in parts)):
+        raise HTTPException(404, "Not Found")
+    root = os.path.realpath(folder)
+    target = os.path.realpath(os.path.join(root, *parts))
+    if os.path.commonpath([root, target]) != root or not os.path.isfile(target):
+        raise HTTPException(404, "Not Found")
+    return FileResponse(target)
+
+
+# The folders are per account, so these are routes that look the folder up per request, not fixed mounts
+# (a mount would keep the folder of whoever started the app). Registered here, before any catch-all.
+@app.api_route(image_gen.GENERATED_URL_PREFIX + "/{name:path}", methods=["GET", "HEAD"], name="generated-images")
+async def generated_image(name: str):
+    return _generated_file_response(image_gen.generated_dir(), name)
+
+
+# Generated Office/PDF files (David's ask 2026-09-10, same session — a pptx/docx/xlsx/pdf a skill builds locally
+# via Bash, not an image pulled from a URL). See core/image_gen.py's GENERATED_FILES_DIR comment.
+@app.api_route(image_gen.GENERATED_FILES_URL_PREFIX + "/{name:path}", methods=["GET", "HEAD"], name="generated-files")
+async def generated_file(name: str):
+    return _generated_file_response(image_gen.generated_files_dir(), name)
 
 
 @app.get("/")

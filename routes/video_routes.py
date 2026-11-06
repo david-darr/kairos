@@ -7,7 +7,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
-from core import design_render, design_render_bridge, design_systems, ffmpeg_tools, video_render, video_store
+from core import accounts, design_render, design_render_bridge, design_systems, ffmpeg_tools, video_render, video_store
 from core.auth import auth_manager
 from core.middleware import get_current_user, require_user
 from core.constants import STATIC_DIR
@@ -111,8 +111,8 @@ async def put_video(video_id: str, body: VideoBody, user: str = Depends(require_
 @router.delete("/api/videos/{video_id}")
 async def delete_video(video_id: str, user: str = Depends(require_user)):
     _video(video_id, user)
-    for job in list(video_render._jobs.values()):
-        if job["video_id"] == video_id and job["status"] not in ("ready",) and not job["status"].startswith("failed:"):
+    for job in video_render.jobs_for(video_id):
+        if job["status"] not in ("ready",) and not job["status"].startswith("failed:"):
             video_render.cancel(job["id"])
     _call(video_store.delete, video_id)
     return {"ok": True}
@@ -149,10 +149,36 @@ async def player(video_id: str, request: Request, aspect: str = "16:9", rt: Opti
         if user is None:
             raise HTTPException(401, "authentication required")
         _video(video_id, user)
+        return _player_response(video_id, request, aspect, v)
+    # The worker has no sign-in: the token names the account whose folder the video is read from. The version
+    # is part of what the token signs, so an unversioned request is checked against the current one.
+    account = None
+    for version in ([v] if v is not None else _versions(video_id, rt)):
+        account = design_render.token_account(video_id, f"video:{aspect}:{version}", rt)
+        if account:
+            break
+    if account is None:
+        raise HTTPException(404, "Video not found")
+    with accounts.as_account(account):
+        return _player_response(video_id, request, aspect, v)
+
+
+def _versions(video_id, rt):
+    """The versions a token without an explicit one could have been made for: the account in the token's
+    own claim decides whose store to ask for the current version."""
+    account = design_render.asset_account(video_id, rt)
+    if account is None:
+        return []
+    with accounts.as_account(account):
+        try:
+            return [video_store.get(video_id)["version"]]
+        except LookupError:
+            return []
+
+
+def _player_response(video_id, request, aspect, v):
     current = _call(video_store.get, video_id)
     version = v if v is not None else current["version"]
-    if rt is not None and not design_render.verify(video_id, f"video:{aspect}:{version}", rt):
-        raise HTTPException(404, "Video not found")
     project = current
     if version != current["version"]:
         project = next((p for p in video_store.history(video_id) if p["version"] == version), None)
@@ -169,10 +195,14 @@ async def player(video_id: str, request: Request, aspect: str = "16:9", rt: Opti
 
 
 @router.get("/api/videos/{video_id}/assets/{name}")
-async def get_asset(video_id: str, name: str):
-    # Same immutable content-addressed capability as design assets: offscreen
-    # windows have no account cookies, and a name reveals no other file.
-    path = _call(video_store.asset_path, video_id, name)
+async def get_asset(video_id: str, name: str, rt: Optional[str] = None):
+    # Same immutable content-addressed capability as design assets: offscreen windows have no account
+    # cookies, so the player page's token (the engine forwards it) names the account whose folder holds it.
+    account = design_render.asset_account(video_id, rt) if rt else design_render.request_account()
+    if account is None:
+        raise HTTPException(404, "Video asset not found")
+    with accounts.as_account(account):
+        path = _call(video_store.asset_path, video_id, name)
     return FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable",
                                        "Access-Control-Allow-Origin": "*", "Content-Security-Policy": "default-src 'none'; sandbox"})
 

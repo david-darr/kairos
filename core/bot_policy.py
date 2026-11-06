@@ -697,7 +697,7 @@ def granted_roots(bot_id: str, session: Optional[dict]) -> list[str]:
         pass
     try:
         from core import image_gen
-        roots.append(image_gen.GENERATED_FILES_DIR)
+        roots.append(image_gen.generated_files_dir())
     except Exception:
         pass
     workspace = (session or {}).get("workspace_dir")

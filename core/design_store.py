@@ -35,11 +35,17 @@ import time
 from pathlib import Path
 from typing import Callable, Optional
 
-from core import design_formats, design_html, design_systems
+from core import accounts, design_formats, design_html, design_systems
 from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
 
-DESIGNS_DIR = os.path.join(DATA_DIR, "designs")
+DESIGNS_DIR = None  # test override; normally the current account's designs folder
+
+
+def designs_dir() -> str:
+    return DESIGNS_DIR or accounts.path("designs")
+
+
 MAX_BOARDS = 60
 MAX_ASSET_BYTES = 25 * 1024 * 1024
 MAX_VERSIONS = 300
@@ -76,7 +82,7 @@ def on_change(listener: Callable[[dict], None]) -> None:
 def _folder(design_id: str) -> Path:
     if not isinstance(design_id, str) or not DESIGN_ID.fullmatch(design_id):
         raise LookupError("No such design.")
-    return Path(DESIGNS_DIR, design_id)
+    return Path(designs_dir(), design_id)
 
 
 def _now() -> float:
@@ -144,8 +150,8 @@ def summary(data: dict) -> dict:
 
 def list_designs() -> list[dict]:
     out = []
-    if os.path.isdir(DESIGNS_DIR):
-        for name in os.listdir(DESIGNS_DIR):
+    if os.path.isdir(designs_dir()):
+        for name in os.listdir(designs_dir()):
             if DESIGN_ID.fullmatch(name):
                 try:
                     out.append(manifest(name))
@@ -190,7 +196,7 @@ def designs_for_chat(key: Optional[str]) -> list[dict]:
 # -- design mode (spec 3h) --------------------------------------------------------
 
 def _mode_file() -> str:
-    return os.path.join(DESIGNS_DIR, "design_mode.json")
+    return os.path.join(designs_dir(), "design_mode.json")
 
 
 def design_mode(session_id: Optional[str]) -> bool:
@@ -201,7 +207,7 @@ def design_mode(session_id: Optional[str]) -> bool:
 
 def set_design_mode(session_id: str, on: bool) -> None:
     with _session_state_lock:
-        os.makedirs(DESIGNS_DIR, exist_ok=True)
+        os.makedirs(designs_dir(), exist_ok=True)
         state = read_json(_mode_file(), {}) or {}
         if on:
             state[session_id] = True

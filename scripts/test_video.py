@@ -26,7 +26,7 @@ from core import (creative_direction, design_render, design_render_bridge as bri
                   ffmpeg_tools, settings, tool_registry, video_audio, video_checks, video_render,
                   video_store, video_tools)
 from core.middleware import SecurityHeadersMiddleware, require_user
-from core import middleware
+from core import accounts, middleware
 from core.session_manager import session_manager
 from core.turn_taint import TurnTaint
 from routes import design_routes, video_routes
@@ -602,6 +602,7 @@ class RouteTests(unittest.TestCase):
     def test_job_auth_and_cancel(self):
         p = self.create()
         video_render._jobs["test-job"] = {"id": "test-job", "video_id": p["id"], "status": "queued", "path": "private"}
+        video_render._owners["test-job"] = accounts.effective_account()
         self.assertNotIn("path", self.client.get("/api/video-jobs/test-job").json())
         self.assertEqual(self.client.post("/api/video-jobs/test-job/cancel").status_code, 200)
         self.app.dependency_overrides[require_user] = lambda: "bob"

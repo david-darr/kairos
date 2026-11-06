@@ -211,7 +211,7 @@ class StorageAndRouteTests(unittest.TestCase):
             self.assertEqual(adjusted.json()["look"]["fonts"]["display"], "lora")
             saved = alice.post(f"/api/design-systems/drafts/{draft['id']}/save").json()
             style = saved["id"]
-            folder = Path(design_systems.SYSTEMS_DIR, style)
+            folder = Path(design_systems.systems_dir(), style)
             self.assertEqual(sorted(p.name for p in folder.iterdir()), ["look.json", "system.json"], "values only, no reference files")
             self.assertFalse(any(Path(design_systems.DATA_DIR if hasattr(design_systems, "DATA_DIR") else environment).rglob("kairos-style-*")))
             ids = lambda c: [s["id"] for s in c.get("/api/design-systems").json()]  # noqa: E731

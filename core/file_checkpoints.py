@@ -25,7 +25,14 @@ from core.constants import BASE_DIR, DATA_DIR
 from core.vault import resolve_vault_dir
 
 logger = logging.getLogger(__name__)
-STORE = Path(DATA_DIR) / "file_checkpoints"
+STORE = None  # override (tests); else the current account's file_checkpoints folder
+
+
+def store() -> Path:
+    from core import accounts
+    return Path(STORE or accounts.path("file_checkpoints"))
+
+
 MAX_FILE = 50 * 1024 * 1024
 MAX_TOTAL = 300 * 1024 * 1024
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist"}
@@ -56,7 +63,7 @@ def _atomic_write(path: Path, data: bytes) -> None:
 
 def _repo(root: Path) -> Path:
     key = hashlib.sha256(os.path.normcase(str(root)).encode()).hexdigest()
-    repo = STORE / "repos" / key
+    repo = store() / "repos" / key
     if not (repo / "HEAD").exists():
         _atomic_write(repo / "HEAD", b"ref: refs/heads/checkpoints\n")
         _atomic_write(repo / "config", b"[core]\n\trepositoryformatversion = 0\n\tbare = true\n")
@@ -130,7 +137,7 @@ def _files(root: Path):
                    and not (root == Path(BASE_DIR).resolve() and
                             ((Path(folder) == root and d == "data") or
                              (Path(folder) == root / "electron" and d == "runtime")))
-                   and not (Path(folder) / d).resolve().is_relative_to(STORE.resolve())]
+                   and not (Path(folder) / d).resolve().is_relative_to(store().resolve())]
         for file in files:
             if file == ".git":
                 continue
@@ -254,7 +261,7 @@ def _commit(repo: Path, tree_oid: str, event_id: str, phase: str) -> str:
 def _event_path(event_id: str) -> Path:
     if len(event_id) != 32 or any(c not in "0123456789abcdef" for c in event_id):
         raise KeyError(event_id)
-    return STORE / "events" / f"{event_id}.json"
+    return store() / "events" / f"{event_id}.json"
 
 
 def _save(event: dict) -> None:
@@ -375,7 +382,7 @@ def record_file_write(source: str, root: str, name: str, before: bytes | None, a
 
 def list_events(limit: int = 100, source: str | None = None) -> list[dict]:
     events = []
-    for path in (STORE / "events").glob("*.json"):
+    for path in (store() / "events").glob("*.json"):
         try:
             event = json.loads(path.read_text(encoding="utf-8"))
             events.append({"id": event["id"], "created": event["created"], "finished": event.get("finished"),

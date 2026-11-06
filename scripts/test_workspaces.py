@@ -66,7 +66,7 @@ class ClaudeFenceTests(unittest.TestCase):
         for tool, args in (("Write", {"file_path": os.path.join(VAULT, "note.md")}),
                            ("Read", {"file_path": "Projects/plan.md"}),
                            ("Glob", {"pattern": "**/*.md"}),
-                           ("Write", {"file_path": os.path.join(image_gen.GENERATED_FILES_DIR, "report.docx")})):
+                           ("Write", {"file_path": os.path.join(image_gen.generated_files_dir(), "report.docx")})):
             self.assertIsNone(self.refused(brain, tool, args), f"{tool} {args}")
 
     def test_a_junction_inside_the_vault_does_not_lead_out(self):

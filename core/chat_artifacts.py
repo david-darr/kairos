@@ -45,7 +45,7 @@ def resolve(session_id: str, url: str) -> tuple[Path, dict]:
             raise HTTPException(404, "This file is not referenced by this chat")
         if prefix not in ("generated-images", "generated-files"):
             raise HTTPException(400, "invalid artifact path")
-        root = Path(image_gen.GENERATED_DIR if prefix == "generated-images" else image_gen.GENERATED_FILES_DIR).resolve()
+        root = Path(image_gen.generated_dir() if prefix == "generated-images" else image_gen.generated_files_dir()).resolve()
         target = (root / name).resolve()
         if target.parent != root or not target.is_file():
             raise HTTPException(404, "The generated file is no longer available")

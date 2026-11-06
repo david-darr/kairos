@@ -19,7 +19,7 @@ from core.auth import auth_enabled
 from core.constants import DATA_DIR
 from core.vault import resolve_vault_dir
 from services.notes_service import notes_service
-from services.skills_service import SKILLS_DIR, create_skill, get_skill, list_skills
+from services.skills_service import skills_dir, create_skill, get_skill, list_skills
 from services.task_service import task_service
 
 BACKUP_VERSION = 1
@@ -141,6 +141,6 @@ def wipe(kind: str) -> None:
         write_json_atomic(task_service._file, [])
         task_service._tasks = {}
     elif kind == "skills":
-        for skill_dir in glob.glob(os.path.join(SKILLS_DIR, "*")):
+        for skill_dir in glob.glob(os.path.join(skills_dir(), "*")):
             if os.path.isdir(skill_dir):
                 shutil.rmtree(skill_dir)

@@ -57,7 +57,7 @@ async def list_computers(user: str = Depends(require_user)) -> list[dict]:
 async def status(user: str = Depends(require_admin)) -> dict:
     available, reason = await sandbox.available()
     profiles = [{"id": agent["id"], "name": agent["name"], "running": computer.manager.is_running("agent:" + agent["id"])}
-                for agent in agent_service.list_agents() if (computer.PROFILES / agent["id"]).is_dir()]
+                for agent in agent_service.list_agents() if (computer.profiles_dir() / agent["id"]).is_dir()]
     return {"docker_available": available, "docker_reason": reason,
             "image_ready": await computer_image.image_ready() if available else False,
             "desktop_image_ready": await computer_image.image_ready(desktop=True) if available else False,

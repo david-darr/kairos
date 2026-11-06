@@ -91,7 +91,7 @@ def html_zip(design_id: str, boards: Optional[list] = None) -> bytes:
             ".card{display:grid;gap:8px;padding:20px;border:1px solid var(--ds-hairline);border-radius:12px;background:var(--ds-surface);"
             "color:var(--ds-text);text-decoration:none}.frame{color:var(--ds-text-dim);font-size:13px}</style></head>"
             f'<body><h1>{html.escape(data.get("title") or "Design")}</h1><div class="grid">{cards}</div></body></html>'))
-        folder = os.path.join(design_store.DESIGNS_DIR, design_id, "assets")
+        folder = os.path.join(design_store.designs_dir(), design_id, "assets")
         if os.path.isdir(folder):
             for name in os.listdir(folder):
                 archive.write(os.path.join(folder, name), f"assets/{name}")

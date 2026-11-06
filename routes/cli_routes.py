@@ -145,7 +145,7 @@ async def local_path(body: RevealBody, request: Request) -> dict:
         except (ValueError, KeyError, OSError) as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
     target = Path(target).resolve()
-    roots = [Path(image_gen.GENERATED_FILES_DIR).resolve(), Path(image_gen.GENERATED_DIR).resolve()]
+    roots = [Path(image_gen.generated_files_dir()).resolve(), Path(image_gen.generated_dir()).resolve()]
     if session.get("workspace_dir"):
         roots.append(Path(session["workspace_dir"]).resolve())
     if not any(target.is_relative_to(root) for root in roots):

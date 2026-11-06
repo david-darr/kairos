@@ -447,8 +447,8 @@ DRAFT_RE = re.compile(r"draft-[0-9a-f]{12}")
 
 
 def _drafts_dir() -> Path:
-    from core.constants import DATA_DIR
-    return Path(DATA_DIR, "design_style_drafts")
+    from core import accounts
+    return Path(accounts.path("design_style_drafts"))  # the current account's (Multi-Account group 7)
 
 
 def _prune() -> None:

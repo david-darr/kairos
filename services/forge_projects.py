@@ -110,9 +110,16 @@ def validate_clone_url(raw):
     raise ValueError('Use an HTTPS or git@host:owner/repo URL.')
 
 
+def projects_file():
+    """The current account's Forge project list (Multi-Account group 7). The project folders themselves stay
+    wherever the person put them."""
+    from core import accounts
+    return accounts.path('forge', 'projects.json')
+
+
 class ForgeProjects:
     def __init__(self, file=None):
-        self.file = str(file or Path(DATA_DIR) / 'forge' / 'projects.json')
+        self.file = str(file or projects_file())
         self.lock = threading.RLock()
 
     def list(self):
@@ -136,7 +143,10 @@ class ForgeProjects:
 
     def remove(self, project_id):
         with self.lock:
-            write_json_atomic(self.file, [p for p in self.list() if p['id'] != project_id])
+            rows = self.list()
+            if not any(p['id'] == project_id for p in rows):
+                raise KeyError(project_id)
+            write_json_atomic(self.file, [p for p in rows if p['id'] != project_id])
 
     def opened(self, project_id):
         with self.lock:
@@ -215,4 +225,6 @@ class ForgeProjects:
         return rows
 
 
-forge_projects = ForgeProjects()
+from core import accounts as _accounts
+
+forge_projects = _accounts.PerAccount(ForgeProjects, projects_file)

@@ -268,7 +268,7 @@ class Migration(unittest.TestCase):
                                      backup=kwargs.pop("backup", self.backup), **kwargs)
 
     def test_group_one_moves_its_five_stores(self):
-        self.assertEqual([s.version for s in account_migration.STEPS], [1, 2, 3, 4, 5, 6], "group 6 added the mail step")
+        self.assertEqual([s.version for s in account_migration.STEPS], [1, 2, 3, 4, 5, 6, 7], "group 7 added the creative step")
         self.assertEqual(set(account_migration.STEPS[0].entries), {
             "notes.json", "calendar_events.json", "documents", "documents_index.json", "projects.json", "contacts.json"})
         (self.data / "documents").mkdir()
@@ -360,8 +360,8 @@ class Stores(unittest.TestCase):
         with accounts.as_account(self.ids["bea"]):
             self.assertEqual(accounts.path("documents", "a.md"),
                              os.path.join(accounts.ACCOUNTS_DIR, self.ids["bea"], "documents", "a.md"))
-            self.assertEqual(accounts.path("designs"), os.path.join(_DATA.name, "designs"),
-                             "designs have not moved yet")
+            self.assertEqual(accounts.path("tab-data"), os.path.join(_DATA.name, "tab-data"),
+                             "tab data has not moved")
 
     def setUp(self):
         fresh_users()

@@ -11,7 +11,7 @@ from services import bot_workbench as state
 
 def _path(ident):
     from core import computer
-    root = computer.PROFILES.resolve()
+    root = computer.profiles_dir().resolve()
     if not re.fullmatch(r"[0-9a-f]{10}|shared-[0-9a-f]{12}", ident):
         raise ValueError("Invalid browser profile")
     target = (root / ident).resolve()

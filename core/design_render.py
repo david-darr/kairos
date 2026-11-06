@@ -274,6 +274,12 @@ def render_document(design_id: str, slug: str, *, version: Optional[int] = None,
             f"{source}{script}</body></html>")
 
 
+def with_asset_token(page: str, token: str) -> str:
+    """The page's own asset paths carrying a token: a sandboxed frame and the headless renderer request
+    them with no sign-in, and the token tells the asset route whose folder to look in."""
+    return design_html.ASSET_PATH.sub(lambda m: f"{m.group(0)}?rt={token}", page)
+
+
 def sample_csp(origin: str) -> str:
     """A look preview's policy: like a board's, with no script at all."""
     base = origin.rstrip("/")
@@ -340,19 +346,56 @@ def _min_height(meta: dict) -> int:
     return int(meta["h"])
 
 
+def _mac(text: str) -> str:
+    return base64.urlsafe_b64encode(hmac.new(_SECRET, text.encode(), hashlib.sha256).digest()[:18]).decode().rstrip("=")
+
+
 def sign(design_id: str, slug: str, seconds: int = TOKEN_SECONDS) -> str:
+    """A token for the headless renderer, which has no sign-in: it names the account it was made for, so
+    the page it fetches is read from that account's folder (accounts.as_account, never a guess). Made inside
+    the starter's request or turn, so the account is the one doing the starting."""
+    from core import accounts
+    account = accounts.effective_account()
     expires = int(time.time()) + seconds
-    mac = hmac.new(_SECRET, f"{design_id}:{slug}:{expires}".encode(), hashlib.sha256).digest()[:18]
-    return f"{expires}.{base64.urlsafe_b64encode(mac).decode().rstrip('=')}"
+    return f"{expires}.{_mac(f'{design_id}:{slug}:{expires}:{account}')}.{account}.{_mac(f'acct:{design_id}:{expires}:{account}')}"
+
+
+_TOKEN = re.compile(r"([0-9]{10})\.([A-Za-z0-9_-]{24})\.([a-z0-9]{1,32})\.([A-Za-z0-9_-]{24})")
+
+
+def token_account(design_id: str, slug: str, token: Optional[str]) -> Optional[str]:
+    """The account a valid token for this id and slug was made for, else None."""
+    match = _TOKEN.fullmatch(token or "")
+    if not match:
+        return None
+    expires, mac, account, _ = match.groups()
+    if int(expires) < time.time() or not hmac.compare_digest(mac, _mac(f"{design_id}:{slug}:{expires}:{account}")):
+        return None
+    return account
+
+
+def asset_account(design_id: str, token: Optional[str]) -> Optional[str]:
+    """The account behind any valid, unexpired token made for this design or video id, whatever its slug:
+    for the content-addressed asset routes, whose requests (sandboxed frames, the renderer) carry the
+    token the page was fetched with but not its slug."""
+    match = _TOKEN.fullmatch(token or "")
+    if not match:
+        return None
+    expires, _, account, amac = match.groups()
+    if int(expires) < time.time() or not hmac.compare_digest(amac, _mac(f"acct:{design_id}:{expires}:{account}")):
+        return None
+    return account
 
 
 def verify(design_id: str, slug: str, token: Optional[str]) -> bool:
-    if not token or not re.fullmatch(r"[0-9]{10}\.[A-Za-z0-9_-]{24}", token):
-        return False
-    expires, _, mac = token.partition(".")
-    if int(expires) < time.time():
-        return False
-    expected = base64.urlsafe_b64encode(hmac.new(_SECRET, f"{design_id}:{slug}:{expires}".encode(),
-                                                 hashlib.sha256).digest()[:18]).decode().rstrip("=")
-    return hmac.compare_digest(mac, expected)
+    return token_account(design_id, slug, token) is not None
 
+
+
+def request_account() -> Optional[str]:
+    """The account of the request being served (its sign-in), or None when nobody is signed in."""
+    from core import accounts
+    try:
+        return accounts.effective_account()
+    except accounts.NoAccount:
+        return None

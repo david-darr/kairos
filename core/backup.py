@@ -78,6 +78,18 @@ def _account_vaults(data_dir: str) -> list[str]:
             if os.path.isdir(os.path.join(root, name, "vault"))]
 
 
+def _account_kept(data_dir: str) -> list[str]:
+    """What a restore leaves in each account folder because no backup carries it: the account's vault, and
+    its file checkpoints (the undo history, left out of backups by name like the shared one)."""
+    root = os.path.join(data_dir, "accounts")
+    try:
+        names = sorted(os.listdir(root))
+    except OSError:
+        return []
+    return [os.path.join("accounts", name, kept) for name in names for kept in ("vault", "file_checkpoints")
+            if os.path.isdir(os.path.join(root, name, kept))]
+
+
 def _vaults_inside(data_dir: str) -> set:
     """Real paths of the vaults kept inside the data folder: the first admin's chosen or default one,
     and every account's default one."""
@@ -321,8 +333,8 @@ def apply_pending_restore(data_dir: Optional[str] = None) -> Optional[dict]:
             source = os.path.join(safety, kept)
             if os.path.isdir(source) and not os.path.exists(os.path.join(data_dir, kept)):
                 shutil.copytree(source, os.path.join(data_dir, kept))
-        # Each account's own vault was moved aside with the accounts folder; it goes back where it was.
-        for rel in _account_vaults(safety):
+        # Each account's own vault and checkpoints were moved aside with the accounts folder; they go back.
+        for rel in _account_kept(safety):
             destination = os.path.join(data_dir, rel)
             if not os.path.exists(destination):
                 os.makedirs(os.path.dirname(destination), exist_ok=True)

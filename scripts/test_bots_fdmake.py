@@ -49,7 +49,7 @@ class MakeTests(unittest.TestCase):
         data = {"id": did, "owner": owner, "title": "Test design", "chat_ids": [sid],
                 "boards": {"one": {"title": "One", "order": 0, "format": fmt}},
                 "created": created if created is not None else self.now + 1, "updated": self.now + 2}
-        write_json_atomic(str(Path(design_store.DESIGNS_DIR, did, "design.json")), data)
+        write_json_atomic(str(Path(design_store.designs_dir(), did, "design.json")), data)
         return data
 
     def write_tasks(self, tasks):
@@ -74,7 +74,7 @@ class MakeTests(unittest.TestCase):
     def test_shared_designs_respect_explicit_visibility(self):
         design = self.design(self.home["id"], owner="someone-else")
         design["visible_to"] = ["david"]
-        write_json_atomic(str(Path(design_store.DESIGNS_DIR, design["id"], "design.json")), design)
+        write_json_atomic(str(Path(design_store.designs_dir(), design["id"], "design.json")), design)
         self.assertEqual(len(make.list_make(user="david")["items"]), 1)
 
     def test_filter_uses_board_format_and_legacy_frames(self):

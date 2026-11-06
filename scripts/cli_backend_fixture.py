@@ -167,9 +167,9 @@ async def fake_stream(session_id, text, attachment_ids=None, is_admin=False, ref
             yield await say(f"Wrote {words[1]}.\n")
     elif command == "file" and len(words) >= 3:
         from core import image_gen
-        os.makedirs(image_gen.GENERATED_FILES_DIR, exist_ok=True)
+        os.makedirs(image_gen.generated_files_dir(), exist_ok=True)
         stored = f"{secrets.token_hex(6)}_{os.path.basename(words[1])}"
-        with open(os.path.join(image_gen.GENERATED_FILES_DIR, stored), "w", encoding="utf-8") as handle:
+        with open(os.path.join(image_gen.generated_files_dir(), stored), "w", encoding="utf-8") as handle:
             handle.write(" ".join(words[2:]) + "\n")
         url = f"/generated-files/{stored}"
         session_manager.register_artifact(session_id, url)

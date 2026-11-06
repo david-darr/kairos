@@ -16,11 +16,17 @@ import time
 from pathlib import Path
 
 from PIL import Image
-from core import design_store
+from core import accounts, design_store
 from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
 
-VIDEOS_DIR = os.path.join(DATA_DIR, "videos")
+VIDEOS_DIR = None  # test override; normally the current account's videos folder
+
+
+def videos_dir() -> str:
+    return VIDEOS_DIR or accounts.path("videos")
+
+
 ASPECTS = {"16:9": (1920, 1080), "9:16": (1080, 1920), "1:1": (1080, 1080)}
 KINDS = ("title", "statement", "big-number", "list", "image", "quote", "split", "logo", "end")
 CAMERAS = ("still", "push", "pull", "pan", "shake")
@@ -38,7 +44,7 @@ _lock = design_store._lock
 def _folder(video_id: str) -> Path:
     if not isinstance(video_id, str) or not re.fullmatch(r"[a-f0-9]{12}", video_id):
         raise LookupError("No such video.")
-    return Path(VIDEOS_DIR, video_id)
+    return Path(videos_dir(), video_id)
 
 
 def _error(path, message):
@@ -168,7 +174,7 @@ def list_for_user(user, is_admin=False):
 
 def _list():
     out = []
-    for path in Path(VIDEOS_DIR).glob("????????????/project.json"):
+    for path in Path(videos_dir()).glob("????????????/project.json"):
         try:
             out.append(get(path.parent.name))
         except LookupError:
@@ -237,7 +243,7 @@ def delete(video_id):
     with _lock("video:" + video_id):
         get(video_id)
         folder = _folder(video_id).resolve()
-        if folder.parent != Path(VIDEOS_DIR).resolve():
+        if folder.parent != Path(videos_dir()).resolve():
             raise ValueError("Video folder is outside the video store.")
         shutil.rmtree(folder)
 

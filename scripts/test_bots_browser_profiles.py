@@ -28,7 +28,7 @@ class ProfileTests(unittest.IsolatedAsyncioTestCase):
     async def test_own_opt_in_guest_and_confinement(self):
         self.assertIsNone(profiles.resolve(self.bot))
         own = {**self.bot, "keep_signed_in": True}
-        self.assertEqual(profiles.resolve(own), (computer.PROFILES / self.bot["id"]).resolve())
+        self.assertEqual(profiles.resolve(own), (computer.profiles_dir() / self.bot["id"]).resolve())
         self.assertIsNone(profiles.resolve({**own, "browser_profile": "guest"}))
         for bad in ("../bad", "a" * 10 + "/../outside", "shared:../bad", "shared:" + "a" * 12):
             with self.assertRaises(ValueError):

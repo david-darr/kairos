@@ -172,7 +172,7 @@ def change(ident, action):
             for slug, owner in SKILLS.items():
                 if owner != ident: continue
                 src = ROOT / ident / 'skills' / slug
-                dst = Path(skills_service.SKILLS_DIR) / slug
+                dst = Path(skills_service.skills_dir()) / slug
                 for source in src.rglob('*'):
                     if not source.is_file(): continue
                     target = _safe_file(dst, source.relative_to(src).as_posix())

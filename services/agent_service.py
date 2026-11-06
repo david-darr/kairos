@@ -761,13 +761,13 @@ class AgentService:
     def forget_logins(self, agent_id: str) -> None:
         """Remove a kept browser profile only after its container has stopped."""
         self._require(agent_id)
-        from core.computer import PROFILES, manager
+        from core.computer import profiles_dir, manager
         if manager.is_running(f"agent:{agent_id}"):
             raise ValueError("stop this agent's computer before forgetting logins")
         if not re.fullmatch(r"[0-9a-f]{10}", agent_id or ""):
             raise ValueError("bad agent id")
-        root = PROFILES.resolve()
-        target = (PROFILES / agent_id).resolve()
+        root = profiles_dir().resolve()
+        target = (profiles_dir() / agent_id).resolve()
         if Path(DATA_DIR).resolve() not in root.parents or root not in target.parents:
             raise ValueError("profile path is outside Kairos data")
         shutil.rmtree(target, ignore_errors=True)

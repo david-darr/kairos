@@ -205,7 +205,7 @@ class McpHealth(unittest.TestCase):
 class SkillAvailability(unittest.TestCase):
     def setUp(self):
         self.web = web()
-        for entry in list(Path(skills_service.SKILLS_DIR).glob("*")) if Path(skills_service.SKILLS_DIR).exists() else []:
+        for entry in list(Path(skills_service.skills_dir()).glob("*")) if Path(skills_service.skills_dir()).exists() else []:
             if entry.is_dir():
                 for sub in sorted(entry.rglob("*"), reverse=True):
                     sub.unlink() if sub.is_file() else sub.rmdir()

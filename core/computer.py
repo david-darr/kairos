@@ -36,7 +36,12 @@ REPLY_LIMIT = 32 * 1024 * 1024
 # than WATCH_FPS for a Remote Access viewer (about 8 Mbit/s at 10).
 WATCH_FPS, CONTROL_FPS = 10, 30
 RECORDING_LIMIT = 200
-PROFILES = Path(DATA_DIR) / "computer" / "profiles"
+PROFILES = None  # override (tests); else the current account's computer/profiles folder
+
+
+def profiles_dir() -> Path:
+    from core import accounts
+    return Path(PROFILES or accounts.path("computer", "profiles"))
 # These commitments belong to the person even when an agent or chat runs in Auto.
 PERSON_ACTION_WORDS = re.compile(
     r"\b(?:buy|pay|purchase|order|place\s+order|checkout|check\s+out|subscribe|donate|transfer|"
@@ -244,7 +249,7 @@ class ComputerManager:
             if profile is not None:
                 profile.mkdir(parents=True, exist_ok=True)
                 target = profile.resolve()
-                if PROFILES.resolve() not in target.parents:
+                if profiles_dir().resolve() not in target.parents:
                     raise ValueError("profile path is outside Kairos data")
                 profile_args = ["--mount", f"type=bind,src={target},dst=/profile"]
         name = "jarvis-computer-" + uuid.uuid4().hex[:12]

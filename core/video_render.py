@@ -11,9 +11,10 @@ import secrets
 from urllib.parse import quote
 import weakref
 from PIL import Image
-from core import design_render, design_render_bridge, ffmpeg_tools, video_audio, video_checks, video_store
+from core import accounts, design_render, design_render_bridge, ffmpeg_tools, video_audio, video_checks, video_store
 
 _jobs = {}
+_owners = {}  # job id -> the account that started it; a job is only visible to that account
 _tasks = {}
 _locks = weakref.WeakKeyDictionary()
 _last_preview = {}
@@ -63,9 +64,15 @@ def _job(project, aspect, job_id, times=None):
 
 
 def status(job_id):
-    if job_id not in _jobs:
+    if job_id not in _jobs or _owners.get(job_id) != accounts.effective_account():
         raise LookupError("No such video job.")
     return dict(_jobs[job_id])
+
+
+def jobs_for(video_id):
+    """The current account's render jobs of one video."""
+    me = accounts.effective_account()
+    return [dict(job) for job_id, job in list(_jobs.items()) if _owners.get(job_id) == me and job["video_id"] == video_id]
 
 
 def cancel(job_id):
@@ -86,12 +93,14 @@ def start(video_id, aspect):
     if not design_render_bridge.available():
         raise design_render_bridge.Unavailable("Video rendering needs the Kairos desktop app. Open the desktop app and try again.")
     job_id = secrets.token_hex(8)
+    _owners[job_id] = accounts.effective_account()
     _jobs[job_id] = {"id": job_id, "video_id": video_id, "aspect": aspect, "version": project["version"], "status": "queued"}
     _tasks[job_id] = asyncio.create_task(_render(project, aspect, job_id))
     # Bound completed status records; live jobs are never evicted.
     for old in list(_jobs)[:-200]:
         if old in _tasks and _tasks[old].done():
             _jobs.pop(old, None)
+            _owners.pop(old, None)
             _tasks.pop(old, None)
     return status(job_id)
 

@@ -94,7 +94,7 @@ async def main():
 
     print("\n== skills: what reaches the model")
     for count in (10, 100, 300):
-        os.makedirs(skills_service.SKILLS_DIR, exist_ok=True)
+        os.makedirs(skills_service.skills_dir(), exist_ok=True)
         existing = len(skills_service.list_skills())
         for i in range(existing, count):
             skills_service.create_skill(f"bench-skill-{i}", f"Procedure number {i} for bench topic {i % 7}", "## When to Use\nWhen the bench asks.\n\n" + ("Step. " * 400))

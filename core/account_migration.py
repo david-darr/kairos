@@ -101,6 +101,15 @@ STEPS: list[Step] = [
     Step(6, "mail, Google, permissions and integrations", ("email_accounts.json", "email_triage.json",
                                                             "permissions.json", "integrations.json",
                                                             "google_accounts.json")),
+    # A person's skills (bundled ones are copied in per account; skill_templates/ stays with the app),
+    # designs and saved styles (the bundled looks stay with the app), videos, generated images and
+    # files, the Forge project list (the project folders stay where the person put them), file
+    # checkpoints and computer-use profiles, trajectories and screens. Tab data, the creative add-on's
+    # connections and the job tab's files are left where they are: installed tab and add-on code reads
+    # them at fixed paths, so moving them waits for David's call (group 7b).
+    Step(7, "skills, designs, videos, generated files, Forge, checkpoints and computer use",
+         ("skills", "designs", "design_systems", "design_style_drafts", "videos", "generated_files",
+          "generated_images", "forge", "file_checkpoints", "computer")),
 ]
 
 

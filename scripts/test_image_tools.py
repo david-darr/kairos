@@ -425,7 +425,7 @@ class ToolTests(unittest.TestCase):
         ctx = tool_registry.ToolContext(session_id="designless", is_admin=True, surface=tool_registry.OPENAI)
         result = self.invoke("image_generate", {"prompt": "football"}, ctx)
         self.assertIn("/generated-images/", result)
-        self.assertTrue(list(Path(image_gen.GENERATED_DIR).glob("*.png")))
+        self.assertTrue(list(Path(image_gen.generated_dir()).glob("*.png")))
         def handler(req):
             if req.url.host == "api.openverse.org":
                 return httpx.Response(200, json=photo())

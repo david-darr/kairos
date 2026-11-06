@@ -184,9 +184,9 @@ class CleanEnvironmentTests(ProbeServer):
 
 class SkillTests(unittest.TestCase):
     def setUp(self):
-        os.makedirs(skills_service.SKILLS_DIR, exist_ok=True)
+        os.makedirs(skills_service.skills_dir(), exist_ok=True)
         self.good = skills_service.create_skill("Good Skill", "Does good things", "Step one.")
-        broken_dir = os.path.join(skills_service.SKILLS_DIR, "broken-skill")
+        broken_dir = os.path.join(skills_service.skills_dir(), "broken-skill")
         os.makedirs(broken_dir, exist_ok=True)
         with open(os.path.join(broken_dir, "SKILL.md"), "wb") as f:
             f.write(b"\xff\xfe\xfa not text")

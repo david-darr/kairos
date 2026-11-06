@@ -60,7 +60,7 @@ class Addons(unittest.TestCase):
 
     def test_reinstall_preserves_edited_skill_and_private_data(self):
         addons.change('roblox', 'install')
-        path = Path(skills_service.SKILLS_DIR) / 'roblox-dev-skill' / 'SKILL.md'
+        path = Path(skills_service.skills_dir()) / 'roblox-dev-skill' / 'SKILL.md'
         path.write_text('---\ndescription: My custom guide\n---\nMy changes', encoding='utf-8')
         data = self.root / 'tab-data' / 'roblox'; data.mkdir(parents=True)
         (data / 'projects.json').write_text('{"keep": true}')

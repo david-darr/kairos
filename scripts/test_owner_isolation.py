@@ -272,7 +272,8 @@ class OwnerIsolation(unittest.TestCase):
                 self.refused(f"anon {method} design{path}", getattr(self.anon, method)(f"/api/designs/{did}{path}", **kwargs))
         kept = self.alice.get(f"/api/designs/{did}")
         self.assertEqual((kept.status_code, kept.json()["title"]), (200, "alice design"))
-        self.assertEqual(self.boss.get(f"/api/designs/{did}").status_code, 200, "an admin may open any design")
+        # Every account has its own designs (Multi-Account group 7, decision D2): not even an admin opens another's.
+        self.refused("an admin opens Alice's design", self.boss.get(f"/api/designs/{did}"))
 
     # -- admin-only routers --------------------------------------------------
 

@@ -250,14 +250,18 @@ async def create_user(body: CreateUserRequest, user: str = Depends(require_admin
         auth_manager.create_user(body.username, body.password, is_admin=body.is_admin)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    # A new account starts with its own Kip (Multi-Account group 4, decision D7).
+    # A new account starts with its own Kip (Multi-Account group 4, decision D7) and the bundled skills (group 7).
     from core import accounts
-    from services import front_desk
-    try:
-        with accounts.as_account(auth_manager.account_id(body.username)):
+    from services import front_desk, skills_service
+    with accounts.as_account(auth_manager.account_id(body.username)):
+        try:
+            skills_service._seed_account(auth_manager.account_id(body.username))
+        except Exception:
+            logging.getLogger(__name__).exception("the new account's skills could not be seeded")
+        try:
             front_desk.ensure()
-    except Exception:
-        logging.getLogger(__name__).exception("the new account's front desk could not be set up")
+        except Exception:
+            logging.getLogger(__name__).exception("the new account's front desk could not be set up")
     return {"ok": True}
 
 

@@ -32,7 +32,14 @@ from pathlib import Path
 from core.constants import DATA_DIR
 
 logger = logging.getLogger(__name__)
-ROOT = Path(DATA_DIR) / "computer" / "trajectories"
+ROOT = None  # override (tests); else the current account's computer/trajectories folder
+
+
+def root_dir() -> Path:
+    from core import accounts
+    return Path(ROOT or accounts.path("computer", "trajectories"))
+
+
 STEP_LIMIT = 200  # runs.TIMELINE_LIMIT, the run timeline's own bound
 RUN_BYTES = 40 * 1024 * 1024
 DEFAULT_DAYS = 7
@@ -57,7 +64,7 @@ def retention_days() -> int:
 def _run_dir(run_id: str, root: Path | None = None) -> Path:
     if not RUN_ID.fullmatch(run_id or ""):
         raise ValueError("bad run id")
-    base = (root or ROOT).resolve()
+    base = (root or root_dir()).resolve()
     target = (base / run_id).resolve()
     if target.parent != base:
         raise ValueError("bad run id")
@@ -185,7 +192,7 @@ def record(owner: str, run_id: str, action: str, args: dict, result: dict, befor
 
 
 def runs_for(owner: str, root: Path | None = None) -> list[dict]:
-    base = root or ROOT
+    base = root or root_dir()
     found = []
     if base.is_dir():
         for meta_path in base.glob("*/meta.json"):
@@ -288,7 +295,7 @@ def delete_owner(owner: str, root: Path | None = None) -> int:
 def sweep(now: float | None = None, root: Path | None = None) -> int:
     """Delete runs older than the retention setting (all of them when steps
     are off). Returns how many went."""
-    base = root or ROOT
+    base = root or root_dir()
     if not base.is_dir():
         return 0
     days = retention_days()

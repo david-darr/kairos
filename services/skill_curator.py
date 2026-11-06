@@ -16,7 +16,7 @@ A skill whose current content scans "dangerous" is hidden from every model
 until an admin approves that exact content. Approval is bound to the content
 hash, so editing the skill afterwards needs approving again.
 
-Provenance is kept in SKILLS_DIR/.provenance.json, never in the SKILL.md
+Provenance is kept in the skills folder/.provenance.json, never in the SKILL.md
 itself: frontmatter is written by whoever wrote the skill, so a skill could
 otherwise declare its own origin. A SKILL.md never grants a tool permission
 either - nothing reads `allowed-tools`, and a test holds that line.
@@ -58,7 +58,7 @@ class SkillImportRefused(Exception):
 def _provenance_path() -> str:
     # Read through skills_service each time so a relocated SKILLS_DIR (tests,
     # a changed data directory) is followed rather than captured at import.
-    return os.path.join(skills_service.SKILLS_DIR, ".provenance.json")
+    return os.path.join(skills_service.skills_dir(), ".provenance.json")
 
 
 def _load() -> dict:
@@ -67,7 +67,7 @@ def _load() -> dict:
 
 
 def _save(data: dict) -> None:
-    os.makedirs(skills_service.SKILLS_DIR, exist_ok=True)
+    os.makedirs(skills_service.skills_dir(), exist_ok=True)
     write_json_atomic(_provenance_path(), data)
 
 

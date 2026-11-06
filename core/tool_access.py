@@ -26,7 +26,14 @@ from core.constants import DATA_DIR
 from core.turn_taint import TurnTaint
 
 TOKEN_LIFETIME_SECONDS = 3600
-SCREEN_ROOT = Path(DATA_DIR) / "computer" / "screens"
+SCREEN_ROOT = None  # override (tests); else the current account's computer/screens folder
+
+
+def screen_root() -> Path:
+    from core import accounts
+    return Path(SCREEN_ROOT or accounts.path("computer", "screens"))
+
+
 SCREEN_MAX_AGE_SECONDS = 86400
 
 
@@ -67,7 +74,7 @@ def issue(session_id: Optional[str], is_admin: bool, agent_id: Optional[str] = N
     for stale in [t for t, g in _grants.items() if g.expires_at < now]:
         revoke(stale)
     token = secrets.token_urlsafe(32)
-    folder = str(SCREEN_ROOT / secrets.token_hex(8))
+    folder = str(screen_root() / secrets.token_hex(8))
     _grants[token] = Grant(session_id, bool(is_admin), agent_id, model, now + TOKEN_LIFETIME_SECONDS,
                            TurnTaint(), folder, context.run_id if context else None, active.get("card_id"),
                            tuple(integration_ids) if integration_ids is not None else None, read_only,
@@ -118,7 +125,12 @@ def safe_screenshot_dir(grant: Grant) -> Path | None:
     folder = Path(grant.screenshot_dir)
     if not re.fullmatch(r"[0-9a-f]{16}", folder.name):
         return None
-    root = SCREEN_ROOT.resolve()
+    from core import accounts
+    if grant.account and not SCREEN_ROOT:  # the grant's own account, whoever is asking
+        with accounts.as_account(grant.account):
+            root = screen_root().resolve()
+    else:
+        root = screen_root().resolve()
     if Path(DATA_DIR).resolve() not in root.parents or folder.parent.resolve() != root:
         return None
     resolved = folder.resolve()
@@ -127,10 +139,11 @@ def safe_screenshot_dir(grant: Grant) -> Path | None:
 
 def sweep_screens() -> None:
     """Remove old turn images left behind by a crashed app."""
-    if not SCREEN_ROOT.exists():
+    root = screen_root()
+    if not root.exists():
         return
     cutoff = time.time() - SCREEN_MAX_AGE_SECONDS
-    for folder in SCREEN_ROOT.iterdir():
+    for folder in root.iterdir():
         if not folder.is_dir() or not re.fullmatch(r"[0-9a-f]{16}", folder.name):
             continue
         if folder.stat().st_mtime >= cutoff:

@@ -96,8 +96,8 @@ def _extract_generated_attachments(text: str) -> tuple[str, list[str]]:
             return ""
         return _inner
 
-    cleaned = GENERATED_IMAGE_RE.sub(_strip(image_gen.GENERATED_DIR), text)
-    cleaned = GENERATED_FILE_RE.sub(_strip(image_gen.GENERATED_FILES_DIR), cleaned)
+    cleaned = GENERATED_IMAGE_RE.sub(_strip(image_gen.generated_dir()), text)
+    cleaned = GENERATED_FILE_RE.sub(_strip(image_gen.generated_files_dir()), cleaned)
     # Collapse the whitespace a stripped-out inline link leaves behind
     # ("Two:  and" from "Two: ![x](...) and") into something that reads
     # naturally, without touching intentional paragraph breaks.

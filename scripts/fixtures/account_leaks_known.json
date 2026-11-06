@@ -1,19 +1,6 @@
 {
  "leaks": [
-  "bea changes david's data via DELETE /api/skills/{slug}",
-  "bea reads david's data via GET /api/chat/references",
-  "bea reads david's data via GET /api/models/choices",
-  "bea reads david's data via GET /api/skills",
-  "bea reads david's data via GET /api/skills/{slug}",
-  "david changes bea's data via DELETE /api/designs/{design_id}",
-  "david changes bea's data via DELETE /api/forge/projects/{project_id}",
-  "david changes bea's data via DELETE /api/skills/{slug}",
-  "david changes bea's data via PATCH /api/designs/{design_id}",
-  "david reads bea's data via GET /api/chat/references",
-  "david reads bea's data via GET /api/designs",
-  "david reads bea's data via GET /api/designs/{design_id}",
-  "david reads bea's data via GET /api/skills",
-  "david reads bea's data via GET /api/skills/{slug}"
+  "bea reads david's data via GET /api/models/choices"
  ],
  "bea_denied": [
   "bea cannot create bots: denied 403",

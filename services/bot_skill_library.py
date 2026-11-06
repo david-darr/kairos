@@ -290,6 +290,13 @@ def assigned(bot_id):
 # -- one-time import of the global Tool Store skills ----------------------------------------------
 
 def migrate_global():
+    """Read the first admin's skills folder (where the old global skills lived), whoever is current."""
+    from core import accounts
+    with accounts.as_account(accounts.local_account()):
+        return _migrate_global()
+
+
+def _migrate_global():
     """Copy the current global skills into the library once, keeping their enabled state.
 
     The original files are never moved or changed. A skill already migrated is skipped on

@@ -214,7 +214,7 @@ class BuilderToolTests(unittest.TestCase):
             result = self.call("save_skill", {**self.args, "files": {"examples/input.txt": "One item"}})
         self.assertTrue(result.startswith("Saved skill"), result)
         ask.assert_not_awaited()
-        self.assertEqual((Path(skills_service.SKILLS_DIR) / self.slug / "examples/input.txt").read_text(), "One item")
+        self.assertEqual((Path(skills_service.skills_dir()) / self.slug / "examples/input.txt").read_text(), "One item")
         self.assertEqual(skill_curator.describe(self.slug)["source"], skill_curator.IMPORTED)
         self.assertTrue(skill_curator.model_visible(self.slug))
 

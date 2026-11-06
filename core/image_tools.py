@@ -89,7 +89,7 @@ def _save(raw, ext, data, alt="Describe this picture"):
     if data:
         asset = design_store.add_asset(data["id"], raw, ext)
         return asset, f'{asset} ({w}x{h}): use <img src="{asset}" alt="{html.escape(alt, quote=True)}">'
-    folder = Path(image_gen.GENERATED_DIR)
+    folder = Path(image_gen.generated_dir())
     folder.mkdir(parents=True, exist_ok=True)
     name = hashlib.sha256(raw).hexdigest() + "." + ext
     (folder / name).write_bytes(raw)

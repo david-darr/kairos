@@ -383,7 +383,7 @@ class Brain:
         # requested .pptx straight into vault root — see
         # system_prompt.py's _GENERATED_FILES_ADDENDUM) — must exist before
         # the SDK will grant access to it.
-        os.makedirs(image_gen.GENERATED_FILES_DIR, exist_ok=True)
+        os.makedirs(image_gen.generated_files_dir(), exist_ok=True)
 
         return ClaudeAgentOptions(
             cli_path=claude_cli.preferred_cli_path(),
@@ -398,7 +398,7 @@ class Brain:
             # requested deliverable can be built there directly instead of
             # in the vault. User-built tab source is the one narrow data/
             # exception: generated tabs live there and need file-tool access.
-            add_dirs=REPO_CODE_DIRS + [image_gen.GENERATED_FILES_DIR, custom_tabs.USER_TABS_DIR],
+            add_dirs=REPO_CODE_DIRS + [image_gen.generated_files_dir(), custom_tabs.USER_TABS_DIR],
             # Found live 2026-09-08: the SDK's own default here is 1MB, and
             # a handful of real photos read back through a file tool (see
             # core/attachments.py) easily produces one JSON message from the
@@ -571,7 +571,7 @@ class Brain:
         """Where Claude's file tools may reach in anything but an admin chat:
         this chat's folder (the vault, or its workspace), generated files,
         and an agent's own folder (roadmap phase 7, 2026-10-06)."""
-        roots = [self.cwd_override or self.vault_dir, image_gen.GENERATED_FILES_DIR]
+        roots = [self.cwd_override or self.vault_dir, image_gen.generated_files_dir()]
         if self.agent_id:
             from services.agent_service import agents_dir
             roots.append(os.path.join(agents_dir(), self.agent_id))

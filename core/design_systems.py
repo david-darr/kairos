@@ -23,11 +23,17 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from core import design_looks
+from core import accounts, design_looks
 from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR, STATIC_DIR
 
-SYSTEMS_DIR = os.path.join(DATA_DIR, "design_systems")
+SYSTEMS_DIR = None  # test override; normally the current account's saved styles folder
+
+
+def systems_dir() -> str:
+    return SYSTEMS_DIR or accounts.path("design_systems")
+
+
 BUILTIN_ID = "kairos"
 ID_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,40}")
 _lock = threading.Lock()
@@ -159,12 +165,22 @@ def font_path(system_id: str, file: str) -> Optional[Path]:
     if re.fullmatch(r"draft-[0-9a-f]{12}", system_id or ""):
         # A style draft's preview: any bundled look font by alias (they are the app's public files).
         return design_looks.font_path(file)
-    look = design_looks.get(system_id) or _style_look(system_id)
+    look = design_looks.get(system_id)
+    if look is None:
+        try:
+            look = _style_look(system_id)
+        except accounts.NoAccount:
+            # A board frame or the render window asks for fonts with no sign-in. A person's style only names
+            # the app's own bundled font files, so any account's style of that id may vouch for the file;
+            # a custom system's own font files (below) stay with the account that is signed in.
+            look = _any_account_style_look(system_id)
+            if look is None:
+                return None
     if look:
         # A bundled look or a person's style: only the bundled OFL files its fonts name (D11).
         allowed = {face["file"] for face in design_looks.fonts(look)}
         return design_looks.font_path(file) if file in allowed else None
-    path = Path(SYSTEMS_DIR, system_id, "fonts", file)
+    path = Path(systems_dir(), system_id, "fonts", file)
     return path if path.is_file() else None
 
 
@@ -201,7 +217,7 @@ def look_system(look: dict, meta: Optional[dict] = None) -> dict:
 def _style_look(system_id: str) -> Optional[dict]:
     """A person's style (Phase 1b: styles from references): look.json beside system.json, validated
     on every read like a bundled look, so a hand-edited file can't make unreadable boards."""
-    path = Path(SYSTEMS_DIR, system_id, "look.json")
+    path = Path(systems_dir(), system_id, "look.json")
     if not ID_RE.fullmatch(system_id or "") or not path.is_file():
         return None
     raw = read_json(str(path), None)
@@ -209,6 +225,15 @@ def _style_look(system_id: str) -> Optional[dict]:
         return design_looks._validate(system_id, raw) if isinstance(raw, dict) else None
     except ValueError:
         return None
+
+
+def _any_account_style_look(system_id: str) -> Optional[dict]:
+    for account in accounts.all_accounts():
+        with accounts.as_account(account):
+            look = _style_look(system_id)
+        if look:
+            return look
+    return None
 
 
 def visible(system: Optional[dict], user: Optional[str], is_admin: bool) -> bool:
@@ -229,7 +254,7 @@ def save_style(look: dict, *, owner: str, sources: list[str], system_id: Optiona
     if system_id == BUILTIN_ID or not ID_RE.fullmatch(system_id) or design_looks.get(system_id):
         raise ValueError("That style id cannot be used.")
     clean = design_looks._validate(system_id, look)
-    folder = Path(SYSTEMS_DIR, system_id)
+    folder = Path(systems_dir(), system_id)
     with _lock:
         folder.mkdir(parents=True, exist_ok=True)
         existing = read_json(str(folder / "system.json"), {}) or {}
@@ -245,7 +270,7 @@ def save_style(look: dict, *, owner: str, sources: list[str], system_id: Optiona
 
 def share_style(system_id: str, shared: bool) -> dict:
     """Admin only (callers check): make a person's style everyone's, or theirs again."""
-    folder = Path(SYSTEMS_DIR, system_id)
+    folder = Path(systems_dir(), system_id)
     with _lock:
         data = read_json(str(folder / "system.json"), None)
         if not isinstance(data, dict) or data.get("kind") != "style":
@@ -265,8 +290,8 @@ def get(system_id: Optional[str]) -> Optional[dict]:
         return look_system(look)
     style = _style_look(system_id)
     if style:
-        return look_system(style, read_json(str(Path(SYSTEMS_DIR, system_id, "system.json")), {}) or {})
-    folder = Path(SYSTEMS_DIR, system_id)
+        return look_system(style, read_json(str(Path(systems_dir(), system_id, "system.json")), {}) or {})
+    folder = Path(systems_dir(), system_id)
     data = read_json(str(folder / "system.json"), None)
     if not isinstance(data, dict):
         return None
@@ -284,8 +309,8 @@ def list_systems(user: Optional[str] = None, is_admin: bool = True) -> list[dict
     out = [{"id": BUILTIN_ID, "name": "Kairos", "builtin": True}]
     out += [{"id": look["id"], "name": look["name"], "builtin": False, "bundled": True, "mood": look["mood"]}
             for look in design_looks.load().values()]
-    if os.path.isdir(SYSTEMS_DIR):
-        for name in sorted(os.listdir(SYSTEMS_DIR)):
+    if os.path.isdir(systems_dir()):
+        for name in sorted(os.listdir(systems_dir())):
             system = get(name) if ID_RE.fullmatch(name) and not design_looks.get(name) else None
             if system and visible(system, user, is_admin):
                 entry = {"id": system["id"], "name": system["name"], "builtin": False, "source": system.get("source")}
@@ -340,7 +365,7 @@ def save(name: str, tokens: dict, guide: str = "", *, created_by: str = "", sour
         system_id = f"{base}-{secrets.token_hex(3)}"
     if system_id == BUILTIN_ID or not ID_RE.fullmatch(system_id) or design_looks.get(system_id):
         raise ValueError("That design system cannot be changed.")
-    folder = Path(SYSTEMS_DIR, system_id)
+    folder = Path(systems_dir(), system_id)
     with _lock:
         folder.mkdir(parents=True, exist_ok=True)
         write_json_atomic(str(folder / "tokens.json"), clean)

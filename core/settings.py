@@ -114,7 +114,7 @@ def update_settings(**fields) -> dict:
 # Settings that belong to one account rather than the install (Multi-Account group 2, 2026-11-06): kept
 # in the account's own folder. Only the vault location so far; group 8 splits the rest of settings.json
 # into "My account" and "This Kairos". The first admin's vault stays in settings.json (core/vault.py).
-ACCOUNT_KEYS = {"vault_dir", "auto_enabled_builtins"}
+ACCOUNT_KEYS = {"vault_dir", "auto_enabled_builtins", "seeded_skills", "seeded_skill_hashes"}
 
 
 def _account_file(account_id=None) -> str:

@@ -16,7 +16,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
-from core import (design_comments, design_export, design_formats, design_html, design_render, design_render_bridge,
+from core import (accounts, design_comments, design_export, design_formats, design_html, design_render, design_render_bridge,
                   design_store, design_systems, design_tools)
 from core.auth import auth_manager
 from core.middleware import get_current_user, require_admin, require_user
@@ -277,11 +277,13 @@ async def get_design_mode(session_id: str, user: str = Depends(require_user)) ->
 # -- boards ---------------------------------------------------------------------------
 
 def _render_response(design_id: str, slug: str, request: Request, version: Optional[int],
-                     width: Optional[int] = None) -> HTMLResponse:
+                     width: Optional[int] = None, rt: Optional[str] = None) -> HTMLResponse:
     try:
         page = design_render.render_document(design_id, slug, version=version, width=width)
     except LookupError as error:
         raise HTTPException(404, str(error).strip("'\"")) from None
+    # Asset requests from the board's frame carry no sign-in: hand them the account in a token.
+    page = design_render.with_asset_token(page, rt or design_render.sign(design_id, "assets", 6 * 3600))
     origin = f"{request.url.scheme}://{request.url.netloc}"
     return HTMLResponse(page, headers={"Content-Security-Policy": design_render.csp(origin, design_id),
                                        "X-Frame-Options": "SAMEORIGIN", "Cache-Control": "no-store",
@@ -292,19 +294,28 @@ def _render_response(design_id: str, slug: str, request: Request, version: Optio
 async def render_board(design_id: str, slug: str, request: Request, v: Optional[int] = None,
                        rt: Optional[str] = None, w: Optional[int] = None) -> HTMLResponse:
     if rt is not None:
-        if not design_render.verify(design_id, slug, rt):
+        # The headless renderer has no sign-in: the token names the account the page is read from.
+        account = design_render.token_account(design_id, slug, rt)
+        if account is None:
             raise HTTPException(404, "Design not found")
-    else:
-        user = get_current_user(request)
-        if user is None:
-            raise HTTPException(401, "authentication required")
-        _design(design_id, user)
+        with accounts.as_account(account):
+            return _render_response(design_id, slug, request, v, w, rt)
+    user = get_current_user(request)
+    if user is None:
+        raise HTTPException(401, "authentication required")
+    _design(design_id, user)
     return _render_response(design_id, slug, request, v, w)
 
 
-def _asset(design_id: str, name: str) -> FileResponse:
+def _asset(design_id: str, name: str, rt: Optional[str] = None) -> FileResponse:
+    # A browser frame or the renderer sends no sign-in; the page's asset links carry the token it was made
+    # with, whose account names the folder. With none, only a signed-in request (its own account) finds one.
+    account = design_render.asset_account(design_id, rt) if rt else design_render.request_account()
+    if account is None:
+        raise HTTPException(404, "Not found")
     try:
-        path = design_store.asset_path(design_id, name)
+        with accounts.as_account(account):
+            path = design_store.asset_path(design_id, name)
     except LookupError:
         raise HTTPException(404, "Not found") from None
     ext = path.suffix.lstrip(".")
@@ -316,13 +327,13 @@ def _asset(design_id: str, name: str) -> FileResponse:
 
 
 @router.get("/{design_id}/assets/{name}")
-async def get_asset(design_id: str, name: str) -> FileResponse:
-    return _asset(design_id, name)
+async def get_asset(design_id: str, name: str, rt: Optional[str] = None) -> FileResponse:
+    return _asset(design_id, name, rt)
 
 
 @router.get("/{design_id}/boards/{slug}/assets/{name}")
-async def get_board_asset(design_id: str, slug: str, name: str) -> FileResponse:
-    return _asset(design_id, name)
+async def get_board_asset(design_id: str, slug: str, name: str, rt: Optional[str] = None) -> FileResponse:
+    return _asset(design_id, name, rt)
 
 
 class Upload(BaseModel):
@@ -903,7 +914,7 @@ async def delete_system(system_id: str, user: str = Depends(require_user)) -> di
     system = design_systems.get(system_id)
     if not _admin(user) and not (system and system.get("style") and system.get("owner") == user):
         raise HTTPException(403, "admin privileges required")
-    shutil.rmtree(Path(design_systems.SYSTEMS_DIR, system_id), ignore_errors=True)
+    shutil.rmtree(Path(design_systems.systems_dir(), system_id), ignore_errors=True)
     return {"ok": True}
 
 
@@ -914,7 +925,15 @@ async def look_preview(system_id: str, request: Request, rt: Optional[str] = Non
     """A look's preview board for Tool Store cards. Bundled looks and Kairos need no session (the
     card's frame is sandboxed and sends none); a person's style or draft is private, so it needs the
     token its owner's authenticated read handed out (rt). No script runs."""
-    page = design_render.render_sample(system_id, rt=rt) if design_systems.ID_RE.fullmatch(system_id or "") else None
+    page = None
+    if design_systems.ID_RE.fullmatch(system_id or ""):
+        # A person's style or draft is private: the token names the account that handed it out.
+        account = design_render.token_account(system_id, "style-preview", rt) if rt else None
+        if account:
+            with accounts.as_account(account):
+                page = design_render.render_sample(system_id, rt=rt)
+        else:
+            page = design_render.render_sample(system_id, rt=rt)
     if page is None:
         raise HTTPException(404, "Not found")
     origin = f"{request.url.scheme}://{request.url.netloc}"

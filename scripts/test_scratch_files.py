@@ -15,7 +15,7 @@ from core import image_gen, system_prompt
 
 class ScratchTests(unittest.TestCase):
     def test_sweep_removes_only_old_scratch(self):
-        scratch, out = Path(image_gen.SCRATCH_DIR), Path(image_gen.GENERATED_FILES_DIR)
+        scratch, out = Path(image_gen.scratch_dir()), Path(image_gen.generated_files_dir())
         (scratch / "run1").mkdir(parents=True, exist_ok=True)
         old, fresh = scratch / "run1" / "boards.json", scratch / "edits.json"
         deliverable = out / "abc123_Guide.pdf"
@@ -31,7 +31,7 @@ class ScratchTests(unittest.TestCase):
         self.assertTrue(deliverable.exists(), "deliverables are never swept")
 
     def test_register_moves_a_file_already_in_generated_files_whatever_its_case(self):
-        out = Path(image_gen.GENERATED_FILES_DIR)
+        out = Path(image_gen.generated_files_dir())
         out.mkdir(parents=True, exist_ok=True)
         source = out / "Story.png"
         source.write_bytes(b"png")
@@ -42,7 +42,7 @@ class ScratchTests(unittest.TestCase):
 
     def test_codex_is_told_where_scratch_goes(self):
         prompt = system_prompt.for_codex("python.exe", "cli.py")
-        self.assertIn(image_gen.SCRATCH_DIR, prompt)
+        self.assertIn(image_gen.scratch_dir(), prompt)
         self.assertIn("never beside deliverables", prompt)
 
 

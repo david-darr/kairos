@@ -290,11 +290,11 @@ class RevealPathTests(PairingTests):
         from core.session_manager import session_manager
         self.session_manager = session_manager
         self.session = session_manager.create_session("Files", owner_user="local")
-        os.makedirs(image_gen.GENERATED_FILES_DIR, exist_ok=True)
+        os.makedirs(image_gen.generated_files_dir(), exist_ok=True)
         self.name = "a1b2c3d4e5f6_report.md"
-        with open(os.path.join(image_gen.GENERATED_FILES_DIR, self.name), "w", encoding="utf-8") as handle:
+        with open(os.path.join(image_gen.generated_files_dir(), self.name), "w", encoding="utf-8") as handle:
             handle.write("# report\n")
-        with open(os.path.join(image_gen.GENERATED_FILES_DIR, "ffffffffffff_other.md"), "w", encoding="utf-8") as handle:
+        with open(os.path.join(image_gen.generated_files_dir(), "ffffffffffff_other.md"), "w", encoding="utf-8") as handle:
             handle.write("not this chat's\n")
         self.url = f"/generated-files/{self.name}"
         session_manager.register_artifact(self.session["id"], self.url)
@@ -350,7 +350,7 @@ class RevealPathTests(PairingTests):
     async def test_a_deleted_file_is_not_revealed(self):
         from core import image_gen
         token = {cli_access.HEADER: await self.paired_token()}
-        os.remove(os.path.join(image_gen.GENERATED_FILES_DIR, self.name))
+        os.remove(os.path.join(image_gen.generated_files_dir(), self.name))
         response = await self.ask({"session_id": self.session["id"], "url": self.url}, token)
         self.assertEqual(response.status_code, 404)
 

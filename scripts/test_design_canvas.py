@@ -626,7 +626,7 @@ class ExportTests(unittest.TestCase):
                         continue
                     job = json.loads(block[6:])
                     seen.append(job)
-                    self.assertRegex(job["path"], r"^/api/designs/[a-f0-9]{12}/boards/[a-z0-9-]+/render\?rt=\d{10}\.[A-Za-z0-9_-]{24}$")
+                    self.assertRegex(job["path"], r"^/api/designs/[a-f0-9]{12}/boards/[a-z0-9-]+/render\?rt=\d{10}\.[A-Za-z0-9_-]{24}\.[a-z0-9]{1,32}\.[A-Za-z0-9_-]{24}$")
                     slug = job["path"].split("/boards/")[1].split("/")[0]
                     self.assertTrue(design_render.verify(self.design_id, slug, job["path"].split("rt=")[1]))
                     design_render_bridge.complete(job["id"], _png() if job["kind"] == "png" else _pdf())
@@ -991,7 +991,7 @@ class FormatTests(unittest.TestCase):
         client = TestClient(app)
         design_id = client.post("/api/designs", json={"title": "Old site"}).json()["id"]
         # The shape of the dev "Kairos website redesign": frame none, odd sizes, free layout.
-        path = Path(design_store.DESIGNS_DIR) / design_id / "design.json"
+        path = Path(design_store.designs_dir()) / design_id / "design.json"
         data = json.loads(path.read_text(encoding="utf-8"))
         html = design_store.board_html(design_id, "screen-1")
         sizes = {"home": (1468, 3990, "Home"), "features": (1440, 2500, "Features"), "home-phone": (1072, 3076, "Home (phone)")}
@@ -999,9 +999,9 @@ class FormatTests(unittest.TestCase):
                           for n, (slug, (w, h, t)) in enumerate(sizes.items())}
         data.pop("layout", None)
         path.write_text(json.dumps(data), encoding="utf-8")
-        (Path(design_store.DESIGNS_DIR) / design_id / "boards" / "screen-1.html").unlink()
+        (Path(design_store.designs_dir()) / design_id / "boards" / "screen-1.html").unlink()
         for slug in sizes:
-            (Path(design_store.DESIGNS_DIR) / design_id / "boards" / f"{slug}.html").write_text(html, encoding="utf-8")
+            (Path(design_store.designs_dir()) / design_id / "boards" / f"{slug}.html").write_text(html, encoding="utf-8")
         client.patch(f"/api/designs/{design_id}", json={"title": "Old site, renamed"})  # A version holding the old boards.
         shown = client.get(f"/api/designs/{design_id}").json()
         self.assertEqual(shown["layout"], "free")

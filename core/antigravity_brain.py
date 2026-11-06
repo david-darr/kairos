@@ -78,11 +78,11 @@ class AntigravityBrain(CodexBrain):
             if self.effort not in antigravity_cli.EFFORTS:
                 raise ValueError('Unsupported Antigravity effort')
             args += ['--effort', self.effort]
-        roots = self._agent_roots() if self.agent_auto else [image_gen.GENERATED_FILES_DIR, USER_TABS_DIR]
+        roots = self._agent_roots() if self.agent_auto else [image_gen.generated_files_dir(), USER_TABS_DIR]
         if self.is_admin and not self.agent_auto:
             roots += list(REPO_CODE_DIRS)
         for root in dict.fromkeys(roots):
-            if root == image_gen.GENERATED_FILES_DIR:
+            if root == image_gen.generated_files_dir():
                 os.makedirs(root, exist_ok=True)
             args += ['--add-dir', root]
         return args
