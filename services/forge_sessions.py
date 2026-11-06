@@ -141,6 +141,8 @@ class ForgeSessions:
 
     def create(self, project_id, task, model_endpoint_id=None, mode='build', isolation='new_worktree',
                branch=None, base_branch=None, owner_user=None, model_override=None):
+        from core import accounts
+        accounts.require_machine_access('Forge')
         if mode not in ('build', 'plan') or isolation not in ('new_worktree', 'existing_branch', 'in_place'):
             raise ValueError('Choose a valid mode and isolation.')
         if not task.strip():

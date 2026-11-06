@@ -99,6 +99,24 @@ class ElevationNeeded(PolicyError):
     status = 409
 
 
+class MachineAccessNeeded(ElevationNeeded):
+    """The bot's owner account has no machine access (core/accounts.py), so it stays at Ask."""
+
+
+MACHINE_MESSAGE = ("This account doesn't have machine access, so its bots stay at Ask. "
+                   "Ask an admin to turn machine access on.")
+
+
+def machine_capped() -> bool:
+    """True when the current account (a bot's owner) may not run things on this computer."""
+    return not accounts.has_machine_access()
+
+
+def check_machine_cap(mode: Optional[str]) -> None:
+    if mode is not None and mode != "ask" and machine_capped():
+        raise MachineAccessNeeded(MACHINE_MESSAGE)
+
+
 class StaleRevision(PolicyError):
     status = 409
 
@@ -312,6 +330,7 @@ def check_bot_change(current: Optional[dict], value: str) -> None:
     taken)."""
     if value not in MODES:
         raise PolicyError(f"approval_mode must be one of: {', '.join(MODES)}")
+    check_machine_cap(value)
     bot_id = (current or {}).get("id")
     stored = (current or {}).get("approval_mode")
     if current is None:
@@ -451,6 +470,13 @@ def effective_policy(bot_id: str, thread_id: Optional[str] = None, provider: Opt
             mode, source, stored, thread_mode = bot_mode, bot_source, override, override
             reason = reason or (f"This conversation was set to {LABELS[override]} without your confirmation, "
                                 f"so it follows the bot's {LABELS[bot_mode]}.")
+    if machine_capped():
+        # No machine access: never above Ask, whatever a stored record says.
+        capped = "Ask is the most this account's bots may do without machine access."
+        if bot_mode != "ask":
+            bot_mode, reason = "ask", reason or capped
+        if mode != "ask":
+            mode, reason = "ask", reason or capped
     supported = True
     if provider:
         supported, why = provider_support(provider, mode)
@@ -651,6 +677,8 @@ def add_command_rule(bot_id: str, command: str, cwd: str, provider: Optional[str
         raise PolicyError("That AI name is not valid.")
     if _agent(bot_id) is None:
         raise NotFound("No such bot.")
+    if machine_capped():
+        raise MachineAccessNeeded(MACHINE_MESSAGE)
     with _mutate() as data:
         rules = data["commands"].setdefault(bot_id, [])
         for rule in rules:
@@ -1241,6 +1269,7 @@ def change_mode(bot_id: str, mode: Optional[str], *, scope: str = "bot", thread_
         raise PolicyError(f"mode must be one of: {', '.join(MODES)}")
     if mode is None and scope != "thread":
         raise PolicyError("Only a conversation can follow its bot.")
+    check_machine_cap(mode)
     if _agent(bot_id) is None:
         raise NotFound("No such bot.")
     if scope == "thread":
@@ -1295,6 +1324,7 @@ def prepare_elevation(bot_id: str, mode: str, *, scope: str = "bot", thread_id: 
     level. Nothing changes yet; only the desktop shell can take the next steps."""
     if mode not in ("edits", "auto", "full", "custom"):
         raise PolicyError("Only a higher level needs confirming.")
+    check_machine_cap(mode)
     if scope not in ("bot", "thread"):
         raise PolicyError("Raise the bot or one conversation.")
     agent = _agent(bot_id)

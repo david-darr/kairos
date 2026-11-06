@@ -83,7 +83,7 @@ def apply(package, selection=None, *, owner_user=None):
             name = free_name(bot["name"], taken)
             result = bot_record.create_configured({
                 "profile": {**{k: copy.deepcopy(bot[k]) for k in ("role", "blurb", "soul", "avatar", "color") if k in bot}, "name": name},
-                "approval_mode": "full", "integration_ids": [], "routines": [], "memory_seed": bot.get("memory_seed", []),
+                "approval_mode": bot_record.default_approval(), "integration_ids": [], "routines": [], "memory_seed": bot.get("memory_seed", []),
                 "origin": {"kind": "preset", "id": bot["key"]}, "use_defaults": False,
             }, owner_user=owner_user)
             agent = result["agent"]

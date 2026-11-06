@@ -56,6 +56,8 @@ class ForgeTerminals:
     def start(self, session_id, rows=24, cols=80, is_admin=False, remote=False):
         if not is_admin:
             raise ValueError('The terminal requires an admin.')
+        from core import accounts
+        accounts.require_machine_access('Forge')
         self.dimensions(rows, cols)
         with self.lock, self.sessions.lock:
             if self.closed:

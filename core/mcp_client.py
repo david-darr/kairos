@@ -37,6 +37,8 @@ _NAME_OK = re.compile(r"[^a-zA-Z0-9_-]")
 def _target(config: dict):
     from mcp.client.stdio import StdioServerParameters
     if config.get("type") == "stdio":
+        from core import accounts
+        accounts.require_machine_access("A local MCP command")
         return StdioServerParameters(command=config["command"], args=list(config.get("args") or []),
                                      env=config.get("env") or None)
     headers = config.get("headers") or {}
@@ -281,6 +283,10 @@ async def check(item_id: str) -> Optional[dict]:
     if not item.get("enabled", True):
         return integrations.get_integration_masked(item_id)
     await mcp_oauth.refresh_due([item_id])
+    if item.get("mcp_type") == "stdio":
+        from core import accounts
+        if not accounts.has_machine_access():
+            return integrations.record_check(item_id, error=accounts.MACHINE_ACCESS_MESSAGE)
     config = integrations.list_mcp_servers_runtime([item_id]).get(item["name"])
     if config is None:  # an OAuth server not signed in is left out until it is
         return integrations.record_check(item_id, signed_out=True)

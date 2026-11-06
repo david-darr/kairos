@@ -223,6 +223,8 @@ def scan(folder):
 
 
 def install(content, *, replace=False, confirmed=False, expected_fingerprint=None):
+    from core import accounts
+    accounts.require_machine_access("Installing a tab")
     with _LOCK, _staging() as temporary:
         folder = unpack(content, temporary)
         meta = tab_folders.metadata(str(folder))

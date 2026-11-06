@@ -162,6 +162,8 @@ def list_mcp_servers_runtime(only_ids: Optional[list[str]] = None) -> dict[str, 
             continue
         if only_ids is None and is_rea(item):
             continue  # REA needs an explicit choice in this chat or agent.
+        if item.get("mcp_type") == "stdio" and not accounts.has_machine_access():
+            continue  # a local command is this computer's to run; a record made earlier does not start without the grant
         if only_ids is not None and item["id"] not in only_ids:
             continue
         api_key = decrypt(item["api_key_encrypted"]) if item.get("api_key_encrypted") else None
@@ -338,6 +340,8 @@ def create_mcp_server(name: str, mcp_type: str, command: Optional[str] = None,
     (core/mcp_oauth.py); the catalog's sign-in servers are added that way."""
     if mcp_type not in MCP_TYPES:
         raise ValueError("mcp_type must be 'stdio' or 'http'")
+    if mcp_type == "stdio":
+        accounts.require_machine_access("A local MCP command")
     if mcp_type == "stdio" and not command:
         raise ValueError("command is required for a stdio MCP server")
     if mcp_type == "http" and not url:
@@ -390,6 +394,8 @@ def save_mcp_config(fields: dict, replace_id: Optional[str] = None) -> dict:
 
     Secret slots (headers, environment, key, OAuth client secret) are write-only: a string replaces the saved
     value, True keeps it, a missing name is removed. Tool pins, health and a still-valid sign-in carry over."""
+    if fields.get("mcp_type") == "stdio":
+        accounts.require_machine_access("A local MCP command")
     data = _load()
     previous = data.get(replace_id) if replace_id else None
     if replace_id and (not previous or previous["kind"] != "mcp_server"):

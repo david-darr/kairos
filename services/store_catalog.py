@@ -233,6 +233,9 @@ class StoreCatalog:
         from routes import integrations_routes
         from services import skills_service, skill_curator
         from services.task_service import task_service
+        if kind == "tab":
+            from core import accounts
+            accounts.require_machine_access("Installing a tab")
         key = _key(kind, slug)
         snapshot = await self.snapshot()
         if confirmed and expected_commit != snapshot["commit"]:

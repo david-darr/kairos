@@ -153,6 +153,7 @@ class AuthManager:
             "totp_enabled": False,
             "created_at": time.time(),
             "account_id": account_id,
+            "machine_access": bool(is_admin),
         }
         write_json_atomic(AUTH_FILE, self._users)
 
@@ -207,12 +208,33 @@ class AuthManager:
         user = self._users["users"].get(username)
         return bool(user and user.get("is_admin"))
 
+    def has_machine_access(self, username: str) -> bool:
+        """Whether this user's chats and bots may use this computer's shell and files. Admins always do (computed,
+        whatever the stored flag says); everyone else only when an admin granted it. The single local user is
+        the owner of the machine."""
+        if username == SINGLE_USER:
+            return True
+        user = self._users["users"].get(username)
+        if not user:
+            return False
+        return bool(user.get("is_admin") or user.get("machine_access"))
+
+    def set_machine_access(self, username: str, enabled: bool) -> None:
+        user = self._users["users"].get(username)
+        if not user:
+            raise KeyError(f"no such user: {username}")
+        if user.get("is_admin"):
+            raise ValueError("admins always have machine access")
+        user["machine_access"] = bool(enabled)
+        write_json_atomic(AUTH_FILE, self._users)
+
     # -- account/user management (Settings tab, David's ask 2026-08-31,
     # matching Odysseus's Account + Admin > Users panels) -----------------
 
     def list_users(self) -> list[dict]:
         return [
-            {"username": u, "is_admin": info.get("is_admin", False), "totp_enabled": info.get("totp_enabled", False), "created_at": info.get("created_at")}
+            {"username": u, "is_admin": info.get("is_admin", False), "totp_enabled": info.get("totp_enabled", False), "created_at": info.get("created_at"),
+             "machine_access": self.has_machine_access(u)}
             for u, info in self._users["users"].items()
         ]
 

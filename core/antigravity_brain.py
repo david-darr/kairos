@@ -116,6 +116,9 @@ class AntigravityBrain(CodexBrain):
         return f'[System instructions:]\n{prompt}\n{guidance}\n\n[User message:]\n{text}'
 
     async def _run_process(self, user_text):
+        refusal = self._machine_refusal()
+        if refusal:
+            raise ValueError(refusal)
         executable = antigravity_cli.find_antigravity()
         if not executable:
             raise RuntimeError('Antigravity CLI (agy) was not found. Install it, sign in, and recheck Settings > Models.')

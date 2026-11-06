@@ -13,7 +13,7 @@ only ever saved OFF with empty secrets (`propose`).
 import re
 from typing import Optional
 
-from core import integrations, mcp_oauth
+from core import accounts, integrations, mcp_oauth
 
 NAME = re.compile(r"[a-z][a-z0-9_-]{0,31}")
 HEADER_NAME = re.compile(r"[A-Za-z0-9-]{1,64}")
@@ -86,6 +86,8 @@ def clean(body: dict, previous: Optional[dict] = None) -> dict:
     if transport not in ("http", "sse", "stdio"):
         raise McpConfigError("Choose a remote link (http or sse) or a local command.")
     fields: dict = {"name": name, "mcp_type": "stdio" if transport == "stdio" else "http"}
+    if transport == "stdio" and not accounts.has_machine_access():
+        raise McpConfigError(accounts.MACHINE_ACCESS_MESSAGE, 403)
     if transport == "stdio":
         fields["command"] = _text(body.get("command"), "The command", 500)
         args = body.get("args") or []
@@ -200,6 +202,8 @@ async def test(item_id: str) -> dict:
     item = integrations.get_integration(item_id)
     if item is None or item.get("kind") != "mcp_server":
         raise McpConfigError("That MCP server was not found.", 404)
+    if item.get("mcp_type") == "stdio" and not accounts.has_machine_access():
+        raise McpConfigError(accounts.MACHINE_ACCESS_MESSAGE, 403)
     await mcp_oauth.refresh_due([item_id])
     config = integrations.list_mcp_servers_runtime([item_id]).get(item["name"]) if item.get("enabled", True) else None
     if config is None:

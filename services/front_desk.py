@@ -25,6 +25,12 @@ def account_owner():
 # Kip as the assistant and team lead (David, 2026-11-02): it can use everything connected, and asks before anything
 # leaves Kairos, so it starts at Edits (core/bot_policy.py: reads and Kairos changes go ahead, sends and deletes ask).
 FRONT_DESK_APPROVAL = "edits"
+
+
+def front_desk_approval() -> str:
+    """Edits, or Ask for an account without machine access (core/accounts.py), whose bots never go above Ask."""
+    from core import accounts
+    return FRONT_DESK_APPROVAL if accounts.has_machine_access() else "ask"
 FRONT_DESK_BLURB = "Your assistant and team lead. Ask for anything."
 FRONT_DESK_ROLE = "Assistant"
 LEGACY_BLURBS = ("Ask, plan and pass work to the right bot.",)
@@ -140,7 +146,7 @@ def ensure(*, restore=False):
                 name = f"Kip, front desk {suffix}"
                 suffix += 1
             agent = agent_service.create(name, role=FRONT_DESK_ROLE, soul=FRONT_DESK_SOUL, blurb=FRONT_DESK_BLURB,
-                                         daily_run_cap=100, approval_mode=FRONT_DESK_APPROVAL, reply_style="conversational")
+                                         daily_run_cap=100, approval_mode=front_desk_approval(), reply_style="conversational")
             agent_service.mutate_bot(agent["id"], lambda a: a.update(builtin="front_desk", order=-1))
             # A team lead hands work to its teammates without asking each time; sends and deletes still ask.
             from services import bot_peers
@@ -194,7 +200,7 @@ def _become_lead(agent, state):
     from services.agent_service import agent_service
     changes = {}
     if agent.get("approval_mode") == "full":
-        changes["approval_mode"] = FRONT_DESK_APPROVAL
+        changes["approval_mode"] = front_desk_approval()
     if (agent.get("soul") or "").strip() in {soul.strip() for soul in LEGACY_SOULS}:
         changes["soul"] = FRONT_DESK_SOUL
     if agent.get("blurb") in LEGACY_BLURBS:

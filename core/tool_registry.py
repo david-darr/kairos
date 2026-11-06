@@ -206,14 +206,27 @@ def helper_tool(spec: ToolSpec) -> bool:
     return (spec.effect == READ or spec.name == "browse") and not spec.agent_only and spec.name not in HELPER_BLOCKED
 
 
+# Tools that run with this computer's permissions or reach its disk, outside the account's own folder. An
+# account without the admin's machine-access grant (core/accounts.py) is not offered them and is refused if
+# it calls one anyway.
+MACHINE_TOOLS = frozenset({"run_shell", "read_repo_file", "list_repo_directory", "write_repo_file", "computer",
+                           "forge_app_logs", "roblox_studio", "rea_call_tool"})
+
+
+def machine_tool(name: str) -> bool:
+    return name in MACHINE_TOOLS or name.startswith("forge_")
+
+
 def specs(surface: str, is_admin: bool = False, agent: bool = False, helper: bool = False,
           read_only: bool = False, session_id: str | None = None, bot_id: str | None = None) -> list[ToolSpec]:
     """The tools one surface offers, in registration order (stable, so the
     tool list - part of the cached prompt prefix - never reorders). Agent-only
     tools appear only for an agent's runs and chats; a helper gets only
     helper_tool()'s."""
-    from core import addons
+    from core import accounts, addons
     hidden = _bot_hidden(bot_id, [s.name for s in _REGISTRY.values()], is_admin)
+    if not accounts.has_machine_access():
+        hidden = hidden | {s.name for s in _REGISTRY.values() if machine_tool(s.name)}
     return [s for s in _REGISTRY.values() if addons.tool_available(s.name) and surface in s.surfaces and (is_admin or not s.admin_only)
             and s.name not in hidden
             and (agent or not s.agent_only) and (not helper or helper_tool(s))
@@ -265,6 +278,10 @@ async def call(name: str, args: dict, ctx: ToolContext, surface: str) -> str | T
     if not addons.tool_available(name):
         return 'Not run: Install and enable this add-on in Tool Store first.'
     spec = _REGISTRY.get(name)
+    if machine_tool(name):
+        from core import accounts
+        if not accounts.has_machine_access():
+            return f"Not run: {accounts.MACHINE_ACCESS_MESSAGE}"
     if (ctx.read_only or session_read_only(ctx.session_id)) and not read_tool(name):
         return 'Not run: Forge Plan mode is read-only.'
     if (spec is None or surface not in spec.surfaces or (spec.admin_only and not ctx.is_admin)

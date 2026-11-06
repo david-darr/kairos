@@ -280,6 +280,22 @@ async def set_user_admin(username: str, body: SetAdminRequest, user: str = Depen
     return {"ok": True}
 
 
+class SetMachineAccessRequest(BaseModel):
+    enabled: bool
+
+
+@router.put("/users/{username}/machine-access")
+async def set_user_machine_access(username: str, body: SetMachineAccessRequest, user: str = Depends(require_admin)) -> dict:
+    """Let one account's chats and bots use this computer's shell and files (admins always can)."""
+    try:
+        auth_manager.set_machine_access(username, body.enabled)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="user not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "machine_access": auth_manager.has_machine_access(username)}
+
+
 @router.delete("/users/{username}")
 async def delete_user(username: str, user: str = Depends(require_admin)) -> dict:
     if username == user:

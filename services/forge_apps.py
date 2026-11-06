@@ -248,6 +248,8 @@ class ForgeApps:
         raise ValueError('Could not reserve an app port.')
 
     async def start(self, session_id, is_admin=False, surface=None):
+        from core import accounts
+        accounts.require_machine_access('Forge')
         if not is_admin:
             raise ValueError('App Preview requires an admin.')
         async with self.start_locks.setdefault(session_id, asyncio.Lock()):

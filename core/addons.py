@@ -150,6 +150,9 @@ def _payload(ident):
 def change(ident, action):
     if ident not in IDS or action not in {'install', 'enable', 'disable', 'remove'}:
         raise ValueError('Choose an add-on and install, enable, disable or remove')
+    if action in {'install', 'enable'}:
+        from core import accounts
+        accounts.require_machine_access('Installing an add-on')
     with _lock:
         state = _load(); rows = state['packages']; previous = rows.get(ident, {})
         if action in {'install', 'disable', 'remove'}:

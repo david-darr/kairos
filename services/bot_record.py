@@ -94,10 +94,16 @@ class ConfiguredFailure(Exception):
 
 # -- defaults and the load-time upgrade ---------------------------------------
 
+def default_approval() -> str:
+    """Full, except for an account without machine access (core/accounts.py), whose new bots start at Ask."""
+    from core import accounts
+    return "full" if accounts.has_machine_access() else "ask"
+
+
 def new_defaults() -> dict:
     """A fresh copy of every field a record gains, with its default."""
     return {"section": None, "origin": {"kind": "blank"}, "hidden": False, "hidden_at": None, "order": None,
-            "folders": [], "thread_limit": 3, "approval_mode": "full",
+            "folders": [], "thread_limit": 3, "approval_mode": default_approval(),
             "outbound": {"policy": "ask", "daily_cap": 25}, "fallback": [], "cache_keep_warm": "follow",
             "place": "auto", "tool_scope": {"allow": [], "deny": []}, "connector_scopes": {}, "always_allow": [],
             "builtin": None, "reply_style": "default", "notifications": True, "speak_replies": False,
@@ -642,7 +648,7 @@ def create_configured(payload: dict, owner_user: Optional[str] = None) -> dict:
     try:
         if len(agent_service.list_agents()) >= MAX_BOTS:
             raise BotConflict(f"you can have up to {MAX_BOTS} bots; delete or archive one first")
-        approval = check_approval(payload.get("approval_mode", "full"))
+        approval = check_approval(payload.get("approval_mode", default_approval()))
         base = read_defaults() if payload.get("use_defaults") else {}
         for key in ("role", "blurb", "soul", "color", "section"):
             if profile.get(key) in (None, "") and base.get(key) not in (None, ""):

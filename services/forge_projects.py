@@ -40,6 +40,8 @@ def documents_folder():
 
 
 def vet_project(raw):
+    from core import accounts
+    accounts.require_machine_access('Forge')
     path = vet_workspace(raw)
     if not path:
         raise ValueError('Choose a usable workspace folder.')

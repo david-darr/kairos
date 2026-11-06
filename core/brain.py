@@ -34,7 +34,7 @@ from claude_agent_sdk import (
 )
 from claude_agent_sdk.types import StreamEvent
 
-from core import chat_tasks, claude_cli, cli_env, custom_tabs, hive_mind_server, image_gen, integrations, mcp_oauth, permissions, projects, runs, settings as settings_store, system_prompt, tool_registry
+from core import accounts, chat_tasks, claude_cli, cli_env, custom_tabs, hive_mind_server, image_gen, integrations, mcp_oauth, permissions, projects, runs, settings as settings_store, system_prompt, tool_registry
 from core.constants import DATA_DIR, REPO_CODE_DIRS
 from core.middleware import local_api_base
 from core.vault import resolve_vault_dir
@@ -71,6 +71,11 @@ def _is_user_tab_source_path(path: str) -> bool:
 
 
 # Claude Code's file tools and where each names its path.
+# Claude Code's built-in tools that touch this computer's disk or shell. Without the machine-access grant
+# (core/accounts.py) every one is disabled, whichever the chat's settings say.
+MACHINE_TOOLS = ("Read", "Glob", "Grep", "LS", "NotebookRead", "Write", "Edit", "MultiEdit", "NotebookEdit",
+                 "Bash", "PowerShell", "BashOutput", "KillShell", "Monitor")
+
 _FILE_TOOLS = {"Read": "file_path", "Write": "file_path", "Edit": "file_path", "MultiEdit": "file_path",
                "NotebookEdit": "notebook_path", "Glob": "path", "Grep": "path", "LS": "path"}
 
@@ -318,6 +323,11 @@ class Brain:
             # A bot's tools that change something are never pre-approved: the SDK skips can_use_tool for
             # a pre-approved tool, and the approval level (core/bot_policy.py) must see every such call.
             allowed_tools = [tool for tool in allowed_tools if tool_registry.read_tool(tool)]
+        if not accounts.has_machine_access():
+            # An account without the admin's machine-access grant gets no way onto this computer's disk or
+            # shell: Kairos's own tools (account-scoped) stay, Claude's built-in ones go.
+            disabled = [*disabled, *MACHINE_TOOLS]
+            allowed_tools = [t for t in allowed_tools if t not in MACHINE_TOOLS]
         if self.read_only:
             disabled = [*disabled, 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell']
             allowed_tools = [t for t in allowed_tools if tool_registry.read_tool(t)]
@@ -347,7 +357,8 @@ class Brain:
     @staticmethod
     def _fingerprint(disabled: list[str], allowed_tools: list[str], mcp_servers: dict) -> str:
         # A digest, never the config itself: MCP entries carry decrypted keys.
-        blob = json.dumps([disabled, allowed_tools, mcp_servers, settings_store.get_setting("computer_use")], sort_keys=True, default=str)
+        blob = json.dumps([disabled, allowed_tools, mcp_servers, settings_store.get_setting("computer_use"),
+                           accounts.has_machine_access()], sort_keys=True, default=str)
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
     def tool_config_changed(self) -> bool:

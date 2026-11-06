@@ -118,6 +118,39 @@ def as_account(account_id: str) -> Iterator[str]:
         _current.reset(token)
 
 
+MACHINE_ACCESS_MESSAGE = "This account doesn't have machine access. Ask an admin to turn it on."
+
+
+class MachineAccessDenied(PermissionError, ValueError):
+    """A machine-level action (shell, files anywhere on disk, local processes) from an account without the
+    admin's machine-access grant."""
+
+
+def has_machine_access(account_id: Optional[str] = None) -> bool:
+    """Whether the account (default: the current one) may run things with this computer's permissions.
+    Accounts off, or the single local user: yes. Nobody signed in: no. Otherwise the user's grant (admins always)."""
+    from core.auth import auth_enabled, auth_manager
+    if account_id is None:
+        try:
+            account_id = effective_account()
+        except NoAccount:
+            return False
+    if not auth_enabled() and not auth_manager.has_any_users():
+        return True
+    username = auth_manager.username_for_account(account_id)
+    if username is None:
+        # The "local" folder with no user behind it: the single local user's, before any account exists.
+        return account_id == LOCAL_ID
+    if not auth_enabled():
+        return True
+    return auth_manager.has_machine_access(username)
+
+
+def require_machine_access(what: str = "") -> None:
+    if not has_machine_access():
+        raise MachineAccessDenied(f"{what + ': ' if what else ''}{MACHINE_ACCESS_MESSAGE}")
+
+
 def all_accounts() -> list[str]:
     """Every account on this install, for background work that loops over them: each account's id, or
     just "local" while there are no accounts."""

@@ -92,11 +92,32 @@ def chosen_vault_dir(account_id: Optional[str] = None) -> str:
             return chosen
         with accounts.as_account(account_id):
             return accounts.path("vault")
-    return settings_store.get_account_setting("vault_dir", account_id) or         os.path.join(accounts.account_dir(account_id), "vault")
+    chosen = settings_store.get_account_setting("vault_dir", account_id)
+    if chosen and not accounts.has_machine_access(account_id) and not inside_account(chosen, account_id):
+        chosen = None  # a folder chosen before the grant was withdrawn is not honoured
+    return chosen or os.path.join(accounts.account_dir(account_id), "vault")
+
+
+def inside_account(path: str, account_id: Optional[str] = None) -> bool:
+    """Whether a folder is inside the account's own folder (the only place an account without machine access
+    may keep its vault)."""
+    root = os.path.realpath(accounts.account_dir(account_id))
+    target = os.path.realpath(path)
+    try:
+        return os.path.commonpath([root, target]) == root
+    except ValueError:  # another drive
+        return False
+
+
+def check_vault_dir(vault_dir: str, account_id: Optional[str] = None) -> None:
+    if not accounts.has_machine_access(account_id) and not inside_account(vault_dir, account_id):
+        raise accounts.MachineAccessDenied(
+            "This account can only keep its vault inside its own folder. " + accounts.MACHINE_ACCESS_MESSAGE)
 
 
 def set_vault_dir(vault_dir: str) -> None:
     """Choose the current account's vault folder."""
+    check_vault_dir(vault_dir)
     if accounts.effective_account() == accounts.local_account():
         settings_store.update_settings(vault_dir=vault_dir)
     else:

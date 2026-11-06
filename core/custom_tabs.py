@@ -251,6 +251,8 @@ def pending_approvals() -> list[dict]:
 
 def approve_user_tab(slug: str, expected_fingerprint: str) -> dict:
     """Approve only the exact source tree shown to the admin for review."""
+    from core import accounts
+    accounts.require_machine_access("Approving a tab")
     if tab_folders.SLUG.fullmatch(slug) and os.path.lexists(os.path.join(USER_TABS_DIR, slug)):
         entry = _folder_entry(slug, user=True)
         if entry is None:
@@ -552,6 +554,9 @@ def mount_one(app, slug: str) -> bool:
 
 def set_user_tab_enabled(slug: str, enabled: bool) -> dict:
     """Suspend either user format without deleting source or granting approval."""
+    if enabled:
+        from core import accounts
+        accounts.require_machine_access("Turning on a tab")
     entry = _folder_entry(slug, user=True)
     if entry is None and (not _TAB_SLUG.fullmatch(slug) or slug not in _user_tab_slugs()):
         raise KeyError(slug)

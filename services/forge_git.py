@@ -41,6 +41,8 @@ def git_env():
 
 
 def _run(cwd, args, timeout=TIMEOUT, output_cap=OUTPUT_CAP, check=True, input_data=None, worktree=False, hooks=False):
+    from core import accounts
+    accounts.require_machine_access('Forge')
     folder = vet_workspace(str(cwd))
     if not folder:
         raise GitError('Project folder is unavailable or unusable.')

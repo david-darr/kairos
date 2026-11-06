@@ -452,7 +452,7 @@ class CodexBrain:
 
     async def events(self, user_text: str, stream: bool = True):
         """Keep the Kairos turn open while no Codex process is needed."""
-        refusal = self._grant_refusal()
+        refusal = self._machine_refusal() or self._grant_refusal()
         if refusal:
             # Codex runs its own shell and file tools, which Kairos cannot judge call by call.
             yield runs.text(refusal)
@@ -501,6 +501,15 @@ class CodexBrain:
         finally:
             await codex_questions.clear(self.session_id)
 
+    def _machine_refusal(self):
+        """Why this account may not run this CLI on this computer, or None. Its sandbox can still read the
+        whole disk, so an account without machine access (core/accounts.py) cannot use it at all."""
+        from core import accounts
+        if accounts.has_machine_access():
+            return None
+        name = "Antigravity" if self.GRANT_PROVIDER == "antigravity" else "Codex"
+        return f"This account can't run {name} on this computer. Ask an admin for machine access."
+
     def _grant_refusal(self):
         """Why this bot's tool limits cannot be held on this provider, or None (services/bot_grants.py)."""
         if not self.agent_id:
@@ -514,6 +523,9 @@ class CodexBrain:
 
     async def _run_process(self, user_text: str):
         """One CLI invocation, shared by normal turns, answers and retries."""
+        refusal = self._machine_refusal()
+        if refusal:
+            raise ValueError(refusal)
         codex = self._codex_path()
         is_fresh_thread = self.thread_id is None
         args = self._build_args(codex)

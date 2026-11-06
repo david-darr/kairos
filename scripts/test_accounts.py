@@ -2248,5 +2248,212 @@ class CliHomesPerAccount(unittest.TestCase):
         self.assertNotIn("bea-server", first)
 
 
+class MachineAccess(unittest.TestCase):
+    """The per-account machine-access grant (Multi-Account phase 4a): what an account without it cannot reach."""
+
+    def setUp(self):
+        fresh_users()
+        auth_manager.create_user("david-darr", "password-one-1", is_admin=True)
+        auth_manager.create_user("bea", "password-two-2")
+        self.admin, self.bea = auth_manager.account_id("david-darr"), auth_manager.account_id("bea")
+        patcher = patch.object(auth, "auth_enabled", return_value=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_grant_defaults_and_admin_override(self):
+        self.assertTrue(auth_manager.has_machine_access("david-darr"))
+        self.assertFalse(auth_manager.has_machine_access("bea"))
+        self.assertFalse(auth_manager.has_machine_access("nobody"))
+        auth_manager.set_machine_access("bea", True)
+        self.assertTrue(auth_manager.has_machine_access("bea"))
+        with self.assertRaises(ValueError):
+            auth_manager.set_machine_access("david-darr", False)
+        auth_manager._users["users"]["david-darr"]["machine_access"] = False  # a stored flag never lowers an admin
+        self.assertTrue(auth_manager.has_machine_access("david-darr"))
+        listing = {row["username"]: row["machine_access"] for row in auth_manager.list_users()}
+        self.assertEqual(listing, {"david-darr": True, "bea": True})
+        auth_manager.set_machine_access("bea", False)
+        with accounts.as_account(self.bea):
+            self.assertFalse(accounts.has_machine_access())
+            with self.assertRaises(accounts.MachineAccessDenied):
+                accounts.require_machine_access("x")
+        with accounts.as_account(self.admin):
+            self.assertTrue(accounts.has_machine_access())
+        token = accounts.set_current(None)  # nobody signed in
+        try:
+            self.assertFalse(accounts.has_machine_access())
+        finally:
+            accounts.reset_current(token)
+        with patch.object(auth, "auth_enabled", return_value=False), accounts.as_account(self.bea):
+            self.assertTrue(accounts.has_machine_access(), "accounts off: the one local user owns the machine")
+
+    def test_admin_route_sets_the_grant(self):
+        from routes import auth_routes
+        app = FastAPI()
+        app.include_router(auth_routes.router)
+        app.add_middleware(middleware.AccountContextMiddleware)
+        admin_token = auth_manager.create_session("david-darr")
+        bea_token = auth_manager.create_session("bea")
+        client = TestClient(app)
+        patcher = patch.object(middleware, "auth_enabled", return_value=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        url = "/api/auth/users/{}/machine-access"
+        client.cookies.set(SESSION_COOKIE_NAME, bea_token)
+        self.assertEqual(client.put(url.format("bea"), json={"enabled": True}).status_code, 403)
+        client.cookies.clear()
+        client.cookies.set(SESSION_COOKIE_NAME, admin_token)
+        self.assertEqual(client.put(url.format("bea"), json={"enabled": True}).json()["machine_access"], True)
+        self.assertEqual(client.put(url.format("ghost"), json={"enabled": True}).status_code, 404)
+        self.assertEqual(client.put(url.format("david-darr"), json={"enabled": False}).status_code, 400)
+        rows = {row["username"]: row for row in client.get("/api/auth/users").json()}
+        self.assertTrue(rows["bea"]["machine_access"])
+
+    def test_claude_tool_config_drops_disk_and_shell_tools_without_access(self):
+        from core import brain, integrations, permissions, tool_registry
+        grants = {"Read", "Glob", "Grep", "LS", "Write", "Edit", "mcp__hive_mind__list_notes"}
+        stub = object.__new__(brain.Brain)
+        stub.integration_ids, stub.agent_id, stub.is_admin = None, None, True
+        stub.session_id, stub.read_only = "s1", False
+
+        def config():
+            with patch.object(integrations, "list_mcp_servers_runtime", return_value={}), \
+                 patch.object(integrations, "held_tools", return_value={}), \
+                 patch.object(tool_registry, "claude_preapproved", return_value=["Read", "Glob", "Grep", "LS", "mcp__hive_mind__list_notes"]), \
+                 patch.object(permissions, "ensure_seeded"), patch.object(permissions, "retire_builtin_grants"), \
+                 patch.object(permissions, "standing_grants", return_value=grants):
+                tools = stub._tool_config()
+                return tools, stub._fingerprint(*tools)
+
+        with accounts.as_account(self.bea):
+            (disabled, allowed, _), fingerprint_without = config()
+        for tool in ("Read", "Glob", "Grep", "LS", "Write", "Edit", "Bash", "PowerShell"):
+            self.assertIn(tool, disabled)
+        self.assertEqual(allowed, ["mcp__hive_mind__list_notes"], "Kairos's own tools stay")
+        with accounts.as_account(self.admin):
+            (disabled, allowed, _), fingerprint_with = config()
+        for tool in ("Read", "Glob", "Grep", "LS"):
+            self.assertNotIn(tool, disabled)
+            self.assertIn(tool, allowed)
+        self.assertNotEqual(fingerprint_with, fingerprint_without)
+
+    def test_codex_and_antigravity_refuse_without_access(self):
+        from core import antigravity_brain, codex_brain
+        codex = object.__new__(codex_brain.CodexBrain)
+        agy = object.__new__(antigravity_brain.AntigravityBrain)
+        with accounts.as_account(self.bea):
+            self.assertEqual(codex._machine_refusal(), "This account can't run Codex on this computer. Ask an admin for machine access.")
+            self.assertIn("Antigravity", agy._machine_refusal())
+
+            async def run():
+                with self.assertRaises(ValueError):
+                    await codex._run_process("hi").__anext__()
+            asyncio.run(run())
+        with accounts.as_account(self.admin):
+            self.assertIsNone(codex._machine_refusal())
+
+    def test_tool_registry_hides_and_refuses_machine_tools(self):
+        from core import tool_registry
+        def names(account):
+            with accounts.as_account(account):
+                return {s.name for s in tool_registry.specs(tool_registry.OPENAI, is_admin=True)}
+        self.assertIn("run_shell", names(self.admin))
+        hidden = names(self.bea)
+        for tool in ("run_shell", "read_repo_file", "list_repo_directory", "write_repo_file", "computer"):
+            self.assertNotIn(tool, hidden)
+        self.assertIn("list_notes", hidden)
+        with accounts.as_account(self.bea):
+            result = asyncio.run(tool_registry.call("run_shell", {"command": "echo hi"},
+                                                    tool_registry.ToolContext(is_admin=True), tool_registry.OPENAI))
+        self.assertTrue(result.startswith("Not run:"), result)
+
+    def test_bot_approval_is_capped_at_ask_without_access(self):
+        from core import bot_policy
+        from services import bot_record
+        stored = {"id": "b1", "approval_mode": "full"}
+        with patch.object(bot_policy, "_agent", return_value=stored):
+            with accounts.as_account(self.bea):
+                self.assertEqual(bot_policy.effective_policy("b1").mode, "ask", "a stored Full is clamped")
+                self.assertEqual(bot_policy.effective_policy("b1").bot_mode, "ask")
+                self.assertEqual(bot_record.default_approval(), "ask")
+                for mode in ("edits", "auto", "full"):
+                    with self.assertRaises(bot_policy.MachineAccessNeeded):
+                        bot_policy.check_bot_change(None, mode)
+                    with self.assertRaises(bot_policy.MachineAccessNeeded):
+                        bot_policy.prepare_elevation("b1", mode)
+                    with self.assertRaises(bot_policy.MachineAccessNeeded):
+                        bot_policy.change_mode("b1", mode)
+                bot_policy.check_bot_change(None, "ask")
+                with self.assertRaises(bot_policy.MachineAccessNeeded):
+                    bot_policy.add_command_rule("b1", "git status", os.getcwd(), "claude", by="x")
+            with accounts.as_account(self.admin):
+                self.assertEqual(bot_policy.effective_policy("b1").mode, "full")
+                self.assertEqual(bot_record.default_approval(), "full")
+
+    def test_local_processes_are_refused_at_create_and_at_run(self):
+        from core import integrations, mcp_client, tab_install
+        from services import bot_mcp_config
+        from services.hook_service import HookService
+        hook_service = HookService()
+        with accounts.as_account(self.admin):
+            integrations.create_mcp_server("local-one", "stdio", command="node", args=["x.js"])
+            hook = hook_service.create("run it", event="agent.inbox", action="command", config={"command": "echo hi"})
+            self.assertIn("local-one", integrations.list_mcp_servers_runtime())
+        with accounts.as_account(self.bea):
+            with self.assertRaises(accounts.MachineAccessDenied):
+                integrations.create_mcp_server("mine", "stdio", command="node")
+            with self.assertRaises(accounts.MachineAccessDenied):
+                integrations.save_mcp_config({"name": "mine", "mcp_type": "stdio", "command": "node"})
+            with self.assertRaises(bot_mcp_config.McpConfigError):
+                bot_mcp_config.clean({"name": "mine", "transport": "stdio", "command": "node"})
+            with self.assertRaises(accounts.MachineAccessDenied):
+                HookService().create("mine", event="agent.inbox", action="command", config={"command": "echo hi"})
+            with self.assertRaises(accounts.MachineAccessDenied):
+                tab_install.install(b"")
+            # Records made while an account had access do not run once it is gone.
+            with accounts.as_account(self.admin):
+                pass
+            self.assertNotIn("local-one", integrations.list_mcp_servers_runtime())
+            with self.assertRaises(accounts.MachineAccessDenied):
+                mcp_client._target({"type": "stdio", "command": "node"})
+            ran = []
+
+            async def attempt():
+                with patch("asyncio.create_subprocess_shell", side_effect=lambda *a, **k: ran.append(a)):
+                    await hook_service._command(hook, {"event": "agent.inbox"}, False)
+            with self.assertRaises(accounts.MachineAccessDenied):
+                asyncio.run(attempt())
+            self.assertEqual(ran, [])
+
+    def test_vault_dir_stays_inside_the_accounts_folder_without_access(self):
+        outside = tempfile.mkdtemp(prefix="kairos-outside-")
+        self.addCleanup(shutil.rmtree, outside, True)
+        inside = os.path.join(accounts.account_dir(self.bea), "my-notes")
+        with accounts.as_account(self.bea):
+            with self.assertRaises(accounts.MachineAccessDenied):
+                vault_module.set_vault_dir(outside)
+            with self.assertRaises(accounts.MachineAccessDenied):
+                settings_store.update_settings(vault_dir=outside)
+            vault_module.set_vault_dir(inside)
+            self.assertEqual(vault_module.chosen_vault_dir(), inside)
+            # A folder chosen while it had access is ignored once the grant is gone.
+            auth_manager.set_machine_access("bea", True)
+            vault_module.set_vault_dir(outside)
+            self.assertEqual(vault_module.chosen_vault_dir(), outside)
+            auth_manager.set_machine_access("bea", False)
+            self.assertEqual(vault_module.chosen_vault_dir(), os.path.join(accounts.account_dir(self.bea), "vault"))
+
+    def test_kip_is_created_and_clamped_for_an_account_without_access(self):
+        from core import bot_policy
+        from services import front_desk
+        from services.agent_service import agent_service
+        with accounts.as_account(self.bea):
+            front_desk.ensure()
+            kip = next(a for a in agent_service.list_agents() if a.get("builtin") == "front_desk")
+            self.assertEqual(bot_policy.effective_policy(kip["id"]).mode, "ask")
+            created = __import__("services.bot_record", fromlist=["x"]).create_configured({"profile": {"name": "Plain"}}, owner_user="bea")
+            self.assertEqual(created["agent"]["approval_mode"], "ask")
+
+
 if __name__ == "__main__":
     unittest.main()

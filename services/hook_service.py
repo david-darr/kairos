@@ -186,6 +186,8 @@ class HookService:
                 raise ValueError("pick a channel")
             config["template"] = str(config.get("template") or "{event}: {summary}")
         elif action == "command":
+            from core import accounts
+            accounts.require_machine_access("A command hook")
             command = str(config.get("command") or "").strip()
             if not command:
                 raise ValueError("write the command to run")
@@ -415,6 +417,8 @@ class HookService:
         """Run the person's command with the event as JSON on stdin. The
         command line is exactly what he wrote; no event data reaches it or
         the environment."""
+        from core import accounts
+        accounts.require_machine_access("A command hook")  # a hook made before the grant was withdrawn does not run
         config = hook["config"]
         env = {k: v for k, v in os.environ.items() if k not in PRIVATE_ENV}
         env["JARVIS_HOOK_EVENT"] = payload["event"]  # the event's name only, never its data

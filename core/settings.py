@@ -153,6 +153,9 @@ def get_account_setting(key: str, account_id=None) -> Any:
 
 
 def update_account_settings(account_id=None, **fields) -> dict:
+    if fields.get("vault_dir"):
+        from core import vault
+        vault.check_vault_dir(fields["vault_dir"], account_id)
     path = _account_file(account_id)
     current = read_json(path, {})
     for key, value in fields.items():
