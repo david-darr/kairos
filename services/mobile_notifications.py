@@ -41,6 +41,9 @@ async def deliver_due(client):
                             and not auth_manager.is_admin(item["owner"]))):
             store.delivery_result(item, 403)
             continue
+        if item["kind"] == "bot_call" and not _still_ringing(item):
+            store.delivery_result(item, 409)
+            continue
         if item["kind"] == "permission" and not permissions.pending_request(item["permission_id"]):
             store.delivery_result(item, 409)
             continue
@@ -50,7 +53,7 @@ async def deliver_due(client):
                 "Authorization": web_push.authorization(config["private"], subscription["endpoint"], config["subject"]),
                 "Content-Encoding": "aes128gcm", "Content-Type": "application/octet-stream",
                 "TTL": str(max(0, int(item["expires"] - time.time()))),
-                "Urgency": "high" if item["kind"] == "permission" else "normal",
+                "Urgency": "high" if item["kind"] in ("permission", "bot_call") else "normal",
                 "Topic": web_push.b64(bytes.fromhex(item["id"])[:24]),
             })
             try:
@@ -61,6 +64,15 @@ async def deliver_due(client):
         except (httpx.HTTPError, ValueError):
             # Endpoint/token/authorization and payload must never reach logs.
             store.delivery_result(item, 0)
+
+
+def _still_ringing(item):
+    from core import accounts
+    from services import rings
+    account_id = accounts.account_for_user(item["owner"])
+    if account_id is None:
+        return False
+    return rings.outcome(account_id, item["run_id"]) == rings.RINGING
 
 
 def _owners_session(owner, session_id):

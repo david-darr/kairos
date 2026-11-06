@@ -5,6 +5,7 @@
 // (/api/notifications); this reads /api/bot-attention/notifications.
 import { icon } from './botsIcons.js';
 import { Segmented } from './botsUi.js';
+import { answerRing } from './ringHost.js';
 import { BASE, FEED_FILTERS, filterNotifications, unreadCount, formatAge, kindLabel, navigationFor, h, errorText } from './botsAttentionHost.js';
 
 export async function mount(root, ctx) {
@@ -71,7 +72,13 @@ export async function mount(root, ctx) {
     const pin = h('button', { type: 'button', class: `bots-icon-btn bots-attn-pin${row.pinned ? ' on' : ''}`, 'aria-pressed': row.pinned ? 'true' : 'false',
       'aria-label': row.pinned ? 'Unpin' : 'Pin', title: row.pinned ? 'Unpin' : 'Pin' }, [icon('pin', { size: 16 })]);
     pin.addEventListener('click', () => act(`/notifications/${encodeURIComponent(row.id)}/pin`, { pinned: !row.pinned }, () => { row.pinned = !row.pinned; view.rows.sort((a, b) => (b.pinned - a.pinned) || (b.at - a.at)); }));
-    return h('div', { class: 'bots-attn-feed-row', role: 'listitem' }, [open, pin]);
+    // A missed call can be returned: it opens that bot's call screen with the reason it rang.
+    const callBack = row.call_back?.ring_id ? h('button', { type: 'button', class: 'bots-btn bots-attn-callback', 'data-action': 'call-back', text: 'Call back' }) : null;
+    callBack?.addEventListener('click', async () => {
+      callBack.disabled = true;
+      try { await answerRing(row.call_back.ring_id); } catch (error) { view.error = 'That call can no longer be returned.'; callBack.disabled = false; draw(); }
+    });
+    return h('div', { class: 'bots-attn-feed-row', role: 'listitem' }, [open, ...(callBack ? [callBack] : []), pin]);
   }
 
   await load();

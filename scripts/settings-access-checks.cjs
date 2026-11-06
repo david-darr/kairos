@@ -226,10 +226,11 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, demoState,
   }
   // Idle: nothing may poll while Settings sits open on a quiet panel.
   await js("document.querySelector('.settings-nav-item[data-section=appearance]').click()"); await delay(500);
+  // A bot ringing you (ringHost.js, /api/rings/pending) must also come through while Settings is open.
   // The one poll allowed to run behind Settings is app.js refreshAgentBadge() reading /api/agents/inbox: bot notifications
   // depend on it, so it keeps its 30-second beat. The Home refresh and the sidebar poll pause while Settings is open.
   const idleReadsFrom = reads.length, idleWritesFrom = writes.length; await delay(6000);
-  const idle = reads.slice(idleReadsFrom).filter(r => r.path !== '/api/agents/inbox').length + (writes.length - idleWritesFrom);
+  const idle = reads.slice(idleReadsFrom).filter(r => r.path !== '/api/agents/inbox' && r.path !== '/api/rings/pending').length + (writes.length - idleWritesFrom);
   await close();
   // Channels redraws its list every 5 seconds while it is on screen; once Settings is closed nothing should keep asking.
   await open('channels'); await waitFor("document.querySelector('.set-page')?.dataset.page === 'channels' && document.querySelector('.channel-list')"); await delay(400);

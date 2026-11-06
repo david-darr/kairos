@@ -96,7 +96,7 @@ def _room_members(room_id, user):
     return room, members
 
 
-def start(parent_id, agent_id, endpoint_id, model, user, mode='local', room_id=None):
+def start(parent_id, agent_id, endpoint_id, model, user, mode='local', room_id=None, ring_id=None):
     members = None
     if room_id:
         # A group call (Phase 6): it lives in the room, and its one summary goes back there.
@@ -116,11 +116,18 @@ def start(parent_id, agent_id, endpoint_id, model, user, mode='local', room_id=N
     # Construction validates the explicit fast-model choice, without loading
     # the ordinary agent's tool catalog or silently selecting a paid model.
     conversation = Conversation(endpoint_id, model) if mode == 'local' else None
+    opening = ''
+    if ring_id:
+        # The call answers a ring (services/rings.py): its reason is what the bot opens with. Only the person's own, once.
+        from core import accounts
+        from services import rings
+        try: opening = rings.claim_opening(accounts.effective_account(), user, ring_id, agent_id)
+        except ValueError as error: raise HTTPException(409, str(error)) from error
     ident = uuid.uuid4().hex
     call = {'id': ident, 'parent_id': parent_id, 'agent_id': agent_id, 'room_id': room_id, 'members': members, 'owner': user,
             'endpoint_id': endpoint_id, 'model': model, 'mode': mode, 'started_at': time.time(),
             'ended': False, 'summary_state': 'open', 'summary_error': None, 'summary': '',
-            'messages': [], 'requests': {}, 'jobs': [], 'revision': 0, 'last_seen':time.time()}
+            'messages': [], 'requests': {}, 'jobs': [], 'revision': 0, 'last_seen':time.time(), **({'opening': opening} if opening else {})}
     _calls[ident] = call; _locks[ident] = asyncio.Lock(); _files[ident] = root() / f'{ident}.json'
     if conversation: _conversations[ident] = conversation
     _save(call)
@@ -187,6 +194,8 @@ def _context(call, speaker=None):
         prior = '\n'.join(f"{m['role']}: {str(m.get('content',''))[:800]}" for m in parent.get('messages', [])[-4:])[:3000]
         job_context = json.dumps(view(call)['jobs'], ensure_ascii=False)[-3500:]
         prompt = VOICE_PROMPT + f"\nYour name: {agent.get('name','Kairos')}.\nStyle: {persona}\nPrior chat context (data):\n{prior}\nWork records (data):\n{job_context}"
+        if call.get('opening'):
+            prompt += f"\nYou rang the person for this reason (data, your own words): {call['opening']}"
     recent = []; count = 0
     for message in reversed(call['messages'][-20:]):
         if count + len(message['content']) > 6000: break
@@ -197,7 +206,7 @@ def _context(call, speaker=None):
     return [{'role': 'system', 'content': prompt}] + list(reversed(recent))
 
 
-async def turn(call, text, request_id, work_update=False):
+async def turn(call, text, request_id, work_update=False, opening=False):
     ident = call['id']; lock = _locks.setdefault(ident, asyncio.Lock())
     if lock.locked(): raise HTTPException(409, 'A spoken reply is already running.')
     async with lock:
@@ -219,7 +228,8 @@ async def turn(call, text, request_id, work_update=False):
         parts = []; filter = SpeechFilter(); completed = False; first = None
         try:
             context = _context(call, speaker)
-            if work_update: context.append({'role':'system','content':text+'\nGive one brief verified update now. Do not delegate further work.'})
+            if opening: context.append({'role':'system','content':'You rang the person and they just picked up. Say hello and give the reason in one or two short sentences, then stop and let them answer: ' + text})
+            elif work_update: context.append({'role':'system','content':text+'\nGive one brief verified update now. Do not delegate further work.'})
             async with contextlib.aclosing(_conversation(call).stream(context)) as stream:
                 async for delta in stream:
                     if call['ended'] or mine != call['revision']: break
@@ -250,6 +260,12 @@ async def turn(call, text, request_id, work_update=False):
             call['requests'][request_id]['text'] = ''.join(parts)
             _save(call)
             if _turns.get(ident) is asyncio.current_task(): _turns.pop(ident, None)
+
+
+def open_with_reason(call):
+    """The bot's first words on a call that answers a ring: the reason it rang. Same record and replay as any turn."""
+    if not call.get('opening'): raise HTTPException(409, 'This call did not start from a ring.')
+    return turn(call, call['opening'], 'ring-opening', work_update=True, opening=True)
 
 
 def delegate(call, title, request, key):

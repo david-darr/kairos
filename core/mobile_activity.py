@@ -233,7 +233,7 @@ def enroll(owner, subscription, session_binding):
             raise ValueError("Remove an old device before adding another (10 device limit)")
         device_id = row["id"] if row else uuid.uuid4().hex
         prefs = row["preferences"] if row else json.dumps({"completed": True, "failed": True, "permission": True,
-                                                          "bot_needs_you": True, "bot_results": True})
+                                                          "bot_needs_you": True, "bot_results": True, "bot_calls": True})
         db.execute("INSERT INTO devices(id,owner,endpoint,subscription,binding,preferences,created) VALUES(?,?,?,?,?,?,?) "
                    "ON CONFLICT(id) DO UPDATE SET subscription=excluded.subscription,binding=excluded.binding",
                    (device_id, owner, subscription["endpoint"], json.dumps(subscription), session_binding, prefs, time.time()))
@@ -290,7 +290,7 @@ def enqueue(run_id, kind, permission=None):
                        (event_id, device["id"], run_id, kind, (permission or {}).get("id"), json.dumps(payload), expiry, now))
 
 
-BOT_KINDS = {"bot_needs_you", "bot_results"}
+BOT_KINDS = {"bot_needs_you", "bot_results", "bot_call"}
 
 
 def enqueue_bot(kind, agent_id, allowed_owner):
@@ -311,6 +311,29 @@ def enqueue_bot(kind, agent_id, allowed_owner):
             event_id = hashlib.sha256(f"{device['id']}:bot:{agent_id}:{kind}:{bucket}".encode()).hexdigest()
             db.execute("INSERT OR IGNORE INTO outbox(id,device_id,run_id,kind,permission_id,payload,expires,next_attempt) VALUES(?,?,?,?,?,?,?,?)",
                        (event_id, device["id"], "", kind, None, json.dumps(payload), now + 3600, now + 10))
+
+
+def enqueue_ring(owner, ring):
+    """A bot is ringing the person (services/rings.py): one high-urgency push to each of that person's devices, sent at once and
+    good only while it rings. The lock screen says who is calling, never why. The URL answers it: the app opens the call screen.
+    Only the ring's own user is ever reached, whatever else is enrolled."""
+    now = time.time()
+    expiry = float(ring["expires_at"])
+    payload = {"kind": "bot_call", "url": f"/?agent={ring['agent_id']}&ring={ring['id']}", "tag": "kairos-ring-" + ring["id"],
+               "ring_id": ring["id"], "body": f"{ring['bot_name'][:60]} is calling you.", "expires_at": expiry}
+    with database() as db:
+        for device in db.execute("SELECT * FROM devices WHERE owner=?", (owner,)).fetchall():
+            if not json.loads(device["preferences"]).get("bot_calls", True):
+                continue
+            event_id = hashlib.sha256(f"{device['id']}:ring:{ring['id']}".encode()).hexdigest()
+            db.execute("INSERT OR IGNORE INTO outbox(id,device_id,run_id,kind,permission_id,payload,expires,next_attempt) VALUES(?,?,?,?,?,?,?,?)",
+                       (event_id, device["id"], ring["id"], "bot_call", None, json.dumps(payload), expiry, now))
+
+
+def close_ring(ring_id):
+    """The ring ended (answered, declined or missed): anything not yet sent is dropped."""
+    with database() as db:
+        db.execute("UPDATE outbox SET status='expired' WHERE run_id=? AND kind='bot_call' AND status='pending'", (ring_id,))
 
 
 def due():

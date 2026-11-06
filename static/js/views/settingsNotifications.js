@@ -32,13 +32,14 @@ export async function renderNotificationsPanel(container) {
       description: 'Lock-screen messages say only that a chat is ready or needs attention. Chat content stays in Kairos.', control: button })]));
     if (device) {
       // Devices enrolled before bot pushes existed have no bot keys: on by default.
-      const prefs = { bot_needs_you: true, bot_results: true, ...device.preferences };
+      const prefs = { bot_needs_you: true, bot_results: true, bot_calls: true, ...device.preferences };
       container.append(group({ title: 'Notify me about' }, [
         ['completed', 'Reply ready', 'A response has finished.'],
         ['permission', 'Permission needed', 'Tap to review a request in Kairos. Unanswered requests still expire.'],
         ['failed', 'Chat failed', 'A response could not finish.'],
         ['bot_needs_you', 'A bot needs you', 'One of your bots asked a question.'],
         ['bot_results', 'Bot results', 'A bot sent a report, or has work ready for review.'],
+        ['bot_calls', 'A bot calls you', 'A bot rings you in Kairos. Answer from the notification to open the call.'],
       ].map(([key, title, description]) => row({ title, description, control: toggle({ label: title, checked: prefs[key], onChange: async value => {
         const next = { ...prefs, [key]: value };
         await api(`/api/notifications/devices/${device.id}`, { method: 'PUT', body: JSON.stringify(next) });

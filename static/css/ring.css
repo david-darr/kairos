@@ -1,0 +1,15 @@
+/* Incoming call sheet (static/js/ringHost.js): a bot is ringing you. Top of the window on a computer, full width on a phone. */
+.ring-sheet { position: fixed; z-index: 2000; top: calc(var(--mobile-safe-top, env(safe-area-inset-top, 0px)) + 12px); left: 50%; transform: translateX(-50%);
+  width: min(460px, calc(100vw - 32px)); box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 14px 16px; background: var(--ui-surface, var(--bg-panel-solid, #fff)); color: var(--text); border: 1px solid var(--border-strong); border-radius: 16px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .28); animation: ring-in .22s ease-out; }
+.ring-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 180px; }
+.ring-title { font-size: 15px; }
+.ring-reason { font-size: 13px; color: var(--text-dim); overflow-wrap: anywhere; }
+.ring-actions { display: flex; gap: 8px; flex: none; }
+.ring-actions .btn { min-height: 44px; min-width: 88px; }
+@keyframes ring-in { from { opacity: 0; transform: translate(-50%, -12px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@media (max-width: 520px) { .ring-actions { width: 100%; } .ring-actions .btn { flex: 1; } }
+@media (prefers-reduced-motion: reduce) { .ring-sheet { animation: none; } }
+.agent-call-ring { max-width: 420px; margin: 0; text-align: center; font-size: 13px; color: var(--text-dim); overflow-wrap: anywhere; }
+.bots-attn-callback { flex: none; min-height: 36px; }

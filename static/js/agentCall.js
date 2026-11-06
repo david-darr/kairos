@@ -10,6 +10,7 @@ import { createTurnEndpoint, postTurn } from './turnEndpoint.js';
 import { createSpeaker, isSpeechOutputSupported, whenVoicesReady, resolveVoice } from './voiceOutput.js';
 import { createMascot } from './mascot.js';
 import { createVoiceTrace } from './voiceTrace.js';
+import { takePendingRing } from './ringHost.js';
 
 // In a call the bot's Kip replaces the orb (Kairos Mascot build spec,
 // 2026-10-22). It reads the orb's --level (microphone) and --word (speech)
@@ -81,6 +82,8 @@ export function agentCall(agent, controller) {
   const partials=createPartialTranscriber({send:(wav,signal)=>transcribePartial(wav,{signal,model:model.value,backend:acceleration.value}),
     onText:text=>{if(active&&!microphoneMuted&&text)heard.textContent=`Hearing: ${text}`;}});
   let bargeIns=0;
+  // A call that answers a ring (ringHost.js): the bot opens with the reason it rang. Taken by the first call screen that opens.
+  let ring = null, ringOpening = null;
   const announceWork=id=>{if(active&&callMode.value==='local'&&!announcedWork.has(id)){announcedWork.add(id);workUpdates.push(id);scheduleFlush();}};
   let endpoints = [];
   // A group call (a room's controller has roomId): each reply names the member who spoke, and on device voices
@@ -212,6 +215,8 @@ export function agentCall(agent, controller) {
   const drawMembers = () => { membersLine.textContent = `With ${room.memberIds().map(id => room.memberName(id)).join(', ')}. Say a name to choose who answers.`; };
   if (room) { drawMembers(); dialog.querySelector('.agent-call-scene').append(membersLine); }
   document.body.append(dialog);
+  const ringNote = el('p', { class: 'agent-call-ring', role: 'status', hidden: true });
+  dialog.querySelector('.agent-call-scene').append(ringNote);
   const button = el('button', { type: 'button', class: 'agent-call-open btn quiet', 'aria-label': `Call ${agent.name}`, title: `Call ${agent.name}`, text: 'Call', onclick: async () => {
     if (disposed) return;
     if (room) drawMembers();
@@ -219,6 +224,15 @@ export function agentCall(agent, controller) {
     if (active) return;
     error.textContent = ''; await loadSetup();
   } });
+  // Answering a ring (ringHost.js) opens this call screen with the reason it rang; the bot says it first.
+  const adoptRing = () => {
+    const found = takePendingRing(agent.id);
+    if (!found || active || disposed) return;
+    ring = found; ringOpening = found.id; ringNote.textContent = `${agent.name} is calling: ${found.reason}`; ringNote.hidden = false;
+    if (!dialog.open) button.click();
+  };
+  document.addEventListener('kairos:ring-answered', adoptRing);
+  setTimeout(adoptRing, 0);
   // Phone (Kairos Mobile v2): the call button is a round phone icon; the word stays for a desktop.
   const callIcon = el('span', { class: 'agent-call-open-icon', 'aria-hidden': 'true' });
   callIcon.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z"/></svg>';
@@ -516,7 +530,7 @@ export function agentCall(agent, controller) {
         }
         if(event.type==='done') { response.reply_ms=event.reply_ms; drawTiming(); }
       };
-      if(workId)await transport.update(workId,consume);else await transport.turn(text,consume);
+      if(workId==='ring-opening')await transport.opening(consume);else if(workId)await transport.update(workId,consume);else await transport.turn(text,consume);
       if (!active || epoch !== token || revision !== mine) return;
       voiceBusy=false;
       if(deferred){deferredReply=output;listen();}
@@ -546,7 +560,7 @@ export function agentCall(agent, controller) {
       if (callMode.value==='local'&&!isCallRecordingSupported()) throw new Error('Microphone access is unavailable. Check your device permissions.');
       if(callMode.value==='cloud'&&(!navigator.mediaDevices?.getUserMedia||!window.RTCPeerConnection))throw new Error('Cloud voice requires a secure browser with WebRTC and microphone access.');
       await localSpeaker.prepare(); stopPlayback();
-      await transport.start(agent,conversation.value,conversationModel.value.trim());
+      await transport.start(agent,conversation.value,conversationModel.value.trim(),ringOpening);
       if(disposed||epoch!==token||!dialog.open){transport.end();return;}
       voiceTrace.reset(); partials.reset(); turnTrace = currentTrace = null; bargeIns = 0; delete dialog.dataset.bargeIns;
       setState('preparing','Preparing the conversation model...');
@@ -570,6 +584,7 @@ export function agentCall(agent, controller) {
       if (!active || epoch !== token) return;
       }
       setup.hidden = true; controls.hidden = false; hold.hidden = holdHint.hidden = callMode.value==='cloud'||inputMode.value !== 'hold'; button.classList.add('is-call-active'); startedAt = lastActivity = Date.now(); ongoingCall = { isActive: () => active, restore }; listen();
+      if (ringOpening && callMode.value === 'local') { ringOpening = null; workUpdates.push('ring-opening'); scheduleFlush(); }
       timer = setInterval(() => { const seconds = Math.floor((Date.now() - startedAt) / 1000); clock.textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`; if (Date.now() - lastActivity > livePrefs.idle_minutes * 60000 && !voiceBusy && !speechActive) hangup(); }, 1000);
     } catch (problem) { if (epoch === token) { active = false; live.stop();transport.end();recorder?.close(); recorder = null; setState('setup','Call could not start');error.textContent = problem.message; } }
     finally { starting = false; start.disabled = false; }
@@ -612,7 +627,7 @@ export function agentCall(agent, controller) {
   document.addEventListener('kairos:bots-live-settings', settingsChanged);
   document.addEventListener('kairos:bots-typed-reply', typedReply);
   document.addEventListener('kairos:bots-saved', botSaved);
-  function cleanup() { if (disposed) return; disposed = true; transport.dispose(); localSpeaker.dispose(); deviceSpeaker.cancel(); callBar?.destroy(); document.removeEventListener('kairos:bots-live-settings', settingsChanged); document.removeEventListener('kairos:bots-typed-reply', typedReply); document.removeEventListener('kairos:bots-saved', botSaved); window.removeEventListener('blur', loseFocus); document.removeEventListener('visibilitychange', visibilityChanged); dialog.remove(); button.remove(); }
+  function cleanup() { if (disposed) return; disposed = true; transport.dispose(); localSpeaker.dispose(); deviceSpeaker.cancel(); callBar?.destroy(); document.removeEventListener('kairos:bots-live-settings', settingsChanged); document.removeEventListener('kairos:bots-typed-reply', typedReply); document.removeEventListener('kairos:bots-saved', botSaved); document.removeEventListener('kairos:ring-answered', adoptRing); window.removeEventListener('blur', loseFocus); document.removeEventListener('visibilitychange', visibilityChanged); dialog.remove(); button.remove(); }
   // Moving between Bots conversations keeps a call going in its bar; leaving Bots mode ends it, so a live
   // microphone never runs behind a page that has no call bar.
   let modeWatch = null;

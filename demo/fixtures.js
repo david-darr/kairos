@@ -1340,6 +1340,7 @@
     if (route === "/api/agents") return list(agentsFixture).map(agent => state.homeClear ? { ...agent, status: "idle", needs_you: 0 } : agent);
     // Phone notification devices; the shell's "need you" row only looks for one whose last push failed.
     if (route === "/api/notifications") return { devices: [] };
+    if (route === "/api/rings/pending") return { rings: [] };
     // Bots onboarding and voice (Phase 6): the welcome and tour are already seen here, and no voice engine is set up.
     if (route === "/api/bot-onboarding") return { welcome_seen: true, tour: { done: true, step: 0, variant: "simple" }, hints_seen: [], notices: {}, setup_checked_at: now };
     if (route === "/api/bot-onboarding/setup") return { checked_at: now, checks: [

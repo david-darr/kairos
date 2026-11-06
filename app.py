@@ -38,6 +38,7 @@ from routes import (
     model_setup_routes,
     speech_routes,
     call_routes,
+    ring_routes,
     phone_routes,
     workspace_routes,
     forge_routes,
@@ -292,6 +293,7 @@ app.include_router(model_routes.router)
 app.include_router(model_setup_routes.router)
 app.include_router(speech_routes.router)
 app.include_router(call_routes.router)
+app.include_router(ring_routes.router)
 app.include_router(phone_routes.router)
 app.include_router(workspace_routes.router)
 app.include_router(forge_routes.router)

@@ -648,6 +648,8 @@ async function startApp() {
   const customTabs = await buildSidebar();
   setupSidebar();
   setupMobileMenu();
+  // A bot ringing you: an incoming-call sheet in any window but a single-chat popup (ringHost.js).
+  if (!chatWindow) import('./ringHost.js').then(module => module.mountRingHost()).catch(() => {});
   document.addEventListener("jarvis:navigate", async (event) => {
     const { tab, ...options } = event.detail;
     if (tab === "settings") { openSettings(options); return; }
@@ -683,6 +685,11 @@ async function startApp() {
   await chatStream.connect();
   notificationRegistration().catch(() => {});
   const openNotificationChat = async url => {
+    // A ringing bot (push notification or link): answer it, which opens that bot's call screen (ringHost.js).
+    try {
+      const ringId = new URL(url, location.origin).searchParams.get('ring');
+      if (/^[0-9a-f]{32}$/.test(ringId || '')) return await (await import('./ringHost.js')).answerRingFromLink(ringId);
+    } catch (_) { /* a malformed link falls through to the ordinary handling */ }
     // A bot link opens that bot, and its conversation when it names one (2026-10-14);
     // botsNavigation.js refuses another origin or a malformed id.
     const target = notificationTarget(url, location.origin);

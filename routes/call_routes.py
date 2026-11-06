@@ -19,6 +19,7 @@ class Start(BaseModel):
     endpoint_id: str
     model: str | None = Field(default=None, max_length=160)
     room_id: str | None = Field(default=None, max_length=64)
+    ring_id: str | None = Field(default=None, pattern='^[0-9a-f]{32}$')
 
 class Turn(BaseModel):
     text: str = Field(min_length=1, max_length=6000)
@@ -95,7 +96,7 @@ async def pending(parent_id: str, user: str = Depends(require_user)):
 
 @router.post('')
 async def start(body: Start, user: str = Depends(require_user)):
-    try: return calls.start(body.parent_id, body.agent_id, body.endpoint_id, body.model, user, room_id=body.room_id)
+    try: return calls.start(body.parent_id, body.agent_id, body.endpoint_id, body.model, user, room_id=body.room_id, ring_id=body.ring_id)
     except ValueError as error: raise HTTPException(422, str(error)) from error
 
 @router.get('/{ident}')
@@ -149,6 +150,15 @@ async def watch(ident: str, user: str = Depends(require_user)):
     if call['ended']:raise HTTPException(409,'Call ended.')
     async def events():
         async for event in calls.watch_events(call):yield json.dumps(event)+'\n'
+    return StreamingResponse(events(),media_type='application/x-ndjson',headers={'Cache-Control':'no-store','X-Accel-Buffering':'no'})
+
+@router.post('/{ident}/opening')
+async def opening(ident: str, user: str = Depends(require_user)):
+    call=calls.require(ident,user)
+    async def events():
+        try:
+            async for event in calls.open_with_reason(call):yield json.dumps(event)+'\n'
+        except HTTPException as error:yield json.dumps({'type':'error','message':str(error.detail)})+'\n'
     return StreamingResponse(events(),media_type='application/x-ndjson',headers={'Cache-Control':'no-store','X-Accel-Buffering':'no'})
 
 @router.post('/{ident}/work/{task_id}/stop')
