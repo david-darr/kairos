@@ -128,7 +128,7 @@ class Models(unittest.TestCase):
         self.assertEqual(self.admin.post("/api/models", json={"kind": "api"}).status_code, 422, "a name is required")
         self.assertEqual(model_endpoints.list_endpoints(), [], "refused requests saved nothing")
         made = self.add()
-        self.assertNotIn(KEY, Path(model_endpoints.ENDPOINTS_FILE).read_text(encoding="utf-8"), "the key is encrypted at rest")
+        self.assertNotIn(KEY, Path(model_endpoints.endpoints_file()).read_text(encoding="utf-8"), "the key is encrypted at rest")
         self.assertNotIn(KEY, json.dumps(made))
         self.assertTrue(made["has_api_key"])
         self.assertNotIn(KEY, self.admin.get("/api/models").text)
@@ -201,7 +201,16 @@ class Models(unittest.TestCase):
     def test_discovery_with_no_key_or_a_failing_provider_returns_the_fallback_not_invented_ids(self):
         model_discovery._cache.clear()
         custom = self.add()  # a custom URL is not a known provider: nothing to discover
+        # Connections are each account's own; the member uses this one only once it is shared (D3).
+        self.assertEqual(self.member.get(f"/api/models/{custom['id']}/catalog").status_code, 404)
+        self.assertEqual(self.admin.put(f"/api/models/{custom['id']}/shares", json={"usernames": ["member"]}).json(),
+                         {"usernames": ["member"]})
         self.assertEqual(self.member.get(f"/api/models/{custom['id']}/catalog").json(), [])
+        choice = next(c for c in self.member.get("/api/models/choices").json() if c["id"] == custom["id"])
+        self.assertNotIn("base_url", choice)
+        self.assertEqual(self.member.put(f"/api/models/{custom['id']}/shares", json={"usernames": []}).status_code, 403)
+        self.assertEqual(self.admin.put(f"/api/models/{custom['id']}/shares", json={"usernames": []}).json(), {"usernames": []})
+        self.assertEqual(self.member.get(f"/api/models/{custom['id']}/catalog").status_code, 404)
         self.assertEqual(self.member.get("/api/models/missing/catalog").status_code, 404)
         official = {"id": "ep1", "kind": "api", "base_url": "https://api.openai.com/v1", "api_key_encrypted": None}
         self.assertEqual(asyncio.run(model_discovery.list_for_endpoint(official)), [], "no key: nothing is invented")

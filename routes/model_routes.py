@@ -123,10 +123,45 @@ async def create_endpoint(body: CreateEndpointRequest, user: str = Depends(requi
 
 @router.delete("/{endpoint_id}")
 async def delete_endpoint(endpoint_id: str, user: str = Depends(require_admin)) -> dict:
-    if model_endpoints.get_endpoint(endpoint_id) is None:
+    endpoint = model_endpoints.get_endpoint(endpoint_id)
+    if endpoint is None or endpoint.get("shared"):
         raise HTTPException(status_code=404, detail="endpoint not found")
     model_endpoints.delete_endpoint(endpoint_id)
     return {"ok": True}
+
+
+class SharesRequest(BaseModel):
+    usernames: list[str]
+
+
+@router.get("/{endpoint_id}/shares")
+async def get_shares(endpoint_id: str, user: str = Depends(require_admin)) -> dict:
+    """Who one of your own connections is shared with (D3: the admin shares on purpose)."""
+    from core.auth import auth_manager
+    endpoint = model_endpoints.get_endpoint(endpoint_id)
+    if endpoint is None or endpoint.get("shared"):
+        raise HTTPException(404, "endpoint not found")
+    names = [auth_manager.username_for_account(a) for a in model_endpoints.shares_of(endpoint_id)]
+    return {"usernames": sorted(n for n in names if n)}
+
+
+@router.put("/{endpoint_id}/shares")
+async def put_shares(endpoint_id: str, body: SharesRequest, user: str = Depends(require_admin)) -> dict:
+    """Share one of your own connections with exactly these people ([] takes it back). They can pick it for
+    their chats and bots; its key and address stay yours, and their usage is counted in their account."""
+    from core.auth import auth_manager
+    accounts_for = []
+    for name in body.usernames:
+        account_id = auth_manager.account_id(name)
+        if account_id is None:
+            raise HTTPException(400, f"no such person: {name}")
+        accounts_for.append(account_id)
+    try:
+        model_endpoints.set_shares(endpoint_id, accounts_for)
+    except KeyError:
+        raise HTTPException(404, "endpoint not found")
+    names = [auth_manager.username_for_account(a) for a in model_endpoints.shares_of(endpoint_id)]
+    return {"usernames": sorted(n for n in names if n)}
 
 
 class ImageSupportRequest(BaseModel):

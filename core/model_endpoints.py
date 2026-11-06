@@ -28,7 +28,19 @@ from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
 from core.secret_storage import decrypt, encrypt
 
-ENDPOINTS_FILE = os.path.join(DATA_DIR, "model_endpoints.json")
+ENDPOINTS_FILE = None  # override (tests); else the current account's model_endpoints.json
+# Connections an account shares with others (D3, Multi-Account phase 3a): install-level, keyed
+# "<owner account>:<endpoint id>" -> {"owner", "endpoint_id", "grantees": [account ids]}.
+SHARES_FILE = None  # override (tests); else data/model_shares.json
+
+
+def endpoints_file() -> str:
+    from core import accounts
+    return ENDPOINTS_FILE or accounts.path("model_endpoints.json")
+
+
+def shares_file() -> str:
+    return SHARES_FILE or os.path.join(DATA_DIR, "model_shares.json")
 
 DEFAULT_LOCAL_NUM_CTX = 16384  # real incident, 2026-09-01: a local model loaded
 # with no cap defaulted to its max supported context (phi3's 131072) and its
@@ -50,14 +62,14 @@ def _load() -> dict:
     on load, not just newly-created ones. Runs on every load so it fixes
     itself the next time anything touches the file, regardless of when this
     code shipped relative to when the endpoint was created."""
-    data = read_json(ENDPOINTS_FILE, {})
+    data = read_json(endpoints_file(), {})
     changed = False
     for ep in data.values():
         if ep.get("kind") == "local" and ep.get("num_ctx") is None:
             ep["num_ctx"] = DEFAULT_LOCAL_NUM_CTX
             changed = True
     if changed:
-        write_json_atomic(ENDPOINTS_FILE, data)
+        write_json_atomic(endpoints_file(), data)
     return data
 
 
@@ -74,12 +86,74 @@ def _masked(ep: dict) -> dict:
     }
 
 
+def _current_account() -> Optional[str]:
+    from core import accounts
+    try:
+        return accounts.effective_account()
+    except accounts.NoAccount:
+        return None
+
+
+def _shared_with_me() -> dict:
+    """Connections other accounts shared with the current one: endpoint id -> the owner's record, marked."""
+    from core import accounts
+    me = _current_account()
+    if not me:
+        return {}
+    found = {}
+    for share in read_json(shares_file(), {}).values():
+        if me not in share.get("grantees", []) or share.get("owner") == me:
+            continue
+        try:
+            with accounts.as_account(share["owner"]):
+                ep = _load().get(share["endpoint_id"])
+        except Exception:
+            ep = None
+        if ep is not None:
+            found[ep["id"]] = {**ep, "shared": True, "owner_account": share["owner"]}
+    return found
+
+
 def list_endpoints() -> list[dict]:
-    return [_masked(ep) for ep in _load().values()]
+    own = [_masked(ep) for ep in _load().values()]
+    # A shared connection shows its name and model, never its address or whether it has a key.
+    shared = [{**_masked(ep), "base_url": "", "has_api_key": False, "shared": True}
+              for ep in _shared_with_me().values()]
+    return own + shared
 
 
 def get_endpoint(endpoint_id: str) -> Optional[dict]:
-    return _load().get(endpoint_id)
+    own = _load().get(endpoint_id)
+    if own is not None:
+        return own
+    return _shared_with_me().get(endpoint_id)
+
+
+def _share_key(owner: str, endpoint_id: str) -> str:
+    return f"{owner}:{endpoint_id}"
+
+
+def shares_of(endpoint_id: str) -> list[str]:
+    """The accounts the current account shares one of its own connections with."""
+    me = _current_account()
+    return list(read_json(shares_file(), {}).get(_share_key(me, endpoint_id), {}).get("grantees", []))
+
+
+def set_shares(endpoint_id: str, grantees: list[str]) -> list[str]:
+    """Share one of the current account's own connections with exactly these accounts ([] takes it back).
+    Usage is counted in the account that uses it; the key and address never leave the owner's file."""
+    me = _current_account()
+    if not me or endpoint_id not in _load():
+        raise KeyError(endpoint_id)
+    grantees = sorted({g for g in grantees if g and g != me})
+    data = read_json(shares_file(), {})
+    key = _share_key(me, endpoint_id)
+    if grantees:
+        data[key] = {"owner": me, "endpoint_id": endpoint_id, "grantees": grantees}
+    else:
+        data.pop(key, None)
+    write_json_atomic(shares_file(), data)
+    return grantees
 
 
 def create_endpoint(name: str, base_url: str = "", model: str = "", api_key: Optional[str] = None,
@@ -107,7 +181,7 @@ def create_endpoint(name: str, base_url: str = "", model: str = "", api_key: Opt
         # don't recognize the field just ignore it). None for api/claude_cli.
         "num_ctx": (num_ctx if num_ctx is not None else DEFAULT_LOCAL_NUM_CTX) if kind == "local" else None,
     }
-    write_json_atomic(ENDPOINTS_FILE, data)
+    write_json_atomic(endpoints_file(), data)
     return _masked(data[endpoint_id])
 
 
@@ -119,14 +193,17 @@ def set_image_support(endpoint_id: str, enabled: bool) -> dict:
     if endpoint.get("kind") not in ("local", "api"):
         raise ValueError("CLI models use their file tools for images.")
     endpoint["supports_images"] = bool(enabled)
-    write_json_atomic(ENDPOINTS_FILE, data)
+    write_json_atomic(endpoints_file(), data)
     return _masked(endpoint)
 
 
 def delete_endpoint(endpoint_id: str) -> None:
     data = _load()
-    data.pop(endpoint_id, None)
-    write_json_atomic(ENDPOINTS_FILE, data)
+    if data.pop(endpoint_id, None) is not None and _current_account():
+        shares = read_json(shares_file(), {})
+        if shares.pop(_share_key(_current_account(), endpoint_id), None) is not None:
+            write_json_atomic(shares_file(), shares)
+    write_json_atomic(endpoints_file(), data)
 
 
 def resolve_runtime(endpoint_id: str) -> tuple[str, str, Optional[str], Optional[int]]:

@@ -1,7 +1,5 @@
 {
- "leaks": [
-  "bea reads david's data via GET /api/models/choices"
- ],
+ "leaks": [],
  "bea_denied": [
   "bea cannot create bots: denied 403",
   "bea cannot create hooks: denied 403",

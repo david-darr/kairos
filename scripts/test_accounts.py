@@ -268,7 +268,7 @@ class Migration(unittest.TestCase):
                                      backup=kwargs.pop("backup", self.backup), **kwargs)
 
     def test_group_one_moves_its_five_stores(self):
-        self.assertEqual([s.version for s in account_migration.STEPS], [1, 2, 3, 4, 5, 6, 7, 8, 9], "group 7b added the tab data step")
+        self.assertEqual([s.version for s in account_migration.STEPS], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "phase 3a added the model connections step")
         self.assertEqual(set(account_migration.STEPS[0].entries), {
             "notes.json", "calendar_events.json", "documents", "documents_index.json", "projects.json", "contacts.json"})
         (self.data / "documents").mkdir()
@@ -1832,6 +1832,88 @@ class SettingsSplit(unittest.TestCase):
         with accounts.as_account(self.second):
             self.assertEqual(bot_policy.default_cwd(None), vault.resolve_vault_dir())
             self.assertIsNotNone(bot_policy.default_cwd(None))
+
+
+class ModelConnectionsPerAccount(unittest.TestCase):
+    """Phase 3a: model connections are each account's own; the owner can share one on purpose (D3)."""
+
+    @classmethod
+    def setUpClass(cls):
+        account_migration.run(_DATA.name, backup=lambda path: None)
+        assert "model_endpoints.json" in account_migration.moved_names()
+
+    def setUp(self):
+        fresh_users()
+        auth_manager.create_user("david-darr", "password-one-1", is_admin=True)
+        auth_manager.create_user("bea", "password-two-2")
+        auth_manager.create_user("cal", "password-three-3")
+        self.first, self.second, self.third = (auth_manager.account_id(n) for n in ("david-darr", "bea", "cal"))
+        from core import model_endpoints
+        self.m = model_endpoints
+        def clean():
+            for a in (self.first, self.second, self.third):
+                Path(accounts.ACCOUNTS_DIR, a, "model_endpoints.json").unlink(missing_ok=True)
+            Path(model_endpoints.shares_file()).unlink(missing_ok=True)
+        clean(); self.addCleanup(clean)
+
+    def test_a_connection_is_listed_only_in_the_account_that_made_it(self):
+        with accounts.as_account(self.first):
+            ep = self.m.create_endpoint("Mine", "https://api.example.test", "m1", api_key="sk-first-secret")
+        with accounts.as_account(self.second):
+            self.assertEqual(self.m.list_endpoints(), [])
+            self.assertIsNone(self.m.get_endpoint(ep["id"]))
+        with accounts.as_account(self.first):
+            self.assertEqual([e["id"] for e in self.m.list_endpoints()], [ep["id"]])
+
+    def test_a_shared_connection_works_without_showing_its_key_and_can_be_taken_back(self):
+        with accounts.as_account(self.first):
+            ep = self.m.create_endpoint("Team", "https://api.example.test", "m1", api_key="sk-first-secret")
+            self.m.set_shares(ep["id"], [self.second])
+        with accounts.as_account(self.second):
+            listed = self.m.list_endpoints()
+            self.assertEqual([(e["id"], e["shared"], e["base_url"], e["has_api_key"]) for e in listed],
+                             [(ep["id"], True, "", False)])
+            self.assertEqual(self.m.resolve_runtime(ep["id"])[2], "sk-first-secret", "it still runs for bea")
+        with accounts.as_account(self.third):
+            self.assertEqual(self.m.list_endpoints(), [], "only the chosen accounts see it")
+        with accounts.as_account(self.first):
+            self.m.set_shares(ep["id"], [])
+        with accounts.as_account(self.second):
+            self.assertEqual(self.m.list_endpoints(), [])
+            self.assertIsNone(self.m.get_endpoint(ep["id"]))
+
+    def test_only_the_owner_can_share_and_deleting_ends_the_share(self):
+        with accounts.as_account(self.first):
+            ep = self.m.create_endpoint("Team", "https://api.example.test", "m1")
+            self.m.set_shares(ep["id"], [self.second])
+        with accounts.as_account(self.second):
+            with self.assertRaises(KeyError):
+                self.m.set_shares(ep["id"], [self.third])
+            self.m.delete_endpoint(ep["id"])  # not bea's: nothing happens
+        with accounts.as_account(self.first):
+            self.assertIsNotNone(self.m.get_endpoint(ep["id"]))
+            self.m.delete_endpoint(ep["id"])
+        with accounts.as_account(self.second):
+            self.assertEqual(self.m.list_endpoints(), [])
+
+
+class ModelConnectionsMigration(unittest.TestCase):
+    """Migration step 10: the model connections file moves into the first admin's account."""
+
+    def test_the_connections_move(self):
+        root = TemporaryDirectory(prefix="kairos-layout10-", dir=tempfile.gettempdir())
+        self.addCleanup(root.cleanup)
+        data = Path(root.name)
+        (data / "model_endpoints.json").write_text("{}", encoding="utf-8")
+        (data / "layout.json").write_text(json.dumps({"version": 9}), encoding="utf-8")
+        step = account_migration.STEPS[9]
+        self.assertEqual(step.version, 10)
+        result = account_migration.run(str(data), [step], account="abc123",
+                                       backup=lambda path: Path(path).write_text("backup", encoding="utf-8"))
+        self.assertTrue(result["ok"], result)
+        self.assertTrue((data / "accounts" / "abc123" / "model_endpoints.json").is_file())
+        self.assertFalse((data / "model_endpoints.json").exists())
+        account_migration._moved.pop(str(data), None)
 
 
 if __name__ == "__main__":

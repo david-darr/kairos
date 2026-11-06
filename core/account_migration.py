@@ -114,6 +114,7 @@ STEPS: list[Step] = [
     # counts its own). Bots' usage moved with step 4.
     Step(8, "usage counts", ("token_usage.json", "token_usage_daily.json", "image_usage.json")),
     Step(9, "tab data and creative add-on connections", ("tab-data", "creative-connections.json")),
+    Step(10, "model connections", ("model_endpoints.json",)),
 ]
 
 
