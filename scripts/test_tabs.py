@@ -608,7 +608,7 @@ def value(): return {{"answer": answer}}
                 self.assertIn("minecraft", ids, "a legacy tab that keeps accounts apart is listed")
                 self.assertEqual(self.client.get("/legacy/minecraft").json(), {"answer": 99})
             with patch.object(accounts, "effective_account", side_effect=accounts.NoAccount("nobody")):
-                self.assertEqual(self.client.get("/legacy/jobs").status_code, 404)
+                self.assertEqual(self.client.get("/legacy/jobs").status_code, 401)
 
     def test_legacy_absolute_imports_urls_and_whole_tree_approval_survive(self):
         self.legacy()

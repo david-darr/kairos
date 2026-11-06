@@ -490,12 +490,17 @@ def _first_admin_only(entry: dict, mod: ModuleType) -> bool:
     return entry["format"] == "legacy" and getattr(mod, "TAB_PER_ACCOUNT", False) is not True
 
 
-def _is_first_admins_account() -> bool:
+def _is_first_admins_account(signed_out=False) -> bool:
+    """True in the first admin's account. Signed out: False for listings; for a route (signed_out=None)
+    raise 401 like the rest of the app."""
     from core import accounts
     try:
         return accounts.effective_account() == accounts.local_account()
     except accounts.NoAccount:
-        return False
+        if signed_out is None:
+            from fastapi import HTTPException
+            raise HTTPException(401, "authentication required")
+        return signed_out
 
 
 def _mount(app, slug: str, mod: ModuleType) -> bool:
@@ -512,7 +517,7 @@ def _mount(app, slug: str, mod: ModuleType) -> bool:
     first_admin_only = _first_admin_only(entry, mod)
     async def active():
         import asyncio
-        if first_admin_only and not await asyncio.to_thread(_is_first_admins_account):
+        if first_admin_only and not await asyncio.to_thread(_is_first_admins_account, None):
             raise HTTPException(404, "This tab is not available in this account.")
         allowed = await asyncio.to_thread(_entry_allowed, entry)
         if not allowed:
