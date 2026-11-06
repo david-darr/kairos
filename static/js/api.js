@@ -43,19 +43,18 @@ export async function apiRecent(path) {
   return value;
 }
 
-// One recovery per 30 seconds: reload, which runs sign-in again, if accounts are on and nobody is signed in.
-let recovering = false;
+// Signed out mid-use (the session ended or the account was removed): say so once a minute at most.
+// Never reload on its own, which would throw away what someone is typing; the next load signs in again.
+let recovering = false, lastSignedOutNotice = 0;
 async function recoverSignIn() {
-  if (recovering || typeof location === "undefined") return;
+  if (recovering || Date.now() - lastSignedOutNotice < 60000) return;
   recovering = true;
   try {
-    let last = 0;
-    try { last = Number(sessionStorage.getItem("kairos:signin-retry")) || 0; } catch { /* Session storage is optional. */ }
-    if (Date.now() - last < 30000) return;
     const status = await fetch("/api/auth/status").then(r => r.json()).catch(() => null);
     if (!status || !status.auth_enabled || status.username) return;
-    try { sessionStorage.setItem("kairos:signin-retry", String(Date.now())); } catch { /* Session storage is optional. */ }
-    location.reload();
+    lastSignedOutNotice = Date.now();
+    toast("You were signed out. Reload Kairos to sign in again.", "error");
+    document.dispatchEvent(new CustomEvent("kairos:signed-out"));
   } finally { recovering = false; }
 }
 
