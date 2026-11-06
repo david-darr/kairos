@@ -1,7 +1,9 @@
 // Voice latency work (Fluid Voice build order steps 1 and 2, no new models): the per-turn trace helper, the sentence
 // chunker (no hold-back, first-clause release, abbreviations/decimals), the call speaker's prefetching queue
 // (order, cancellation mid-prefetch, look-ahead limit), the call transport's push channel and the rolling transcript
-// (partials, commit, reuse / tail finals, fallback, the slow-engine gate) against a scripted fake recognizer.
+// (partials, commit, reuse / tail finals, fallback, the slow-engine gate) against a scripted fake recognizer, and
+// Open Mic on the call pipeline (step 6): worklet capture at its 900 ms endpoint, barge-in, held text, rolling partials,
+// the prefetching neural speaker, the loudness fallback.
 // Plain node, no browser: the speaker runs against a fake AudioContext and a fake speech endpoint.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -106,7 +108,7 @@ const load = async (file, prefix = '') => import('data:text/javascript;base64,' 
   };
   const vo = await load('static/js/voiceOutput.js'), tr = await load('static/js/callTransport.js', 'const api=async()=>({});');
   globalThis.__vo = vo; globalThis.__tr = tr; globalThis.__api = { api: async () => ({}), el: () => ({}) };
-  const callVoice = await load('static/js/callVoice.js', 'const {api,el}=globalThis.__api;const {createChunker,_forSpeech}=globalThis.__vo;const {readEvents}=globalThis.__tr;\n');
+  const callVoice = await load('static/js/callVoice.js', 'const {api,el}=globalThis.__api;const {createChunker,createSpeaker,_forSpeech}=globalThis.__vo;const {readEvents}=globalThis.__tr;\n');
   const make = () => {
     const events = []; created.length = 0; requests.length = 0;
     const speaker = callVoice.neuralSpeaker({ onStart: () => events.push('start'), onEnd: () => events.push('end'), onError: e => events.push('error:' + e),
@@ -376,5 +378,173 @@ const load = async (file, prefix = '') => import('data:text/javascript;base64,' 
     console.log('Final-pass recognition cost (fake recognizer, scripted words):\n  ' + table.join('\n  '));
   }
 
-  console.log('Voice latency trace, chunker, prefetching speaker, push channel and rolling transcript: passed');
+
+  // ---- Open Mic on the call pipeline (build order step 6) ---------------------------------------------------------------
+  // The real openMic.js, with the browser pieces behind it faked: the call recorder (driven by calling its callbacks, the
+  // way the worklet does), speech recognition (scripted), the chat turn and, for most cases, the voice.
+  {
+    const pt = await load('static/js/partialTranscript.js', 'const encodeWav = pcm => pcm;\n');
+    const vt = await load('static/js/voiceTrace.js');
+    const deps = { transcribe: async () => '', partial: async () => ({ text: '', segments: [] }), status: async () => ({}), api: async () => ({}) };
+    const calls = { transcribe: [], partial: [], api: [] };
+    globalThis.__omDeps = {
+      createRecorder: () => { throw new Error('the loudness recorder is not expected here'); },
+      createCallRecorder: () => { throw new Error('the real call recorder is not expected here'); },
+      isCallRecordingSupported: () => true, isSpeechOutputSupported: () => true,
+      transcribeBlob: async (blob, options) => { calls.transcribe.push({ blob, options }); return deps.transcribe(blob, options); },
+      transcribePartial: async (wav, options) => { calls.partial.push(options); return deps.partial(wav, options); },
+      getSpeechStatus: () => deps.status(),
+      api: async (path, options) => { calls.api.push({ path, body: JSON.parse(options?.body || '{}') }); return deps.api(path, options); },
+      createPartialTranscriber: pt.createPartialTranscriber, createVoiceSpeaker: callVoice.createVoiceSpeaker, createVoiceTrace: vt.createVoiceTrace,
+    };
+    const om = await load('static/js/openMic.js', 'const {createRecorder,createCallRecorder,isCallRecordingSupported,isSpeechOutputSupported,transcribeBlob,transcribePartial,getSpeechStatus,api,createPartialTranscriber,createVoiceSpeaker,createVoiceTrace}=globalThis.__omDeps;\n');
+    const reset = () => { calls.transcribe.length = calls.partial.length = calls.api.length = 0; deps.transcribe = async () => ''; deps.partial = async () => ({ text: '', segments: [] }); deps.status = async () => ({}); deps.api = async () => ({}); };
+    const quiet = Float32Array.from({ length: 16000 }, () => .01);       // a clip: 1 s of 16 kHz samples
+    const harness = (options = {}) => {
+      const h = { sent: [], log: [], states: [], errors: [], enabled: [], closed: 0, speaker: null, finishTurn: null, turns: 0 };
+      h.factory = opts => { h.cap = opts; return { async start() { if (options.startError) throw options.startError; }, setEnabled(on, barge) { h.enabled.push([on, barge]); }, close() { h.closed++; } }; };
+      h.makeSpeaker = opts => { h.speakerOptions = opts; h.speaker = { feeds: [], resets: 0, cancels: 0, finishes: 0,
+        feed(t) { this.feeds.push(t); }, finish() { this.finishes++; }, reset() { this.resets++; }, cancel() { this.cancels++; } }; return h.speaker; };
+      h.mic = om.createOpenMic({ sessionId: 's1', onState: s => h.states.push(s), onError: e => h.errors.push(e), stopTurn: id => h.log.push('stop:' + id),
+        createCapture: options.noCapture ? undefined : h.factory, createMic: options.createMic, makeSpeaker: options.realSpeaker ? undefined : h.makeSpeaker,
+        sendMessage: (text, handlers) => { h.sent.push(text); h.turns++; handlers.onChunk('Hello there. '); return new Promise(resolve => { h.finishTurn = () => { handlers.onDone(); resolve('done'); }; }); } });
+      h.segment = (ms, endpoint = 900) => h.cap.onSegment({ wav: ms }, { endpoint_ms: endpoint, audio_ms: ms }, Float32Array.from({ length: 16 * ms + 2560 }, () => .01));
+      h.say = (ms = 1000, endpoint = 900) => { h.cap.onSpeechStart(); h.cap.onChunk(Float32Array.from({ length: 16 * ms }, () => .01), false); h.segment(ms, endpoint); };
+      return h;
+    };
+
+    // 1. Worklet capture at Open Mic's own endpoint; one clip -> one chat turn spoken as it streams; the mic watches for barge-in while thinking and speaking.
+    {
+      reset(); const h = harness(); deps.transcribe = async () => 'what time is it';
+      assert.equal(await h.mic.start(), true); await tick();
+      assert.equal(h.mic.capture, 'worklet', 'with a worklet-capable browser Open Mic uses the call recorder');
+      assert.equal(h.cap.silenceMs, 900, 'and keeps its 900 ms end-of-speech wait through the recorder option'); assert.equal(h.cap.mode, 'automatic');
+      assert.equal(h.mic.state, 'listening'); assert.deepEqual(h.enabled.at(-1), [true, false], 'listening: the recorder is segmenting, not in barge mode');
+      assert.equal(calls.api.length, 0, 'no speech runtime registered: nothing is prepared, nothing changes for the default recognizer');
+      h.say(); await wait(5);
+      assert.deepEqual(h.sent, ['what time is it']);
+      assert.equal(calls.transcribe.length, 1); assert.deepEqual(calls.transcribe[0].options, { pcm: true }, 'the clip is already a 16 kHz WAV: no decode, and the default model as before');
+      assert.deepEqual(h.states, ['listening', 'transcribing', 'thinking']);
+      assert.deepEqual(h.speaker.feeds, ['Hello there. '], 'the chat reply streams into the speaker as it arrives'); assert.equal(h.speaker.resets, 1);
+      assert.deepEqual(h.enabled.at(-1), [true, true], 'while the reply is thinking the microphone stays open in barge mode');
+      h.speakerOptions.onStart(); assert.equal(h.mic.state, 'speaking'); assert.deepEqual(h.enabled.at(-1), [true, true]);
+      const offsets = h.mic.latency.offsets(h.mic.latency.last);
+      for (const stage of ['speech_end', 'endpoint', 'upload_sent', 'transcript_back', 'turn_started', 'first_token']) assert.ok(Number.isFinite(offsets[stage]), 'trace has ' + stage);
+      // Reply done and spoken: back to listening and out of barge mode.
+      h.finishTurn(); assert.equal(h.speaker.finishes, 1); h.speakerOptions.onEnd(); await tick();
+      assert.equal(h.mic.state, 'listening'); assert.deepEqual(h.enabled.at(-1), [true, false], 'listening again after the reply');
+      h.mic.stop(); assert.equal(h.closed, 1, 'stop closes the recorder'); assert.equal(h.mic.state, 'idle');
+    }
+
+    // 2. Barge-in: the user's voice over the reply cuts the voice and the turn, and the interruption becomes the next turn.
+    {
+      reset(); const h = harness(); let said = 'first thing'; deps.transcribe = async () => said;
+      await h.mic.start(); h.say(); await wait(5); h.speakerOptions.onStart(); assert.equal(h.mic.state, 'speaking');
+      h.cap.onBargeIn(); h.cap.onSpeechStart();
+      assert.equal(h.speaker.cancels, 1, 'the voice is cut'); assert.deepEqual(h.log, ['stop:s1'], 'and so is the chat turn');
+      assert.equal(h.mic.state, 'listening'); assert.deepEqual(h.enabled.at(-1), [true, false], 'the recorder goes back to segmenting; the worklet already holds the start of the interruption');
+      said = 'actually never mind'; h.segment(1200); await wait(5);
+      assert.deepEqual(h.sent, ['first thing', 'actually never mind'], 'the interruption goes out as the next turn');
+      assert.equal(h.speaker.resets, 2, 'the speaker latch is cleared for the new reply');
+      // A barge-in with nothing to interrupt (listening) is ignored.
+      h.finishTurn(); h.speakerOptions.onEnd(); await tick(); const cancels = h.speaker.cancels; h.cap.onBargeIn(); assert.equal(h.speaker.cancels, cancels);
+      h.mic.stop();
+    }
+
+    // 3. A pause that outlasts the endpoint but not the thought is ONE turn; noise and empty transcripts send nothing.
+    {
+      reset(); const h = harness(); const texts = ['I was thinking', 'about the budget']; let release; deps.transcribe = () => new Promise(resolve => { release = () => resolve(texts.shift()); });
+      await h.mic.start(); h.say(); await wait(5); assert.equal(h.mic.state, 'transcribing');
+      h.say(); await wait(5);                                  // the user carries on while the first clip is still being recognized
+      release(); await wait(5); release(); await wait(5);
+      assert.deepEqual(h.sent, ['I was thinking about the budget'], 'both clips are joined into a single turn');
+      h.mic.stop();
+      reset(); const noisy = harness(); await noisy.mic.start();
+      noisy.cap.onSpeechStart(); noisy.cap.onSegment(null, { endpoint_ms: 900 }, null); await wait(5);
+      assert.deepEqual(noisy.sent, []); assert.equal(calls.transcribe.length, 0, 'a click or cough (no segment audio) is never recognized'); assert.equal(noisy.mic.state, 'listening');
+      deps.transcribe = async () => '   '; noisy.say(); await wait(5);
+      assert.deepEqual(noisy.sent, [], 'an empty transcript sends nothing'); assert.equal(noisy.mic.state, 'listening'); assert.deepEqual(noisy.errors, []);
+      deps.transcribe = async () => { throw new Error('engine busy'); }; noisy.say(); await wait(5);
+      assert.deepEqual(noisy.errors, ['engine busy']); assert.equal(noisy.mic.state, 'listening', 'a recognition failure is reported and the loop recovers');
+      noisy.mic.stop();
+    }
+
+    // 4. Rolling partial transcription where the warm GPU recognizer is registered: the final transcript is ready at the endpoint.
+    {
+      reset(); const h = harness();
+      deps.status = async () => ({ acceleration: { configured: true }, call_model: 'small.en', models: [{ name: 'small.en', downloaded: true }] });
+      deps.api = async () => ({ engine: 'cuda', prepare_ms: 40 });
+      deps.partial = async () => ({ text: 'hello there', segments: [{ text: 'hello there', end_ms: 1100 }], timings: { recognition_ms: 80 }, engine: 'cuda' });
+      deps.transcribe = async () => { throw new Error('the whole clip should not be needed'); };
+      await h.mic.start(); await wait(5);
+      assert.deepEqual(calls.api, [{ path: '/api/speech/prepare', body: { model: 'small.en', backend: 'auto' } }], 'the call model is prepared on the warm GPU server');
+      assert.deepEqual(h.mic.recognition, { model: 'small.en', backend: 'auto', partials: 'on' });
+      h.cap.onSpeechStart(); h.cap.onChunk(Float32Array.from({ length: 19200 }, () => .01), true); await wait(5);
+      assert.equal(calls.partial.length, 1); assert.deepEqual([calls.partial[0].model, calls.partial[0].backend], ['small.en', 'auto'], 'a partial is requested while the user is still talking');
+      h.cap.onSegment({ wav: 1 }, { endpoint_ms: 900 }, Float32Array.from({ length: 19200 + 2560 }, () => .01)); await wait(5);
+      assert.deepEqual(h.sent, ['hello there'], 'the partial that covers the speech IS the transcript');
+      assert.equal(calls.transcribe.length, 0, 'no upload and no recognition run at the end of the turn');
+      h.mic.stop();
+      // A CPU engine, a missing model or no registered runtime: partials stay off and the default recognizer is untouched.
+      for (const [status, prepared] of [[{ acceleration: { configured: true }, call_model: 'small.en', models: [{ name: 'small.en', downloaded: true }] }, { engine: 'cpu' }],
+        [{ acceleration: { configured: true }, call_model: 'small.en', models: [{ name: 'small.en', downloaded: false }] }, { engine: 'cuda' }], [{ acceleration: { configured: false } }, { engine: 'cuda' }]]) {
+        reset(); const g = harness(); deps.status = async () => status; deps.api = async () => prepared; deps.transcribe = async () => 'whole clip';
+        await g.mic.start(); await wait(5);
+        assert.deepEqual(g.mic.recognition, { partials: 'cpu' }); g.cap.onSpeechStart(); g.cap.onChunk(Float32Array.from({ length: 19200 }, () => .01), true); g.segment(1000); await wait(5);
+        assert.equal(calls.partial.length, 0, 'no partial requests'); assert.deepEqual(g.sent, ['whole clip']); assert.deepEqual(calls.transcribe[0].options, { pcm: true });
+        g.mic.stop();
+      }
+    }
+
+    // 5. Capture fallbacks.
+    {
+      reset(); const denied = harness({ startError: Object.assign(new Error('no'), { name: 'NotAllowedError' }) });
+      assert.equal(await denied.mic.start(), false); assert.deepEqual(denied.errors, ['Microphone access was blocked. Allow it to use Open Mic.']); assert.equal(denied.mic.state, 'idle');
+      // A worklet that cannot start (no 16 kHz context, module failed) drops to the loudness recorder instead of failing.
+      const events = []; const level = harness({ startError: new Error('This browser cannot capture call audio at 16 kHz.'),
+        createMic: () => ({ async start() { events.push('level-start'); }, capture() {}, async stop() { return { size: 4 }; }, close() { events.push('level-close'); }, cancel() {} }) });
+      assert.equal(await level.mic.start(), true); assert.equal(level.mic.capture, 'level', 'falls back to the loudness recorder'); assert.deepEqual(events, ['level-start']); assert.deepEqual(level.errors, []);
+      level.mic.stop();
+      // The loudness recorder by itself (the injection the older suites use) selects the loudness path.
+      const only = harness({ noCapture: true, createMic: () => ({ async start() {}, capture() {}, async stop() { return { size: 4 }; }, close() {}, cancel() {} }) });
+      await only.mic.start(); assert.equal(only.mic.capture, 'level'); only.mic.stop();
+    }
+
+    // 6. The real call speaker: a chosen neural voice prefetches the sentences of the reply; the OS voice otherwise.
+    {
+      reset(); const streams = [];
+      global.fetch = async (path, options) => {
+        const entry = { path, body: JSON.parse(options.body), aborted: false };
+        entry.stream = new ReadableStream({ start(controller) { entry.controller = controller;
+          options.signal?.addEventListener('abort', () => { entry.aborted = true; try { controller.error(Object.assign(new Error('aborted'), { name: 'AbortError' })); } catch {} }); } });
+        streams.push(entry); return new Response(entry.stream, { headers: { 'Content-Type': 'application/x-ndjson' } });
+      };
+      const store = new Map(); global.localStorage = { getItem: key => store.has(key) ? store.get(key) : null, setItem: (key, value) => store.set(key, value) };
+      store.set('kairos:neural-voice:openmic', JSON.stringify({ provider: 'neural', model: 'kokoro', voice: 'af_heart' }));
+      let reply = 'One here. Two here. Three here.';
+      const real = harness({ realSpeaker: true }); const mic = om.createOpenMic({ sessionId: 's1', stopTurn: () => {}, onState: s => real.states.push(s), onError: e => real.errors.push(e),
+        createCapture: real.factory, sendMessage: (text, handlers) => { handlers.onChunk(reply); return new Promise(() => {}); } });
+      deps.transcribe = async () => 'tell me three things';
+      await mic.start(); real.cap.onSpeechStart(); real.cap.onSegment({ wav: 1 }, { endpoint_ms: 900 }, quiet); await wait(30);
+      assert.deepEqual(streams.map(r => r.body), [{ text: 'One here.', model: 'kokoro', voice: 'af_heart' }, { text: 'Two here.', model: 'kokoro', voice: 'af_heart' }],
+        'the reply is cut into sentences as it streams, and every complete sentence is requested at once, ahead of playback');
+      await wait(150); assert.equal(streams.length, 3, 'the last sentence follows its 100 ms flush, before the turn has ended');
+      assert.equal(mic.state, 'thinking');
+      // The user talks over it: every in-flight render is aborted.
+      real.cap.onBargeIn(); assert.ok(streams.every(r => r.aborted), 'barge-in aborts every queued and prefetching render'); assert.equal(mic.state, 'listening');
+      mic.stop();
+      // No neural voice chosen: the OS voice speaks.
+      store.set('kairos:neural-voice:openmic', JSON.stringify({ provider: 'device' }));
+      const spoken = []; global.window.speechSynthesis = { speak: u => spoken.push(u.text), cancel() {}, getVoices: () => [], pending: false, speaking: false, addEventListener() {} };
+      global.SpeechSynthesisUtterance = global.window.SpeechSynthesisUtterance = class { constructor(text) { this.text = text; } addEventListener() {} };
+      streams.length = 0; reply = 'Plain voice. Second line.';
+      const os = harness({ realSpeaker: true }); const micB = om.createOpenMic({ sessionId: 's1', stopTurn: () => {}, onState() {}, onError() {},
+        createCapture: os.factory, sendMessage: (text, handlers) => { handlers.onChunk(reply); return new Promise(() => {}); } });
+      await micB.start(); os.cap.onSpeechStart(); os.cap.onSegment({ wav: 1 }, { endpoint_ms: 900 }, quiet); await wait(150);
+      assert.deepEqual(spoken, ['Plain voice.', 'Second line.'], 'with no neural voice chosen the OS voice speaks the sentences'); assert.equal(streams.length, 0);
+      micB.stop(); delete global.window.speechSynthesis; delete global.window.SpeechSynthesisUtterance; delete global.SpeechSynthesisUtterance;
+    }
+  }
+
+  console.log('Voice latency trace, chunker, prefetching speaker, push channel, rolling transcript and Open Mic on the call pipeline: passed');
 })().catch(error => { console.error(error); process.exit(1); });

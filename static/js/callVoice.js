@@ -1,5 +1,5 @@
 import { api, el } from './api.js';
-import { createChunker, _forSpeech } from './voiceOutput.js';
+import { createChunker, createSpeaker, _forSpeech } from './voiceOutput.js';
 import { readEvents } from './callTransport.js';
 
 // PCM is played as it arrives, with one cancellable generation for network,
@@ -76,6 +76,27 @@ export function neuralSpeaker(options, getSelection) {
     reset(){this.cancel();cancelled=false;finished=false;next=context?.currentTime||0;},
     cancel(){generation++;cancelled=true;jobs=[];head=0;count=0;finished=false;chunker.reset();cancelAnimationFrame(frame);options.onLevel?.(0);controllers.forEach(c=>c.abort());controllers.clear();sources.forEach(s=>{try{s.stop();}catch{}});sources.clear();speaking=false;},
     dispose(){this.cancel();context?.close();context=null;},
+  };
+}
+
+// The call's two voices behind one speaker, for a caller with no call dialog (Open Mic): the prefetching neural voice
+// when the selection says so, otherwise the OS voice. The voice is chosen at reset(), once per reply, so a setting
+// changed mid-reply cannot split it between two voices. The 100 ms timer after each delta releases a sentence that
+// already ends in punctuation without waiting for the next capital letter, exactly as the call does.
+export function createVoiceSpeaker(options, getSelection = () => ({ provider: 'device' }), makeDevice = createSpeaker) {
+  const device = makeDevice(options), neural = neuralSpeaker(options, getSelection);
+  let current = device, timer = null;
+  const pick = () => getSelection()?.provider === 'neural' ? neural : device;
+  return {
+    get speaking() { return current.speaking; },
+    get kind() { return current === neural ? 'neural' : 'device'; },
+    // Creates (and resumes) the audio context a neural voice plays through; the OS voice needs nothing.
+    async prepare() { if (pick() === neural) await neural.prepare(); },
+    reset() { clearTimeout(timer); current = pick(); current.reset(); },
+    feed(text) { current.feed(text); clearTimeout(timer); timer = setTimeout(() => current.flushSentence(), 100); },
+    finish() { clearTimeout(timer); current.finish(); },
+    cancel() { clearTimeout(timer); device.cancel(); neural.cancel(); },
+    dispose() { this.cancel(); neural.dispose(); },
   };
 }
 

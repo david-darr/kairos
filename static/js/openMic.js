@@ -9,20 +9,32 @@
 // transcript exactly like typed ones, so leaving Open Mic leaves a real
 // conversation behind rather than a separate voice log that has to be merged.
 //
-// Endpointing is done in the browser from audio levels rather than with a VAD
-// library. voice-line uses webrtcvad server-side, but that would mean shipping
-// audio continuously to the backend just to decide whether someone is talking.
-// Keeping it local means the microphone stream never leaves the page until an
-// utterance is complete.
+// Open Mic runs on the same pipeline as a native call (Fluid Voice build order step 6):
+//   capture     the AudioWorklet call recorder: 16 kHz PCM, 400 ms of pre-roll so the first word is whole, the call's
+//               sample-based endpoint (kept at Open Mic's 900 ms via the recorder's silenceMs option)
+//   recognition rolling partial transcription while the user talks (partialTranscript.js), used when the warm GPU
+//               recognizer is registered, so the final transcript is ready at the endpoint; otherwise the whole clip
+//   barge-in    the microphone stays open while the reply is written and spoken; the worklet's BargeIn (echo-cancelled,
+//               ~250 ms of voice) cuts the voice and the turn, and the interruption is already being recorded
+//   speech      the call's prefetching sentence speaker: the neural voice when one is chosen for Open Mic, the OS
+//               voice otherwise, speaking each sentence as the chat reply's tokens stream in
+// The turn itself is still an ordinary chat turn in that chat: same model, tools and history, no fast layer.
+//
+// Where an AudioWorklet cannot run (no worklet, no 16 kHz context) it falls back to the original capture: a
+// MediaRecorder with loudness thresholds polled every 100 ms. The thresholds below belong to that fallback.
 //
 // The honest limitation, the same one voice-line's ears.py documents: an open
 // microphone hears the room. Audio from a video, music, or someone else's
 // conversation can be picked up as speech. That is why this is a mode you turn
 // on deliberately, not the default.
 
-import { createRecorder, transcribeBlob } from './voiceInput.js';
-import { createSpeaker, isSpeechOutputSupported } from './voiceOutput.js';
+import { createRecorder, transcribeBlob, transcribePartial, getSpeechStatus } from './voiceInput.js';
+import { createCallRecorder, isCallRecordingSupported } from './callRecorder.js';
+import { createPartialTranscriber } from './partialTranscript.js';
+import { isSpeechOutputSupported } from './voiceOutput.js';
+import { createVoiceSpeaker } from './callVoice.js';
 import { createVoiceTrace } from './voiceTrace.js';
+import { api } from './api.js';
 
 // Tuned against normal speech at a normal distance. The onset threshold sits
 // above room tone; the barge-in threshold is higher because the microphone
@@ -49,40 +61,85 @@ const MIN_UTTERANCE_MS = 350;
 // A hard ceiling so a stuck recorder or a noisy room cannot record forever.
 const MAX_UTTERANCE_MS = 45000;
 
-// `createMic` and `makeSpeaker` are injection points for the suites, not
-// configuration. Barge-in shipped broken because nothing could drive this
-// machine without a real microphone and a real voice, so the one test that
-// would have caught it could not be written. Defaulted to the real
-// implementations; production never passes them.
+// The reading voice for Open Mic when a local neural voice is chosen (Settings > Speech > Reading voice); the same
+// {provider, model, voice} shape a call keeps per bot.
+export const OPEN_MIC_VOICE_KEY = 'kairos:neural-voice:openmic';
+export function openMicVoiceSelection() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(OPEN_MIC_VOICE_KEY) || '{}');
+    if (saved.provider === 'neural' && saved.model && saved.voice) return { provider: 'neural', model: saved.model, voice: saved.voice };
+  } catch { /* storage blocked or corrupt: the OS voice */ }
+  return { provider: 'device' };
+}
+
+// `createMic`, `createCapture` and `makeSpeaker` are injection points for the suites, not configuration. Barge-in
+// shipped broken once because nothing could drive this machine without a real microphone and a real voice, so the
+// one test that would have caught it could not be written.
+//   createCapture  a call-recorder factory (the worklet path). Default: the real one where the browser supports it.
+//   createMic      the loudness recorder. Passing it WITHOUT createCapture selects the loudness path (what the
+//                  original suites drive through _level); the default is that recorder, as the fallback.
+//   makeSpeaker    default: the call's sentence speaker, neural voice when chosen, OS voice otherwise.
 export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onError,
-                                createMic = createRecorder, makeSpeaker = createSpeaker }) {
+                                createMic, createCapture, makeSpeaker }) {
+  const makeLevelMic = createMic || createRecorder;
+  const makeCapture = createCapture || (!createMic && isCallRecordingSupported() ? createCallRecorder : null);
   let state = 'idle';
   let recorder = null;
+  let mode = '';              // 'worklet' (call capture) or 'level' (loudness fallback), set once the microphone is open
   let speaker = null;
   let stopped = false;
+  let epoch = 0;              // bumped on start and stop, so a late async step from an old session does nothing
 
   let speechStartedAt = 0;
   let lastLoudAt = 0;
   let capturing = false;
   let bargeWindow = [];
+  // Utterances waiting for recognition, and the text of earlier ones the user has not finished the thought after:
+  // a pause that outlasts the endpoint but not the thought becomes ONE turn, as it does in a call.
+  let backlog = [];
+  let transcribing = false;
+  let held = '';
+  let heldTrace = null;
+  let neuralFailed = false;
   // Per-turn latency, kept in memory for this session and logged at debug (see voiceTrace.js).
   const voiceTrace = createVoiceTrace({ label: 'openmic' });
   let turnTrace = null;
+  // Rolling transcription: off until a warm GPU recognizer is confirmed (the in-process CPU engine runs at about real
+  // time, so partials there would only fight the real pass for it). `recognition` is the model the call would use.
+  let recognition = {};
+  const partials = createPartialTranscriber({ send: (wav, signal) => transcribePartial(wav, { signal, model: recognition.model, backend: recognition.backend }) });
+  partials.disable('cpu');
 
   const setState = (next) => {
     if (state === next) return;
     state = next;
     onState?.(next);
+    applyMicrophone();
   };
 
   const fail = (message) => {
     onError?.(message);
   };
 
-  // Level callback drives the whole machine. Kept in one place so the states
+  // Worklet capture only. The microphone is live in every state; while the reply is being written or spoken it is in
+  // barge mode: no segmenting, only a watch for the user's voice over the echo (speechSegments.js BargeIn).
+  function applyMicrophone() {
+    if (mode !== 'worklet' || !recorder) return;
+    recorder.setEnabled(true, state === 'thinking' || state === 'speaking');
+  }
+
+  const interrupt = () => {
+    // Cut both the voice and the in-flight turn: letting the reply finish
+    // generating invisibly would make the next thing said land against
+    // stale context.
+    speaker?.cancel();
+    stopTurn?.(sessionId);
+  };
+
+  // Level callback drives the loudness fallback. Kept in one place so the states
   // cannot disagree about what the microphone is currently hearing.
   const onLevel = (level) => {
-    if (stopped) return;
+    if (stopped || mode === 'worklet') return;
     const now = Date.now();
 
     // Barge-in. The microphone is open the whole time - through transcribing,
@@ -97,11 +154,7 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
       if (bargeWindow.length > BARGE_WINDOW_FRAMES) bargeWindow.shift();
       if (bargeWindow.filter(Boolean).length < BARGE_LOUD_FRAMES) return;
       bargeWindow = [];
-      // Cut both the voice and the in-flight turn: letting the reply finish
-      // generating invisibly would make the next thing said land against
-      // stale context.
-      speaker?.cancel();
-      stopTurn?.(sessionId);
+      interrupt();
       beginCapture(now);
       return;
     }
@@ -147,6 +200,7 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
     recorder?.stop().catch(() => {});
   }
 
+  // Loudness fallback: the end of an utterance. Hands the recorded clip to the shared recognition queue.
   async function finishUtterance() {
     if (!recorder || !capturing) return;
     capturing = false;
@@ -155,6 +209,7 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
     const trace = voiceTrace.begin(performance.now() - (Date.now() - lastLoudAt));
     voiceTrace.mark(trace, 'endpoint');
     setState('transcribing');
+    const mine = epoch;
     let blob = null;
     try {
       // Ends the utterance but leaves the stream open, so levels keep arriving
@@ -163,34 +218,102 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
     } catch {
       blob = null;
     }
-    if (stopped) return;
+    if (stopped || mine !== epoch) return;
+    backlog.push({ wav: blob, pcm: null, session: null, trace, decode: true });
+    drain();
+  }
 
-    let text = '';
-    if (blob) {
-      try {
-        voiceTrace.mark(trace, 'upload_sent');
-        text = await transcribeBlob(blob);
-        voiceTrace.mark(trace, 'transcript_back');
-      } catch (error) {
-        fail(error.message || 'Transcription failed.');
-      }
+  // -- worklet capture: the call recorder's callbacks -------------------------------------------------------------
+  function speechStarted() {
+    if (stopped) return;
+    capturing = true;
+    partials.begin();
+  }
+
+  function bargedIn() {
+    if (stopped || (state !== 'thinking' && state !== 'speaking')) return;
+    interrupt();
+    // The worklet already holds the start of the interruption and keeps recording it as the next utterance.
+    capturing = true;
+    setState('listening');
+  }
+
+  function segmentEnded(wav, timing, pcm) {
+    if (stopped) return;
+    capturing = false;
+    const session = partials.take();
+    if (!wav) {
+      // Too little voice to be speech (a click, a cough): nothing to recognize.
+      session?.cancel();
+      if (!transcribing) drain();
+      return;
     }
-    if (stopped) return;
+    const trace = voiceTrace.begin(performance.now() - (timing?.endpoint_ms || 0));
+    voiceTrace.mark(trace, 'endpoint');
+    backlog.push({ wav, pcm, session, trace, decode: false });
+    drain();
+  }
 
-    if (!text) {
+  // Final transcript of one utterance: the rolling session's text when it has one (nothing left to send, or only the
+  // tail), otherwise, or if anything about that goes wrong, the whole clip.
+  async function recognize(item) {
+    const options = { pcm: !item.decode, ...recognition };
+    if (item.session && item.pcm) {
+      try {
+        const rolled = await item.session.finalize(item.pcm, wav => transcribeBlob(wav, options));
+        if (rolled) return rolled.text;
+      } catch (problem) { if (problem?.name === 'AbortError') return ''; }
+    }
+    return transcribeBlob(item.wav, options);
+  }
+
+  // Recognition, one clip at a time; then the turn goes out once the user has stopped (not mid-thought).
+  async function drain() {
+    if (transcribing) return;
+    transcribing = true;
+    const mine = epoch;
+    try {
+      while (!stopped && mine === epoch && backlog.length) {
+        const item = backlog.shift();
+        setState('transcribing');
+        let text = '';
+        if (item.wav) {
+          try {
+            voiceTrace.mark(item.trace, 'upload_sent');
+            text = String(await recognize(item) || '').trim();
+            voiceTrace.mark(item.trace, 'transcript_back');
+          } catch (error) {
+            fail(error.message || 'Transcription failed.');
+          }
+        }
+        if (stopped || mine !== epoch) return;
+        if (text) { held = held ? `${held} ${text}` : text; heldTrace = item.trace; }
+      }
+    } finally {
+      if (mine === epoch) transcribing = false;
+    }
+    if (stopped || mine !== epoch) return;
+    if (capturing || backlog.length) { setState('listening'); return; }   // still talking: this text goes out with the rest
+    if (!held) {
       // Nothing intelligible. Back to listening rather than sending an empty
       // turn or announcing it, which in a continuous loop would fire
       // constantly on ordinary room noise.
       setState('listening');
       return;
     }
+    dispatch();
+  }
 
+  async function dispatch() {
+    const text = held, trace = heldTrace;
+    held = ''; heldTrace = null;
     setState('thinking');
     turnTrace = trace;
     voiceTrace.mark(trace, 'turn_started');
     // Clears the cancel latch from any previous interruption. Without it the
     // speaker stays permanently silenced after the first barge-in.
     speaker?.reset();
+    const mine = epoch;
     try {
       await sendMessage(text, {
         onChunk: (delta) => { voiceTrace.mark(trace, 'first_token'); speaker?.feed(delta); },
@@ -198,8 +321,25 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
       });
     } catch (error) {
       fail(error.message || 'That turn could not be sent.');
-      setState('listening');
+      if (!stopped && mine === epoch) setState('listening');
     }
+  }
+
+  // Which recognizer a turn uses. The call's choice (Small, on the warm CUDA server) only when a GPU runtime is
+  // registered and that model is downloaded: then partials roll and the final pass is the same fast engine. Otherwise
+  // nothing changes from before: the default model, on demand, one whole clip.
+  async function prepareRecognition() {
+    const mine = epoch;
+    try {
+      const status = await getSpeechStatus();
+      if (!status?.acceleration?.configured) return;
+      const name = status.call_model || 'small.en';
+      if (!(status.models || []).some(item => item.name === name && item.downloaded)) return;
+      const ready = await api('/api/speech/prepare', { method: 'POST', toast: false, body: JSON.stringify({ model: name, backend: 'auto' }) });
+      if (stopped || mine !== epoch || ready?.engine !== 'cuda') return;
+      recognition = { model: name, backend: 'auto' };
+      partials.reset();
+    } catch { /* stay on the default recognizer */ }
   }
 
   // Opens the device without claiming any particular state, and only once per
@@ -210,13 +350,35 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
     if (stopped) return false;
     if (recorder) return true;
     capturing = false;
-    const active = createMic({ onLevel, gated: true });
+    const blocked = (error) => fail(error && error.name === 'NotAllowedError'
+      ? 'Microphone access was blocked. Allow it to use Open Mic.'
+      : 'No microphone is available.');
+    if (makeCapture) {
+      const active = makeCapture({
+        mode: 'automatic', silenceMs: SILENCE_MS,
+        onSpeechStart: speechStarted, onChunk: pcm => { if (!stopped && capturing) partials.push(pcm); },
+        onBargeIn: bargedIn, onSegment: segmentEnded,
+        onError: error => { fail(error?.message || 'Microphone capture stopped.'); stop(); },
+      });
+      try {
+        await active.start();
+        if (stopped) { try { active.close(); } catch { /* already gone */ } return false; }
+        recorder = active; mode = 'worklet';
+        applyMicrophone();
+        return true;
+      } catch (error) {
+        try { active.close(); } catch { /* already gone */ }
+        // A blocked microphone is final. Anything else is the worklet path being unavailable here: use loudness.
+        if (error && error.name === 'NotAllowedError') { blocked(error); stop(); return false; }
+        if (stopped) return false;
+      }
+    }
+    mode = 'level';
+    const active = makeLevelMic({ onLevel, gated: true });
     try {
       await active.start();
     } catch (error) {
-      fail(error && error.name === 'NotAllowedError'
-        ? 'Microphone access was blocked. Allow it to use Open Mic.'
-        : 'No microphone is available.');
+      blocked(error);
       stop();
       return false;
     }
@@ -238,6 +400,10 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
 
   return {
     get state() { return state; },
+    // 'worklet' (the call's capture) or 'level' (the loudness fallback); '' until the microphone is open.
+    get capture() { return mode; },
+    // Rolling transcription: 'on', or why it is off ('cpu', 'slow', 'unavailable'); and the model in use, if not the default.
+    get recognition() { return { ...recognition, partials: partials.state.disabled || 'on' }; },
     // The in-memory latency trace of this session's voice turns.
     get latency() { return voiceTrace; },
 
@@ -247,14 +413,17 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
 
     async start() {
       stopped = false;
+      epoch++;
       clearInterval(ceilingTimer);
       // Checked on a timer rather than in the level callback so it still
       // applies to a silent stuck stream, which produces no levels to act on.
+      // (Loudness path only: the worklet cuts an utterance at 30 s itself.)
       ceilingTimer = setInterval(() => {
-        if (stopped || !capturing) return;
+        if (stopped || !capturing || mode !== 'level') return;
         if (Date.now() - speechStartedAt > MAX_UTTERANCE_MS) finishUtterance();
       }, 1000);
-      speaker = makeSpeaker({
+      neuralFailed = false;
+      const options = {
         onStart: () => setState('speaking'),
         onSentenceReady: () => voiceTrace.mark(turnTrace, 'first_sentence'),
         onSentenceStart: () => voiceTrace.sentenceStart(turnTrace),
@@ -263,14 +432,27 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
         // pause between the assistant's own sentences is never mistaken for
         // the end of its turn.
         onEnd: () => { voiceTrace.report(turnTrace); if (!stopped) listen(); },
-      });
+        // A neural voice that fails (server stopped, engine error) hands the rest of the session to the OS voice.
+        onError: message => {
+          if (speaker?.kind !== 'neural') return;
+          neuralFailed = true;
+          fail(`${message} Open Mic will use the device voice from the next reply.`);
+        },
+      };
+      speaker = (makeSpeaker || (opts => createVoiceSpeaker(opts, () => (neuralFailed ? { provider: 'device' } : openMicVoiceSelection()))))(options);
       if (!isSpeechOutputSupported()) {
         // Still useful without a voice: it becomes hands-free dictation with
         // replies on screen, which is better than refusing outright.
         fail('This browser cannot speak replies aloud. Open Mic will still listen and reply in text.');
       }
       // False when the microphone could not be opened (the caller then ends the session).
-      return listen();
+      const listening = await listen();
+      if (listening) {
+        // Creates the neural voice's audio context now, inside the user's click, and warms the recognizer.
+        try { speaker?.prepare?.()?.catch?.(() => { neuralFailed = true; }); } catch { neuralFailed = true; }
+        if (mode === 'worklet') prepareRecognition();
+      }
+      return listening;
     },
 
     // Called by the turn driver as the reply streams, so the speaker can start
@@ -283,12 +465,18 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
 
   function stop() {
     stopped = true;
+    epoch++;
     clearInterval(ceilingTimer);
     ceilingTimer = null;
     bargeWindow = [];
+    backlog = [];
+    held = ''; heldTrace = null; transcribing = false;
+    partials.cancel();
     try { recorder?.close(); } catch { /* already released */ }
     recorder = null;
+    mode = '';
     speaker?.cancel();
+    speaker?.dispose?.();
     speaker = null;
     capturing = false;
     setState('idle');

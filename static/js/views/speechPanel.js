@@ -2,6 +2,7 @@ import { api, el, toast } from '../api.js';
 import { refreshSpeechStatus, listInputDevices, getInputDevice, setInputDevice, requestMicrophoneAccess, isRecordingSupported } from '../voiceInput.js';
 import { isSpeechOutputSupported, whenVoicesReady, resolveVoice, getPreferredVoice, setPreferredVoice } from '../voiceOutput.js';
 import { group, row, note, pill } from '../settingsKit.js';
+import { voiceSettings } from '../callVoice.js';
 
 // Settings > Workspace > Speech (David's ask 2026-09-15).
 //
@@ -103,6 +104,16 @@ export async function renderSpeechPanel(content, status) {
         'Only the American voices are listed. Add one in Windows Settings under Time & language, Speech, Manage voices, Add voices, '
         + 'English (United Kingdom). It appears here after a restart and is then chosen automatically.' }));
     }
+    // Open Mic speaks through the same sentence speaker a call uses, so it can use a local neural voice server
+    // (the one set up for calls) instead of the OS voice. The OS voice stays the fallback if the server is down.
+    // Saved as kairos:neural-voice:openmic (openMic.js OPEN_MIC_VOICE_KEY).
+    const neural = voiceSettings({ id: 'openmic' }, select, {});
+    neural.sync();
+    let neuralLoaded = false;
+    const loadNeural = () => { if (neuralLoaded) return; neuralLoaded = true; neural.load(); };
+    neural.node.addEventListener('change', () => { if (neural.selection().provider === 'neural') loadNeural(); });
+    if (neural.selection().provider === 'neural') loadNeural();
+    rows.push(row({ title: 'Voice engine', description: 'Local neural voice plays each sentence as it is written, with the next one rendering ahead. Needs the local voice server set up for calls; otherwise the reading voice above is used.', control: [neural.node] }));
     // Stated here because this is exactly where someone looks for it, and
     // silence would read as an oversight rather than a real constraint.
     rows.push(row({ title: 'Output device', description:

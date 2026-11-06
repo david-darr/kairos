@@ -33,6 +33,8 @@ class KairosCallProcessor extends AudioWorkletProcessor {
       }
       if (data.type === 'smart_turn') this.segmenter.smartTurn(data.value);
       if (data.type === 'verdict') this.segmenter.answer(data.id, data.complete);
+      // A caller that wants a longer end-of-speech wait than the call's 700 ms (Open Mic keeps its 900 ms).
+      if (data.type === 'silence' && data.value > 0) this.segmenter.silence = sampleRate * data.value / 1000;
       if (data.type === 'mode') { this.manual = data.value === 'hold'; this.held.cancel(); this.segmenter.reset(true); }
       if (data.type === 'hold_start' && this.enabled && this.manual) this.held.begin();
       if (data.type === 'hold_end') this.held.release();

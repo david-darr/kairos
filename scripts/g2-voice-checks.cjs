@@ -1,4 +1,5 @@
-// g2 (A22): Open Mic state machine edge cases, spoken replies, and the denied-microphone state.
+// g2 (A22): Open Mic state machine edge cases, spoken replies, and the denied-microphone state; Open Mic on the call pipeline
+// (worklet capture, 900 ms endpoint, barge-in, held speech, rolling partials, loudness fallback).
 // Runs after g2-chat-checks.cjs in the same page (it reuses window.__g2's fetch/microphone stubs).
 const assert = require('node:assert/strict');
 
@@ -119,6 +120,153 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes }) 
   assert.deepEqual(await om('errors'), ['This browser cannot speak replies aloud. Open Mic will still listen and reply in text.']);
   await waitFor("window.__mic.state === 'listening'");
   await js("window.__mic.stop(); if (window.__speechSynth) Object.defineProperty(window, 'speechSynthesis', window.__speechSynth); true");
+
+
+  // ---- 6b. Open Mic on the call pipeline (Fluid Voice build order step 6) ---------------------------------------------
+  // The real openMic.js, real recognition upload and real rolling-transcript module; only the browser's recorder is injected
+  // here (the worklet cannot hear a test room). The next block runs the real worklet on a synthetic tone.
+  await js(`(async () => {
+    const m = await import('/static/js/openMic.js'); const g = window.__g2;
+    g.cap = { options: null, enabled: [], closed: 0, sent: [], states: [], errors: [], stops: 0, resets: 0, cancels: 0, spoken: [], speakerOptions: null };
+    g.capReset = () => { const c = g.cap; c.enabled = []; c.closed = 0; c.sent = []; c.states = []; c.errors = []; c.stops = 0; c.resets = 0; c.cancels = 0; c.spoken = []; };
+    g.capMake = (opts = {}) => m.createOpenMic({ sessionId: 's1',
+      sendMessage: opts.send || ((text, h) => { g.cap.sent.push(text); h.onChunk('Reply one. Reply two.'); h.onDone(); return Promise.resolve('done'); }),
+      stopTurn: () => { g.cap.stops++; }, onState: s => g.cap.states.push(s), onError: e => g.cap.errors.push(e),
+      createCapture: options => { g.cap.options = options; return { async start() {}, setEnabled(on, barge) { g.cap.enabled.push([on, barge]); }, close() { g.cap.closed++; } }; },
+      makeSpeaker: options => { g.cap.speakerOptions = options; let cancelled = false; return { feed(t) { if (!cancelled) g.cap.spoken.push(t); }, finish() {}, reset() { cancelled = false; g.cap.resets++; }, cancel() { cancelled = true; g.cap.cancels++; } }; } });
+    g.capSegment = (ms = 1000, endpoint = 900) => g.cap.options.onSegment(g.realWav, { endpoint_ms: endpoint, audio_ms: ms }, new Float32Array(16 * ms));
+    return true; })()`);
+  await js("window.__g2.capReset(); window.__g2.transcribes.length = 0; window.__g2.transcript = 'what time is it'; window.__mic = window.__g2.capMake(); window.__mic.start()");
+  await waitFor("window.__mic.state === 'listening'");
+  const cap = expr => js(`window.__g2.cap.${expr}`);
+  assert.equal(await js("window.__mic.capture"), 'worklet', 'Open Mic captures through the call recorder');
+  assert.equal(await cap('options.silenceMs'), 900, 'and keeps its 900 ms end-of-speech wait');
+  assert.deepEqual(await cap('enabled.at(-1)'), [true, false], 'listening: segmenting, not in barge mode');
+  await js("window.__g2.cap.options.onSpeechStart(); window.__g2.capSegment()");
+  await waitFor("window.__g2.cap.sent.length === 1");
+  assert.deepEqual(await cap('sent'), ['what time is it'], 'the worklet segment is recognized and sent as an ordinary turn');
+  assert.deepEqual(await cap('spoken'), ['Reply one. Reply two.'], 'the reply streams to the speaker');
+  assert.equal(await g('transcribes.length'), 1, 'one upload for one utterance');
+  assert.equal(await g('transcribes[0].name'), 'speech.wav', 'the PCM clip goes up as it is (no decode of a codec stream)');
+  const workletTrace = await js("(() => { const t = window.__mic.latency.last; return window.__mic.latency.offsets(t); })()");
+  for (const stage of ['speech_end', 'endpoint', 'upload_sent', 'transcript_back', 'turn_started', 'first_token']) assert.ok(Number.isFinite(workletTrace[stage]), `worklet trace records ${stage}`);
+  // Thinking and speaking keep the microphone open in barge mode; the user's voice over the reply cuts voice and turn.
+  assert.deepEqual(await cap('enabled.at(-1)'), [true, true], 'the microphone watches for barge-in while the reply is thinking');
+  await js("window.__g2.cap.speakerOptions.onStart()");
+  assert.equal(await js("window.__mic.state"), 'speaking');
+  await js("window.__g2.cap.options.onBargeIn(); window.__g2.cap.options.onSpeechStart()");
+  assert.equal(await cap('cancels'), 1, 'barge-in silences the voice'); assert.equal(await cap('stops'), 1, 'and stops the chat turn');
+  assert.equal(await js("window.__mic.state"), 'listening'); assert.deepEqual(await cap('enabled.at(-1)'), [true, false]);
+  await js("window.__g2.transcript = 'wait, something else'; window.__g2.capSegment(1200)");
+  await waitFor("window.__g2.cap.sent.length === 2");
+  assert.equal((await cap('sent'))[1], 'wait, something else', 'the interruption is the next turn');
+  assert.ok((await cap('resets')) >= 2 && (await cap('spoken')).length === 2, 'and the reply after an interruption is still spoken');
+  // Two pieces of one thought (a pause past the endpoint) go out as one turn.
+  await js(`(() => { const g = window.__g2; g.joinN = 0; g.joinInner = window.fetch;
+    window.fetch = async (input, init = {}) => { const url = new URL(typeof input === 'string' ? input : input.url, location.href);
+      if (url.pathname === '/api/speech/transcribe' && (init.method || 'GET').toUpperCase() === 'POST') { const n = ++g.joinN; g.transcribes.push({ bytes: 1, name: 'speech.wav' }); await new Promise(r => setTimeout(r, 250));
+        return new Response(JSON.stringify({ text: ['first part', 'second part'][n - 1] }), { status: 200, headers: { 'Content-Type': 'application/json' } }); }
+      return g.joinInner(input, init); };
+    g.capReset(); g.transcribes.length = 0; g.cap.speakerOptions.onEnd(); return true; })()`);
+  await waitFor("window.__mic.state === 'listening'");
+  await js("window.__g2.cap.options.onSpeechStart(); window.__g2.capSegment()");
+  await waitFor("window.__mic.state === 'transcribing'");
+  await js("window.__g2.cap.options.onSpeechStart(); window.__g2.capSegment()");
+  await waitFor("window.__g2.cap.sent.length === 1");
+  assert.deepEqual(await cap('sent'), ['first part second part'], 'speech that continues while the first clip is recognized joins into one turn');
+  await js("window.fetch = window.__g2.joinInner; window.__mic.stop(); true");
+
+  // Rolling partial transcription: used when a GPU runtime is registered; the final transcript then needs no upload.
+  await js(`(() => { const g = window.__g2; g.partialCalls = []; g.prepareCalls = [];
+    g.inner = window.fetch;
+    window.fetch = async (input, init = {}) => {
+      const url = new URL(typeof input === 'string' ? input : input.url, location.href); const json = body => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      if (url.pathname === '/api/speech/prepare') { g.prepareCalls.push(JSON.parse(init.body)); return json({ engine: 'cuda', prepare_ms: 20 }); }
+      if (url.pathname === '/api/speech/partial') { g.partialCalls.push({ model: init.body.get('model'), backend: init.body.get('backend') });
+        return json({ text: 'rolling words', segments: [{ text: 'rolling words', end_ms: 1100 }], timings: { recognition_ms: 50 }, engine: 'cuda' }); }
+      return g.inner(input, init);
+    };
+    g.speech = { engine_available: true, active_model: 'base.en', call_model: 'small.en', acceleration: { supported: true, configured: true }, models: [{ name: 'small.en', downloaded: true }] };
+    return true; })()`);
+  await js("(async () => { (await import('/static/js/voiceInput.js')).refreshSpeechStatus(); return true; })()");
+  await js("window.__g2.capReset(); window.__g2.transcribes.length = 0; window.__mic = window.__g2.capMake(); window.__mic.start()");
+  await waitFor("window.__mic.state === 'listening' && window.__g2.prepareCalls.length === 1");
+  assert.deepEqual(await g('prepareCalls[0]'), { model: 'small.en', backend: 'auto' }, 'the call model is prepared on the GPU recognizer');
+  await waitFor("window.__mic.recognition.partials === 'on'");
+  await js("window.__g2.cap.options.onSpeechStart(); window.__g2.cap.options.onChunk(new Float32Array(19200), true); true");
+  await waitFor("window.__g2.partialCalls.length === 1");
+  assert.deepEqual(await g('partialCalls[0]'), { model: 'small.en', backend: 'auto' }, 'a partial transcript is requested while the user is still talking');
+  await js("window.__g2.cap.options.onSegment(window.__g2.realWav, { endpoint_ms: 900, audio_ms: 1360 }, new Float32Array(19200 + 2560)); true");
+  await waitFor("window.__g2.cap.sent.length === 1");
+  assert.deepEqual(await cap('sent'), ['rolling words'], 'the partial that covers the speech is the transcript');
+  assert.equal(await g('transcribes.length'), 0, 'with nothing uploaded at the end of the turn');
+  await js("window.__mic.stop(); window.fetch = window.__g2.inner; window.__g2.speech = { engine_available: true, active_model: 'base.en', models: [] }; true");
+  // Without a registered runtime nothing is prepared and the default recognizer is used exactly as before.
+  await js("(async () => { (await import('/static/js/voiceInput.js')).refreshSpeechStatus(); return true; })()");
+  await js("window.__g2.prepareCalls.length = 0; window.__g2.transcribes.length = 0; window.__g2.capReset(); window.__g2.transcript = 'plain'; window.__mic = window.__g2.capMake(); window.__mic.start()");
+  await waitFor("window.__mic.state === 'listening'"); await delay(150);
+  assert.equal(await g('prepareCalls.length'), 0); assert.deepEqual(await js("window.__mic.recognition"), { partials: 'cpu' });
+  await js("window.__g2.cap.options.onSpeechStart(); window.__g2.capSegment()");
+  await waitFor("window.__g2.cap.sent.length === 1"); assert.equal(await g('transcribes.length'), 1);
+  await js("window.__mic.stop(); true");
+
+  // The real worklet on a synthetic tone: real capture, real 900 ms endpoint, real barge-in, nothing injected but the chat turn and voice.
+  const workletOk = await js(`(async () => {
+    const g = window.__g2, m = await import('/static/js/openMic.js');
+    const ac = new AudioContext({ sampleRate: 16000 }); await Promise.race([ac.resume(), new Promise(r => setTimeout(r, 1500))]);
+    if (ac.state !== 'running') return false;
+    const osc = ac.createOscillator(), gain = ac.createGain(), dest = ac.createMediaStreamDestination();
+    osc.frequency.value = 220; gain.gain.value = 0; osc.connect(gain); gain.connect(dest); osc.start();
+    g.toneCtx = ac; g.tone = gain; g.gumBefore = navigator.mediaDevices.getUserMedia;
+    navigator.mediaDevices.getUserMedia = async constraints => { g.gum.push(constraints.audio); return dest.stream; };
+    g.tn = { states: [], at: [], sent: [], stops: 0, errors: [], cancels: 0 };
+    g.tnMic = m.createOpenMic({ sessionId: 's1',
+      sendMessage: (text, h) => { g.tn.sent.push(text); h.onChunk('Reply. '); return new Promise(() => {}); },
+      stopTurn: () => { g.tn.stops++; }, onState: s => { g.tn.states.push(s); g.tn.at.push(performance.now()); }, onError: e => g.tn.errors.push(e),
+      makeSpeaker: () => ({ feed() {}, finish() {}, reset() {}, cancel() { g.tn.cancels++; } }) });
+    return true; })()`);
+  if (workletOk) {
+    await js("window.__g2.transcribes.length = 0; window.__g2.transcript = 'tone words'; window.__g2.tnMic.start()");
+    await waitFor("window.__g2.tnMic.state === 'listening'", 8000);
+    assert.equal(await js("window.__g2.tnMic.capture"), 'worklet', 'by default the real call recorder is used');
+    await js("window.__g2.tone.gain.value = 0.2; true"); await delay(700);
+    const offAt = await js("(() => { window.__g2.tone.gain.value = 0; return performance.now(); })()");
+    await waitFor("window.__g2.tn.states.includes('transcribing')", 5000);
+    const endpointAfter = await js(`window.__g2.tn.at[window.__g2.tn.states.indexOf('transcribing')] - ${offAt}`);
+    assert.ok(endpointAfter >= 800 && endpointAfter < 1600, `the worklet ends the utterance after Open Mic's 900 ms of silence (${Math.round(endpointAfter)} ms)`);
+    await waitFor("window.__g2.tn.sent.length === 1", 5000);
+    assert.deepEqual(await js("window.__g2.tn.sent"), ['tone words']); assert.equal(await js("window.__g2.transcribes.length"), 1);
+    await waitFor("window.__g2.tnMic.state === 'thinking'");
+    // Talking over the reply while it is "thinking": the real BargeIn hears the tone and interrupts.
+    await delay(400);   // the barge detector spends its first 150 ms learning how much of the reply's own sound leaks back in
+    await js("window.__g2.transcript = 'interrupting'; window.__g2.tone.gain.value = 0.2; true");
+    try { await waitFor("window.__g2.tn.stops === 1", 5000); }
+    catch (error) { throw new Error(error.message + ' ' + await js("JSON.stringify({ tn: window.__g2.tn, state: window.__g2.tnMic.state, ctx: window.__g2.toneCtx.state, gain: window.__g2.tone.gain.value })")); }
+    assert.equal(await js("window.__g2.tn.cancels"), 1, 'the voice is cut by the user speaking over it');
+    await delay(400); await js("window.__g2.tone.gain.value = 0; true");
+    await waitFor("window.__g2.tn.sent.length === 2", 6000);
+    assert.equal((await js("window.__g2.tn.sent"))[1], 'interrupting', 'and the interruption is heard whole and sent as the next turn');
+    await js("window.__g2.tnMic.stop(); window.__g2.tone.gain.value = 0; true");
+  } else {
+    console.log('NOTE: the test page cannot start an audio context here; the real-worklet check was skipped.');
+  }
+  await js("(() => { const g = window.__g2; if (g.gumBefore) navigator.mediaDevices.getUserMedia = g.gumBefore; g.toneCtx?.close(); return true; })()");
+
+  // Without AudioWorklet support Open Mic falls back to its loudness recorder and still works end to end.
+  await js(`(async () => {
+    const g = window.__g2, m = await import('/static/js/openMic.js');
+    g.workletCtor = window.AudioWorkletNode; delete window.AudioWorkletNode;
+    g.fb = { states: [], sent: [], errors: [] };
+    g.fbMic = m.createOpenMic({ sessionId: 's1', sendMessage: (text, h) => { g.fb.sent.push(text); h.onChunk('Ok. '); h.onDone(); return Promise.resolve('done'); }, stopTurn() {},
+      onState: s => g.fb.states.push(s), onError: e => g.fb.errors.push(e), makeSpeaker: () => ({ feed() {}, finish() {}, reset() {}, cancel() {} }) });
+    g.fbMic.start(); return true; })()`);
+  await waitFor("window.__g2.fbMic.state === 'listening'");
+  assert.equal(await js("window.__g2.fbMic.capture"), 'level', 'no AudioWorklet: the loudness recorder is used');
+  await js("window.__g2.transcript = 'fallback works'; window.__g2.fbMic._level(0.5)"); await delay(420);
+  await js("window.__g2.fbMic._level(0.5)"); await delay(950); await js("window.__g2.fbMic._level(0.01)");
+  await waitFor("window.__g2.fb.sent.length === 1", 6000);
+  assert.deepEqual(await js("window.__g2.fb.sent"), ['fallback works']); assert.deepEqual(await js("window.__g2.fb.errors"), []);
+  await js("window.__g2.fbMic.stop(); window.AudioWorkletNode = window.__g2.workletCtor; true");
 
   // ---- 7. Spoken replies: voice choice, queue end, stop, fallbacks ------------------------
   await js(`(async () => {

@@ -4,7 +4,7 @@ import { getInputDevice, setInputDevice, encodeWav } from './voiceInput.js';
 export function isCallRecordingSupported() {
   return !!(navigator.mediaDevices?.getUserMedia && window.AudioContext && window.AudioWorkletNode);
 }
-export function createCallRecorder({ onLevel, onSpeechStart, onSegment, onChunk, onPause, onBargeIn, onError, mode = 'automatic' } = {}) {
+export function createCallRecorder({ onLevel, onSpeechStart, onSegment, onChunk, onPause, onBargeIn, onError, mode = 'automatic', silenceMs = 0 } = {}) {
   let stream = null, context = null, source = null, node = null, gain = null, closed = false, enabled = false, settleReady = null, readyTimer = null;
   const close = () => {
     closed = true; enabled = false;
@@ -46,7 +46,7 @@ export function createCallRecorder({ onLevel, onSpeechStart, onSegment, onChunk,
         node.onprocessorerror = () => { close(); onError?.(new Error('Microphone processing stopped. End the call and try again.')); };
         gain = active.createGain(); gain.gain.value = 0;
         source.connect(node); node.connect(gain); gain.connect(active.destination);
-        enabled = true; node.port.postMessage({ type: 'mode', value: mode }); node.port.postMessage({ type: 'enabled', value: true });
+        enabled = true; node.port.postMessage({ type: 'mode', value: mode }); if (silenceMs > 0) node.port.postMessage({ type: 'silence', value: silenceMs }); node.port.postMessage({ type: 'enabled', value: true });
         await Promise.all([active.resume(), ready]);
       } catch (error) { close(); throw error; }
     },
