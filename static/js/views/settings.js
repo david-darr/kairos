@@ -92,6 +92,13 @@ const NAV_ICONS = {
   "file-checkpoints": I('<path d="M3 12a9 9 0 109-9 9 9 0 00-6.4 2.6L3 8"/><path d="M3 3v5h5M12 8v4l3 2"/>'),
 };
 
+// Every page is either "My account" (saved in your own account; a member sees it) or "This Kairos" (shared by
+// everyone on this computer; admins only). A page needing this computer's shell and files also needs machine access.
+const THIS_KAIROS = new Set(["integrations", "images", "channels", "remote", "forge", "computer-use", "agent-tools", "permissions",
+  "hooks", "users", "system", "logs", "runs", "sandbox-changes", "file-checkpoints"]);
+const NEEDS_MACHINE = new Set(["bot-computers"]);
+export const sectionScope = (section) => (section.admin || THIS_KAIROS.has(section.id) ? "kairos" : "mine");
+
 const SECTION_GROUPS = [
   {
     id: "models", label: "Models", sections: [
@@ -582,9 +589,12 @@ function attachResizeHandles(panel) {
 // Which sections this user can actually reach. One place, so the nav, the
 // search, and selectSection() can never disagree about it.
 function visibleSections() {
+  const isAdmin = !!cachedStatus.is_admin;
+  const machine = isAdmin || !!cachedStatus.machine_access;
+  const reachable = (section) => isAdmin || (sectionScope(section) === "mine" && (!NEEDS_MACHINE.has(section.id) || machine));
   const groups = SECTION_GROUPS
-    .filter((group) => !group.admin || cachedStatus.is_admin)
-    .map((group) => ({ ...group, sections: group.sections.filter((section) => !section.admin || cachedStatus.is_admin) }))
+    .filter((group) => !group.admin || isAdmin)
+    .map((group) => ({ ...group, sections: group.sections.filter((section) => (!section.admin || isAdmin) && reachable(section)) }))
     .filter((group) => group.sections.length);
   // Regroup only after applying both group and section authorization gates.
   // The original section objects retain their renderers, keywords and deep links.
@@ -692,7 +702,7 @@ async function selectSection(id) {
   content.scrollTop = 0;
   const page = {
     actions(nodes = []) {
-      headerSlot.replaceChildren(pageHeader(section.label, section.description, nodes));
+      headerSlot.replaceChildren(pageHeader(section.label, section.description, nodes, sectionScope(section)));
       if (mobile && mine === renderVersion) { mobile.subBack = null; mobile.showPage(section.label); }
     },
     sub({ title, description, actions = [], back }) {
@@ -851,9 +861,20 @@ function renderAddModelsPanel(body) {
 }
 
 // -- Added Models -------------------------------------------------------
-async function renderAddedModelsPanel(body, _status, page) {
-  const endpoints = await api("/api/models");
+async function renderAddedModelsPanel(body, status, page) {
+  // A member may not read the full list; the picker's list (name and model only) still shows what they can use.
+  const endpoints = await api("/api/models").catch((error) => (status?.is_admin ? Promise.reject(error) : api("/api/models/choices")));
   const tests = [];
+  // Admins can share each of their own connections with chosen people (core/model_endpoints.py set_shares).
+  const canShare = !!(status?.is_admin && status?.auth_enabled);
+  const people = canShare ? (await api("/api/auth/users").catch(() => [])).filter((u) => u.username !== status.username) : [];
+  const sharedWith = new Map();
+  if (people.length) {
+    await Promise.all(endpoints.filter((e) => !e.shared).map(async (e) => {
+      const got = await api(`/api/models/${encodeURIComponent(e.id)}/shares`).catch(() => null);
+      if (got) sharedWith.set(e.id, got.usernames || []);
+    }));
+  }
   page.actions([el("button", { class: "btn", text: "Test all", onclick: () => tests.forEach((run) => run()) })]);
 
   function endpointRow(ep) {
@@ -876,7 +897,9 @@ async function renderAddedModelsPanel(body, _status, page) {
       toast("Model removed", "success");
       await selectSection("added-models");
     } });
-    const meta = ep.kind === "claude_cli" || ep.kind === "codex_cli" || ep.kind === "antigravity_cli"
+    // Shared by someone else: a name and a model, never an address or key, and not the member's to remove.
+    const meta = ep.shared ? [ep.model || "CLI default", `Shared by ${ep.shared_by || "another account"}`].join(" · ")
+      : ep.kind === "claude_cli" || ep.kind === "codex_cli" || ep.kind === "antigravity_cli"
       ? `Model: ${ep.model || "CLI default"}`
       : [ep.model, ep.base_url, ep.has_api_key ? "key saved" : null, ep.kind === "local" && ep.num_ctx ? `context ${ep.num_ctx}` : null].filter(Boolean).join(" · ");
     const controls = [result];
@@ -888,16 +911,52 @@ async function renderAddedModelsPanel(body, _status, page) {
       small.classList.add("small-window");
       controls.push(small);
     }
-    if (ep.kind === "local" || ep.kind === "api") {
+    if (!ep.shared && (ep.kind === "local" || ep.kind === "api")) {
       controls.push(el("label", { class: "set-inline-switch" }, [el("span", { class: "meta", text: "Images" }),
         toggle({ checked: ep.supports_images, label: `${ep.name} accepts images`, onChange: async (on) => {
           const updated = await api(`/api/models/${ep.id}/image-support`, { method: "PATCH", body: JSON.stringify({ enabled: on }) });
           ep.supports_images = updated.supports_images;
         } })]));
     }
-    controls.push(el("button", { class: "btn", text: "Test", onclick: runTest }), remove);
-    return row({ title: [modelMark(ep.mark, ep.name), el("span", { text: ep.name })].filter(Boolean), description: meta, control: controls,
+    if (ep.shared) controls.unshift(pill(`Shared by ${ep.shared_by || "another account"}`, "accent"));
+    let below = null;
+    if (!ep.shared && people.length && sharedWith.has(ep.id)) {
+      const shares = sharesControl(ep);
+      controls.push(shares.button);
+      below = shares.panel;
+    }
+    controls.push(el("button", { class: "btn", text: "Test", onclick: runTest }));
+    if (!ep.shared) controls.push(remove);
+    return row({ title: [modelMark(ep.mark, ep.name), el("span", { text: ep.name })].filter(Boolean), description: meta, control: controls, below,
       cls: "model-row", attrs: { "data-endpoint": ep.id } });
+  }
+
+  // "Shared with": pick which other accounts may use one of your connections. Their chats and bots can choose
+  // it; the key and address stay yours, and what they use is counted in their own account.
+  function sharesControl(ep) {
+    const current = () => sharedWith.get(ep.id) || [];
+    const label = () => (current().length ? `Shared with ${current().length}` : "Share");
+    const button = el("button", { class: "btn", type: "button", "aria-expanded": "false", text: label() });
+    const panel = el("div", { class: "model-shares", hidden: true });
+    const err = el("div", { class: "set-error" });
+    const boxes = people.map((u) => {
+      const box = el("input", { type: "checkbox", checked: current().includes(u.username) });
+      return { name: u.username, box, row: el("label", { class: "model-share-person" }, [box, el("span", { text: u.is_admin ? `${u.username} (admin)` : u.username })]) };
+    });
+    const save = el("button", { class: "btn primary", type: "button", text: "Save", onclick: async () => {
+      err.textContent = ""; save.disabled = true;
+      try {
+        const done = await api(`/api/models/${encodeURIComponent(ep.id)}/shares`, { method: "PUT", body: JSON.stringify({ usernames: boxes.filter((b) => b.box.checked).map((b) => b.name) }) });
+        sharedWith.set(ep.id, done.usernames || []);
+        button.textContent = label();
+        toast(done.usernames?.length ? `${ep.name} shared with ${done.usernames.join(", ")}` : `${ep.name} is private again`, "success");
+        panel.hidden = true; button.setAttribute("aria-expanded", "false");
+      } catch (e) { err.textContent = errorText(e); } finally { save.disabled = false; }
+    } });
+    panel.append(el("div", { class: "set-row-description", text: "Shared with. They can pick this model for their chats and bots. Your key and address stay private." }),
+      ...boxes.map((b) => b.row), el("div", { class: "set-row-actions" }, [err, save]));
+    button.addEventListener("click", () => { panel.hidden = !panel.hidden; button.setAttribute("aria-expanded", String(!panel.hidden)); });
+    return { button, panel };
   }
 
   const kinds = [["claude_cli", "Claude Code CLI"], ["codex_cli", "Codex CLI"], ["antigravity_cli", "Antigravity"], ["local", "Local"], ["api", "API"]];
@@ -931,10 +990,13 @@ async function renderAddedModelsPanel(body, _status, page) {
     description: "Any chat or task can hand up to 3 research jobs to helpers that work in parallel and report back. They run on this model, can only read (notes, past chats, documents, the web) and stop after 10 minutes or 40,000 tokens each. Claude and Codex chats can use them too; their own built-in subagents are separate.",
     control: helperSelect,
   })]);
-  body.replaceChildren(...kinds.map(([kind, title]) => {
-    const list = endpoints.filter((e) => e.kind === kind);
+  const sharedList = endpoints.filter((e) => e.shared);
+  const ownKinds = status?.is_admin || endpoints.some((e) => !e.shared) ? kinds : [];
+  body.replaceChildren(...ownKinds.map(([kind, title]) => {
+    const list = endpoints.filter((e) => e.kind === kind && !e.shared);
     return group({ title }, list.length ? list.map(endpointRow) : [empty("None added")]);
-  }), longChats, helpers);
+  }), ...(sharedList.length ? [group({ title: "Shared with you", description: "Connections other accounts on this Kairos let you use." }, sharedList.map(endpointRow))] : []),
+  longChats, helpers);
   if (!endpoints.length) body.prepend(note(["Nothing added yet. ", el("button", { type: "button", class: "btn quiet", text: "Add a model", onclick: () => selectSection("add-models") })]));
 }
 
@@ -1318,6 +1380,7 @@ async function renderForgePanel(body) {
 // -- Vault --------------------------------------------------------------
 async function renderVaultPanel(body, status, page) {
   const settings = await api("/api/settings");
+  const onMachine = !!(status?.is_admin || status?.machine_access);
   const pick = el("button", { class: "btn", text: "Choose folder…" });
   if (!window.jarvis) {
     pick.disabled = true;
@@ -1357,8 +1420,10 @@ async function renderVaultPanel(body, status, page) {
 
   body.replaceChildren(
     group({}, [
-      row({ title: "Vault folder", description: [el("span", { class: "set-mono", text: settings.vault_dir })], control: pick,
-        below: el("div", { class: "set-row-description", text: "Point Kairos at an existing vault on this device, or keep the default. Open chats keep their old vault until reconnected." }) }),
+      row({ title: "Vault folder", description: [el("span", { class: "set-mono", text: settings.vault_dir })], control: onMachine ? pick : null,
+        below: el("div", { class: "set-row-description", text: onMachine
+          ? "Point Kairos at an existing vault on this device, or keep the default. Open chats keep their old vault until reconnected."
+          : "Your vault lives inside your own space on this computer. Choosing a folder elsewhere needs machine access from an admin." }) }),
       row({ title: "Task list sync", description: "Checkbox items in your vault's Active Priorities.md show up as Notes, and ticking one here ticks it there. Runs every time Kairos starts.",
         control: [syncStatus, sync] }),
     ]),
@@ -1582,7 +1647,12 @@ async function renderAccountPanel(body, status) {
   await renderTotpSection(totp);
   body.replaceChildren(
     group({}, [row({ icon: badge(status.username, hueFor(status.username)), title: status.username,
-      description: status.is_admin ? "Admin" : "Member" })]),
+      description: status.is_admin ? "Admin" : "Member" }),
+      row({ title: "This computer",
+        description: status.is_admin ? "Admins can always run commands and open files on this computer."
+          : status.machine_access ? "An admin allowed your chats and bots to run commands and open files on this computer."
+            : "Your chats and bots can't run commands or open files on this computer. Ask an admin if you need that.",
+        control: pill(status.is_admin || status.machine_access ? "Allowed" : "Not allowed", status.is_admin || status.machine_access ? "ok" : "muted") })]),
     group({ title: "Password" }, [field("Current password", current), field("New password", next),
       el("div", { class: "set-row-actions" }, [err, ok, change])]),
     totp,
@@ -1696,9 +1766,40 @@ async function renderUsersPanel(body, status, page) {
       } catch (e) { toast(errorText(e), "error"); }
     } });
     if (u.username === status.username) { remove.disabled = true; remove.title = "You can't delete the account you're signed in as"; }
+    const controls = [];
+    let below = null;
+    if (u.is_admin) {
+      controls.push(pill("Full access", "muted"));
+    } else {
+      // Machine access: whether this member's chats and bots may run commands and open files on this computer.
+      controls.push(el("label", { class: "set-inline-switch", title: "Lets this person's chats and bots run commands and open files on this computer" }, [
+        el("span", { class: "meta", text: "This computer" }),
+        toggle({ checked: u.machine_access, label: `${u.username} can use this computer`, onChange: async (on) => {
+          await api(`/api/auth/users/${encodeURIComponent(u.username)}/machine-access`, { method: "PUT", body: JSON.stringify({ enabled: on }) });
+          u.machine_access = on;
+          toast(on ? `${u.username} can now use this computer` : `${u.username} can no longer use this computer`, "success");
+        } })]));
+      if (u.username !== status.username) {
+        const newPass = el("input", { type: "password", autocomplete: "new-password", placeholder: "New password (8 or more characters)", "aria-label": `New password for ${u.username}` });
+        const resetErr = el("div", { class: "set-error" });
+        const save = el("button", { class: "btn primary", type: "button", text: "Set password", onclick: async () => {
+          resetErr.textContent = ""; save.disabled = true;
+          try {
+            await api(`/api/auth/users/${encodeURIComponent(u.username)}/password`, { method: "POST", body: JSON.stringify({ new_password: newPass.value }), toast: false });
+            toast(`${u.username}'s password was changed and they were signed out`, "success");
+            newPass.value = ""; panel.hidden = true;
+          } catch (e) { resetErr.textContent = errorText(e); } finally { save.disabled = false; }
+        } });
+        const panel = el("div", { class: "user-reset", hidden: true }, [newPass, el("div", { class: "set-row-actions" }, [resetErr, save])]);
+        below = panel;
+        controls.push(el("button", { class: "btn", type: "button", text: "Reset password", onclick: () => { panel.hidden = !panel.hidden; if (!panel.hidden) newPass.focus(); } }));
+      }
+    }
+    controls.push(promote, remove);
+    const access = u.is_admin ? "full access to this computer" : u.machine_access ? "can use this computer" : "cannot use this computer";
     return row({ icon: badge(u.username, hueFor(u.username)), title: u.username,
-      description: [u.is_admin ? "Admin" : "Member", u.totp_enabled ? "two-factor on" : null, u.username === status.username ? "you" : null].filter(Boolean).join(" · "),
-      control: [promote, remove] });
+      description: [u.is_admin ? "Admin" : "Member", access, u.totp_enabled ? "two-factor on" : null, u.username === status.username ? "you" : null].filter(Boolean).join(" · "),
+      control: controls, below });
   });
 
   const name = el("input", { autocomplete: "off" });
@@ -1714,9 +1815,9 @@ async function renderUsersPanel(body, status, page) {
     } catch (e) { err.textContent = errorText(e); }
   });
   body.replaceChildren(
-    group({ title: "People" }, rows),
-    group({ title: "Add a user" }, [field("Username", name), field("Password", pass),
-      row({ title: "Admin", description: "Admins manage models, agents, users and these settings.", control: admin }),
+    group({ title: "People", description: "Each person has their own chats, notes, bots and settings. This computer lets a member's chats and bots run commands and open files here; leave it off unless you trust them with this computer." }, rows),
+    group({ title: "Add a user", description: "People can't sign themselves up. Give them the username and password." }, [field("Username", name), field("Password", pass),
+      row({ title: "Admin", description: "Admins manage this Kairos: models, users, and these settings. They can always use this computer.", control: admin }),
       el("div", { class: "set-row-actions" }, [err, add])]),
   );
 }

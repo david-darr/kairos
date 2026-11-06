@@ -3,6 +3,7 @@ import { api, el, toast, confirmDialog as baseConfirmDialog, customSelect, openP
 import { ICONS } from "../icons.js";
 import { pill } from "../settingsKit.js";
 import { shareButton, githubStrip } from "../storePublish.js";
+import { libraryShareButton, renderSharedLibrary } from "../libraryShare.js";
 import { builderMessage, startBuilderChat, openBuilderBrief } from "../builderBrief.js";
 import { addReaIntegration } from "../reaSetup.js";
 import { initToolStoreMobile } from "../redesignToolStoreMobile.js";
@@ -243,7 +244,7 @@ export async function render(container) {
   function draw() {
     if (!view.isConnected) return;
     filters.innerHTML = "";
-    for (const [id, label] of [["all", "All"], ["skills", "Skills"], ["tools", "Tools"], ["tabs", "Tabs"], ["automations", "Automations"], ["designs", "Design systems"]]) {
+    for (const [id, label] of [["all", "All"], ["skills", "Skills"], ["tools", "Tools"], ["tabs", "Tabs"], ["automations", "Automations"], ["designs", "Design systems"], ["library", "Shared library"]]) {
       const button = el("button", {
         type: "button", class: "segmented-tab" + (state.kind === id ? " active" : ""),
         text: label, "aria-pressed": state.kind === id ? "true" : "false",
@@ -260,6 +261,16 @@ export async function render(container) {
     }
     installTab.hidden = state.kind !== "tabs" || !state.admin;
     results.innerHTML = "";
+    if (state.kind === "library") {
+      // What accounts on this Kairos shared with each other (libraryShare.js), not part of the store's search.
+      remoteInstall.hidden = manageSkills.hidden = manageTools.hidden = true;
+      count.textContent = "";
+      const libraryHost = el("div", { class: "tool-store-library" });
+      results.append(libraryHost);
+      renderSharedLibrary(libraryHost);
+      mobile.sync();
+      return;
+    }
     // Design systems for the Design canvas (designSystems.js).
     if (state.kind === "designs") {
       count.textContent = "";
@@ -717,6 +728,7 @@ export async function render(container) {
       el("div", { class: "tool-store-card-foot" }, [
         item.version ? el("span", { class: "tool-store-version" }, [sourceLabel, el("span", { class: "meta", text: ` · v${item.version}` })]) : sourceLabel,
         button,
+        ["user", "imported", "recorded", "unknown"].includes(source) ? libraryShareButton("skill", item.slug) : null,
         state.admin && ["user", "imported", "recorded", "unknown"].includes(source) ? shareButton("skill", item.slug) : null,
       ]),
     ]);

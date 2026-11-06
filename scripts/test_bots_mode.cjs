@@ -24,18 +24,18 @@ const check = (name, fn) => { fn(); passed.push(name); };
     assert.equal(M.MODE_BADGES.kairos, undefined);
   });
 
-  check('restoreMode: an admin gets Forge and Bots back, anything else is Kairos', () => {
+  check('restoreMode: machine access gets Forge and Bots back, anything else is Kairos', () => {
     assert.equal(M.restoreMode('forge', true), 'forge');
     assert.equal(M.restoreMode('bots', true), 'bots');
     assert.equal(M.restoreMode('kairos', true), 'kairos');
     for (const stored of [null, undefined, '', 'Bots', 'agents', 'forge ', 7, {}]) assert.equal(M.restoreMode(stored, true), 'kairos', String(stored));
   });
 
-  check('restoreMode: a non-admin is always in Kairos', () => {
-    for (const stored of ['forge', 'bots', 'kairos', null]) {
-      assert.equal(M.restoreMode(stored, false), 'kairos', String(stored));
-      assert.equal(M.restoreMode(stored, undefined), 'kairos', String(stored));
-    }
+  check('restoreMode: an account without machine access keeps Bots but never lands in Forge', () => {
+    assert.equal(M.restoreMode('bots', false), 'bots');
+    for (const stored of ['forge', 'kairos', null]) assert.equal(M.restoreMode(stored, false), 'kairos', String(stored));
+    assert.equal(M.restoreMode('forge', undefined), 'kairos');
+    assert.equal(M.restoreMode('bots', false, false), 'kairos', 'nobody signed in: Kairos');
   });
 
   check('modeForTab: every Bots tab is Bots, every Forge tab is Forge, the rest is Kairos', () => {
@@ -92,6 +92,15 @@ const check = (name, fn) => { fn(); passed.push(name); };
     for (let i = 0; i < 3; i++) { seen.add(mode); mode = M.nextRailMode(mode); }
     assert.equal(seen.size, 3);
     assert.equal(mode, 'kairos', 'three steps come back');
+  });
+
+  check('the rail skips Forge for an account without machine access', () => {
+    const memberModes = ['kairos', 'bots'];
+    assert.equal(M.nextRailMode('kairos', memberModes), 'bots');
+    assert.equal(M.nextRailMode('bots', memberModes), 'kairos');
+    assert.equal(M.railLabel('kairos', memberModes), 'Switch to Bots Preview');
+    assert.equal(M.railLabel('bots', memberModes), 'Switch to Kairos');
+    assert.equal(M.nextRailMode('forge', memberModes), 'kairos', 'a stale Forge steps back to Kairos');
   });
 
   check('mode copy has no em dash', () => {

@@ -23,11 +23,23 @@ export function staggerEntrance(container) {
 // the label when the pane is narrow. Pages compose these instead of
 // hand-rolling cards, so Settings reads as one product.
 
-export function pageHeader(title, description, actions = []) {
+// `scope` is "mine" (this account only) or "kairos" (everyone on this Kairos); it adds a small caption.
+export const SCOPE_CAPTIONS = {
+  mine: ["My account", "accent", "Only you see and change this."],
+  kairos: ["This Kairos", "muted", "Applies to everyone who uses this Kairos."],
+};
+
+export function scopeCaption(scope) {
+  const entry = SCOPE_CAPTIONS[scope];
+  return entry ? el("div", { class: "set-scope", "data-scope": scope }, [pill(entry[0], entry[1]), el("span", { class: "set-scope-note", text: entry[2] })]) : null;
+}
+
+export function pageHeader(title, description, actions = [], scope = null) {
   return el("header", { class: "set-header" }, [
     el("div", { class: "set-header-text" }, [
       el("h2", { class: "set-title", text: title }),
       description ? el("p", { class: "set-description", text: description }) : null,
+      scopeCaption(scope),
     ]),
     actions.length ? el("div", { class: "set-header-actions" }, actions) : null,
   ]);

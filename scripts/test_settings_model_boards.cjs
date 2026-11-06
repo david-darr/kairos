@@ -8,19 +8,21 @@ for (const [, name] of source.matchAll(/render: (\w+)/g)) context[name] = () => 
 vm.createContext(context);
 const definitions = source.slice(source.indexOf('const SECTION_GROUPS = ['), source.indexOf('\n];', source.indexOf('const SECTION_GROUPS = [')) + 3);
 const visible = source.slice(source.indexOf('function visibleSections()'), source.indexOf('\nfunction buildNav()'));
-vm.runInContext(definitions + '\n' + visible + '\nthis.groups = visibleSections; this.registry = SECTION_GROUPS;', context);
+const scope = source.slice(source.indexOf('const THIS_KAIROS'), source.indexOf('const SECTION_GROUPS = [')).replace('export ', '');
+vm.runInContext(scope + definitions + '\n' + visible + '\nthis.groups = visibleSections; this.sectionScope = sectionScope; this.registry = SECTION_GROUPS;', context);
 const ids = groups => groups.flatMap(group => group.sections.map(section => section.id)).sort();
 for (const admin of [true, false]) {
   context.cachedStatus.is_admin = admin;
   const originalGroups = context.registry.filter(group => !group.admin || admin)
-    .map(group => ({ ...group, sections: group.sections.filter(section => !section.admin || admin) }));
+    .map(group => ({ ...group, sections: group.sections.filter(section => (!section.admin || admin) && (admin || (context.sectionScope(section) === 'mine' && section.id !== 'bot-computers'))) }))
+    .filter(group => group.sections.length);
   const board = context.groups();
   assert.deepEqual(ids(board), ids(originalGroups), 'Every authorized section remains reachable exactly once');
   assert.deepEqual(Array.from(board, group => group.label), admin
     ? ['General', 'Models', 'Connections', 'Agents', 'Bots', 'Your data', 'Access', 'Advanced']
-    : ['General', 'Models', 'Connections', 'Bots', 'Your data', 'Access']);
+    : ['General', 'Models', 'Bots', 'Your data', 'Access']);
   assert.deepEqual(Array.from(board[0].sections, section => section.id), ['appearance', 'layout', 'notifications', 'speech', 'shortcuts']);
-  assert.ok(board.find(group => group.id === 'connections').sections.some(section => section.id === 'integrations' && section.label === 'Integrations' && ['calendar', 'email'].every(word => section.keywords.includes(word))));
+  if (admin) assert.ok(board.find(group => group.id === 'connections').sections.some(section => section.id === 'integrations' && section.label === 'Integrations' && ['calendar', 'email'].every(word => section.keywords.includes(word))));
   assert.ok(!board.find(group => group.id === 'your-data').sections.some(section => section.id === 'integrations'));
   assert.ok(!board.find(group => group.id === 'access').sections.some(section => section.id === 'remote'));
   for (const group of board) for (const section of group.sections) {

@@ -3,8 +3,9 @@
 // them (scripts/test_bots_mode.cjs). app.js owns the state; this file owns the
 // rules: which mode a stored value or a tab id means, the nav lists, the labels.
 //
-// Forge and Bots are admin-only (David's D2: one person). A non-admin is always
-// in Kairos, whatever was stored on the device.
+// Bots is for every account. Forge builds and runs apps on this computer, so it
+// needs machine access (admins always have it); an account without it never
+// lands in Forge, whatever was stored on the device.
 
 export const MODES = ['kairos', 'forge', 'bots'];
 
@@ -34,10 +35,11 @@ const HOME_TABS = { kairos: 'home', forge: 'forgeHome', bots: 'botsHome' };
 // The tab each mode opens on.
 export function homeTabFor(mode) { return HOME_TABS[mode] || HOME_TABS.kairos; }
 
-// What a stored mode (localStorage 'kairos:app-mode') means. Only an admin gets
-// Forge or Bots back; anything unknown is Kairos.
-export function restoreMode(stored, isAdmin) {
-  return isAdmin && (stored === 'forge' || stored === 'bots') ? stored : 'kairos';
+// What a stored mode (localStorage 'kairos:app-mode') means. Bots comes back for
+// anyone signed in; Forge only with machine access; anything unknown is Kairos.
+export function restoreMode(stored, machineAccess, signedIn = true) {
+  if (stored === 'bots' && signedIn) return 'bots';
+  return stored === 'forge' && machineAccess ? 'forge' : 'kairos';
 }
 
 // The mode a tab id belongs to.
@@ -50,14 +52,16 @@ export function modeForTab(tabId) {
 // The collapsed sidebar shows one button, the Kairos mark. It steps through the
 // modes: Kairos, Bots, Forge, back to Kairos.
 const RAIL_ORDER = ['kairos', 'bots', 'forge'];
-export function nextRailMode(mode) {
-  const at = RAIL_ORDER.indexOf(mode);
-  return RAIL_ORDER[(at + 1) % RAIL_ORDER.length];
+// `allowed` (optional) limits the steps to the modes this account may use.
+export function nextRailMode(mode, allowed = RAIL_ORDER) {
+  const order = Array.isArray(allowed) ? RAIL_ORDER.filter(item => allowed.includes(item)) : RAIL_ORDER;
+  const at = order.indexOf(mode);
+  return order[(at + 1) % order.length] || 'kairos';
 }
 
 // The collapsed button's spoken name: where it goes next.
-export function railLabel(mode) {
-  const next = nextRailMode(mode);
+export function railLabel(mode, allowed = RAIL_ORDER) {
+  const next = nextRailMode(mode, allowed);
   return next === 'kairos' ? 'Switch to Kairos' : `Switch to ${MODE_LABELS[next]} Preview`;
 }
 

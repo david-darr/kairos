@@ -6,6 +6,10 @@ import { ICONS } from "../icons.js";
 import { renderBoard } from "./taskBoard.js";
 import { renderTriggers } from "./taskTriggers.js";
 import { shareButton } from "../storePublish.js";
+import { libraryShareButton } from "../libraryShare.js";
+
+// Only a plain scheduled automation can go to the shared library; a bot's routine travels with the bot.
+const plainSchedule = (task) => ["once", "interval", "daily"].includes(task.schedule_kind) && !task.agent_id && !task.routine && !task.trigger && !task.builtin_action;
 import { openBuilderBrief } from "../builderBrief.js";
 import { runHistory, outcomeLabel, formatDuration, runTime, deliveryState } from "../runHistory.js";
 
@@ -311,6 +315,7 @@ async function refresh(list) {
           el("div", { class: "meta", text: schedText }),
         ]),
         el("div", { class: "card-row", style: "gap:6px;" }, [modelSelect, deliverySelect, toggleBtn, task.run_started_at ? stopBtn : runBtn,
+          plainSchedule(task) ? libraryShareButton("automation", task.id, { text: "Share with this Kairos" }) : null,
           auth.is_admin && !task.builtin_action ? shareButton("automation", task.id) : null,
           el("div", { class: "row-actions" }, [delBtn])]),
       ]),

@@ -4,6 +4,7 @@
 // palette and fonts, pasted CSS variables, or a Forge project's stylesheets
 // (read only). A design switches look in one click from its Tokens panel.
 import { api, el, toast, confirmDialog } from './api.js';
+import { libraryShareButton } from './libraryShare.js';
 
 const ROLES = ['bg', 'surface', 'text', 'text-dim', 'accent', 'accent-text', 'danger', 'success'];
 
@@ -60,6 +61,7 @@ function lookCard(system, { admin, isDefault, host }) {
         renderDesignSystems(host, { admin });
       } catch { /* api() shows the error */ }
     } }));
+  if (system.style && system.mine) actions.push(libraryShareButton('design', system.id));
   if (system.style && (system.mine || admin)) actions.push(el('button', { type: 'button', class: 'btn quiet', text: 'Remove', onclick: async () => {
     if (!await confirmDialog({ title: `Remove ${system.name}?`, message: 'Designs using it fall back to Kairos.', confirmLabel: 'Remove' })) return;
     await api(`/api/design-systems/${encodeURIComponent(system.id)}`, { method: 'DELETE' }).catch(() => null);

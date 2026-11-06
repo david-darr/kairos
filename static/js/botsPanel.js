@@ -17,6 +17,7 @@
 // A section kept mounted (Memory) is built once and only hidden, so its draft survives polls and tabs.
 import { api, el, toast, confirmDialog, customSelect, openPanelDialog } from './api.js';
 import { agentAvatar } from './agentAvatar.js';
+import { shareWithKairos } from './libraryShare.js';
 import { agentModelPicker } from './agentModelPicker.js';
 import { creativeSelectionButton } from './creativeConnections.js';
 import { botStatusLine } from './botStatus.js';
@@ -76,6 +77,7 @@ export async function openBotMenu(anchor, agent, { onChanged, onClose } = {}) {
     { label: team?.chief_bot_id === agent.id ? 'Remove chief' : 'Make chief', iconName: 'crown', disabled: !!chiefDisabledReason(agent), meta: chiefDisabledReason(agent),
       onSelect: () => openTeamDialog({ agentId: agent.id, departmentId: team?.id, mode: 'chief', onChanged }) },
     { label: 'Duplicate', iconName: 'copy', onSelect: () => duplicateBot(agent) },
+    ...(agent.builtin ? [] : [{ label: 'Share with this Kairos', iconName: 'share-2', onSelect: () => shareWithKairos('bot', agent.id) }]),
     { label: 'Save as preset', iconName: 'download', onSelect: async () => {
       try { await api('/api/agents/presets', { method: 'POST', body: JSON.stringify({ from_agent_id: agent.id }), toast: false }); toast('Saved. Find it under Starting role in a new bot.', 'success'); }
       catch (error) { toast(messageOf(error), 'error'); }

@@ -67,19 +67,22 @@ const STUB_TABS = new Set();
 // Tabs either mode may open without switching mode (none since the Design tab
 // moved into Library, David 2026-10-22).
 const SHARED_TABS = new Set();
-let forgeAdmin = false;
+let forgeAccess = false; // this account may use this computer's shell and files (Forge needs it)
 let appMode = 'kairos';
-// Whether this person is an admin is not known yet; buildSidebar() puts a non-admin back in Kairos.
-try { appMode = restoreMode(localStorage.getItem('kairos:app-mode'), true); } catch { /* Device storage is optional. */ }
+// Whether this person has machine access is not known yet; buildSidebar() puts an account without it back out of Forge.
+try { appMode = restoreMode(localStorage.getItem('kairos:app-mode'), true, true); } catch { /* Device storage is optional. */ }
 // The marker must match a mode restored at startup, not only one switched to.
 document.documentElement.dataset.appMode = appMode;
+// Bots is for every account; Forge needs machine access (it builds and runs apps on this computer).
+function modeAllowed(mode) { return mode === 'kairos' || mode === 'bots' || (mode === 'forge' && forgeAccess); }
+function allowedModes() { return MODES.filter(modeAllowed); }
 function rememberMode(mode) {
   appMode = mode;
   document.documentElement.dataset.appMode = mode;
   try { localStorage.setItem('kairos:app-mode', mode); } catch { /* Device storage is optional. */ }
 }
 export async function switchMode(mode) {
-  if (mode !== 'kairos' && !forgeAdmin) return;
+  if (!modeAllowed(mode)) return;
   rememberMode(MODES.includes(mode) ? mode : 'kairos');
   await buildSidebar();
   return switchTab(homeTabFor(appMode));
@@ -183,7 +186,7 @@ function switchTabNow(tabId, options) {
 
 async function performSwitch(tabId, options = {}) {
   const mode = SHARED_TABS.has(tabId) ? appMode : modeForTab(tabId);
-  if (mode !== 'kairos' && !forgeAdmin) return;
+  if (!modeAllowed(mode)) return;
   if (mode !== appMode) { rememberMode(mode); await buildSidebar(); }
   const version = ++navigationVersion;
   // The side browser's chrome lives in the Chat view's DOM, but in the
@@ -347,17 +350,18 @@ desktopSidebar.addEventListener("change", () => { if (document.getElementById("n
 
 async function buildSidebar() {
   const identity = await api('/api/auth/status').catch(() => null);
-  forgeAdmin = !!identity?.is_admin;
-  if (!forgeAdmin) rememberMode('kairos');
-  if (forgeAdmin && appMode === 'bots') mountAttention(); else unmountAttention();
+  forgeAccess = !!(identity?.machine_access || identity?.is_admin);
+  if (!modeAllowed(appMode)) rememberMode('kairos');
+  if (appMode === 'bots') mountAttention(); else unmountAttention();
   document.getElementById('forge-mode-switch')?.remove();
-  if (forgeAdmin) {
+  {
+    const modes = allowedModes();
     const control = document.createElement('div');
     control.id = 'forge-mode-switch';
     control.className = 'forge-mode-switch';
     control.setAttribute('role', 'group');
     control.setAttribute('aria-label', 'App mode');
-    for (const [mode, label] of MODE_SWITCH) {
+    for (const [mode, label] of MODE_SWITCH.filter(([mode]) => modes.includes(mode))) {
       const button = document.createElement('button');
       button.type = 'button'; button.className = 'segmented-tab'; button.dataset.mode = mode;
       button.setAttribute('aria-pressed', String(appMode === mode));
@@ -367,9 +371,9 @@ async function buildSidebar() {
       control.append(button);
     }
     const rail = document.createElement('button'); rail.type = 'button'; rail.className = 'forge-mode-rail';
-    rail.setAttribute('aria-label', railLabel(appMode));
+    rail.setAttribute('aria-label', railLabel(appMode, modes));
     rail.title = rail.getAttribute('aria-label'); rail.innerHTML = KAIROS_MARK; // The Kairos circle mark (David, 2026-10-09).
-    rail.onclick = () => switchMode(nextRailMode(appMode)); control.append(rail);
+    rail.onclick = () => switchMode(nextRailMode(appMode, modes)); control.append(rail);
     document.querySelector('.sidebar-header').after(control);
   }
   const brand = document.getElementById("brand");
@@ -613,7 +617,11 @@ async function boot() {
   initLayout(identity.username);
   overlay.classList.add("hidden");
 
-  const settings = await api("/api/settings");
+  // An account that cannot read the install's settings still gets its app: an admin's failure is real and surfaces.
+  const settings = await api("/api/settings").catch((error) => {
+    if (identity.is_admin) throw error;
+    return { onboarding_complete: true };
+  });
   const app = document.getElementById("app");
 
   if (!settings.onboarding_complete) {
@@ -622,7 +630,7 @@ async function boot() {
     chatStream.connect().catch(() => {});
     app.style.display = "none";
     overlay.classList.remove("hidden");
-    await onboarding.run(overlay, () => {
+    await onboarding.run(overlay, identity, () => {
       overlay.classList.add("hidden");
       overlay.innerHTML = "";
       app.style.display = "";

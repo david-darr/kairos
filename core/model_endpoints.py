@@ -114,10 +114,16 @@ def _shared_with_me() -> dict:
     return found
 
 
+def _owner_name(account_id) -> Optional[str]:
+    """The user name of the account that shared a connection (shown as "Shared by <name>")."""
+    from core.auth import auth_manager
+    return auth_manager.username_for_account(account_id) if account_id else None
+
+
 def list_endpoints() -> list[dict]:
     own = [_masked(ep) for ep in _load().values()]
     # A shared connection shows its name and model, never its address or whether it has a key.
-    shared = [{**_masked(ep), "base_url": "", "has_api_key": False, "shared": True}
+    shared = [{**_masked(ep), "base_url": "", "has_api_key": False, "shared": True, "shared_by": _owner_name(ep.get("owner_account"))}
               for ep in _shared_with_me().values()]
     return own + shared
 

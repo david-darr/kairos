@@ -1878,6 +1878,8 @@ class ModelConnectionsPerAccount(unittest.TestCase):
             self.assertEqual([(e["id"], e["shared"], e["base_url"], e["has_api_key"]) for e in listed],
                              [(ep["id"], True, "", False)])
             self.assertEqual(self.m.resolve_runtime(ep["id"])[2], "sk-first-secret", "it still runs for bea")
+            self.assertEqual(listed[0]["shared_by"], "david-darr", "the list says who shared it")
+            self.assertNotIn("owner_account", listed[0])
         with accounts.as_account(self.third):
             self.assertEqual(self.m.list_endpoints(), [], "only the chosen accounts see it")
         with accounts.as_account(self.first):
@@ -2443,6 +2445,66 @@ class MachineAccess(unittest.TestCase):
         self.assertEqual(client.put(url.format("david-darr"), json={"enabled": False}).status_code, 400)
         rows = {row["username"]: row for row in client.get("/api/auth/users").json()}
         self.assertTrue(rows["bea"]["machine_access"])
+
+    def _auth_client(self):
+        from routes import auth_routes
+        app = FastAPI()
+        app.include_router(auth_routes.router)
+        app.add_middleware(middleware.AccountContextMiddleware)
+        patcher = patch.object(middleware, "auth_enabled", return_value=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return TestClient(app)
+
+    def _as(self, client, name):
+        client.cookies.clear()
+        client.cookies.set(SESSION_COOKIE_NAME, auth_manager.create_session(name))
+
+    def test_status_reports_machine_access_and_own_sign_in(self):
+        client = self._auth_client()
+        self._as(client, "bea")
+        body = client.get("/api/auth/status").json()
+        self.assertFalse(body["machine_access"])
+        self.assertTrue(body["own_sign_in"], "a member signs in to their own Claude")
+        auth_manager.set_machine_access("bea", True)
+        self.assertTrue(client.get("/api/auth/status").json()["machine_access"])
+        self._as(client, "david-darr")
+        body = client.get("/api/auth/status").json()
+        self.assertTrue(body["machine_access"], "admins always have it")
+        self.assertFalse(body["own_sign_in"], "the first admin keeps this computer's sign-in")
+        client.cookies.clear()
+        body = client.get("/api/auth/status").json()
+        self.assertFalse(body["machine_access"])
+        self.assertFalse(body["own_sign_in"])
+
+    def test_admin_resets_a_members_password(self):
+        client = self._auth_client()
+        url = "/api/auth/users/{}/password"
+        self._as(client, "bea")
+        self.assertEqual(client.post(url.format("bea"), json={"new_password": "brand-new-pass"}).status_code, 403)
+        member_token = auth_manager.create_session("bea")
+        self._as(client, "david-darr")
+        self.assertEqual(client.post(url.format("bea"), json={"new_password": "short"}).status_code, 400)
+        self.assertEqual(client.post(url.format("ghost"), json={"new_password": "brand-new-pass"}).status_code, 404)
+        self.assertEqual(client.post(url.format("david-darr"), json={"new_password": "brand-new-pass"}).status_code, 400,
+                         "your own password is changed in Account settings")
+        auth_manager.create_user("cy", "password-three-3", is_admin=True)
+        self.assertEqual(client.post(url.format("cy"), json={"new_password": "brand-new-pass"}).status_code, 400,
+                         "an admin's password is theirs to change")
+        self.assertTrue(auth_manager.verify_password("cy", "password-three-3"))
+        self.assertEqual(client.post(url.format("bea"), json={"new_password": "brand-new-pass"}).json(), {"ok": True})
+        self.assertTrue(auth_manager.verify_password("bea", "brand-new-pass"))
+        self.assertFalse(auth_manager.verify_password("bea", "password-two-2"))
+        self.assertIsNone(auth_manager.validate_session(member_token), "the member is signed out everywhere")
+
+    def test_a_member_finishes_their_own_onboarding(self):
+        client = self._auth_client()
+        self._as(client, "bea")
+        with patch.object(settings_store, "update_settings") as update:
+            self.assertEqual(client.post("/api/auth/onboarding-complete").json(), {"ok": True})
+        update.assert_called_once_with(onboarding_complete=True)
+        client.cookies.clear()
+        self.assertEqual(client.post("/api/auth/onboarding-complete").status_code, 401)
 
     def test_claude_tool_config_drops_disk_and_shell_tools_without_access(self):
         from core import brain, integrations, permissions, tool_registry

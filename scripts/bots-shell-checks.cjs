@@ -281,16 +281,24 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
     await js("document.querySelector('#sidebar-toggle').click()");
     await delay(350);
 
-    // -- A non-admin has no switch and cannot reach Bots ---------------------------------------------------------
+    // -- A member gets Bots but not Forge (Forge needs machine access) ------------------------------------------------
     demoState.isAdmin = false;
+    await js("localStorage.setItem('kairos:app-mode', 'kairos'); true");
     await win.loadURL(base);
     await waitFor("!!document.querySelector('.dashboard-core')");
-    assert.equal(await js("!!document.querySelector('#forge-mode-switch, .bots-rail, #nav [data-tab=botsHome]')"), false, 'a non-admin sees no mode switch and no Bots');
-    assert.equal(await mode(), 'kairos', 'a stored Bots mode does not apply to a non-admin');
-    await navigate('botsHome');
-    assert.equal(await view(), 'home', 'a non-admin cannot route to Bots');
-    await navigate('botsShell', { agentId: 'a1' });
+    assert.deepEqual(await js("[...document.querySelectorAll('#forge-mode-switch .segmented-tab')].map(b => b.dataset.mode)"), ['kairos', 'bots'], 'a member sees Kairos and Bots, no Forge');
+    assert.equal(await js("document.querySelector('.forge-mode-rail').getAttribute('aria-label')"), 'Switch to Bots Preview', 'the member rail steps Kairos to Bots');
+    await navigate('forgeHome');
+    assert.equal(await view(), 'home', 'a member cannot route to Forge');
+    await navigate('forgeShell', { projectId: 'p1' });
     assert.equal(await view(), 'home');
+    await js("document.querySelector('#forge-mode-switch [data-mode=bots]').click()");
+    await waitFor("document.documentElement.dataset.appMode === 'bots'");
+    assert.equal(await js("document.querySelector('.forge-mode-rail').getAttribute('aria-label')"), 'Switch to Kairos', 'in Bots the member rail goes back to Kairos');
+    await js("localStorage.setItem('kairos:app-mode', 'forge'); true");
+    await win.loadURL(base);
+    await waitFor("!!document.querySelector('.dashboard-core')");
+    assert.equal(await mode(), 'kairos', 'a stored Forge mode does not apply without machine access');
     demoState.isAdmin = true;
     await win.loadURL(base);
     await waitFor("!!document.querySelector('#forge-mode-switch')");

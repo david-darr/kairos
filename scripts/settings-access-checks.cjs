@@ -22,9 +22,15 @@ function registry() {
   for (const [, name] of source.matchAll(/render: (\w+)/g)) context[name] = () => {};
   vm.createContext(context);
   vm.runInContext(block + '\nthis.registry = SECTION_GROUPS;', context);
+  // "This Kairos" pages are for admins only; a page needing this computer needs machine access too.
+  const set = name => {
+    const at = source.indexOf(`const ${name} = new Set([`);
+    return new Set(source.slice(at, source.indexOf(']);', at)).match(/"([^"]+)"/g).map(x => x.slice(1, -1)));
+  };
+  const kairos = set('THIS_KAIROS'), machine = set('NEEDS_MACHINE');
   const sections = [];
   for (const group of context.registry) for (const section of group.sections) {
-    sections.push({ id: section.id, label: section.label, keywords: Array.from(section.keywords || []), admin: !!(group.admin || section.admin) });
+    sections.push({ id: section.id, label: section.label, keywords: Array.from(section.keywords || []), admin: !!(group.admin || section.admin || kairos.has(section.id)), machine: machine.has(section.id) });
   }
   return sections;
 }
@@ -32,7 +38,7 @@ function registry() {
 module.exports = async ({ js, win, waitFor, delay, navigate, capture, demoState, reads, writes }) => {
   const sections = registry();
   const adminIds = sections.filter(s => s.admin).map(s => s.id);
-  const memberIds = sections.filter(s => !s.admin).map(s => s.id);
+  const memberIds = sections.filter(s => !s.admin && !s.machine).map(s => s.id);
   const mouse = (type, x, y, extra = {}) => win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',
     { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: 1, ...extra });
   const press = async (key, code, vk) => {
@@ -104,13 +110,18 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, demoState,
   await open('permissions'); await waitFor("document.querySelectorAll('.settings-nav-item').length > 3");
   const member = await navIds();
   assert.ok(!member.includes('images'), 'members cannot reach Image generation');
-  assert.deepEqual(member.slice().sort(), memberIds.slice().sort(), 'a member reaches exactly the non-admin sections');
+  assert.deepEqual(member.slice().sort(), memberIds.slice().sort(), 'a member reaches exactly the My account sections that need no machine access');
+  assert.ok(await js("[...document.querySelectorAll('.settings-nav-item')].every(n => n.dataset.section !== 'bot-computers')"), 'Bot computers needs machine access');
+  assert.ok(await js("document.querySelector('.set-scope[data-scope=mine]')?.textContent.includes('My account')"), 'a member page says My account');
   for (const id of adminIds) assert.ok(!member.includes(id), `${id} is hidden from a member`);
   assert.ok(memberIds.includes(await js("document.querySelector('.settings-nav-item.active')?.dataset.section")), 'a deep link to an admin section lands on a reachable one');
   await search('permission');
   assert.ok(!(await visibleNav()).includes('permissions'), 'search never surfaces an admin section to a member');
   await close();
   demoState.isAdmin = true;
+  await open('users'); await waitFor("!!document.querySelector('.set-scope[data-scope=kairos]')");
+  assert.ok(await js("document.querySelector('.set-scope[data-scope=kairos]').textContent.includes('This Kairos')"), 'an admin page says This Kairos');
+  await close();
 
   // -- 3. the desktop window --------------------------------------------------------------------
   await open('add-models'); await waitFor("!!document.querySelector('.settings-window .settings-nav-item')"); await settled('.settings-window');

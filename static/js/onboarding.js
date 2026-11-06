@@ -7,11 +7,19 @@ import { mountModelSetup } from "./modelSetup.js";
 // Discord config) rather than any special onboarding-only API surface, so
 // "set it up now" and "set it up later from Settings" are the exact same
 // code path.
-const STEPS = ["welcome", "model", "vault", "discord", "remote", "finish"];
+// An admin sets up the whole Kairos. A member only sets up their own space: no Discord, no Remote Access.
+const ADMIN_STEPS = ["welcome", "model", "vault", "discord", "remote", "finish"];
+const MEMBER_STEPS = ["welcome", "model", "vault", "finish"];
 
-export async function run(overlay, onComplete) {
+export async function run(overlay, identity, onComplete) {
+  if (typeof identity === "function") { onComplete = identity; identity = { is_admin: true }; }
+  identity = identity || {};
+  const member = !identity.is_admin;
+  const onMachine = !!(identity.is_admin || identity.machine_access);
+  const STEPS = member ? MEMBER_STEPS : ADMIN_STEPS;
   let step = 0;
-  let settings = await api("/api/settings");
+  // A member may not be able to read the install's settings; their own vault path is all this needs.
+  let settings = await api("/api/settings").catch((error) => { if (!member) throw error; return { vault_dir: "" }; });
   let disposeGuide = null;
 
   function renderStep() {
@@ -34,14 +42,17 @@ export async function run(overlay, onComplete) {
   }
 
   function goTo(i) { step = i; renderStep(); }
+  const go = (name) => goTo(STEPS.indexOf(name));
 
   const STEP_RENDERERS = {
     welcome: () => el("div", {}, [
-      el("h2", { text: "Not more time. The right time." }),
-      el("div", { class: "sub", text: "Let's get Kairos set up on this machine. We'll help you choose a model and connect your memory. You can change these choices later." }),
+      el("h2", { text: member ? `Welcome, ${identity.username || "there"}` : "Not more time. The right time." }),
+      el("div", { class: "sub", text: member
+        ? "This is your own space on this Kairos: your own chats, notes, bots and settings, kept apart from everyone else's. You also have your own Kip, your front desk bot, waiting in Bots. Let's pick a model and set up your notes. You can change these choices later."
+        : "Let's get Kairos set up on this machine. We'll help you choose a model and connect your memory. You can change these choices later." }),
       el("div", { class: "onboarding-actions" }, [
         el("div", {}),
-        el("button", { class: "btn", text: "Get Started", onclick: () => goTo(1) }),
+        el("button", { class: "btn", text: "Get Started", onclick: () => go("model") }),
       ]),
     ]),
 
@@ -50,9 +61,9 @@ export async function run(overlay, onComplete) {
       const host = el("div");
       const wrap = el("div", {}, [el("h2", { text: "Choose how Kairos thinks" }), host,
         el("div", { class: "onboarding-actions" }, [
-          el("button", { class: "btn", text: "Back", onclick: () => goTo(0) }),
-          el("button", { class: "btn quiet", text: "Skip for now", onclick: () => goTo(2) }),
-          el("button", { class: "btn", text: "Continue", onclick: () => goTo(2) }),
+          el("button", { class: "btn", text: "Back", onclick: () => go("welcome") }),
+          el("button", { class: "btn quiet", text: "Skip for now", onclick: () => go("vault") }),
+          el("button", { class: "btn", text: "Continue", onclick: () => go("vault") }),
         ]),
       ]);
       disposeGuide = mountModelSetup(host);
@@ -60,7 +71,7 @@ export async function run(overlay, onComplete) {
     },
 
     vault: () => {
-      const pathEl = el("div", { class: "meta", style: "margin:10px 0;", text: settings.vault_dir });
+      const pathEl = el("div", { class: "meta", style: "margin:10px 0;", text: settings.vault_dir || "" });
       const pickBtn = el("button", { class: "btn", text: "Choose Existing Vault..." });
       if (!window.jarvis) {
         pickBtn.disabled = true;
@@ -117,15 +128,22 @@ export async function run(overlay, onComplete) {
         questionnaireWrap.style.display = questionnaireWrap.style.display === "none" ? "block" : "none";
       }});
 
+      // A member keeps a vault inside their own space; only machine access lets them point at a folder elsewhere,
+      // and the questionnaire builds the install's vault, so it is the admin's.
       return el("div", {}, [
         el("h2", { text: "Your vault" }),
-        el("div", { class: "sub", text: "This is where Kairos's memory lives — notes, priorities, everything it remembers between sessions. Use the seeded default, point it at a vault you already have, or answer a few quick questions and Kairos will build one shaped to you." }),
+        el("div", { class: "sub", text: member
+          ? `This is where Kairos keeps your notes and memory. It lives inside your own space on this computer, so nobody else sees it.${onMachine ? " You can also point it at a vault you already have." : ""} Leave it as it is, or skip this step.`
+          : "This is where Kairos's memory lives — notes, priorities, everything it remembers between sessions. Use the seeded default, point it at a vault you already have, or answer a few quick questions and Kairos will build one shaped to you." }),
         pathEl,
-        el("div", { style: "display:flex;gap:8px;" }, [pickBtn, questionnaireBtn]),
-        questionnaireWrap,
+        member
+          ? (onMachine ? el("div", { style: "display:flex;gap:8px;" }, [pickBtn]) : el("div"))
+          : el("div", { style: "display:flex;gap:8px;" }, [pickBtn, questionnaireBtn]),
+        member ? el("div") : questionnaireWrap,
         el("div", { class: "onboarding-actions" }, [
-          el("button", { class: "btn", text: "Back", onclick: () => goTo(1) }),
-          el("button", { class: "btn", text: "Continue", onclick: () => goTo(3) }),
+          el("button", { class: "btn", text: "Back", onclick: () => go("model") }),
+          member ? el("button", { class: "btn quiet", text: "Skip", onclick: () => go("finish") }) : null,
+          el("button", { class: "btn", text: "Continue", onclick: () => go(member ? "finish" : "discord") }),
         ]),
       ]);
     },
@@ -150,8 +168,8 @@ export async function run(overlay, onComplete) {
         el("div", { class: "sub", text: "Optional — Discord is the fastest way to reach Kairos outside this app. Paste a bot token now, or skip and add it later from Settings." }),
         tokenInput, allowedInput, connectBtn, statusEl,
         el("div", { class: "onboarding-actions" }, [
-          el("button", { class: "btn", text: "Back", onclick: () => goTo(2) }),
-          el("button", { class: "btn", text: "Skip / Continue", onclick: () => goTo(4) }),
+          el("button", { class: "btn", text: "Back", onclick: () => go("vault") }),
+          el("button", { class: "btn", text: "Skip / Continue", onclick: () => go("remote") }),
         ]),
       ]);
     },
@@ -192,8 +210,8 @@ export async function run(overlay, onComplete) {
           text: "Get Tailscale",
         }),
         el("div", { class: "onboarding-actions" }, [
-          el("button", { class: "btn", text: "Back", onclick: () => goTo(3) }),
-          el("button", { class: "btn", text: "Skip / Continue", onclick: () => goTo(5) }),
+          el("button", { class: "btn", text: "Back", onclick: () => go("discord") }),
+          el("button", { class: "btn", text: "Skip / Continue", onclick: () => go("finish") }),
         ]),
       ]);
     },
@@ -202,9 +220,12 @@ export async function run(overlay, onComplete) {
       el("h2", { text: "You're set." }),
       el("div", { class: "sub", text: "To start a conversation, pick a model you connected from the menu above the chat box. If you skipped model setup, use Set up a model on Home or Chat when you are ready. Add or change models any time from Settings. A local download can keep running in the background." }),
       el("div", { class: "onboarding-actions" }, [
-        el("button", { class: "btn", text: "Back", onclick: () => goTo(4) }),
+        el("button", { class: "btn", text: "Back", onclick: () => go(member ? "vault" : "remote") }),
         el("button", { class: "btn", text: "Enter Kairos", onclick: async () => {
-          await api("/api/settings/onboarding-complete", { method: "POST" });
+          // A member marks their own onboarding done through the account route; if that fails they still get in
+          // (onboarding shows again next time instead of locking them out).
+          try { await api(member ? "/api/auth/onboarding-complete" : "/api/settings/onboarding-complete", { method: "POST" }); }
+          catch (error) { if (!member) throw error; }
           onComplete();
         }}),
       ]),

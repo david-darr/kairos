@@ -40,6 +40,12 @@ async def status(request: Request) -> dict:
         "setup_required": auth_enabled() and not auth_manager.has_any_users(),
         "username": user,
         "is_admin": auth_manager.is_admin(user) if user else False,
+        # Whether this account may use this computer's shell and files (admins always can); the UI hides the
+        # pieces that need it (Forge, folder pickers) from accounts without it.
+        "machine_access": auth_manager.has_machine_access(user) if user else False,
+        # True for every account but the first admin's: each signs in to its own Claude and Codex (the first
+        # admin keeps this computer's sign-in), so the model guide says "your own" sign-in.
+        "own_sign_in": bool(user) and auth_enabled() and auth_manager.account_id(user) != auth_manager.first_admin_account(),
         # Account > Two-factor shows whether it is on and offers only the matching action.
         "totp_enabled": bool(user) and auth_manager.totp_enabled(user),
         # Whether a real "Switch User" is even meaningful right now (David's
@@ -196,6 +202,15 @@ class TotpVerifyRequest(BaseModel):
     code: str
 
 
+@router.post("/onboarding-complete")
+async def onboarding_complete(user: str = Depends(require_user)) -> dict:
+    """A member finishing the first-run guide: marks it done for this account only (onboarding_complete is a
+    "My account" setting, kept in the account's own file). Admins use /api/settings/onboarding-complete."""
+    from core import settings as settings_store
+    settings_store.update_settings(onboarding_complete=True)
+    return {"ok": True}
+
+
 @router.post("/totp/enroll")
 async def totp_enroll(user: str = Depends(require_user)) -> dict:
     uri = auth_manager.start_totp_enrollment(user)
@@ -294,6 +309,27 @@ async def set_user_machine_access(username: str, body: SetMachineAccessRequest, 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True, "machine_access": auth_manager.has_machine_access(username)}
+
+
+class AdminResetPasswordRequest(BaseModel):
+    new_password: str
+
+
+@router.post("/users/{username}/password")
+async def admin_reset_password(username: str, body: AdminResetPasswordRequest, user: str = Depends(require_admin)) -> dict:
+    """An admin sets a new password for a member who forgot theirs. Never for an admin account or one's own
+    (those use Settings > Account), and the member's open sessions end."""
+    if username == user:
+        raise HTTPException(status_code=400, detail="Use Account settings to change your own password.")
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Use a password of at least 8 characters.")
+    if username not in {u["username"] for u in auth_manager.list_users()}:
+        raise HTTPException(status_code=404, detail="user not found")
+    if auth_manager.is_admin(username):
+        raise HTTPException(status_code=400, detail="Admin passwords can only be changed by that admin in Account settings.")
+    auth_manager.change_password(username, body.new_password)
+    auth_manager.drop_sessions(username)
+    return {"ok": True}
 
 
 @router.delete("/users/{username}")

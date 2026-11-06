@@ -56,7 +56,20 @@ export function mountModelSetup(host, { onConnected, initialKind } = {}) {
     screen.replaceChildren(el("h3", { text: title }), el("p", { text: copy }), ...children,
       button("Back to choices", choices, { class: "btn quiet" }));
   }
-  async function refresh() { state = await api("/api/model-setup/status", { signal }); return state; }
+  // Each account signs in to its own Claude and Codex (the first admin keeps this computer's sign-in); Codex needs machine access.
+  let own = false, machine = true, identityLoaded = false;
+  async function refresh() {
+    state = await api("/api/model-setup/status", { signal });
+    if (!identityLoaded) {
+      identityLoaded = true;
+      const who = await api("/api/auth/status", { signal }).catch(() => null);
+      own = !!who?.own_sign_in;
+      machine = !who || !!(who.is_admin || who.machine_access);
+    }
+    return state;
+  }
+  const claudeLabel = () => state.claude.signed_in ? (own ? "Signed in to your Claude" : "Signed in on this computer") : "No download needed";
+  const codexLabel = () => !machine ? "Needs machine access. Ask an admin." : state.codex.installed ? `Installed${state.codex.version ? ` (${state.codex.version})` : ""}` : "Needs a one-time install";
   async function choices() {
     stop(); jobId = null;
     screen.replaceChildren(el("p", { text: "Checking this computer..." }));
@@ -66,14 +79,14 @@ export function mountModelSetup(host, { onConnected, initialKind } = {}) {
     const grid = el("div", { class: "model-setup-cards" });
     const has = kind => !!state.connections?.[kind]?.length;
     for (const [kind, title, copy, ready, label] of [
-      ["claude", "I pay for Claude", "For Claude Pro or Max. Claude Code is already inside Kairos, so you only need to sign in. Your subscription's limits apply.", has("claude_cli") && state.claude.signed_in, state.claude.signed_in ? "Signed in on this computer" : "No download needed"],
-      ["codex", "I pay for ChatGPT", "For ChatGPT Plus or Pro. Codex is OpenAI's agent app. Kairos can install it, then help you sign in. Your subscription's limits apply.", has("codex_cli") && state.codex.signed_in, state.codex.installed ? `Installed${state.codex.version ? ` (${state.codex.version})` : ""}` : "Needs a one-time install"],
+      ["claude", "I pay for Claude", own ? "For Claude Pro or Max. Claude Code is already inside Kairos, so you only need to sign in to your own Claude. Your subscription's limits apply." : "For Claude Pro or Max. Claude Code is already inside Kairos, so you only need to sign in. Your subscription's limits apply.", has("claude_cli") && state.claude.signed_in, claudeLabel()],
+      ["codex", "I pay for ChatGPT", "For ChatGPT Plus or Pro. Codex is OpenAI's agent app. Kairos can install it, then help you sign in. Your subscription's limits apply.", has("codex_cli") && state.codex.signed_in, codexLabel()],
       ["antigravity", "Antigravity (Gemini)", "Use the Gemini models in your Antigravity account. Install agy and sign in in the Antigravity app or CLI; Kairos never handles your credentials.", has("antigravity_cli") && state.antigravity?.signed_in, state.antigravity?.installed ? `Installed${state.antigravity.version ? ` (${state.antigravity.version})` : ""} | ${state.antigravity.models_found} models found` : "Install Antigravity CLI (agy)"],
       ["api", "I have an API key", "Choose OpenAI, Anthropic, OpenRouter or Google. You pay the provider for what you use. Kairos tests and saves your key securely.", has("api"), "Pay for what you use"],
       ["local", "Free, on this computer", "Download a small model through Cookbook. No account or usage bill. Private, but slower and less capable than a cloud model.", has("local"), "Needs disk space"],
     ]) grid.append(el("section", { class: "model-setup-choice", "data-setup-kind": kind }, [
       el("h3", { text: title }), el("p", { text: copy }), el("p", { class: "meta model-setup-card-status", text: ready ? "Already set up" : label }),
-      button(ready ? "Review setup" : "Choose this", () => choose(kind)),
+      button(ready ? "Review setup" : "Choose this", () => choose(kind), kind === "codex" && !machine ? { disabled: true } : {}),
     ]));
     screen.replaceChildren(grid);
     async function pollCards() {
@@ -85,11 +98,12 @@ export function mountModelSetup(host, { onConnected, initialKind } = {}) {
           const kind = card.dataset.setupKind;
           const ready = has(['claude', 'codex', 'antigravity'].includes(kind) ? kind + '_cli' : kind) &&
             (kind === 'claude' ? state.claude.available && state.claude.signed_in : kind === 'codex' ? state.codex.installed && state.codex.signed_in : kind === 'antigravity' ? state.antigravity?.installed && state.antigravity.signed_in : true);
-          const label = kind === 'claude' ? state.claude.signed_in ? 'Signed in on this computer' : 'No download needed' :
-            kind === 'codex' ? state.codex.installed ? `Installed${state.codex.version ? ` (${state.codex.version})` : ''}` : 'Needs a one-time install' :
+          const label = kind === 'claude' ? claudeLabel() :
+            kind === 'codex' ? codexLabel() :
               kind === 'antigravity' ? state.antigravity?.installed ? `Installed${state.antigravity.version ? ` (${state.antigravity.version})` : ''} | ${state.antigravity.models_found} models found` : 'Install Antigravity CLI (agy)' : kind === 'api' ? 'Pay for what you use' : 'Needs disk space';
           card.querySelector('.model-setup-card-status').textContent = ready ? 'Already set up' : label;
           card.querySelector('button').textContent = ready ? 'Review setup' : 'Choose this';
+          if (kind === 'codex') card.querySelector('button').disabled = !machine;
         }
       } catch { /* Keep the last successful check during a brief outage. */ }
       if (!disposed && at === generation) timer = setTimeout(pollCards, 4000);
@@ -135,14 +149,15 @@ export function mountModelSetup(host, { onConnected, initialKind } = {}) {
         button("Recheck", async () => { await refresh(); cli(kind); }));
       return;
     }
-    const title = kind === "claude" ? "Sign in with Claude" : "Sign in with ChatGPT";
+    const title = own ? (kind === "claude" ? "Sign in to your own Claude" : "Sign in to your own ChatGPT")
+      : kind === "claude" ? "Sign in with Claude" : "Sign in with ChatGPT";
     if (kind === "claude" && !current.available) {
       frame("Claude Code could not be found", "This copy of Kairos could not find its bundled Claude app. Repair or update Kairos, then try again."); return;
     }
     if (kind === "codex" && !current.installed) {
       frame("ChatGPT with Codex", "Codex is OpenAI's agent app. It lets Kairos work with your ChatGPT subscription. Installation asks for your permission and shows the exact command or download URL.", button("Install Codex", install)); return;
     }
-    frame(title, current.signed_in ? "You are already signed in on this computer. Connect it to Kairos." : "A text window will open with the provider's own sign-in. Follow its steps, then come back here.",
+    frame(title, current.signed_in ? (own ? "You are already signed in to your own account. Connect it to Kairos." : "You are already signed in on this computer. Connect it to Kairos.") : "A text window will open with the provider's own sign-in. Follow its steps, then come back here.",
       button(current.signed_in ? "Connect to Kairos" : title, () => current.signed_in ? connected(kind) : signIn(kind)));
   }
   async function install() {

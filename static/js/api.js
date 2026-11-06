@@ -43,6 +43,22 @@ export async function apiRecent(path) {
   return value;
 }
 
+// One recovery per 30 seconds: reload, which runs sign-in again, if accounts are on and nobody is signed in.
+let recovering = false;
+async function recoverSignIn() {
+  if (recovering || typeof location === "undefined") return;
+  recovering = true;
+  try {
+    let last = 0;
+    try { last = Number(sessionStorage.getItem("kairos:signin-retry")) || 0; } catch { /* Session storage is optional. */ }
+    if (Date.now() - last < 30000) return;
+    const status = await fetch("/api/auth/status").then(r => r.json()).catch(() => null);
+    if (!status || !status.auth_enabled || status.username) return;
+    try { sessionStorage.setItem("kairos:signin-retry", String(Date.now())); } catch { /* Session storage is optional. */ }
+    location.reload();
+  } finally { recovering = false; }
+}
+
 export async function api(path, options = {}) {
   const method = (options.method || "GET").toUpperCase();
   const shareable = method === "GET" && typeof path === "string" && !options.signal && !options.cache && !options.headers;
@@ -69,7 +85,10 @@ export async function api(path, options = {}) {
     // error toasts the moment the backend hiccups).
     // `toast: false` is for callers that show the failure themselves (e.g. the
     // Forge editor's save-conflict dialog), so it doesn't appear twice.
-    const method = (options.method || "GET").toUpperCase();
+    // Signed-out (the session ended or the account was removed): sign in again, once, never in a loop.
+    if (res.status === 401 && !String(path).startsWith("/api/auth/")) recoverSignIn();
+    // A 403 on a read stays quiet (the view shows its own fallback); a refused write says why in plain words.
+    if (res.status === 403 && (!detail || detail === "Forbidden")) detail = "Your account can't do that. Ask an admin of this Kairos.";
     if (method !== "GET" && options.toast !== false) toast(`${detail}`, "error");
     throw new Error(`${res.status}: ${detail}`);
   }

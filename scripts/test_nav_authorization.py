@@ -131,6 +131,24 @@ class NavAuthorizationTests(unittest.TestCase):
         unmatched = [p for p in self.paths if not routes_for(p)]
         self.assertEqual(unmatched, [], "every path the UI calls exists in the app")
 
+    def test_settings_pages_are_each_my_account_or_this_kairos(self):
+        # A member sees only "My account" pages. Every admin-only page (the Administration group and anything
+        # marked `admin: true`) must be one of the "This Kairos" ids, so the page caption and the member
+        # filter can never disagree with the admin gate.
+        settings = (ROOT / "static/js/views/settings.js").read_text(encoding="utf-8")
+        block = settings[settings.index("const THIS_KAIROS = new Set(["):]
+        kairos = set(re.findall(r'"([a-z-]+)"', block[:block.index("]);")]))
+        needs_machine = set(re.findall(r'"([a-z-]+)"', settings[settings.index("const NEEDS_MACHINE = new Set(["):].split("]);")[0]))
+        group = settings[settings.index('id: "administration"'):]
+        administration = set(re.findall(r'\{ id: "([a-z-]+)"', group[:group.index("];")]))
+        flagged = {m.group(1) for line in settings.splitlines() if "admin: true" in line
+                   for m in [re.search(r'\{ id: "([a-z-]+)"', line)] if m}
+        self.assertTrue(administration >= {"users", "system", "logs"}, "the Administration group was parsed")
+        self.assertEqual(sorted(administration - kairos), [], "an Administration page is missing from THIS_KAIROS")
+        self.assertEqual(sorted(flagged - kairos), [], "an admin: true page is missing from THIS_KAIROS")
+        self.assertFalse(kairos & needs_machine, "a page is either This Kairos or needs machine access, not both")
+        self.assertIn("bot-computers", needs_machine)
+
     def test_members_and_anonymous_requests_are_refused(self):
         for path, where in sorted(self.paths.items()):
             for method, route in routes_for(path):

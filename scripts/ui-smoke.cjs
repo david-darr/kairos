@@ -1142,7 +1142,7 @@ app.whenReady().then(async () => {
       demoState.isAdmin = false;
       await js("localStorage.setItem('kairos:app-mode', 'forge')"); await win.loadURL(base);
       await waitFor("(!!document.querySelector('.hm-home.is-filled .hm-week .rd-dot-matrix') && !!document.querySelector('.dashboard-system-chip') && ![...document.querySelectorAll('.dashboard-content .skeleton, .dashboard-stat-value')].some(n => n.getClientRects().length && (n.classList.contains('skeleton') || n.textContent === '…')))");
-      assert.ok(await js("!document.querySelector('#forge-mode-switch, #nav [data-tab=forgeHome], #nav [data-tab=forgeProjects], #nav [data-tab=forgeSessions]')"), label + ' non-admin sees no Forge switch');
+      assert.ok(await js("!document.querySelector('#forge-mode-switch [data-mode=forge], #nav [data-tab=forgeHome], #nav [data-tab=forgeProjects], #nav [data-tab=forgeSessions]')"), label + ' non-admin sees no Forge switch');
       await navigate('forgeHome');
       assert.equal(await js("document.getElementById('view-content').dataset.view"), 'home', label + ' non-admin cannot route to Forge');
       demoState.isAdmin = true; delete demoState.sessionFields;

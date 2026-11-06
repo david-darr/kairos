@@ -127,7 +127,28 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, demoState,
       assert.ok(writes.slice(writeIndex).some(w => w.path === '/api/model-setup/sign-in/claude'), label + ' this pass launches Claude');
       assert.ok(writes.slice(writeIndex).some(w => w.path === '/api/model-setup/sign-in/codex'), label + ' this pass launches Codex');
     }
+    // A member's first run: personal steps only (welcome, model, vault, finish), no Discord and no Remote Access,
+    // no folder questionnaire, and their own Kip in the welcome.
+    demoState.isAdmin = false; demoState.empty = false; demoState.setupConnections = [];
+    const memberStart = writes.length;
+    await js(`(async () => { const overlay=document.getElementById('onboarding-overlay'); overlay.classList.remove('hidden'); const who = await fetch('/api/auth/status').then(r => r.json()); await import('/static/js/onboarding.js').then(m => m.run(overlay, who, () => overlay.classList.add('hidden'))); })()`);
+    await waitFor("document.querySelector('.onboarding-card h2')?.textContent.startsWith('Welcome')");
+    assert.ok(await js("document.querySelector('.onboarding-card .sub').textContent.includes('your own Kip')"), 'member welcome mentions their own Kip');
+    assert.equal(await js("document.querySelectorAll('.onboarding-steps .dot').length"), 4, 'a member has four steps');
+    await click('Get Started', '.onboarding-card');
+    await waitFor("!!document.querySelector('.onboarding-card [data-setup-kind=claude]')");
+    await click('Skip for now', '.onboarding-card');
+    await waitFor("document.querySelector('.onboarding-card h2')?.textContent === 'Your vault'");
+    assert.ok(await js("![...document.querySelectorAll('.onboarding-card button')].some(b => /Choose Existing|questionnaire/.test(b.textContent))"), 'a member without machine access gets no folder picker or questionnaire');
+    await click('Continue', '.onboarding-card');
+    await waitFor("document.querySelector('.onboarding-card h2')?.textContent === \"You're set.\"");
+    await click('Enter Kairos', '.onboarding-card');
+    await waitFor("document.getElementById('onboarding-overlay').classList.contains('hidden')");
+    const memberWrites = writes.slice(memberStart).map(w => w.path);
+    assert.ok(memberWrites.includes('/api/auth/onboarding-complete'), 'a member finishes through their own route');
+    assert.ok(!memberWrites.includes('/api/settings/onboarding-complete'), 'and not the admin one');
   } finally {
+    demoState.isAdmin = true;
     for (const [key, value] of Object.entries(saved)) {
       if (value === undefined) delete demoState[key]; else demoState[key] = value;
     }

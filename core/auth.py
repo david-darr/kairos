@@ -245,6 +245,14 @@ class AuthManager:
         user["password_hash"] = bcrypt.hashpw(new_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
         write_json_atomic(AUTH_FILE, self._users)
 
+    def drop_sessions(self, username: str) -> None:
+        """End every open session for one account (after an admin resets its password)."""
+        stale = [t for t, s in self._sessions.items() if s.get("username") == username]
+        for t in stale:
+            del self._sessions[t]
+        if stale:
+            write_json_atomic(SESSIONS_FILE, self._sessions)
+
     def set_admin(self, username: str, is_admin: bool) -> None:
         user = self._users["users"].get(username)
         if not user:
