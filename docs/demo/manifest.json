@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "57b51ba21c900dd6ec3e810c6f0b5fb02fd9bf5ce207ca270c78d8d41c68d17b",
+  "app.js": "45f263562f5b792fdf61f95d118bc53382207785d9e354c0ad0d4517d1c1e9da",
   "fixtures.js": "3d2bfea869aebb649fde25b11598a456f82df6b977236f8f0ab61d269bb329da",
   "index.html": "14d95158c3292ac91495f3ec8395c0acb68f67bf3e3a4097a9f287e6c12d3c71",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -1452,7 +1452,7 @@
   "static/js/mobileSidebar.js": "c8ab1901f346076d243f4380b27db166f05a404c52a988db544fc5b09128dfa9",
   "static/js/mobileTabSheet.js": "f5859c20a334c37adc6ee4c6df7178ef76b0470a4ff5831ef64e9e382858a58f",
   "static/js/mobileVoiceRow.js": "7d9af569ad51e07f6829492688569977d567f3c6a73720900f5efb85459ed9ea",
-  "static/js/modelSetup.js": "cbb93380c775441e8f1dcb27d2d68bef9075ddaf429f19b10b9390812261a716",
+  "static/js/modelSetup.js": "75b1810b2b4ccf92fe96da428764985020bb321a16ca32afb2609d0a1ce9b0cb",
   "static/js/notchComposer.js": "d192d263a9b47eac630c433907d5d4f400c3e9ef3098ab55b280108c1ed4e8eb",
   "static/js/notchDrop.js": "76f8b73f1e2f189e7ceebedaf4956310b88ede8c0747cbc17dacebcd0a350556",
   "static/js/notchGlow.js": "f64ab289b7070d364762703c9a21ad0d0cf92b73af1765bd1b8a3eb693106f81",
@@ -1464,7 +1464,7 @@
   "static/js/notchShell.js": "d79c035cab549e26bd8de43e74d325ced9bfbfde221eb8878d7db0e237acbb17",
   "static/js/notchSide.js": "96adfcb5f772029c0e5fb02cb3790468b9d6f9978519e518032f46975ea80480",
   "static/js/notchSteps.js": "2f630b1ada10456c62f7c994ba8f4d64c258a32b93585dc4e53a84c521befb24",
-  "static/js/onboarding.js": "feeea0e075b50733518ff5a4951367620df3672a83d083faf7d0d5f70db5ba46",
+  "static/js/onboarding.js": "c56d33dc61a6c10bb66ee2677b6686aa338b645577762c3e5ec1e9edadf9c138",
   "static/js/openMic.js": "3121f088c8a2173fe3aabc4d959117c16297fe3922b2d7af7ed55249bab254ef",
   "static/js/partialTranscript.js": "34990f374fde3809155fe6bc581abae8e80f15ada091d251af65cb2b56c134b3",
   "static/js/pdfViewer.js": "146681ac92b9fa6af43776d8ec6ab274558929e457ba8cab1aec2dd835932c9e",
