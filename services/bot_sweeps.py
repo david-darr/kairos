@@ -31,8 +31,11 @@ def sweep(now=None):
 
 async def _loop():
     while True:
-        try: await asyncio.to_thread(sweep)
-        except Exception: log.exception("Run details could not be pruned")
+        from core import accounts
+        for account_id in accounts.all_accounts():  # each account's run details (Multi-Account group 4)
+            with accounts.as_account(account_id):
+                try: await asyncio.to_thread(sweep)
+                except Exception: log.exception("Run details could not be pruned")
         await asyncio.sleep(86400)
 
 

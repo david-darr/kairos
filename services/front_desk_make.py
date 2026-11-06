@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
 
 from core.atomic_io import read_json
-from core.constants import DATA_DIR
+from core import accounts
 
 KINDS = ("design", "slides", "website", "files")
 
@@ -32,12 +32,12 @@ def _bot_id():
     except ModuleNotFoundError as error:
         if error.name != "services.front_desk":
             raise
-        return (read_json(str(Path(DATA_DIR, "front_desk", "state.json")), {}) or {}).get("bot_id")
+        return (read_json(str(Path(accounts.path("front_desk", "state.json"))), {}) or {}).get("bot_id")
     return bot_id()
 
 
 def _tasks() -> list[dict]:
-    rows = read_json(str(Path(DATA_DIR, "front_desk", "tasks.json")), []) or []
+    rows = read_json(str(Path(accounts.path("front_desk", "tasks.json"))), []) or []
     if isinstance(rows, dict):
         rows = rows.get("tasks", [])
     return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []

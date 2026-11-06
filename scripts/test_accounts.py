@@ -268,7 +268,7 @@ class Migration(unittest.TestCase):
                                      backup=kwargs.pop("backup", self.backup), **kwargs)
 
     def test_group_one_moves_its_five_stores(self):
-        self.assertEqual([s.version for s in account_migration.STEPS], [1, 2, 3], "group 3 added the chats step")
+        self.assertEqual([s.version for s in account_migration.STEPS], [1, 2, 3, 4], "group 4 added the bots step")
         self.assertEqual(set(account_migration.STEPS[0].entries), {
             "notes.json", "calendar_events.json", "documents", "documents_index.json", "projects.json", "contacts.json"})
         (self.data / "documents").mkdir()
@@ -965,6 +965,243 @@ class ChatsMigration(unittest.TestCase):
         for path in paths.values():
             with closing(sqlite3.connect(path)) as db:
                 self.assertEqual(dict(db.execute("SELECT id, status FROM runs")), {"r1": "failed", "r2": "done"})
+
+
+class BotsPerAccount(unittest.TestCase):
+    """Group 4: each account has its own bots and its own Kip."""
+
+    @classmethod
+    def setUpClass(cls):
+        account_migration.run(_DATA.name, backup=lambda path: None)  # layout 4, as app.py leaves it
+        assert "agents.json" in account_migration.moved_names()
+
+    def setUp(self):
+        from core import session_manager_store
+        self.addCleanup(session_manager_store.close)  # open connections would keep the temp folder's files locked
+        fresh_users()
+        auth_manager.create_user("david-darr", "password-one-1", is_admin=True)
+        auth_manager.create_user("bea", "password-two-2")
+        self.first, self.second = (auth_manager.account_id(n) for n in ("david-darr", "bea"))
+
+    def test_a_bot_is_listed_only_in_its_own_account(self):
+        from services import agent_service as agent_service_module
+        service = agent_service_module.agent_service
+        with accounts.as_account(self.first):
+            bot = service.create("First bot")
+        with accounts.as_account(self.second):
+            other = service.create("Second bot")
+        with accounts.as_account(self.first):
+            self.assertEqual([a["id"] for a in service.list_agents()], [bot["id"]])
+            self.assertIsNone(service.get(other["id"]))
+        with accounts.as_account(self.second):
+            self.assertEqual([a["id"] for a in service.list_agents()], [other["id"]])
+            self.assertIsNone(service.get(bot["id"]))
+
+    def test_each_account_keeps_its_bots_in_its_own_folder(self):
+        from services import agent_service as agent_service_module
+        dirs, files = {}, {}
+        for account_id in (self.first, self.second):
+            with accounts.as_account(account_id):
+                agent_service_module.agent_service.create("A bot")
+                dirs[account_id] = agent_service_module.agents_dir()
+                files[account_id] = agent_service_module.agents_file()
+        self.assertNotEqual(*dirs.values())
+        for account_id in (self.first, self.second):
+            folder = accounts.account_dir(account_id)
+            self.assertEqual(os.path.dirname(files[account_id]), folder)
+            self.assertEqual(dirs[account_id], os.path.join(folder, "agents"))
+            self.assertTrue(os.path.exists(files[account_id]))
+
+    def test_a_delete_hook_runs_for_a_bot_deleted_in_either_account(self):
+        from services import agent_service as agent_service_module
+        service = agent_service_module.agent_service
+        seen = []
+        self.addCleanup(agent_service_module.on_delete(seen.append))
+        gone = []
+        for account_id in (self.first, self.second):
+            with accounts.as_account(account_id):
+                bot = service.create("Doomed")
+                service.delete(bot["id"])
+                gone.append(bot["id"])
+                self.assertIsNone(service.get(bot["id"]))
+        self.assertEqual(seen, gone)
+
+    def test_each_account_gets_its_own_kip_and_its_own_state_file(self):
+        from services import agent_service as agent_service_module, front_desk
+        service = agent_service_module.agent_service
+        # Kip's welcome cards and the "what I can reach" probe belong to other services: stubbed.
+        with patch("services.front_desk_cards.post_card"), patch.object(front_desk, "connections", return_value={}):
+            front_desk.ensure_all()
+            front_desk.ensure_all()
+        ids = {}
+        for name, account_id in (("david-darr", self.first), ("bea", self.second)):
+            with accounts.as_account(account_id):
+                kips = [a for a in service.list_agents() if a.get("builtin") == "front_desk"]
+                self.assertEqual(len(kips), 1, "a second start-up makes no second Kip")
+                ids[name] = kips[0]["id"]
+                state_file = Path(accounts.account_dir(account_id)) / "front_desk" / "state.json"
+                self.assertEqual(front_desk._state_file(), state_file)
+                self.assertEqual(json.loads(state_file.read_text(encoding="utf-8"))["bot_id"], ids[name])
+                self.assertEqual(front_desk.bot_id(), ids[name])
+        self.assertNotEqual(*ids.values())
+        with accounts.as_account(self.first):
+            self.assertIsNone(service.get(ids["bea"]))
+
+    def test_account_owner_is_the_current_accounts_user(self):
+        from services import front_desk
+        with patch.object(auth, "auth_enabled", return_value=True):
+            with accounts.as_account(self.second):
+                self.assertEqual(front_desk.account_owner(), "bea")
+            with accounts.as_account(self.first):
+                self.assertEqual(front_desk.account_owner(), "david-darr")
+
+    def test_legacy_owner_follows_the_account_with_sign_in_on_and_the_local_user_with_it_off(self):
+        from services.bot_attention import legacy_owner
+        with patch.object(auth, "auth_enabled", return_value=True), accounts.as_account(self.second):
+            self.assertEqual(legacy_owner(), "bea")
+        with patch.object(auth, "auth_enabled", return_value=False), accounts.as_account(self.second):
+            self.assertEqual(legacy_owner(), SINGLE_USER)
+
+    def test_two_bots_each_get_their_own_front_desk_watch_routine(self):
+        from services import bot_routines
+        from services import agent_service as agent_service_module
+        from services.task_service import task_service
+        spec = bot_routines.normalize_config({"name": "Watch", "instructions": "Look around.",
+                                              "schedule": {"kind": "daily", "time": "09:00", "time_zone": "UTC"}})
+        made = {}
+        for name, account_id in (("david-darr", self.first), ("bea", self.second)):
+            with accounts.as_account(account_id):
+                bot = agent_service_module.agent_service.create(f"{name} watcher")
+                task = bot_routines.create(name, bot["id"], dict(spec), application_id="front-desk-watch")
+                self.addCleanup(task_service.delete_task, task["id"])
+                made[name] = (bot["id"], task)
+                again = bot_routines.create(name, bot["id"], dict(spec), application_id="front-desk-watch")
+                self.assertEqual(again["id"], task["id"], "the same bot asking again gets its own back")
+        (first_bot, first_task), (second_bot, second_task) = made.values()
+        self.assertNotEqual(first_task["id"], second_task["id"])
+        self.assertEqual((first_task["agent_id"], second_task["agent_id"]), (first_bot, second_bot))
+
+    def test_the_routine_runner_runs_a_routine_as_its_bots_account(self):
+        from core import bot_routine_runner
+        from services import agent_service as agent_service_module
+        bots = {}
+        for account_id in (self.first, self.second):
+            with accounts.as_account(account_id):
+                bots[account_id] = agent_service_module.agent_service.create("Runner")["id"]
+        homes = bot_routine_runner._bot_homes()
+        self.assertEqual({homes[b]: a for a, b in bots.items()}, {a: a for a in bots})
+        for account_id, bot_id in bots.items():
+            with bot_routine_runner._in_bot_account({"agent_id": bot_id}, homes):
+                self.assertEqual(accounts.current_account(), account_id)
+        with bot_routine_runner._in_bot_account({"agent_id": "no-such-bot"}, homes):
+            self.assertEqual(accounts.current_account(), accounts.local_account())
+        with bot_routine_runner._in_bot_account({}, homes):
+            self.assertEqual(accounts.current_account(), accounts.local_account())
+
+    def test_keep_warm_remembers_the_account_a_chat_belongs_to(self):
+        from types import SimpleNamespace
+        from services import bot_keep_warm
+        self.addCleanup(bot_keep_warm._idle.clear)
+        bot = {"id": "b1", "cache_keep_warm": "on"}
+        endpoint = {"id": "e1", "kind": "api"}
+        brain = SimpleNamespace(_messages=[{"role": "user", "content": "hi"}], tools=[], model="m")
+        usage = SimpleNamespace(cache_write_tokens=10)
+        with accounts.as_account(self.second):
+            bot_keep_warm.observe(bot, "chat-b", endpoint, brain, usage, now=1.0)
+        self.assertEqual(bot_keep_warm._idle["chat-b"]["account"], self.second)
+        token = accounts.set_current(None)  # nobody signed in
+        try:
+            bot_keep_warm.observe(bot, "chat-none", endpoint, brain, usage, now=1.0)
+        finally:
+            accounts.reset_current(token)
+        self.assertNotIn("chat-none", bot_keep_warm._idle)
+
+    def test_a_calls_summary_runs_in_its_owners_account_unless_one_is_set(self):
+        from services import agent_calls
+        call = {"owner": "bea"}
+        self.assertIsNone(accounts.current_account())
+        with agent_calls._in_owners_account(call):
+            self.assertEqual(accounts.current_account(), self.second)
+        self.assertIsNone(accounts.current_account())
+        with accounts.as_account(self.first), agent_calls._in_owners_account(call):
+            self.assertEqual(accounts.current_account(), self.first, "an account already set is left alone")
+        with agent_calls._in_owners_account({"owner": "ghost"}):
+            self.assertIsNone(accounts.current_account(), "an owner with no account changes nothing")
+
+
+class BotsMigration(unittest.TestCase):
+    """Migration step 4: bots and Kip move into the account folder; install-level bot files stay."""
+
+    INSTALL_LEVEL = ("bot-skills-library/index.json", "bot-secrets/x", "bot-keys.json", "bot-connections/a.json",
+                     "bot-resource-settings/k.json", "bot_lifecycle/x", "discord_bots.json", "speech_models/m",
+                     "speech_runtime.json", "swarm/swarm.sqlite3", "jobs.json")
+
+    def setUp(self):
+        self.root = TemporaryDirectory(prefix="kairos-layout4-", dir=tempfile.gettempdir())
+        self.addCleanup(self.root.cleanup)
+        self.data = Path(self.root.name)
+        self.account = self.data / "accounts" / "abc123"
+
+    def step4_files(self):
+        """One concrete file for every entry: a folder's entry gets a file inside it, a wildcard its matches."""
+        names = ["bot_rooms.sqlite3-wal", "agents.json.pre-bots", "front_desk/state.json", "agents/inbox.json"]
+        for entry in account_migration.STEPS[3].entries:
+            if entry.endswith(".*"):
+                names.append(entry[:-1] + "pre-bots")
+            elif entry.endswith("*"):
+                names += [entry[:-1], entry[:-1] + "-wal"]
+            elif "." in entry:
+                names.append(entry)
+            else:
+                names.append(entry + "/x.json")
+        return sorted(set(names))
+
+    def plant(self, names):
+        for name in names:
+            path = self.data / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(name, encoding="utf-8")
+
+    def test_every_bot_name_moves_and_every_install_level_name_stays(self):
+        step = account_migration.STEPS[3]
+        self.assertEqual(step.version, 4)
+        self.plant(self.step4_files() + list(self.INSTALL_LEVEL))
+        (self.data / "layout.json").write_text(json.dumps({"version": 3}), encoding="utf-8")
+        result = account_migration.run(str(self.data), [step], account="abc123",
+                                       backup=lambda path: Path(path).write_text("backup", encoding="utf-8"))
+        self.assertTrue(result["ok"], result)
+        self.assertEqual((result["from_version"], result["to_version"]), (3, 4))
+        for name in self.step4_files():
+            self.assertEqual((self.account / name).read_text(encoding="utf-8"), name, f"{name} moved")
+            self.assertFalse((self.data / name).exists(), f"{name} left the top level")
+        for name in self.INSTALL_LEVEL:
+            self.assertEqual((self.data / name).read_text(encoding="utf-8"), name, f"{name} stays at the top")
+            self.assertFalse((self.account / name).exists(), f"{name} must not be in the account folder")
+
+    def test_the_wildcards_cover_the_database_copies_and_nothing_install_level(self):
+        data = str(self.data)
+        (self.data / "layout.json").write_text(json.dumps({"version": 4}), encoding="utf-8")
+        account_migration._moved.pop(data, None)
+        for name in ("bot_rooms.sqlite3", "bot_rooms.sqlite3-wal", "agents.json.pre-bots", "agents.json", "front_desk"):
+            self.assertTrue(account_migration.is_moved(name, data), name)
+        for name in ("bot-skills-library", "bot-secrets", "bot-keys.json", "discord_bots.json", "swarm", "jobs.json"):
+            self.assertFalse(account_migration.is_moved(name, data), name)
+        (self.data / "layout.json").write_text(json.dumps({"version": 3}), encoding="utf-8")
+        account_migration._moved.pop(data, None)
+        self.assertFalse(account_migration.is_moved("bot_rooms.sqlite3", data), "not before layout 4")
+        account_migration._moved.pop(data, None)
+
+    def test_a_bot_database_path_is_in_the_account_folder_once_moved(self):
+        account_migration.run(_DATA.name, backup=lambda path: None)
+        fresh_users()
+        auth_manager.create_user("david-darr", "password-one-1", is_admin=True)
+        account_id = auth_manager.account_id("david-darr")
+        self.assertTrue(account_migration.is_moved("bot_rooms.sqlite3"))
+        self.assertFalse(account_migration.is_moved("bot-skills-library"))
+        with accounts.as_account(account_id):
+            self.assertEqual(accounts.path("bot_rooms.sqlite3"),
+                             os.path.join(accounts.account_dir(account_id), "bot_rooms.sqlite3"))
+            self.assertEqual(accounts.path("bot-skills-library"), os.path.join(_DATA.name, "bot-skills-library"))
 
 
 if __name__ == "__main__":

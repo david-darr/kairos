@@ -580,8 +580,8 @@ def post_webhook(room_id: str, bot_id: str, text: str = "", images: list[bytes] 
         raise HTTPException(409, "This room has not finished setup yet")
     if voice_note:
         raise HTTPException(409, "Voice notes are not available yet")
-    from core.constants import DATA_DIR
-    folder = os.path.join(DATA_DIR, "bot-room-files", room_id)
+    from core import accounts
+    folder = accounts.path("bot-room-files", room_id)
     staged: list[str] = []
     try:
         thread = thread_or_404(room_id, None)
@@ -644,9 +644,14 @@ def ensure_seat(room_id: str, bot_id: str) -> str:
 # -- start up ----------------------------------------------------------------------
 
 async def startup() -> dict:
-    """After a restart: running turns are marked interrupted (never replayed), then queued messages go on."""
-    connect()
-    _turns().note_interrupted()  # a line in each room where a turn was cut off, before the turns are marked
-    interrupted = store.interrupt_running()
-    resumed = _turns().resume_pending()
+    """After a restart: running turns are marked interrupted (never replayed), then queued messages go on,
+    in every account's rooms (Multi-Account group 4)."""
+    from core import accounts
+    interrupted = resumed = 0
+    for account_id in accounts.all_accounts():
+        with accounts.as_account(account_id):
+            connect()
+            _turns().note_interrupted()  # a line in each room where a turn was cut off, before the turns are marked
+            interrupted += store.interrupt_running() or 0
+            resumed += _turns().resume_pending() or 0
     return {"interrupted": interrupted, "resumed": resumed}

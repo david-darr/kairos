@@ -32,9 +32,13 @@ import time
 import uuid
 from typing import Optional
 
-from core.constants import DATA_DIR
+from core import accounts
 
-DB_FILE = os.path.join(DATA_DIR, "bot_automation_events.sqlite3")
+DB_FILE: Optional[str] = None  # a test can point it at its own file
+
+
+def db_file() -> str:
+    return DB_FILE or accounts.path("bot_automation_events.sqlite3")
 SCHEMA_VERSION = 1
 
 MAX_ATTEMPTS_KEPT = 2000
@@ -68,7 +72,7 @@ def redact(text) -> str:
 
 class ReceiptStore:
     def __init__(self, path: Optional[str] = None) -> None:
-        self.path = path or DB_FILE
+        self.path = path or db_file()
         self._lock = threading.RLock()
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
         with self._connect() as db:
@@ -396,21 +400,23 @@ class _Closing:
         return getattr(self._db, name)
 
 
-_store: Optional[ReceiptStore] = None
+_stores: dict = {}  # path -> ReceiptStore: one per account
 _store_lock = threading.Lock()
 
 
 def store() -> ReceiptStore:
-    global _store
+    path = db_file()
     with _store_lock:
-        if _store is None:
-            _store = ReceiptStore(DB_FILE)
-        return _store
+        found = _stores.get(path)
+        if found is None:
+            found = _stores[path] = ReceiptStore(path)
+        return found
 
 
 def reset_for_tests(path: Optional[str] = None) -> ReceiptStore:
     """Point the shared store at a fresh file (tests only)."""
-    global _store
+    global DB_FILE
     with _store_lock:
-        _store = ReceiptStore(path or DB_FILE)
-        return _store
+        DB_FILE = path
+        _stores.clear()
+    return store()

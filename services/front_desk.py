@@ -9,7 +9,19 @@ from core.atomic_io import write_json_atomic
 from core.constants import DATA_DIR
 
 _LOCK = threading.RLock()
-STATE_FILE = Path(DATA_DIR) / "front_desk" / "state.json"
+STATE_FILE = None  # a test can point it at its own file
+
+
+def _state_file() -> Path:
+    """The current account's Kip state (Multi-Account group 4: every account has its own Kip)."""
+    from core import accounts
+    return Path(STATE_FILE or accounts.path("front_desk", "state.json"))
+
+
+def account_owner():
+    """The person whose Kip this is: the current account's user, else (accounts off) the single local user."""
+    from services.bot_attention import legacy_owner
+    return legacy_owner()
 # Kip as the assistant and team lead (David, 2026-11-02): it can use everything connected, and asks before anything
 # leaves Kairos, so it starts at Edits (core/bot_policy.py: reads and Kairos changes go ahead, sends and deletes ask).
 FRONT_DESK_APPROVAL = "edits"
@@ -72,10 +84,11 @@ LEGACY_SOULS = (_FIRST_SOUL,)
 
 def read_state():
     # An unreadable stamp must never be mistaken for an unseeded installation.
-    if not STATE_FILE.exists():
+    state_file = _state_file()
+    if not state_file.exists():
         stored = {}
     else:
-        with STATE_FILE.open(encoding="utf-8-sig") as handle:
+        with state_file.open(encoding="utf-8-sig") as handle:
             stored = json.load(handle)
         if not isinstance(stored, dict):
             raise ValueError("The front desk state could not be read")
@@ -86,7 +99,7 @@ def read_state():
 def update_state(fields):
     with _LOCK:
         value = {**read_state(), **copy.deepcopy(fields)}
-        write_json_atomic(str(STATE_FILE), value)
+        write_json_atomic(str(_state_file()), value)
         return value
 
 
@@ -111,7 +124,6 @@ def ensure(*, restore=False):
     """Startup calls ensure(). Only the person's explicit restore route uses restore=True."""
     from core.session_manager import session_manager
     from services.agent_service import agent_service
-    from services.bot_attention import legacy_owner
     with _LOCK, agent_service._profile_lock:
         state = read_state()
         agent = agent_service.get(state.get("bot_id"))
@@ -142,7 +154,7 @@ def ensure(*, restore=False):
             state = _become_lead(agent, state)
         sid = main_thread_id()
         if not sid:
-            session = session_manager.create_session(agent["name"], owner_user=legacy_owner())
+            session = session_manager.create_session(agent["name"], owner_user=account_owner())
             sid = session["id"]
             endpoint = agent_service.chat_endpoint(agent)
             if endpoint:
@@ -161,6 +173,19 @@ def ensure(*, restore=False):
             post_card(sid, "welcome", {**WELCOME, "title": f"{agent['name']} can do more now."}, key="front-desk:welcome-v2")
             update_state({"welcome_v2": True})
         return agent
+
+
+def ensure_all():
+    """Startup: every account has its own Kip (Multi-Account group 4, decision D7: new accounts start with
+    theirs). One account's failure never stops another's."""
+    import logging
+    from core import accounts
+    for account_id in accounts.all_accounts():
+        try:
+            with accounts.as_account(account_id):
+                ensure()
+        except Exception:
+            logging.getLogger(__name__).exception("the front desk could not be set up for account %s", account_id)
 
 
 def _become_lead(agent, state):

@@ -95,12 +95,14 @@ def data_root() -> Path:
 
 
 def workspaces_root() -> Path:
-    return data_root() / "bot-workspaces"
+    from core import accounts
+    return Path(accounts.path("bot-workspaces"))
 
 
 def state_root() -> Path:
     """Protected state (journal, snapshots, manifests): outside every model-writable root."""
-    return data_root() / "bot-memory-state"
+    from core import accounts
+    return Path(accounts.path("bot-memory-state"))
 
 
 def check_bot_id(bot_id) -> str:

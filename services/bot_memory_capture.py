@@ -33,7 +33,12 @@ from services import bot_turn_context as ctx
 
 logger = logging.getLogger(__name__)
 
-STATE_FILE = os.path.join(DATA_DIR, "bot-memory-state", "capture-pending.json")
+STATE_FILE: Optional[str] = None  # a test can point it at its own file
+
+
+def state_file() -> str:
+    from core import accounts
+    return STATE_FILE or accounts.path("bot-memory-state", "capture-pending.json")
 MAX_THREADS, MAX_TURNS = 50, 6
 QUIET_DEFAULT, COALESCE_SECONDS = 300, 15
 TRIVIAL_BYTES = 24
@@ -50,12 +55,12 @@ _HYPOTHETICAL = re.compile(r"\b(suppose|supposing|what if|imagine|hypothetical\w
 # -- pending references ---------------------------------------------------------------------------------
 
 def _load() -> dict:
-    data = read_json(STATE_FILE, {})
+    data = read_json(state_file(), {})
     return data if isinstance(data, dict) and isinstance(data.get("bots"), dict) else {"bots": {}}
 
 
 def _save(data: dict) -> None:
-    write_json_atomic(STATE_FILE, data)
+    write_json_atomic(state_file(), data)
 
 
 def _bot(data: dict, bot_id: str) -> dict:

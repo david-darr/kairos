@@ -51,7 +51,12 @@ MAX_ROUTINES_PER_BOT = 20
 OVERLAPS = ("skip", "queue")
 ACCESS = ("normal", "read-and-draft")
 REPORTS = ("notable", "always")
-TRASH_FILE = os.path.join(DATA_DIR, "bot_routine_trash.json")
+TRASH_FILE: Optional[str] = None  # a test can point it at its own file
+
+
+def trash_file() -> str:
+    from core import accounts
+    return TRASH_FILE or accounts.path("bot_routine_trash.json")
 TRASH_SECONDS = 7 * 24 * 3600
 TRASH_MAX = 50
 OUTPUT_BOUND, ERROR_BOUND = 4000, 1000
@@ -415,8 +420,9 @@ def create(owner: str, bot_id: str, spec: dict, *, application_id: Optional[str]
         raise RoutineError("That bot was not found.", 404, "not_found", "bot_id")
     with _LOCK:
         if application_id:
+            # The same bot's: every account's Kip asks for its own "front-desk-watch" (Multi-Account group 4).
             for task in task_service.list_tasks():
-                if (task.get("routine") or {}).get("application_id") == application_id:
+                if (task.get("routine") or {}).get("application_id") == application_id and task.get("agent_id") == bot_id:
                     return task
         mine = [t for t in task_service.list_tasks() if is_routine(t) and t.get("agent_id") == bot_id
                 and (t.get("owner_user") or owner) == owner]
@@ -494,14 +500,14 @@ def delete(owner: str, is_admin: bool, routine_id: str, expected_revision: Optio
 
 
 def _trash(task: dict) -> None:
-    items = [i for i in read_json(TRASH_FILE, []) if i.get("deleted_at", 0) > time.time() - TRASH_SECONDS]
+    items = [i for i in read_json(trash_file(), []) if i.get("deleted_at", 0) > time.time() - TRASH_SECONDS]
     items.append({"deleted_at": time.time(), "task": copy.deepcopy(task)})
-    write_json_atomic(TRASH_FILE, items[-TRASH_MAX:])
+    write_json_atomic(trash_file(), items[-TRASH_MAX:])
 
 
 def restore_deleted(owner: str, is_admin: bool, routine_id: str) -> dict:
     with _LOCK:
-        items = read_json(TRASH_FILE, [])
+        items = read_json(trash_file(), [])
         found = next((i for i in items if i["task"]["id"] == routine_id
                       and i.get("deleted_at", 0) > time.time() - TRASH_SECONDS), None)
         if found is None or not owned_by(found["task"], owner, is_admin):
@@ -515,7 +521,7 @@ def restore_deleted(owner: str, is_admin: bool, routine_id: str) -> dict:
         if task.get("enabled") and task.get("routine"):
             task["next_run_at"] = task_service.routine_next(task)
         task_service._save_tasks()
-        write_json_atomic(TRASH_FILE, [i for i in items if i is not found])
+        write_json_atomic(trash_file(), [i for i in items if i is not found])
         return view(task)
 
 
@@ -837,7 +843,7 @@ class AutomationBackend:
 
     def find_application(self, owner, bot_id, application_id, spec):
         for task in task_service.list_tasks():
-            if (task.get("routine") or {}).get("application_id") == application_id:
+            if (task.get("routine") or {}).get("application_id") == application_id and task.get("agent_id") == bot_id:
                 return task
         return None
 

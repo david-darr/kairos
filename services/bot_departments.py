@@ -31,7 +31,8 @@ def service():
 
 
 def root():
-    return Path(DATA_DIR) / "bot-teams"
+    from core import accounts
+    return Path(accounts.path("bot-teams"))
 
 
 def load(path, default):
@@ -52,7 +53,8 @@ def save(path, value):
 
 
 def registry_path():
-    return Path(DATA_DIR) / "bot_departments.json"
+    from core import accounts
+    return Path(accounts.path("bot_departments.json"))
 
 
 def _read():

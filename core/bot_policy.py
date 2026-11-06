@@ -43,7 +43,7 @@ from typing import Callable, Optional
 from core import bot_outbound
 from core import bot_tool_catalog as catalog
 from core.atomic_io import write_json_atomic
-from core.constants import DATA_DIR
+from core import accounts
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +60,16 @@ MODE_BLURB = {
 }
 SCOPES = ("bot", "thread", "all_threads")
 
-STATE_FILE = os.path.join(DATA_DIR, "bot_approval_state.json")
-DECISIONS_DIR = os.path.join(DATA_DIR, "bot_decisions")
+STATE_FILE: Optional[str] = None  # a test can point it at its own file
+DECISIONS_DIR: Optional[str] = None  # a test can point it at its own folder
+
+
+def state_file() -> str:
+    return STATE_FILE or accounts.path("bot_approval_state.json")
+
+
+def decisions_dir() -> str:
+    return DECISIONS_DIR or accounts.path("bot_decisions")
 STATE_VERSION = 1
 DECISION_RETENTION_DAYS = 180
 ELEVATION_SECONDS = 300
@@ -158,7 +166,7 @@ def _empty_state() -> dict:
 def _read_state() -> tuple[dict, bool]:
     """(state, corrupt). A file that exists but will not parse disables remembered grants and
     refuses writes: it is never silently replaced with an empty one."""
-    path = STATE_FILE
+    path = state_file()
     try:
         stamp = os.stat(path).st_mtime_ns
     except OSError:
@@ -189,12 +197,13 @@ def state_corrupt() -> bool:
 
 
 def _write_state(data: dict) -> None:
-    write_json_atomic(STATE_FILE, data)
+    path = state_file()
+    write_json_atomic(path, data)
     try:
-        stamp = os.stat(STATE_FILE).st_mtime_ns
+        stamp = os.stat(path).st_mtime_ns
     except OSError:
         stamp = None
-    _state_cache.update(path=STATE_FILE, mtime=stamp, data=data, corrupt=False)
+    _state_cache.update(path=path, mtime=stamp, data=data, corrupt=False)
 
 
 @contextmanager
@@ -214,8 +223,9 @@ def _mutate():
 def _revoke_incomplete_locked(data: dict) -> None:
     """A handshake that never finished is not a grant: dropped at startup and when it expires."""
     now = time.time()
-    first = STATE_FILE not in _started
-    _started.add(STATE_FILE)
+    path = state_file()
+    first = path not in _started
+    _started.add(path)
     for rid, item in list(data["elevations"].items()):
         if item.get("phase") == "committed":
             if now - item.get("committed_at", now) > 3600:
@@ -681,8 +691,8 @@ def match_command(bot_id: str, command: Optional[str], cwd: Optional[str], provi
 def granted_roots(bot_id: str, session: Optional[dict]) -> list[str]:
     roots = []
     try:
-        from services.agent_service import AGENTS_DIR
-        roots.append(os.path.join(AGENTS_DIR, bot_id))
+        from services.agent_service import agents_dir
+        roots.append(os.path.join(agents_dir(), bot_id))
     except Exception:
         pass
     try:
@@ -1001,7 +1011,7 @@ def clear_inflight(bot_id: str) -> None:
 # -- decision history --------------------------------------------------------------------------
 
 def _month_file(stamp: float) -> str:
-    return os.path.join(DECISIONS_DIR, datetime.fromtimestamp(stamp, timezone.utc).strftime("%Y-%m") + ".ndjson")
+    return os.path.join(decisions_dir(), datetime.fromtimestamp(stamp, timezone.utc).strftime("%Y-%m") + ".ndjson")
 
 
 def record_decision(*, bot_id: str, thread_id: Optional[str], tool: str, op: Optional[Operation], mode: str,
@@ -1016,7 +1026,7 @@ def record_decision(*, bot_id: str, thread_id: Optional[str], tool: str, op: Opt
                  "actor": actor, "unattended": bool(unattended), "invocation_id": invocation_id,
                  "scope": scope, "target": redact(target or (op.command if op and op.command else op.path if op else "") or "", 200),
                  "reason": redact(reason, 200)}
-        os.makedirs(DECISIONS_DIR, exist_ok=True)
+        os.makedirs(decisions_dir(), exist_ok=True)
         with _LOCK:
             with open(_month_file(now), "a", encoding="utf-8") as handle:
                 handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
@@ -1034,7 +1044,8 @@ def _prune_decisions(now: float) -> None:
         return
     _last_prune = now
     cutoff = now - DECISION_RETENTION_DAYS * 86400
-    for name in os.listdir(DECISIONS_DIR):
+    folder = decisions_dir()
+    for name in os.listdir(folder):
         if not name.endswith(".ndjson"):
             continue
         try:
@@ -1045,11 +1056,11 @@ def _prune_decisions(now: float) -> None:
         end = month.replace(year=month.year + (month.month == 12), month=month.month % 12 + 1)
         if end.timestamp() < cutoff:
             try:
-                os.remove(os.path.join(DECISIONS_DIR, name))
+                os.remove(os.path.join(folder, name))
             except OSError:
                 pass
         else:
-            _trim_month(os.path.join(DECISIONS_DIR, name), cutoff)
+            _trim_month(os.path.join(folder, name), cutoff)
 
 
 def _trim_month(path: str, cutoff: float) -> None:
@@ -1075,13 +1086,14 @@ def decisions(owner: Optional[str], *, bot_id: Optional[str] = None, thread_id: 
     """Newest first, bounded, for this owner only."""
     limit = max(1, min(int(limit), 1000))
     rows: list[dict] = []
-    if not os.path.isdir(DECISIONS_DIR):
+    folder = decisions_dir()
+    if not os.path.isdir(folder):
         return rows
-    for name in sorted(os.listdir(DECISIONS_DIR), reverse=True):
+    for name in sorted(os.listdir(folder), reverse=True):
         if not name.endswith(".ndjson"):
             continue
         try:
-            with open(os.path.join(DECISIONS_DIR, name), encoding="utf-8") as handle:
+            with open(os.path.join(folder, name), encoding="utf-8") as handle:
                 lines = handle.readlines()
         except OSError:
             continue
@@ -1392,9 +1404,10 @@ _migrated_for: set = set()
 
 def ensure_migrated() -> None:
     """Run the one-time migration the first time a policy is read in this process."""
-    if STATE_FILE in _migrated_for:
+    path = state_file()
+    if path in _migrated_for:
         return
-    _migrated_for.add(STATE_FILE)
+    _migrated_for.add(path)
     try:
         stamp_migration_grants()
     except Exception:

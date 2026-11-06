@@ -24,7 +24,12 @@ from services import bot_turn_context as ctx
 
 logger = logging.getLogger(__name__)
 
-STATE_FILE = os.path.join(DATA_DIR, "bot-memory-state", "dream.json")
+STATE_FILE: Optional[str] = None  # a test can point it at its own file
+
+
+def state_file() -> str:
+    from core import accounts
+    return STATE_FILE or accounts.path("bot-memory-state", "dream.json")
 MIN_CONVERSATIONS, MAX_CONVERSATIONS = 2, 20
 PER_CONVERSATION_BYTES, TOTAL_BYTES = 4 * 1024, 40 * 1024
 FIRST_LOOKBACK_DAYS = 7
@@ -35,7 +40,7 @@ ENTRY_CANDIDATES = 60
 
 
 def _load() -> dict:
-    data = read_json(STATE_FILE, {})
+    data = read_json(state_file(), {})
     return data if isinstance(data, dict) and isinstance(data.get("bots"), dict) else {"bots": {}, "last_day": None}
 
 
@@ -57,7 +62,7 @@ def ideas(bot_id: str, now: Optional[float] = None) -> list[dict]:
 def forget_bot(bot_id: str) -> None:
     data = _load()
     data["bots"].pop(bot_id, None)
-    write_json_atomic(STATE_FILE, data)
+    write_json_atomic(state_file(), data)
 
 
 def _conversations(bot_id: str, since: float) -> dict[str, list[tuple[str, str]]]:
@@ -235,7 +240,7 @@ def _finish(bot_id: str, now: float, report: dict, run_id: Optional[str], new_id
     row["report"] = report
     if counted:
         row["last_run"] = now
-    write_json_atomic(STATE_FILE, data)
+    write_json_atomic(state_file(), data)
     if run_id:
         bot_memory_upkeep.log_outcome(
             bot_id, run_id, f"dream · {report['patterns']} patterns, {report['outdated']} outdated, {report['ideas']} ideas", now)
@@ -253,5 +258,5 @@ async def run_daily(now: Optional[float] = None, bot_ids: Optional[list[str]] = 
         return None
     data = _load()
     data["last_day"] = ctx.owner_today(now).isoformat()
-    write_json_atomic(STATE_FILE, data)
+    write_json_atomic(state_file(), data)
     return await run_bot(chosen, now)

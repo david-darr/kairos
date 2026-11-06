@@ -17,7 +17,7 @@ from routes.bot_onboarding_routes import router
 
 class OnboardingTests(unittest.TestCase):
     def setUp(self):
-        onboarding.FILE.unlink(missing_ok=True)
+        onboarding.file_path().unlink(missing_ok=True)
         self.app = FastAPI(); self.app.include_router(router)
         self.app.dependency_overrides[require_admin] = lambda: 'alice'
         self.client = TestClient(self.app)

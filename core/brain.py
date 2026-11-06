@@ -573,8 +573,8 @@ class Brain:
         and an agent's own folder (roadmap phase 7, 2026-10-06)."""
         roots = [self.cwd_override or self.vault_dir, image_gen.GENERATED_FILES_DIR]
         if self.agent_id:
-            from services.agent_service import AGENTS_DIR
-            roots.append(os.path.join(AGENTS_DIR, self.agent_id))
+            from services.agent_service import agents_dir
+            roots.append(os.path.join(agents_dir(), self.agent_id))
             from services import bot_memory_store
             roots.append(str(bot_memory_store.workspace(self.agent_id)))
         return roots

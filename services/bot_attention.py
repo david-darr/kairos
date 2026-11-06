@@ -25,8 +25,17 @@ def clean(value, limit=2000):
 
 
 def legacy_owner():
-    from core.auth import owner_or_default
-    return owner_or_default(None)
+    """Who owns bot work that names no owner: the current account's user (Multi-Account group 4: every
+    account has its own bots), else the old install-wide default (accounts off, or nobody signed in)."""
+    from core import accounts
+    from core.auth import auth_enabled, auth_manager, owner_or_default
+    if not auth_enabled():
+        return owner_or_default(None)  # every request is the single local user
+    try:
+        name = auth_manager.username_for_account(accounts.effective_account())
+    except accounts.NoAccount:
+        name = None
+    return name or owner_or_default(None)
 
 
 def owner_of(record):

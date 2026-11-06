@@ -12,17 +12,24 @@ import threading
 import time
 from contextlib import contextmanager
 
-from core.constants import DATA_DIR
+from typing import Optional
 
-DB_FILE = os.path.join(DATA_DIR, "bot-attention.sqlite3")
+from core import accounts
+
+DB_FILE: Optional[str] = None  # a test can point it at its own file
 _LOCK = threading.RLock()
+
+
+def db_file() -> str:
+    return DB_FILE or accounts.path("bot-attention.sqlite3")
 
 
 @contextmanager
 def database():
     with _LOCK:
-        os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
-        db = sqlite3.connect(DB_FILE, timeout=15)
+        path = db_file()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        db = sqlite3.connect(path, timeout=15)
         db.row_factory = sqlite3.Row
         try:
             db.executescript("""

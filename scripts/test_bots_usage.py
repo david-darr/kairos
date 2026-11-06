@@ -31,7 +31,7 @@ def row(ident="one", **extra):
 class UsageTests(unittest.TestCase):
     def setUp(self):
         bot_usage.drain()
-        for file in bot_usage.ROOT.glob("*"):
+        for file in bot_usage.root().glob("*"):
             file.unlink()
 
     def test_prices_reported_estimated_unknown(self):

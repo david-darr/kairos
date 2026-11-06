@@ -36,9 +36,25 @@ from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
 from services import bot_memory, bot_memory_entries, bot_memory_store, bot_record
 
-AGENTS_FILE = os.path.join(DATA_DIR, "agents.json")
-AGENTS_DIR = os.path.join(DATA_DIR, "agents")
-INBOX_FILE = os.path.join(AGENTS_DIR, "inbox.json")
+# Overrides a test can point at its own files; otherwise each account has its own bots (Multi-Account
+# group 4): agents.json and agents/ in the account folder.
+AGENTS_FILE: Optional[str] = None
+AGENTS_DIR: Optional[str] = None
+INBOX_FILE: Optional[str] = None
+
+
+def agents_file() -> str:
+    from core import accounts
+    return AGENTS_FILE or accounts.path("agents.json")
+
+
+def _dir_for(file: str) -> str:
+    return AGENTS_DIR or os.path.join(os.path.dirname(file), "agents")
+
+
+def agents_dir() -> str:
+    """The current account's bot folders (SOUL.md, profile history, inbox)."""
+    return _dir_for(agents_file())
 
 # The notebook (Bots Phase 2): a turn loads at most 24,576 UTF-8 bytes of the index, and a topic holds
 # 64 KiB. Whole documents may be stored up to 512 KiB (services/bot_memory_store.py).
@@ -239,13 +255,30 @@ class AdmissionDenied(ValueError):
     """Background work was refused; its message is safe to show the caller."""
 
 
+# Shared by every account's AgentService: hooks are registered once at import, and a turn's work slot
+# is per asyncio task whichever account it belongs to.
+_DELETE_HOOKS: list = []
+_CURRENT_WORK: ContextVar = ContextVar("agent_work", default=None)
+
+
+def on_delete(hook):
+    """Register hook(agent_id) for every account's bots without loading any account's registry (callers
+    register at import, before anyone is signed in). See AgentService.on_delete."""
+    if hook not in _DELETE_HOOKS:
+        _DELETE_HOOKS.append(hook)
+    return lambda: _DELETE_HOOKS.remove(hook) if hook in _DELETE_HOOKS else None
+
+
 class AgentService:
-    def __init__(self) -> None:
-        self._agents: dict = read_json(AGENTS_FILE, {})
+    def __init__(self, file: Optional[str] = None) -> None:
+        self._file = file or agents_file()
+        self._dir = _dir_for(self._file)
+        self._inbox_file = INBOX_FILE or os.path.join(self._dir, "inbox.json")
+        self._agents: dict = read_json(self._file, {})
         # Bots redesign (2026-10-28): the copy of the file as it was before the
         # first Bots-mode change, taken before any of the migrations below writes.
         if bot_record.pending(self._agents):
-            bot_record.backup(AGENTS_FILE)
+            bot_record.backup(self._file)
         dirty = False
         if any(agent.get("color") in LEGACY_COLORS for agent in self._agents.values()):
             for agent in self._agents.values():
@@ -264,11 +297,11 @@ class AgentService:
         # redesign, 2026-10-28; services/bot_record.py). One write in all.
         if bot_record.upgrade_all(self._agents, self._mirror_soul) or stale or dirty:
             self._save()
-        self._inbox: list = read_json(INBOX_FILE, [])
+        self._inbox: list = read_json(self._inbox_file, [])
         # Each asyncio task carries its own work (Agents 2.0, 2026-10-13):
         # an agent's card and goal can overlap, so its identity cannot be a
         # shared slot. No run context means an ordinary, unattached chat item.
-        self._current: ContextVar[Optional[dict]] = ContextVar("agent_work", default=None)
+        self._current = _CURRENT_WORK
         # The app runs one scheduler process (Agents 2.0, 2026-10-13).
         # Holds are process-local so a crash cannot strand one forever;
         # task_service's durable claims still recover interrupted work as
@@ -276,7 +309,7 @@ class AgentService:
         self._admission_lock = threading.RLock()
         self._profile_lock = threading.RLock()
         self._reservations: dict[str, dict] = {}
-        self._delete_hooks: list = []
+        self._delete_hooks = _DELETE_HOOKS
         # Notebook migration (Bots Phase 2): copy each bot's old memory files into its workspace once.
         bot_memory.migrate_all(list(self._agents))
 
@@ -291,7 +324,7 @@ class AgentService:
     # -- identities -------------------------------------------------------------
 
     def _save(self) -> None:
-        write_json_atomic(AGENTS_FILE, self._agents)
+        write_json_atomic(self._file, self._agents)
 
     def _mirror_soul(self, agent_id, soul: str) -> None:
         """Keep SOUL.md in step with a soul the load-time upgrade just set. A
@@ -574,7 +607,7 @@ class AgentService:
         """SOUL.md stays in agents/<id>/, beside the profile history, whatever the notebook does."""
         if not re.fullmatch(r"[0-9a-f]{10}", agent_id or ""):
             raise ValueError("bad agent id")
-        return os.path.join(AGENTS_DIR, agent_id, "SOUL.md")
+        return os.path.join(self._dir, agent_id, "SOUL.md")
 
     def _file_soul(self, agent_id: str) -> Optional[str]:
         try:
@@ -702,7 +735,7 @@ class AgentService:
         self._inbox = [i for i in self._inbox if i["agent_id"] != agent_id]
         self._save_inbox()
         bot_memory.remove_bot(agent_id)
-        legacy = Path(AGENTS_DIR) / agent_id
+        legacy = Path(self._dir) / agent_id
         for name in ("memory.md", "memory-archive.md", "memory-upkeep.json", "memory-upkeep.json.upkeep-tmp"):
             (legacy / name).unlink(missing_ok=True)
         for item in legacy.glob("memory-*-archive.md"):
@@ -824,7 +857,7 @@ class AgentService:
     # -- inbox ------------------------------------------------------------------
 
     def _save_inbox(self) -> None:
-        write_json_atomic(INBOX_FILE, self._inbox)
+        write_json_atomic(self._inbox_file, self._inbox)
 
     def inbox(self, agent_id: Optional[str] = None, status: Optional[str] = "open") -> list[dict]:
         items = [i for i in self._inbox if (agent_id is None or i["agent_id"] == agent_id)
@@ -1373,7 +1406,9 @@ def _memory_template(agent: dict) -> str:
             "## Corrections\n\n## Notes\n")
 
 
-agent_service = AgentService()
+from core import accounts as _accounts
+
+agent_service = _accounts.PerAccount(AgentService, agents_file)
 
 # Resolve stores only at deletion time: several of them depend on this singleton.
 def _resource_cleanup(module, name):
@@ -1386,4 +1421,4 @@ def _resource_cleanup(module, name):
 for _module, _cleanup in (("bot_skills", "remove_bot"), ("bot_grants", "remove_bot"),
                           ("bot_logins", "forget_bot"), ("bot_routines", "delete_for_bot"),
                           ("bot_app_triggers", "on_bot_deleted"), ("bot_turn_context", "remove_bot")):
-    agent_service.on_delete(_resource_cleanup(_module, _cleanup))
+    on_delete(_resource_cleanup(_module, _cleanup))

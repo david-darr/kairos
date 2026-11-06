@@ -14,13 +14,21 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
 from core.model_prices import price
 
 log = logging.getLogger(__name__)
-ROOT = Path(DATA_DIR) / "bot_usage"
+ROOT: Optional[Path] = None  # a test can point it at its own folder
+
+
+def root() -> Path:
+    from core import accounts
+    return ROOT or Path(accounts.path("bot_usage"))
+
+
 LOCK = threading.RLock()
 _writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="bot-usage")
 _slots = threading.BoundedSemaphore(128)
@@ -29,9 +37,10 @@ DEFAULTS = {"budget": {"monthly_usd": None, "warn_percent": 80}, "alerts": {"war
 GROUPS = {"bot", "model", "endpoint", "day", "trigger", "routine"}
 
 
-def settings():
+def settings(where=None):
+    """where: the usage folder, for the writer thread, which has no account of its own."""
     with LOCK:
-        raw = read_json(str(ROOT / "settings.json"), {})
+        raw = read_json(str((where or root()) / "settings.json"), {})
         return {**copy.deepcopy(DEFAULTS), **raw,
                 "budget": {**DEFAULTS["budget"], **raw.get("budget", {})},
                 "alerts": {**DEFAULTS["alerts"], **raw.get("alerts", {})}}
@@ -40,8 +49,8 @@ def settings():
 def update_settings(**changes):
     with LOCK:
         value = {**settings(), **changes}
-        write_json_atomic(str(ROOT / "settings.json"), value)
-        os.chmod(ROOT / "settings.json", 0o600)
+        write_json_atomic(str(root() / "settings.json"), value)
+        os.chmod(root() / "settings.json", 0o600)
         return value
 
 
@@ -82,7 +91,7 @@ def rows(start=None, end=None, bot_id=None, user=None):
     start, end = bounds(start, end)
     seen = set()
     with LOCK:
-        paths = sorted(ROOT.glob("????-??.jsonl"))
+        paths = sorted(root().glob("????-??.jsonl"))
         # Hold the writer lock while streaming so no partial append is read.
         for path in paths:
             if not month(start) <= path.stem <= month(end):
@@ -106,8 +115,9 @@ def rows(start=None, end=None, bot_id=None, user=None):
                     yield row
 
 
-def _observe(row, timeline, context):
+def _observe(row, timeline, context, where=None):
     try:
+        where = where or root()
         if not row.get("agent_id"):
             return
         tokens = {key: row.get(column) for key, column in
@@ -121,7 +131,7 @@ def _observe(row, timeline, context):
                  "thread_id": row.get("session_id"), "endpoint_id": row.get("endpoint_id"),
                  "model_kind": kind, "model": row.get("model"), "tokens": tokens,
                  **price(row.get("model"), tokens, getattr(context, "reported_cost_usd", None),
-                         settings()["prices_override"]),
+                         settings(where)["prices_override"]),
                  "trigger": getattr(context, "trigger", None) or
                             ("routine" if row.get("task_id") else "helper" if row.get("parent_id") else "person"),
                  "routine_id": row.get("task_id"), "duration_s": max(0, row["ended_at"] - row["started_at"]),
@@ -129,9 +139,9 @@ def _observe(row, timeline, context):
                  "steps": sum(s.get("kind") == "model_call" for s in timeline),
                  "tool_errors": sum(s.get("kind") == "tool_finished" and s.get("ok") is False for s in timeline),
                  "parent_id": row.get("parent_id")}
-        ROOT.mkdir(parents=True, exist_ok=True)
+        where.mkdir(parents=True, exist_ok=True)
         with LOCK:
-            path = ROOT / (month(value["at"]) + ".jsonl")
+            path = where / (month(value["at"]) + ".jsonl")
             fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
             with os.fdopen(fd, "a", encoding="utf-8") as stream:
                 stream.write(json.dumps(value, ensure_ascii=False, allow_nan=False) + "\n")
@@ -149,7 +159,8 @@ def observe(row, timeline, context):
     if not row.get("agent_id") or not _slots.acquire(blocking=False):
         return
     try:
-        future = _writer.submit(_observe, dict(row), list(timeline), context)
+        # The writer thread has no account: resolve the folder here, in the caller.
+        future = _writer.submit(_observe, dict(row), list(timeline), context, root())
         future.add_done_callback(lambda _: _slots.release())
     except Exception:
         _slots.release()

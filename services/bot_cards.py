@@ -41,7 +41,12 @@ from core.constants import DATA_DIR
 
 logger = logging.getLogger(__name__)
 
-CARDS_FILE = os.path.join(DATA_DIR, "bot_cards.json")
+CARDS_FILE: Optional[str] = None  # a test can point it at its own file
+
+
+def cards_file() -> str:
+    from core import accounts
+    return CARDS_FILE or accounts.path("bot_cards.json")
 VERSION = 1
 
 KINDS = ("approval", "question", "connector", "credential", "signin", "computer")
@@ -256,7 +261,7 @@ def _mine(card_owner: str, who: str) -> bool:
 
 class CardStore:
     def __init__(self, path: str | None = None) -> None:
-        self.path = path or CARDS_FILE
+        self.path = path or cards_file()
         self._lock = threading.RLock()
         data = read_json(self.path, {})
         self._cards: dict[str, dict] = {c["id"]: c for c in (data.get("cards") or []) if isinstance(c, dict) and "id" in c}
@@ -264,7 +269,8 @@ class CardStore:
         self._handles: dict[str, str] = {}
         self._generation: dict[str, int] = {}
         self._resume_handlers: dict[str, Callable[[dict, str], dict]] = {}
-        self._listeners: list[Callable[[dict], None]] = []
+        with _store_lock:
+            self._listeners: list[Callable[[dict], None]] = list(_listeners)  # the host's, on every account's store
         self._reconcile_start()
 
     # persistence ---------------------------------------------------------------
@@ -304,8 +310,19 @@ class CardStore:
     def add_listener(self, listener: Callable[[dict], None]) -> Callable[[], None]:
         """The host publishes card changes through its live feed. The listener
         gets `{type: "bot_card", event: "opened"|"settled"|"updated", card}`."""
-        self._listeners.append(listener)
-        return lambda: self._listeners.remove(listener) if listener in self._listeners else None
+        with _store_lock:
+            _listeners.append(listener)
+            for store_ in _stores.values():
+                store_._listeners.append(listener)
+
+        def remove() -> None:
+            with _store_lock:
+                if listener in _listeners:
+                    _listeners.remove(listener)
+                for store_ in _stores.values():
+                    if listener in store_._listeners:
+                        store_._listeners.remove(listener)
+        return remove
 
     def _emit(self, event: str, card: dict) -> None:
         packet = {"type": "bot_card", "event": event, "card": self.public(card)}
@@ -725,21 +742,25 @@ class CardStore:
         return "The person answered your earlier question:\n" + "\n".join(lines)
 
 
-_store: CardStore | None = None
-_store_lock = threading.Lock()
+_stores: dict[str, CardStore] = {}  # one per cards file, so each account has its own
+_listeners: list[Callable[[dict], None]] = []  # added through any store; every store hears them
+_test_path: str | None = None
+_store_lock = threading.RLock()
 
 
 def store() -> CardStore:
-    global _store
     with _store_lock:
-        if _store is None:
-            _store = CardStore()
-        return _store
+        path = _test_path or cards_file()
+        found = _stores.get(path)
+        if found is None:
+            found = _stores[path] = CardStore(path)
+        return found
 
 
 def reset_for_test(path: str | None = None) -> CardStore:
     """Tests: forget the cached store (a new one is a restart)."""
-    global _store
+    global _test_path
     with _store_lock:
-        _store = CardStore(path)
-        return _store
+        _test_path = path
+        _stores.pop(path or cards_file(), None)
+        return store()

@@ -53,7 +53,12 @@ from core.constants import DATA_DIR
 
 logger = logging.getLogger(__name__)
 
-CHANGES_FILE = os.path.join(DATA_DIR, "bot_automation_changes.json")
+CHANGES_FILE: Optional[str] = None  # a test can point it at its own file
+
+
+def changes_file() -> str:
+    from core import accounts
+    return CHANGES_FILE or accounts.path("bot_automation_changes.json")
 VERSION = 1
 UNDO_WINDOW_SECONDS = 7 * 24 * 3600
 KEEP_SECONDS = 30 * 24 * 3600
@@ -707,11 +712,12 @@ def _now() -> float:
 
 class ChangeStore:
     def __init__(self, path: str | None = None) -> None:
-        self.path = path or CHANGES_FILE
+        self.path = path or changes_file()
         self._lock = threading.RLock()
         data = read_json(self.path, {})
         self._receipts: dict[str, dict] = {r["id"]: r for r in (data.get("receipts") or []) if isinstance(r, dict) and "id" in r}
-        self._listeners = []
+        with _store_lock:
+            self._listeners = list(_listeners)  # the host's, on every account's store
 
     def _save(self) -> None:
         cutoff = _now() - KEEP_SECONDS
@@ -724,7 +730,19 @@ class ChangeStore:
         write_json_atomic(self.path, {"version": VERSION, "receipts": list(self._receipts.values())})
 
     def add_listener(self, listener):
-        self._listeners.append(listener)
+        with _store_lock:
+            _listeners.append(listener)
+            for store_ in _stores.values():
+                store_._listeners.append(listener)
+
+        def remove() -> None:
+            with _store_lock:
+                if listener in _listeners:
+                    _listeners.remove(listener)
+                for store_ in _stores.values():
+                    if listener in store_._listeners:
+                        store_._listeners.remove(listener)
+        return remove
 
     def _emit(self, event: str, receipt: dict) -> None:
         packet = {"type": "bot_automation_change", "event": event, "receipt": self.public(receipt)}
@@ -1025,24 +1043,29 @@ class ChangeStore:
         return snapshot
 
 
-_store: ChangeStore | None = None
-_store_lock = threading.Lock()
+_stores: dict[str, ChangeStore] = {}  # one per receipts file, so each account has its own
+_listeners: list = []  # added through any store; every store hears them
+_test_path: str | None = None
+_store_lock = threading.RLock()
 
 
 def store() -> ChangeStore:
-    global _store
     with _store_lock:
-        if _store is None:
-            _store = ChangeStore()
+        path = _test_path or changes_file()
+        found = _stores.get(path)
+        if found is None:
+            found = _stores[path] = ChangeStore(path)
             try:
-                _store.reconcile()
+                found.reconcile()
             except Exception:
                 logger.exception("automation change reconcile failed")
-        return _store
+        return found
 
 
 def reset_for_test(path: str | None = None) -> ChangeStore:
-    global _store
+    global _test_path
     with _store_lock:
-        _store = ChangeStore(path)
-        return _store
+        _test_path = path
+        _stores.pop(path or changes_file(), None)
+        found = _stores[path or changes_file()] = ChangeStore(path)
+        return found

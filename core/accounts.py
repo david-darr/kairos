@@ -94,7 +94,7 @@ def path(*parts: str) -> str:
     """Where a store's file or folder is: inside the current account's folder once the migration has moved
     it (path("notes.json"), path("documents")), else the shared place it always had (core/account_migration.py)."""
     from core import account_migration
-    if parts and parts[0] not in account_migration.moved_names():
+    if parts and not account_migration.is_moved(parts[0]):
         return os.path.join(DATA_DIR, *parts)
     return os.path.join(account_dir(), *parts)
 

@@ -182,6 +182,10 @@ class AuthManager:
             write_json_atomic(AUTH_FILE, self._users)
         return user["account_id"]
 
+    def username_for_account(self, account_id: str) -> Optional[str]:
+        """The user name of an account folder id, or None (the shared "local" folder has no user)."""
+        return next((name for name, info in self._users["users"].items() if info.get("account_id") == account_id), None)
+
     def account_ids(self) -> list[str]:
         return [self.account_id(name) for name in list(self._users["users"])]
 

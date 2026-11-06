@@ -8,9 +8,16 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from core.atomic_io import read_json, write_json_atomic
+from typing import Optional
+
 from core.constants import DATA_DIR
 
-STATE_FILE = str(Path(DATA_DIR) / "bot_workbench.json")
+STATE_FILE: Optional[str] = None  # a test can point it at its own file
+
+
+def state_file() -> str:
+    from core import accounts
+    return STATE_FILE or accounts.path("bot_workbench.json")
 LOCK = threading.RLock()
 PLACES = ("auto", "computer", "browser", "off")
 PHASES = {
@@ -30,13 +37,14 @@ PHASES = {
 def read_state():
     with LOCK:
         return {"profiles": [], "computers": {"max_running": 2, "idle_minutes": 10}, "help": {},
-                **read_json(STATE_FILE, {})}
+                **read_json(state_file(), {})}
 
 
 def save_state(state):
-    write_json_atomic(STATE_FILE, state)
+    path = state_file()
+    write_json_atomic(path, state)
     try:
-        os.chmod(STATE_FILE, 0o600)
+        os.chmod(path, 0o600)
     except OSError:
         pass
 

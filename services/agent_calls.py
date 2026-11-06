@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 from pathlib import Path
+from typing import Optional
 import re
 import time
 import uuid
@@ -20,7 +21,25 @@ from services import chat_live
 from services.agent_service import agent_service
 from services.task_service import task_service
 
-ROOT = Path(DATA_DIR) / 'agent_calls'
+ROOT: Optional[Path] = None  # a test can point it at its own folder
+_files = {}  # call id -> the file it was loaded from or created in (the account it belongs to)
+
+
+def root():
+    from core import accounts
+    return ROOT or Path(accounts.path('agent_calls'))
+
+
+def _roots():
+    # Every account's folder, for start-up work that runs as no one in particular.
+    if ROOT:
+        return [ROOT]
+    from core import accounts
+    found = {}
+    for account in accounts.all_accounts():
+        with accounts.as_account(account):
+            found[str(root())] = root()
+    return list(found.values())
 logger = logging.getLogger(__name__)
 _calls = {}; _locks = {}; _turns = {}; _summaries = {}; _conversations = {}; _jobs = set()
 _starters = {}
@@ -30,7 +49,7 @@ _watchdog = None
 def _path(ident):
     if not isinstance(ident, str) or len(ident) != 32 or any(c not in '0123456789abcdef' for c in ident):
         raise HTTPException(404, 'Call not found')
-    return ROOT / f'{ident}.json'
+    return _files.get(ident) or root() / f'{ident}.json'
 
 
 def _save(call):
@@ -39,6 +58,7 @@ def _save(call):
 
 def require(ident, user):
     call = _calls.get(ident) or read_json(str(_path(ident)), None)
+    if call: _files.setdefault(ident, _path(ident))
     if not call or call.get('owner') != user:
         raise HTTPException(404, 'Call not found')
     if call.get('room_id'): _rooms().get(call['room_id'], user)
@@ -100,7 +120,7 @@ def start(parent_id, agent_id, endpoint_id, model, user, mode='local', room_id=N
             'endpoint_id': endpoint_id, 'model': model, 'mode': mode, 'started_at': time.time(),
             'ended': False, 'summary_state': 'open', 'summary_error': None, 'summary': '',
             'messages': [], 'requests': {}, 'jobs': [], 'revision': 0, 'last_seen':time.time()}
-    _calls[ident] = call; _locks[ident] = asyncio.Lock()
+    _calls[ident] = call; _locks[ident] = asyncio.Lock(); _files[ident] = root() / f'{ident}.json'
     if conversation: _conversations[ident] = conversation
     _save(call)
     return view(call)
@@ -281,7 +301,23 @@ def interrupt(call):
     _save(call)
 
 
+def _in_owners_account(call):
+    """A call's summary goes into its owner's chats (Multi-Account group 4); the watchdog and start-up
+    recovery run as no one in particular."""
+    import contextlib
+    from core import accounts
+    if accounts.current_account():
+        return contextlib.nullcontext()
+    account = accounts.account_for_user(call.get('owner'))
+    return accounts.as_account(account) if account else contextlib.nullcontext()
+
+
 def schedule_summary(call):
+    with _in_owners_account(call):
+        return _schedule_summary(call)
+
+
+def _schedule_summary(call):
     previous = _summaries.get(call['id'])
     if previous and not previous.done():
         call['summary_dirty'] = True
@@ -364,21 +400,21 @@ def pending(parent_id, user):
     if room is not None: _rooms().get(parent_id, user)
     else: chat_live.require_session(parent_id, user)
     values = []
-    if ROOT.exists():
-        for path in ROOT.glob('*.json'):
+    for folder in [root()]:
+        for path in folder.glob('*.json'):
             call = read_json(str(path), {})
             if call.get('owner') == user and call.get('parent_id') == parent_id and call.get('ended') and call.get('summary_state') != 'saved':
-                _calls[call['id']] = call; values.append(view(call))
+                _calls[call['id']] = call; _files[call['id']] = path; values.append(view(call))
     return values
 
 
 async def recover():
     global _watchdog
-    if ROOT.exists():
-        for path in ROOT.glob('*.json'):
+    for folder in _roots():
+        for path in folder.glob('*.json'):
             call = read_json(str(path), {})
             if call.get('id') == path.stem and len(path.stem)==32 and all(c in '0123456789abcdef' for c in path.stem):
-                _calls[call['id']]=call
+                _calls[call['id']]=call; _files[call['id']] = path
                 if not call.get('ended') or call.get('summary_state') == 'pending' or call.get('jobs') and call.get('summary_state')=='saved' and call.get('work_digest')!=_work_digest(call):
                     call['ended'] = True; _save(call); schedule_summary(call)
     async def watch():

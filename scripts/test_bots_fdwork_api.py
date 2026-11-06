@@ -32,7 +32,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         bot = self.h.bot("Kip API")
         agent_service._agents[bot["id"]]["builtin"] = "front_desk"
         main = self.h.thread(bot)
-        write_json_atomic(os.path.join(tasks.DIRECTORY, "state.json"), {"bot_id": bot["id"], "main_thread_id": main})
+        write_json_atomic(os.path.join(tasks.directory(), "state.json"), {"bot_id": bot["id"], "main_thread_id": main})
         tasks.write_rows("tasks", [])
         tasks.write_rows("suggestions", [])
         self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")

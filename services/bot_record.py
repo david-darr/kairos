@@ -23,8 +23,18 @@ from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
 from services import bot_resource_fields
 
-BOT_DEFAULTS_FILE = os.path.join(DATA_DIR, "bot_defaults.json")
-BOT_PRESETS_FILE = os.path.join(DATA_DIR, "bot_presets.json")
+BOT_DEFAULTS_FILE: Optional[str] = None  # a test can point it at its own file
+BOT_PRESETS_FILE: Optional[str] = None  # a test can point it at its own file
+
+
+def defaults_file() -> str:
+    from core import accounts
+    return BOT_DEFAULTS_FILE or accounts.path("bot_defaults.json")
+
+
+def presets_file() -> str:
+    from core import accounts
+    return BOT_PRESETS_FILE or accounts.path("bot_presets.json")
 BACKUP_SUFFIX = ".pre-bots"
 
 MAX_BOTS = 100
@@ -495,14 +505,14 @@ def clean_defaults(value) -> dict:
 
 def read_defaults() -> dict:
     with _STORE_LOCK:
-        stored = read_json(BOT_DEFAULTS_FILE, {})
+        stored = read_json(defaults_file(), {})
     return stored if isinstance(stored, dict) else {}
 
 
 def write_defaults(value) -> dict:
     cleaned = clean_defaults(value)
     with _STORE_LOCK:
-        write_json_atomic(BOT_DEFAULTS_FILE, cleaned)
+        write_json_atomic(defaults_file(), cleaned)
     return cleaned
 
 
@@ -540,29 +550,29 @@ def clean_preset(value) -> dict:
 
 def list_presets() -> list:
     with _STORE_LOCK:
-        stored = read_json(BOT_PRESETS_FILE, [])
+        stored = read_json(presets_file(), [])
     return [{**item, "source": "saved"} for item in stored] if isinstance(stored, list) else []
 
 
 def add_preset(value) -> dict:
     preset = {"id": uuid.uuid4().hex[:10], **clean_preset(value), "created_at": time.time()}
     with _STORE_LOCK:
-        stored = read_json(BOT_PRESETS_FILE, [])
+        stored = read_json(presets_file(), [])
         stored = stored if isinstance(stored, list) else []
         if len(stored) >= MAX_PRESETS:
             raise BotConflict(f"you can save up to {MAX_PRESETS} presets; delete one first")
-        write_json_atomic(BOT_PRESETS_FILE, [*stored, preset])
+        write_json_atomic(presets_file(), [*stored, preset])
     return {**preset, "source": "saved"}
 
 
 def delete_preset(preset_id: str) -> bool:
     with _STORE_LOCK:
-        stored = read_json(BOT_PRESETS_FILE, [])
+        stored = read_json(presets_file(), [])
         stored = stored if isinstance(stored, list) else []
         kept = [item for item in stored if item.get("id") != preset_id]
         if len(kept) == len(stored):
             return False
-        write_json_atomic(BOT_PRESETS_FILE, kept)
+        write_json_atomic(presets_file(), kept)
     return True
 
 

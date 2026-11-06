@@ -344,15 +344,18 @@ def start() -> None:
 
 
 async def _run_forever() -> None:
+    from core import accounts
     while True:
-        try:
-            await tick()
-            _store().prune()
-            _store().prune_marks()
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("app event loop pass failed")
+        for account_id in accounts.all_accounts():  # each account's bots and receipts (Multi-Account group 4)
+            try:
+                with accounts.as_account(account_id):
+                    await tick()
+                    _store().prune()
+                    _store().prune_marks()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("app event loop pass failed")
         await asyncio.sleep(TICK_SECONDS)
 
 

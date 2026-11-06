@@ -5,13 +5,16 @@ from urllib.parse import urlsplit
 import httpx
 from websockets.asyncio.client import connect
 from core.atomic_io import read_json, write_json_atomic
-from core.constants import DATA_DIR
-from pathlib import Path
+from core import accounts
+from typing import Optional
 
-SETTINGS = Path(DATA_DIR) / 'call_voice.json'
+SETTINGS: Optional[str] = None  # a test can point it at its own file
+
+def settings_file():
+    return SETTINGS or accounts.path('call_voice.json')
 
 def configuration():
-    return read_json(str(SETTINGS), {'url':'','protocol':'voicestudio'})
+    return read_json(str(settings_file()), {'url':'','protocol':'voicestudio'})
 
 def validate_url(value):
     parsed = urlsplit(value)
@@ -23,7 +26,7 @@ def validate_url(value):
 
 def configure(url, protocol):
     value = {'url':validate_url(url), 'protocol':protocol}
-    write_json_atomic(str(SETTINGS), value)
+    write_json_atomic(str(settings_file()), value)
     return value
 
 async def catalog():

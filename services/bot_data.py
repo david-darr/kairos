@@ -459,7 +459,7 @@ class Engine:
 
 # -- the registry: one engine per bot, closed when idle ---------------------------------
 
-_ENGINES: dict[str, Engine] = {}
+_ENGINES: dict[str, Engine] = {}  # keyed by the database path, so each account has its own
 _REG_LOCK = threading.Lock()
 _REAPER: Optional[threading.Thread] = None
 _CLOCK = time.time
@@ -468,13 +468,13 @@ _CLOCK = time.time
 def engine(bot_id: str) -> Engine:
     global _REAPER
     try:
-        cards.folder(bot_id)
+        key = os.path.join(cards.folder(bot_id), "data.sqlite3")
     except cards.CardError as error:
         raise _from_cards(error)
     with _REG_LOCK:
-        found = _ENGINES.get(bot_id)
+        found = _ENGINES.get(key)
         if found is None:
-            found = _ENGINES[bot_id] = Engine(bot_id, clock=lambda: _CLOCK())
+            found = _ENGINES[key] = Engine(bot_id, clock=lambda: _CLOCK())
         if _REAPER is None:
             _REAPER = threading.Thread(target=_reap_loop, name="bot-data-idle", daemon=True)
             _REAPER.start()
@@ -486,10 +486,10 @@ def close_idle(now: Optional[float] = None, idle: float = IDLE_SECONDS) -> list[
     now = _CLOCK() if now is None else now
     closed = []
     with _REG_LOCK:
-        for bot_id, item in list(_ENGINES.items()):
+        for item in list(_ENGINES.values()):
             if item.is_open and now - item.last_used >= idle and not item._runs:
                 item.close()
-                closed.append(bot_id)
+                closed.append(item.bot_id)
     return closed
 
 
@@ -512,14 +512,15 @@ def close_all() -> None:
 def forget_bot(bot_id: str) -> None:
     """Drop a deleted bot's database and cards."""
     import shutil
+    try:
+        folder = cards.folder(bot_id)
+    except cards.CardError:
+        return
     with _REG_LOCK:
-        item = _ENGINES.pop(bot_id, None)
+        item = _ENGINES.pop(os.path.join(folder, "data.sqlite3"), None)
     if item:
         item.close()
-    try:
-        shutil.rmtree(cards.folder(bot_id), ignore_errors=True)
-    except cards.CardError:
-        pass
+    shutil.rmtree(folder, ignore_errors=True)
 
 
 # -- operations the routes and tools share ------------------------------------------------

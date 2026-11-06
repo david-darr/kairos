@@ -635,29 +635,29 @@ def trim(store: "ResultStore", owner: str, bot_id: str, thread_id: str, text: st
 
 
 def _default_root() -> str:
-    from core.constants import DATA_DIR
-    return os.path.join(DATA_DIR, "bot-tool-results")
+    from core import accounts
+    return accounts.path("bot-tool-results")
 
 
-_store: Optional[ResultStore] = None
+_stores: dict = {}  # root -> ResultStore: one per account
 _store_lock = threading.Lock()
 
 
 def store() -> ResultStore:
-    """The process-wide store, made on first use."""
-    global _store
+    """The store of the current account, made on first use."""
+    root = _default_root()
     with _store_lock:
-        if _store is None:
-            _store = ResultStore(_default_root())
-        return _store
+        found = _stores.get(root)
+        if found is None:
+            found = _stores[root] = ResultStore(root)
+        return found
 
 
 def reset_store() -> None:
-    global _store
     with _store_lock:
-        if _store is not None:
-            _store.clear()
-        _store = None
+        for found in _stores.values():
+            found.clear()
+        _stores.clear()
 
 
 def run_query_tool(owner: str, bot_id: str, thread_id: str, result_id: str, query: str, max_chars: int = MAX_QUERY_OUTPUT) -> str:

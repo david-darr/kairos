@@ -18,7 +18,12 @@ from typing import Optional
 from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
 
-ROOT = os.path.join(DATA_DIR, "bot_data")
+ROOT: Optional[str] = None  # a test can point it at its own folder
+
+
+def root() -> str:
+    from core import accounts
+    return ROOT or accounts.path("bot_data")
 MAX_CARDS = 200
 MAX_TITLE = 120
 MAX_SQL_BYTES = 100 * 1024
@@ -37,8 +42,9 @@ def folder(bot_id: str) -> str:
     """The bot's data folder, confined under ROOT."""
     if not isinstance(bot_id, str) or not BOT_ID.match(bot_id):
         raise CardError("Unknown bot.", 404)
-    path = os.path.join(ROOT, bot_id)
-    if os.path.commonpath([os.path.realpath(ROOT), os.path.realpath(path)]) != os.path.realpath(ROOT):
+    base = root()
+    path = os.path.join(base, bot_id)
+    if os.path.commonpath([os.path.realpath(base), os.path.realpath(path)]) != os.path.realpath(base):
         raise CardError("Unknown bot.", 404)
     return path
 

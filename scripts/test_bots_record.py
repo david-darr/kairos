@@ -373,7 +373,7 @@ class ConfiguredTests(BotTestCase):
     def test_a_failing_routine_rolls_everything_back(self):
         real = task_service.create_task
         count = []
-        before = set(os.listdir(agents_module.AGENTS_DIR)) if os.path.isdir(agents_module.AGENTS_DIR) else set()
+        before = set(os.listdir(agents_module.agents_dir())) if os.path.isdir(agents_module.agents_dir()) else set()
 
         def flaky(*args, **kwargs):
             count.append(1)
@@ -388,7 +388,7 @@ class ConfiguredTests(BotTestCase):
         self.assertEqual(failed.json()["cleanup_errors"], [])
         self.assertEqual(agent_service.list_agents(), [], "no bot is left")
         self.assertEqual(self.tasks(), [], "no routine is left")
-        after = set(os.listdir(agents_module.AGENTS_DIR)) if os.path.isdir(agents_module.AGENTS_DIR) else set()
+        after = set(os.listdir(agents_module.agents_dir())) if os.path.isdir(agents_module.agents_dir()) else set()
         self.assertEqual(after, before, "no notes or soul folder is left")
 
     def test_a_failing_cleanup_is_reported_and_keeps_the_bot_with_its_leftover_routine(self):
@@ -499,7 +499,7 @@ class DefaultsAndPresetsTests(BotTestCase):
         self.assertEqual(saved.status_code, 200, saved.text)
         self.assertEqual(saved.json()["defaults"], {"blurb": "Hi", "thread_limit": 5, "place": "off"})
         self.assertEqual(saved.json()["suggested_name"], bot_names.NAMES[1])
-        self.assertEqual(json.loads(Path(bot_record.BOT_DEFAULTS_FILE).read_text(encoding="utf-8"))["thread_limit"], 5)
+        self.assertEqual(json.loads(Path(bot_record.defaults_file()).read_text(encoding="utf-8"))["thread_limit"], 5)
 
     def test_defaults_carry_preferences_only(self):
         for field in ("endpoint_id", "integration_ids", "tool_scope", "connector_scopes", "always_allow",

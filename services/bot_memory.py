@@ -63,7 +63,8 @@ def reset_caches() -> None:
 # Migration from the old memory files (agents/<id>/memory.md and friends)
 # =============================================================================================================
 def _legacy_dir(bot_id: str) -> Path:
-    return store.data_root() / "agents" / bot_id
+    from services import agent_service
+    return Path(agent_service.agents_dir()) / bot_id
 
 
 def _migration_path(bot_id: str) -> Path:
@@ -182,9 +183,10 @@ def ensure_notebook(bot_id: str) -> None:
     what is on disk (so a file already there is never mistaken for an outside edit)."""
     with lock(bot_id):
         _recover(bot_id)
-        if bot_id not in _migrated:
+        key = str(store.state_dir(bot_id))  # one per account: the same bot id can exist in two accounts
+        if key not in _migrated:
             _migrate(bot_id)
-            _migrated.add(bot_id)
+            _migrated.add(key)
         if journal.read_seen(bot_id) is None:
             _baseline(bot_id)
 
@@ -786,4 +788,4 @@ def remove_bot(bot_id: str) -> None:
         if root.exists() and not store.is_reparse(root):
             shutil.rmtree(root, ignore_errors=True)
         journal.remove_bot_state(bot_id)
-        _migrated.discard(bot_id)
+        _migrated.discard(str(store.state_dir(bot_id)))

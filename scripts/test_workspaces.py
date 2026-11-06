@@ -32,7 +32,7 @@ from claude_agent_sdk import PermissionResultDeny  # noqa: E402
 from core import image_gen, permissions, session_manager_store, system_prompt, tool_registry  # noqa: E402
 from core.brain import Brain  # noqa: E402
 from core.codex_brain import CodexBrain  # noqa: E402
-from services.agent_service import AGENTS_DIR  # noqa: E402
+from services.agent_service import agents_dir  # noqa: E402
 
 VAULT = os.path.join(_DATA.name, "vault")
 SECRET = os.path.join(_DATA.name, "auth.json")
@@ -81,9 +81,9 @@ class ClaudeFenceTests(unittest.TestCase):
 
     def test_an_agent_run_also_reaches_its_own_folder_but_not_another_agents(self):
         brain = self.brain(is_admin=False, agent_id="aaaaaaaaaa")
-        self.assertIsNone(self.refused(brain, "Write", {"file_path": os.path.join(AGENTS_DIR, "aaaaaaaaaa", "work.md")}))
-        self.assertIn("Not allowed", self.refused(brain, "Write", {"file_path": os.path.join(AGENTS_DIR, "bbbbbbbbbb", "memory.md")}))
-        self.assertIn("Not allowed", self.refused(brain, "Read", {"file_path": os.path.join(AGENTS_DIR, "inbox.json")}))
+        self.assertIsNone(self.refused(brain, "Write", {"file_path": os.path.join(agents_dir(), "aaaaaaaaaa", "work.md")}))
+        self.assertIn("Not allowed", self.refused(brain, "Write", {"file_path": os.path.join(agents_dir(), "bbbbbbbbbb", "memory.md")}))
+        self.assertIn("Not allowed", self.refused(brain, "Read", {"file_path": os.path.join(agents_dir(), "inbox.json")}))
 
     def test_an_admin_chat_is_not_fenced(self):
         self.assertIsNone(self.refused(self.brain(is_admin=True), "Write", {"file_path": SECRET}))

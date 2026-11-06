@@ -57,7 +57,8 @@ class Levels(ApprovalCase):
             self.assertIn("cannot ask", denied.reason)
 
     async def test_edits_allows_edits_in_the_bots_own_folders_and_asks_for_the_rest(self):
-        from services.agent_service import AGENTS_DIR
+        from services.agent_service import agents_dir
+        AGENTS_DIR = agents_dir()
         bot = make_bot("Edits")
         sid = make_thread(bot)
         set_mode(bot, "edits")
@@ -259,13 +260,13 @@ class Asking(ApprovalCase):
         cwd = os.path.abspath(self.dir.name)
         bot_policy.add_command_rule(bot, "pytest", cwd, None, by="local")
         self.assertEqual((await self.decide(bot, sid, "Bash", {"command": "pytest", "cwd": cwd})).behavior, "allow")
-        Path(bot_policy.STATE_FILE).write_text("{ not json", encoding="utf-8")
+        Path(bot_policy.state_file()).write_text("{ not json", encoding="utf-8")
         bot_policy._state_cache.update(path=None, mtime=None, data=None)
         self.assertTrue(bot_policy.state_corrupt())
         self.assertEqual((await self.decide(bot, sid, "Bash", {"command": "pytest", "cwd": cwd}, timeout=1)).behavior, "deny")
         with self.assertRaises(bot_policy.StateCorrupt):
             bot_policy.add_command_rule(bot, "pytest -x", cwd, None, by="local")
-        self.assertEqual(Path(bot_policy.STATE_FILE).read_text(encoding="utf-8"), "{ not json")
+        self.assertEqual(Path(bot_policy.state_file()).read_text(encoding="utf-8"), "{ not json")
 
     async def test_a_nested_check_inside_a_person_approved_call_is_not_asked_again(self):
         bot = make_bot("Nested")
@@ -610,8 +611,8 @@ class History(ApprovalCase):
         self.assertEqual(bot_policy.decisions("someone-else"), [])
 
     async def test_old_months_are_dropped_after_180_days(self):
-        os.makedirs(bot_policy.DECISIONS_DIR, exist_ok=True)
-        old = os.path.join(bot_policy.DECISIONS_DIR, "2020-01.ndjson")
+        os.makedirs(bot_policy.decisions_dir(), exist_ok=True)
+        old = os.path.join(bot_policy.decisions_dir(), "2020-01.ndjson")
         Path(old).write_text(json.dumps({"at": 1577836800, "owner": "local"}) + "\n", encoding="utf-8")
         bot_policy._last_prune = 0
         bot_policy.record_decision(bot_id="b", thread_id=None, tool="x", op=None, mode="full", outcome="allow",

@@ -181,7 +181,7 @@ async def lifespan(_app: FastAPI):
     await bot_rooms.startup()
     bot_incidents.start()
     try:
-        front_desk.ensure()
+        front_desk.ensure_all()
     except Exception:
         logging.getLogger(__name__).exception("the front desk could not be set up; Bots home offers to bring it back")
     front_desk_tick.start()
@@ -194,7 +194,7 @@ async def lifespan(_app: FastAPI):
         if thread:
             chat_live.broadcast_owner({**packet, "sessionId": thread})
     remove_card_listener = bot_cards.store().add_listener(publish_bot_resource)
-    bot_automation_changes.store().add_listener(publish_bot_resource)
+    remove_change_listener = bot_automation_changes.store().add_listener(publish_bot_resource)
     task_scheduler.start()
     # Tool-result search text for old chats: batched in a daemon thread so it never holds the
     # store lock against startup (core/session_manager_store.py).
@@ -219,7 +219,7 @@ async def lifespan(_app: FastAPI):
         yield
     finally:
         remove_card_listener()
-        bot_automation_changes.store()._listeners.remove(publish_bot_resource)
+        remove_change_listener()
         from services.forge_apps import forge_apps
         from services.forge_terminals import forge_terminals
         try:

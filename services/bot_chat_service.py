@@ -447,14 +447,19 @@ async def drain(bot_id: str) -> int:
 
 
 async def startup() -> dict:
-    """After a restart: reconcile every uncertain dispatch, then let queues run."""
-    recovered = 0
-    for sid in store.sessions_dispatching():
-        recovered += recover(sid)
-    bots = store.bots_with_pending()
-    for bot_id in bots:
-        schedule_drain(bot_id)
-    return {"recovered": recovered, "bots": len(bots)}
+    """After a restart: reconcile every uncertain dispatch, then let queues run, in every account (each has
+    its own chats and bots, Multi-Account group 4). A drain started here keeps its account."""
+    from core import accounts
+    recovered = started = 0
+    for account_id in accounts.all_accounts():
+        with accounts.as_account(account_id):
+            for sid in store.sessions_dispatching():
+                recovered += recover(sid)
+            bots = store.bots_with_pending()
+            for bot_id in bots:
+                schedule_drain(bot_id)
+            started += len(bots)
+    return {"recovered": recovered, "bots": started}
 
 
 def recover(sid: str) -> int:

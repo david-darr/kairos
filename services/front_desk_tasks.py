@@ -12,21 +12,28 @@ import time
 import uuid
 
 from core.atomic_io import read_json, write_json_atomic
+from typing import Optional
+
 from core.constants import DATA_DIR
 
-DIRECTORY = os.path.join(DATA_DIR, "front_desk")
+DIRECTORY: Optional[str] = None  # a test can point it at its own folder
+
+
+def directory() -> str:
+    from core import accounts
+    return DIRECTORY or accounts.path("front_desk")
 LOCK = threading.RLock()
 TASK_FRAME = "Do the work in this task conversation. Do not start another task. Ask the person here when you need input."
 MAKE_KINDS = ("design", "slides", "website", "files")
 
 
 def read_rows(name):
-    rows = read_json(os.path.join(DIRECTORY, name + ".json"), [])
+    rows = read_json(os.path.join(directory(), name + ".json"), [])
     return rows if isinstance(rows, list) else []
 
 
 def write_rows(name, rows, limit=2000):
-    write_json_atomic(os.path.join(DIRECTORY, name + ".json"), rows[-limit:])
+    write_json_atomic(os.path.join(directory(), name + ".json"), rows[-limit:])
 
 
 def front_context():
@@ -38,7 +45,7 @@ def front_context():
     except ModuleNotFoundError as error:
         if error.name != "services.front_desk":
             raise
-        state = read_json(os.path.join(DIRECTORY, "state.json"), {})
+        state = read_json(os.path.join(directory(), "state.json"), {})
         bid, sid = state.get("bot_id"), state.get("main_thread_id")
     else:
         bid, sid = front_desk.bot_id(), front_desk.main_thread_id()

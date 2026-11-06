@@ -105,7 +105,7 @@ class PendingBufferTests(Base):
         busy = self.convo([(f"Another long enough message {i} about plans.", "ok") for i in range(9)], "Busy")
         self.note(busy, NOW + 99)
         self.assertEqual(len(capture.pending(self.bid)[busy]["turns"]), capture.MAX_TURNS)
-        data = json.loads(Path(capture.STATE_FILE).read_text("utf-8"))
+        data = json.loads(Path(capture.state_file()).read_text("utf-8"))
         self.assertIn(busy, data["bots"][self.bid]["threads"], "kept on disk, not only in memory")
 
     async def test_trivial_exchanges_cost_nothing(self):

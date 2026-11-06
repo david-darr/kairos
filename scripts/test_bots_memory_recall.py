@@ -126,7 +126,7 @@ class SearchTests(Base):
         self.convo([("Remember the walrus", "ok")])
         self.assertEqual(recall.search(self.scope, q="walrus")["count"], 1)
         recall.rebuild()
-        os.remove(recall.DB_FILE)
+        os.remove(recall.db_file())
         self.assertEqual(recall.search(self.scope, q="walrus")["count"], 1)
 
     async def test_forgotten_passages_leave_every_result(self):

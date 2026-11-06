@@ -21,7 +21,7 @@ from services import bot_usage, bot_spend
 class SpendTests(unittest.TestCase):
     def setUp(self):
         bot_usage.drain()
-        for p in bot_usage.ROOT.glob("*"): p.unlink()
+        for p in bot_usage.root().glob("*"): p.unlink()
         self.now = datetime(2026, 10, 15, tzinfo=timezone.utc).timestamp()
         self.ctx = SimpleNamespace(reported_cost_usd=8)
         self.row = dict(id="spend-run", agent_id="spend-bot", started_at=self.now - 1, ended_at=self.now,

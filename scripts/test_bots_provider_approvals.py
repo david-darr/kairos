@@ -210,12 +210,12 @@ class CodexApprovals(ApprovalCase):
         self.assertEqual(sent[1]["result"], {"decision": "decline"})
 
     async def test_a_file_change_request_follows_edits_and_full(self):
-        from services.agent_service import AGENTS_DIR
+        from services.agent_service import agents_dir
         bot = make_bot("CdxB")
         agent_service.update(bot, approval_mode="edits")
         sid = make_thread(bot)
         peer, sent = await self.peer(bot, sid)
-        await peer.feed(json.dumps(self.request(bot_codex_transport.FILE_CHANGE, grantRoot=os.path.join(AGENTS_DIR, bot))))
+        await peer.feed(json.dumps(self.request(bot_codex_transport.FILE_CHANGE, grantRoot=os.path.join(agents_dir(), bot))))
         await peer.drain()
         self.assertEqual(sent[0]["result"], {"decision": "accept"})
 

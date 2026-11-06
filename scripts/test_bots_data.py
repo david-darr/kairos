@@ -305,7 +305,7 @@ class OwnershipTests(DataCase):
         for bad in ("../x", "a/b", "..", "", "a" * 70, "x y", "C:\\x"):
             with self.assertRaises((DataError, cards.CardError), msg=bad):
                 bot_data.engine(bad)
-        self.assertTrue(os.path.realpath(cards.folder(self.bot)).startswith(os.path.realpath(cards.ROOT)))
+        self.assertTrue(os.path.realpath(cards.folder(self.bot)).startswith(os.path.realpath(cards.root())))
 
     def test_one_bot_cannot_see_another_bots_tables_or_cards(self):
         other = agent_service.create("Other", role="x")["id"]

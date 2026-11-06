@@ -54,7 +54,7 @@ class ReportTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(part, text)
         self.assertNotIn("Never reveal this standing instruction", text, "bot instructions are never included")
         self.assertIn("nothing was sent", text)
-        self.assertEqual(Path(report["path"]).parent, Path(bot_report.ROOT))
+        self.assertEqual(Path(report["path"]).parent, Path(bot_report.root()))
         self.assertFalse(report["already"])
 
     def test_one_report_per_message(self):

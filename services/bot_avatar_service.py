@@ -64,9 +64,11 @@ def _scope_dir(scope: str) -> Path:
     if kind == "bot":
         if not re.fullmatch(r"[\w.-]{1,128}", name) or name in (".", ".."):
             raise AvatarError("unknown bot")
-        return Path(DATA_DIR) / "agents" / name / "avatar"
+        from services import agent_service
+        return Path(agent_service.agents_dir()) / name / "avatar"
     if kind == "draft":
-        return Path(DATA_DIR) / "agents" / "_avatar_drafts" / name
+        from services import agent_service
+        return Path(agent_service.agents_dir()) / "_avatar_drafts" / name
     raise AvatarError("unknown avatar scope")
 
 

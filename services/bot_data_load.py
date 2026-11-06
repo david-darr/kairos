@@ -27,7 +27,6 @@ from core.constants import DATA_DIR
 from services import bot_data
 from services.bot_data import DataError
 
-AGENTS_DIR = os.path.join(DATA_DIR, "agents")
 MAX_FILE_BYTES = 200 * 1024 * 1024
 MAX_URL_BYTES = 25 * 1024 * 1024
 MAX_TABLES_PER_LOAD = 25
@@ -41,7 +40,8 @@ MAX_EXPORT_NAME = 80
 def bot_folder(bot_id: str) -> str:
     if not re.match(r"^[A-Za-z0-9_-]{1,64}$", str(bot_id)):
         raise DataError("Unknown bot.", 404)
-    return os.path.join(AGENTS_DIR, bot_id)
+    from services import agent_service
+    return os.path.join(agent_service.agents_dir(), bot_id)
 
 
 def _inside(root: str, path: str) -> bool:

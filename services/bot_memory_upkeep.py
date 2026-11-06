@@ -27,7 +27,12 @@ from services import bot_turn_context as ctx
 
 logger = logging.getLogger(__name__)
 
-STATE_FILE = os.path.join(DATA_DIR, "bot-memory-state", "upkeep.json")
+STATE_FILE: Optional[str] = None  # a test can point it at its own file
+
+
+def state_file() -> str:
+    from core import accounts
+    return STATE_FILE or accounts.path("bot-memory-state", "upkeep.json")
 CHECK_EVERY = 600
 TIDY_TIME_DEFAULT = "03:00"
 CONTRADICTION_MIN_NOTES = 5
@@ -67,7 +72,7 @@ def settings() -> dict:
 
 
 def _load() -> dict:
-    data = read_json(STATE_FILE, {})
+    data = read_json(state_file(), {})
     return data if isinstance(data, dict) and isinstance(data.get("bots"), dict) else {"bots": {}}
 
 
@@ -79,7 +84,7 @@ def _bot_state(data: dict, bot_id: str) -> dict:
 def _update(bot_id: str, **fields) -> None:
     data = _load()
     _bot_state(data, bot_id).update(fields)
-    write_json_atomic(STATE_FILE, data)
+    write_json_atomic(state_file(), data)
 
 
 def bot_state(bot_id: str) -> dict:
@@ -89,7 +94,7 @@ def bot_state(bot_id: str) -> dict:
 def forget_bot(bot_id: str) -> None:
     data = _load()
     data["bots"].pop(bot_id, None)
-    write_json_atomic(STATE_FILE, data)
+    write_json_atomic(state_file(), data)
 
 
 # -- the daily log -------------------------------------------------------------------------------------------
@@ -123,7 +128,7 @@ def log_outcome(bot_id: str, run_id: str, text: str, now: Optional[float] = None
     data = _load()
     entry = _bot_state(data, bot_id)
     entry["logged"] = (entry["logged"] + [run_id])[-LOGGED_KEPT:]
-    write_json_atomic(STATE_FILE, data)
+    write_json_atomic(state_file(), data)
     return True
 
 

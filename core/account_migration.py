@@ -72,6 +72,21 @@ STEPS: list[Step] = [
     Step(3, "chats", ("sessions.db", "sessions.db-wal", "sessions.db-shm", "sessions.db.pre-v*",
                       "sessions.pre-sqlite-backup", "chat_tasks", "attachments", "events.json",
                       "agent_conversations.json")),
+    # Bots and Kip: each account's bots, their notebooks, memory, rooms, cards, routines' state, usage,
+    # calls and voice choices, and Kip's own folder (front_desk/). Install-level and left where they are:
+    # the shared skills library (bot-skills-library), speech models and runtime, Discord bots (group 6),
+    # Swarm (group 8), and bot secrets, keys, logins and connections (phase 3). Checked against the
+    # installed tabs and add-ons (data/tabs, data/addons): none reads these files directly.
+    Step(4, "bots and Kip", ("agents.json", "agents.json.*", "agents", "agent_voice.json", "call_voice.json",
+                             "agent_calls", "bot-attention.sqlite3*", "bot-grants-state.json", "bot-memory-state",
+                             "bot-recall", "bot-skill-state", "bot-teams", "bot-workspaces", "bot-profiles",
+                             "bot-room-files", "bot-tool-results", "bot-activity", "bot_approval_state.json",
+                             "bot_assignments.sqlite3*", "bot_automation_events.sqlite3*",
+                             "bot_automation_changes.json", "bot_cards.json", "bot_data", "bot_decisions",
+                             "bot_departments.json", "bot_onboarding.json", "bot_peer_state.json",
+                             "bot_rooms.sqlite3*", "bot_outbound.sqlite3*", "bot_usage", "bot_workbench.json",
+                             "bot_routine_trash.json", "bot_defaults.json", "bot_presets.json", "bot_reports",
+                             "bot_voice", "front_desk")),
 ]
 
 
@@ -100,6 +115,13 @@ def moved_names(data_dir: str = DATA_DIR) -> frozenset:
         version = layout_version(data_dir)
         names = _moved[data_dir] = frozenset(n for s in STEPS if s.version <= version for n in s.entries)
     return names
+
+
+def is_moved(name: str, data_dir: str = DATA_DIR) -> bool:
+    """Whether a top-level name now lives in account folders, wildcard entries included
+    ("bot_rooms.sqlite3*" covers the database and its -wal and -shm files)."""
+    names = moved_names(data_dir)
+    return name in names or any(any(ch in n for ch in "*?[") and fnmatch.fnmatch(name, n) for n in names)
 
 
 def _target_account() -> str:

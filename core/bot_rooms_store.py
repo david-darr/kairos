@@ -22,12 +22,15 @@ import threading
 import time
 import uuid
 
-from core import constants
+from core import accounts
 
-DB_FILE = os.path.join(constants.DATA_DIR, "bot_rooms.sqlite3")
+DB_FILE: str | None = None  # a test can point it at its own file
 _LOCK = threading.RLock()
-_CONN: sqlite3.Connection | None = None
-_CONN_PATH: str | None = None
+_CONNS: dict[str, sqlite3.Connection] = {}  # path -> connection: one per account
+
+
+def db_file() -> str:
+    return DB_FILE or accounts.path("bot_rooms.sqlite3")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS rooms(
@@ -79,21 +82,20 @@ class Stale(ValueError):
 
 
 def _conn() -> sqlite3.Connection:
-    global _CONN, _CONN_PATH
-    if _CONN is None or _CONN_PATH != DB_FILE:
-        if _CONN is not None:
-            _CONN.close()
-        os.makedirs(os.path.dirname(DB_FILE) or ".", exist_ok=True)
-        _CONN = sqlite3.connect(DB_FILE, check_same_thread=False, isolation_level=None)
-        _CONN.row_factory = sqlite3.Row
+    path = db_file()
+    conn = _CONNS.get(path)
+    if conn is None:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        conn = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
+        conn.row_factory = sqlite3.Row
         try:
-            _CONN.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA journal_mode=WAL")
         except sqlite3.DatabaseError:
             pass
-        _CONN.execute("PRAGMA busy_timeout=5000")
-        _CONN.executescript(SCHEMA)
-        _CONN_PATH = DB_FILE
-    return _CONN
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.executescript(SCHEMA)
+        _CONNS[path] = conn
+    return conn
 
 
 class _Tx:
@@ -116,11 +118,10 @@ def transaction() -> _Tx:
 
 
 def close() -> None:
-    global _CONN, _CONN_PATH
     with _LOCK:
-        if _CONN is not None:
-            _CONN.close()
-        _CONN, _CONN_PATH = None, None
+        for conn in _CONNS.values():
+            conn.close()
+        _CONNS.clear()
 
 
 def _new_id() -> str:

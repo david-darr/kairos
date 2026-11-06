@@ -132,13 +132,13 @@ class ProfileAndSoulTests(AgentTestCase):
     def test_existing_bots_switch_to_ajar_on_upgrade(self):
         from services import agent_service as module
         from core.atomic_io import read_json, write_json_atomic
-        before = read_json(module.AGENTS_FILE, {})
-        self.addCleanup(write_json_atomic, module.AGENTS_FILE, before)
+        before = read_json(module.agents_file(), {})
+        self.addCleanup(write_json_atomic, module.agents_file(), before)
         stored = dict(before)
         face = {'form': 'heart', 'color': '#4778FF', 'finish': 'matte', 'face': 'wink', 'accessory': 'bow'}
         stored['old1'] = {'id': 'old1', 'name': 'Old face', 'color': '#d99a92', 'created_at': 1, 'avatar': face}
         stored['old2'] = {'id': 'old2', 'name': 'No face', 'color': '#e88f8f', 'created_at': 2}
-        write_json_atomic(module.AGENTS_FILE, stored)
+        write_json_atomic(module.agents_file(), stored)
         upgraded = module.AgentService()
         first, second = upgraded.get('old1'), upgraded.get('old2')
         self.assertEqual(first['avatar']['color'], '#B9D2E3', 'the dot face colour maps to the nearest pastel')
@@ -146,13 +146,13 @@ class ProfileAndSoulTests(AgentTestCase):
         self.assertEqual(first['color'], '#b9d2e3', "the bot's colour follows its face")
         self.assertEqual(second['avatar']['color'], '#D99A92', 'a bot with no face keeps its own colour')
         self.assertNotIn('avatar_legacy', second)
-        self.assertTrue(all(module.is_ajar(agent['avatar']) for agent in read_json(module.AGENTS_FILE, {}).values()))
+        self.assertTrue(all(module.is_ajar(agent['avatar']) for agent in read_json(module.agents_file(), {}).values()))
         again = module.AgentService()
         self.assertEqual(again.get('old1')['avatar'], first['avatar'], 'the migration runs once and is stable')
 
     def soul_path(self):
-        from services.agent_service import AGENTS_DIR
-        return Path(AGENTS_DIR) / self.agent["id"] / "SOUL.md"
+        from services.agent_service import agents_dir
+        return Path(agents_dir()) / self.agent["id"] / "SOUL.md"
 
     def test_name_limit_and_existing_name(self):
         self.assertEqual(agent_service.update(self.agent["id"], name="N" * 40)["name"], "N" * 40)
@@ -197,8 +197,8 @@ class ProfileAndSoulTests(AgentTestCase):
         self.assertEqual(created.status_code, 200, created.text)
         self.addCleanup(self._remove, created.json()["id"])
         self.assertEqual(created.json()["soul"], "Start here.\n")
-        from services.agent_service import AGENTS_DIR
-        self.assertEqual((Path(AGENTS_DIR) / created.json()["id"] / "SOUL.md").read_bytes(), b"Start here.\n")
+        from services.agent_service import agents_dir
+        self.assertEqual((Path(agents_dir()) / created.json()["id"] / "SOUL.md").read_bytes(), b"Start here.\n")
 
     def test_soul_limit_counts_complete_utf8_bytes(self):
         text = "é" * 12000

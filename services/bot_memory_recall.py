@@ -29,8 +29,19 @@ from core.constants import DATA_DIR
 
 logger = logging.getLogger(__name__)
 
-DB_DIR = os.path.join(DATA_DIR, "bot-recall")
-DB_FILE = os.path.join(DB_DIR, "recall.sqlite")
+DB_DIR: Optional[str] = None  # a test can point it at its own folder
+DB_FILE: Optional[str] = None  # a test can point it at its own file
+
+
+def db_dir() -> str:
+    from core import accounts
+    return DB_DIR or accounts.path("bot-recall")
+
+
+def db_file() -> str:
+    return DB_FILE or os.path.join(db_dir(), "recall.sqlite")
+
+
 SCHEMA_VERSION = 1
 TURN_MEMORY, TURN_CHATS, TURN_CHARS = 4, 4, 6000
 SEARCH_DEFAULT, SEARCH_MAX = 12, 25
@@ -56,9 +67,10 @@ class RecallNotFound(RecallError):
 
 @contextmanager
 def _db():
-    os.makedirs(DB_DIR, exist_ok=True)
+    path = db_file()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with _LOCK:
-        conn = sqlite3.connect(DB_FILE, timeout=10)
+        conn = sqlite3.connect(path, timeout=10)
         conn.row_factory = sqlite3.Row
         try:
             _schema(conn)

@@ -7,6 +7,7 @@ from core import session_manager_store as store
 from core.session_manager import session_manager
 from core.untrusted import wrap_untrusted
 from services.agent_service import agent_service
+from services import agent_service as _agent_service_module
 from services.task_service import STOPPED_NOTE, task_service
 
 # 2026-10-14: five lets a coordinator fan out without unbounded model spend.
@@ -558,4 +559,4 @@ def _deleted_bot(bot_id):
 
 from core import bot_assignments as _assignments
 _assignments.on_change(_assignment_changed)
-agent_service.on_delete(_deleted_bot)
+_agent_service_module.on_delete(_deleted_bot)

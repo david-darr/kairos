@@ -37,9 +37,14 @@ def observe(bot, sid, endpoint, brain, usage, now=None):
         return
     if len(_idle) >= 20:
         _idle.pop(next(iter(_idle)))
+    from core import accounts
+    try:
+        account_id = accounts.effective_account()
+    except accounts.NoAccount:
+        return
     _idle[sid] = {"bot_id": bot["id"], "endpoint": dict(endpoint), "model": brain.model,
                   "messages": copy.deepcopy(messages), "tools": copy.deepcopy(tools),
-                  "last": now, "count": 0}
+                  "last": now, "count": 0, "account": account_id}
 
 
 def _busy(bot_id, sid):
@@ -106,15 +111,18 @@ async def tick(now=None, ping=None, busy=None):
         if task and not task.done(): continue
         if state["count"] >= 3:
             _idle.pop(sid, None); continue
-        if now - state["last"] < INTERVAL or busy(state["bot_id"], sid): continue
-        from services.bot_spend import budget
-        if budget()["near_cap"]: continue
-        state["last"], state["count"] = now, state["count"] + 1
-        async def work(ident=sid, snapshot=state):
-            try: await ping(ident, snapshot)
-            except Exception: log.exception("Cache read could not start")
-            finally: _tasks.pop(ident, None)
-        _tasks[sid] = asyncio.create_task(work())
+        # The chat's own account (Multi-Account group 4): the ping, its budget and usage land there.
+        from core import accounts
+        with accounts.as_account(state.get("account") or accounts.local_account()):
+            if now - state["last"] < INTERVAL or busy(state["bot_id"], sid): continue
+            from services.bot_spend import budget
+            if budget()["near_cap"]: continue
+            state["last"], state["count"] = now, state["count"] + 1
+            async def work(ident=sid, snapshot=state):
+                try: await ping(ident, snapshot)
+                except Exception: log.exception("Cache read could not start")
+                finally: _tasks.pop(ident, None)
+            _tasks[sid] = asyncio.create_task(work())
 
 
 def start():

@@ -27,7 +27,13 @@ MAX_REMOVED = 500
 MAX_FORGOTTEN = 200
 MAX_FACT_CHARS = 1000
 MIN_TERM_LETTERS = 3
-ROOT = os.path.join(DATA_DIR, "bot-profiles")
+ROOT: Optional[str] = None  # a test can point it at its own folder
+
+
+def root() -> str:
+    from core import accounts
+    return ROOT or accounts.path("bot-profiles")
+
 _LOCK = threading.RLock()
 
 
@@ -54,7 +60,7 @@ def owner_key(owner: str) -> str:
 
 
 def _dir(owner: str) -> str:
-    return os.path.join(ROOT, owner_key(owner))
+    return os.path.join(root(), owner_key(owner))
 
 
 def _hash(text: str) -> str:

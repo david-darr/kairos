@@ -12,10 +12,18 @@ import textwrap
 
 from core import call_voices
 from core.atomic_io import read_json, write_json_atomic
+from typing import Optional
+
 from core.constants import DATA_DIR
 from core.logs import scrub_credentials
 
-ROOT = Path(DATA_DIR) / "bot_voice"
+ROOT: Optional[Path] = None  # a test can point it at its own folder
+
+
+def root() -> Path:
+    from core import accounts
+    return ROOT or Path(accounts.path("bot_voice"))
+
 LOCK = threading.RLock()
 BOUNDARY = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"'])")
 SECRET = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY|\b(?:sk-|gh[pousr]_|github_pat_|AKIA)[A-Za-z0-9_-]{12,}|"
@@ -37,7 +45,7 @@ class VoiceError(ValueError):
 def private_dir(owner):
     if not owner:
         raise VoiceError("Sign in first.", 403)
-    return ROOT / hashlib.sha256(owner.encode()).hexdigest()[:24]
+    return root() / hashlib.sha256(owner.encode()).hexdigest()[:24]
 
 
 def save(path, value):

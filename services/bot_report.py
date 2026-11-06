@@ -18,10 +18,21 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from core.atomic_io import read_json, write_json_atomic
+from typing import Optional
+
 from core.constants import DATA_DIR
 
-ROOT = os.path.join(DATA_DIR, "bot_reports")
-INDEX = os.path.join(ROOT, "index.json")
+ROOT: Optional[str] = None  # a test can point it at its own folder
+INDEX: Optional[str] = None
+
+
+def root() -> str:
+    from core import accounts
+    return ROOT or accounts.path("bot_reports")
+
+
+def index_file() -> str:
+    return INDEX or os.path.join(root(), "index.json")
 LIMITS = {"went_wrong": 2000, "you_saw": 3000, "steps": 2000}
 MESSAGE_CHARS = 2000
 LOG_LINES = 300
@@ -89,7 +100,7 @@ def _message(user: str, session_id: str, message_id: str) -> tuple[dict, str]:
 
 
 def _index() -> dict:
-    value = read_json(INDEX, {})
+    value = read_json(index_file(), {})
     return value if isinstance(value, dict) else {}
 
 
@@ -97,17 +108,17 @@ def _prune(index: dict, now: float) -> None:
     for key, row in list(index.items()):
         if now - float(row.get("created_at") or 0) > KEEP_SECONDS:
             try:
-                os.remove(os.path.join(ROOT, row["id"] + ".md"))
+                os.remove(os.path.join(root(), row["id"] + ".md"))
             except OSError:
                 pass
             del index[key]
 
 
 def _view(row: dict, already: bool) -> dict:
-    path = os.path.join(ROOT, row["id"] + ".md")
+    path = os.path.join(root(), row["id"] + ".md")
     with open(path, encoding="utf-8") as handle:
         markdown = handle.read()
-    return {"id": row["id"], "path": path, "folder": ROOT, "markdown": markdown, "created_at": row["created_at"], "already": already}
+    return {"id": row["id"], "path": path, "folder": root(), "markdown": markdown, "created_at": row["created_at"], "already": already}
 
 
 def draft(user: str, *, session_id: str, message_id: str, went_wrong: str, you_saw: str = "", steps: str = "",
@@ -118,12 +129,12 @@ def draft(user: str, *, session_id: str, message_id: str, went_wrong: str, you_s
     now = time.time() if now is None else now
     key = f"{user}\n{session_id}\n{message_id}"
     with _LOCK:
-        os.makedirs(ROOT, exist_ok=True)
+        os.makedirs(root(), exist_ok=True)
         index = _index()
         _prune(index, now)
         earlier = index.get(key)
-        if earlier and os.path.exists(os.path.join(ROOT, earlier["id"] + ".md")):
-            write_json_atomic(INDEX, index)
+        if earlier and os.path.exists(os.path.join(root(), earlier["id"] + ".md")):
+            write_json_atomic(index_file(), index)
             return _view(earlier, already=True)
         ident = uuid.uuid4().hex
         when = datetime.fromtimestamp(now, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -140,11 +151,11 @@ def draft(user: str, *, session_id: str, message_id: str, went_wrong: str, you_s
             "## Bots", "", *(_clean(line) for line in _health(user)), "",
             f"## Recent log ({len(logs)} lines)", "", "```", *(_clean(line.rstrip("\n")).replace("```", "'''") for line in logs), "```", "",
         ])
-        with open(os.path.join(ROOT, ident + ".md"), "w", encoding="utf-8") as handle:
+        with open(os.path.join(root(), ident + ".md"), "w", encoding="utf-8") as handle:
             handle.write(body)
         row = {"id": ident, "owner_user": user, "session_id": session_id, "message_id": message_id, "created_at": now}
         index[key] = row
-        write_json_atomic(INDEX, index)
+        write_json_atomic(index_file(), index)
         return _view(row, already=False)
 
 
@@ -153,6 +164,6 @@ def get(user: str, ident: str) -> dict:
         raise HTTPException(404, "Report not found")
     with _LOCK:
         row = next((r for r in _index().values() if r["id"] == ident and r.get("owner_user") == user), None)
-        if not row or not os.path.exists(os.path.join(ROOT, ident + ".md")):
+        if not row or not os.path.exists(os.path.join(root(), ident + ".md")):
             raise HTTPException(404, "Report not found")
         return _view(row, already=True)

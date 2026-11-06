@@ -26,7 +26,10 @@ BEFORE = json.loads((FIXTURE / "agents.json").read_text(encoding="utf-8"))
 RESEARCHER, WRITER, PLANNER = (next(i for i, a in BEFORE.items() if a["name"] == n) for n in ("Researcher", "Writer", "Planner"))
 
 from core import bot_rooms_store  # noqa: E402
-from services.agent_service import agent_service  # noqa: E402  the record upgrade and memory migration run here
+from services.agent_service import agent_service  # noqa: E402
+# The record upgrade and memory migration run when an account's bots are first loaded (Multi-Account group 4:
+# one registry per account, loaded on first use); a start loads each account's when it sets up Kip.
+agent_service.list_agents()
 from services import bot_attention, bot_routines  # noqa: E402
 from core.session_manager import session_manager  # noqa: E402
 

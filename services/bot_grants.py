@@ -34,7 +34,13 @@ from core import bot_tool_catalog as catalog
 from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
 
-STATE_FILE = os.path.join(DATA_DIR, "bot-grants-state.json")
+STATE_FILE: Optional[str] = None  # a test can point it at its own file
+
+
+def state_file() -> str:
+    from core import accounts
+    return STATE_FILE or accounts.path("bot-grants-state.json")
+
 RECEIPT_SECONDS = 600
 _LOCK = threading.RLock()
 _receipts: dict = {}
@@ -145,21 +151,21 @@ def revision(scope) -> int:
         raise ScopeError("no such bot")
     digest = _fingerprint(record)
     with _LOCK:
-        state = read_json(STATE_FILE, {})
+        state = read_json(state_file(), {})
         state = state if isinstance(state, dict) else {}
         entry = state.get(scope.bot_id) or {"rev": 0, "hash": None}
         if entry["hash"] != digest:
             entry = {"rev": int(entry["rev"]) + 1, "hash": digest}
             state[scope.bot_id] = entry
-            write_json_atomic(STATE_FILE, state)
+            write_json_atomic(state_file(), state)
     return int(entry["rev"])
 
 
 def remove_bot(bot_id: str) -> None:
     with _LOCK:
-        state = read_json(STATE_FILE, {})
+        state = read_json(state_file(), {})
         if isinstance(state, dict) and state.pop(bot_id, None) is not None:
-            write_json_atomic(STATE_FILE, state)
+            write_json_atomic(state_file(), state)
         for key in [k for k in _receipts if k[0] == bot_id]:
             _receipts.pop(key, None)
 

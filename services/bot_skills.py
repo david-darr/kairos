@@ -68,11 +68,13 @@ def checked(path):
 
 
 def state_path(bot_id, filename="skills.json"):
-    return checked(Path(DATA_DIR) / "bot-skill-state" / ident(bot_id) / filename)
+    from core import accounts
+    return checked(Path(accounts.path("bot-skill-state")) / ident(bot_id) / filename)
 
 
 def workspace(bot_id, skill_name):
-    return checked(Path(DATA_DIR) / "bot-workspaces" / ident(bot_id) / "skills" / name(skill_name))
+    from core import accounts
+    return checked(Path(accounts.path("bot-workspaces")) / ident(bot_id) / "skills" / name(skill_name))
 
 
 def read_json(path, default):

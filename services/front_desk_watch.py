@@ -15,10 +15,17 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from core.atomic_io import write_json_atomic
+from typing import Optional
+
 from core.constants import DATA_DIR
 
 logger = logging.getLogger(__name__)
-DIRECTORY = os.path.join(DATA_DIR, "front_desk")
+DIRECTORY: Optional[str] = None  # a test can point it at its own folder
+
+
+def directory() -> str:
+    from core import accounts
+    return DIRECTORY or accounts.path("front_desk")
 LOCK = threading.RLock()
 
 
@@ -26,7 +33,7 @@ def read(name, default=None):
     # Fail closed on an unreadable stamp instead of recreating a deleted watch.
     with LOCK:
         try:
-            with open(os.path.join(DIRECTORY, name + ".json"), encoding="utf-8-sig") as handle:
+            with open(os.path.join(directory(), name + ".json"), encoding="utf-8-sig") as handle:
                 return json.load(handle)
         except FileNotFoundError:
             return deepcopy({} if default is None else default)
@@ -34,7 +41,7 @@ def read(name, default=None):
 
 def write(name, value):
     with LOCK:
-        write_json_atomic(os.path.join(DIRECTORY, name + ".json"), value)
+        write_json_atomic(os.path.join(directory(), name + ".json"), value)
 
 
 def bot_id():

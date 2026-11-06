@@ -97,8 +97,8 @@ def guard_path(path: str) -> str:
 
 
 def _activity_path() -> str:
-    from core.constants import DATA_DIR
-    return os.path.join(DATA_DIR, "bot-activity", "highlevel.jsonl")
+    from core import accounts
+    return accounts.path("bot-activity", "highlevel.jsonl")
 
 
 def record_activity(bot_id: str, tool: str, summary: str, ok: bool) -> None:

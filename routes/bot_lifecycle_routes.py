@@ -218,13 +218,13 @@ async def report_folder(user: str = Depends(require_admin)):
     import subprocess
     import sys
     from services import bot_report
-    os.makedirs(bot_report.ROOT, exist_ok=True)
+    os.makedirs(bot_report.root(), exist_ok=True)
     if sys.platform.startswith("win"):
-        os.startfile(bot_report.ROOT)  # noqa: S606 - our own data folder
+        os.startfile(bot_report.root())  # noqa: S606 - our own data folder
     elif sys.platform == "darwin":
-        subprocess.Popen(["open", bot_report.ROOT], shell=False)
+        subprocess.Popen(["open", bot_report.root()], shell=False)
     else:
-        subprocess.Popen(["xdg-open", bot_report.ROOT], shell=False)
+        subprocess.Popen(["xdg-open", bot_report.root()], shell=False)
     return {"ok": True}
 
 

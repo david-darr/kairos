@@ -101,7 +101,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         agent_service._agents[self.bot["id"]]["builtin"] = "front_desk"
         self.bot = agent_service.get(self.bot["id"])
         self.main = self.h.thread(self.bot)
-        write_json_atomic(os.path.join(tasks.DIRECTORY, "state.json"),
+        write_json_atomic(os.path.join(tasks.directory(), "state.json"),
                           {"bot_id": self.bot["id"], "main_thread_id": self.main})
         tasks.write_rows("tasks", [])
         tasks.write_rows("suggestions", [])

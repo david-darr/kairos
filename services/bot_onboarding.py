@@ -4,6 +4,7 @@ import copy
 import hashlib
 import os
 from pathlib import Path
+from typing import Optional
 import re
 import threading
 import time
@@ -11,7 +12,13 @@ import time
 from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
 
-FILE = Path(DATA_DIR) / "bot_onboarding.json"
+FILE: Optional[Path] = None  # a test can point it at its own file
+
+
+def file_path() -> Path:
+    from core import accounts
+    return FILE or Path(accounts.path("bot_onboarding.json"))
+
 LOCK = threading.RLock()
 DEFAULT = {"welcome_seen": False, "tour": {"done": False, "step": 0, "variant": "simple"},
            "hints_seen": [], "notices": {}, "setup_checked_at": None}
@@ -32,13 +39,13 @@ def key(owner):
 
 def state(owner):
     with LOCK:
-        stored = read_json(str(FILE), {}).get("people", {}).get(key(owner), {})
+        stored = read_json(str(file_path()), {}).get("people", {}).get(key(owner), {})
         return copy.deepcopy({**DEFAULT, **stored})
 
 
 def patch(owner, changes):
     with LOCK:
-        all_people = read_json(str(FILE), {})
+        all_people = read_json(str(file_path()), {})
         result = state(owner)
         if set(changes) - {"welcome_seen", "tour", "hints", "notices"}:
             raise OnboardingError("Unknown onboarding field.")
@@ -74,9 +81,9 @@ def patch(owner, changes):
 
 
 def _save(value):
-    write_json_atomic(str(FILE), value)
+    write_json_atomic(str(file_path()), value)
     try:
-        os.chmod(FILE, 0o600)
+        os.chmod(file_path(), 0o600)
     except OSError:
         pass
 
@@ -129,7 +136,7 @@ async def setup(owner, recheck=False, now=None):
     now = time.time() if now is None else now
     # Persist the reservation before awaiting checks, so concurrent rechecks cannot race.
     with LOCK:
-        people = read_json(str(FILE), {})
+        people = read_json(str(file_path()), {})
         stored = people.setdefault("people", {}).setdefault(key(owner), copy.deepcopy(DEFAULT))
         last = stored.get("setup_checked_at")
         if last is not None and now - last < 10:
@@ -141,7 +148,7 @@ async def setup(owner, recheck=False, now=None):
         _save(people)
     result = {"checked_at": now, "checks": await checks(owner)}
     with LOCK:
-        people = read_json(str(FILE), {})
+        people = read_json(str(file_path()), {})
         people["people"][key(owner)]["setup"] = result
         _save(people)
     return result

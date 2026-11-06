@@ -360,30 +360,52 @@ def _future(stamp) -> bool:
         return False
 
 
+def _bot_homes() -> dict:
+    """bot id -> the account it belongs to (Multi-Account group 4: each account has its own bots; the
+    routines themselves stay in one file until group 5)."""
+    from core import accounts
+    homes = {}
+    for account_id in accounts.all_accounts():
+        with accounts.as_account(account_id):
+            for agent in agent_service.list_agents():
+                homes.setdefault(agent["id"], account_id)
+    return homes
+
+
+def _in_bot_account(task, homes):
+    """Run a routine's work as its bot's account, so its turn, chat and memory land there. A routine whose
+    bot is in no account is handled where all background work used to run, the first admin's."""
+    from core import accounts
+    return accounts.as_account(homes.get(task.get("agent_id")) or accounts.local_account())
+
+
 async def tick(now: Optional[float] = None) -> None:
     """One pass of the Bots lane. Never waits on a run."""
     global _started_up
     now = _now() if now is None else now
+    homes = _bot_homes()
     if not _started_up:
         _started_up = True
-        _startup_runs()
+        _startup_runs(homes)
     for task in list(task_service.list_tasks()):
         routine = task.get("routine")
         if not routine or not task.get("agent_id") or task.get("schedule_kind") == "card":
             continue
         try:
-            if routine.get("kind") == "event":
-                _dispatch_events(task, now)
-                continue
-            _refresh_reset_times(task)
-            _dispatch_retry(task, now)
-            if task_service.is_due(task["id"]):
-                _dispatch_scheduled(task, now)
+            with _in_bot_account(task, homes):
+                if routine.get("kind") == "event":
+                    _dispatch_events(task, now)
+                    continue
+                _refresh_reset_times(task)
+                _dispatch_retry(task, now)
+                if task_service.is_due(task["id"]):
+                    _dispatch_scheduled(task, now)
         except Exception:
             logger.exception("routine %s: the lane could not handle it", task.get("id"))
 
 
-def _startup_runs() -> None:
+def _startup_runs(homes: Optional[dict] = None) -> None:
+    homes = _bot_homes() if homes is None else homes
     for task in list(task_service.list_tasks()):
         if not bot_routines.is_routine(task) or not task.get("enabled") or not task.get("routine"):
             continue
@@ -393,7 +415,8 @@ def _startup_runs() -> None:
             status["last_startup_launch"] = LAUNCH_ID
             task_service._save_tasks()
             try:
-                _spawn(task, "startup")
+                with _in_bot_account(task, homes):
+                    _spawn(task, "startup")
             except RuntimeError:
                 pass
 

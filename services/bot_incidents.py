@@ -219,11 +219,11 @@ async def report(bot_id, thread_id, kind="failed", detail="", *, event_id=None):
     escalation = kind in ESCALATIONS
     chief_id = bot_chief.chief_for(bot_id)
     if escalation:
-        peer_state = teams.load(teams.root().parent / "bot_peer_state.json", {})
+        from services import bot_peers
+        peer_state = teams.load(bot_peers.state_path(), {})
         if not peer_state.get("chief_escalations", False) or not chief_id:
             return {"suppressed": True}
         bot_chief.authorize(chief_id, "escalate", bot_id)
-        from services import bot_peers
         if not bot_peers.can_reach(chief_id, bot_id):
             return {"suppressed": True}
     with teams.LOCK:

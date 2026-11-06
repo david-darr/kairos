@@ -389,10 +389,10 @@ class CodexBrain:
     def _agent_roots(self) -> list[str]:
         """Where an agent run may write besides its working folder (the
         vault): generated files and the agent's own folder."""
-        from services.agent_service import AGENTS_DIR
+        from services.agent_service import agents_dir
         roots = [image_gen.GENERATED_FILES_DIR]
         if self.agent_id:
-            roots.append(os.path.join(AGENTS_DIR, self.agent_id))
+            roots.append(os.path.join(agents_dir(), self.agent_id))
             from services import bot_memory_store
             roots.append(str(bot_memory_store.workspace(self.agent_id)))
         for root in roots:

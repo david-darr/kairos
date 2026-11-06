@@ -5,12 +5,19 @@ import re
 import threading
 import unicodedata
 from pathlib import Path
+from typing import Optional
 
 from core.atomic_io import write_json_atomic
 from core.constants import DATA_DIR
 from core.untrusted import wrap_untrusted
 
-STATE_PATH = Path(DATA_DIR) / "bot_peer_state.json"
+STATE_PATH: Optional[Path] = None  # a test can point it at its own file
+
+
+def state_path() -> Path:
+    from core import accounts
+    return STATE_PATH or Path(accounts.path("bot_peer_state.json"))
+
 _LOCK = threading.RLock()
 DEFAULTS = {"version": 1, "approve_peer_comms": {}, "loop_guard": {
     "steer_at": 5, "stop_at": None, "enabled": False}, "chief_escalations": False}
@@ -23,7 +30,7 @@ class StateUnavailable(RuntimeError):
 def state():
     with _LOCK:
         try:
-            value = json.loads(STATE_PATH.read_text(encoding="utf-8-sig"))
+            value = json.loads(state_path().read_text(encoding="utf-8-sig"))
             if not isinstance(value, dict) or value.get("version") != 1:
                 raise ValueError("unknown peer state")
             result = copy.deepcopy(DEFAULTS)
@@ -56,7 +63,7 @@ def save_loop(value):
     with _LOCK:
         data = state()
         data["loop_guard"] = dict(value)
-        write_json_atomic(str(STATE_PATH), data)
+        write_json_atomic(str(state_path()), data)
     return dict(value)
 
 
@@ -150,7 +157,7 @@ def set_reach(bot_id, *, mode, peers=(), acknowledge_scope=False, expected_revis
         _service().update(bot_id, expected_revision=expected_revision, peers=proposed)
         if approve_peer_comms is not None:
             data["approve_peer_comms"][bot_id] = approve_peer_comms
-            write_json_atomic(str(STATE_PATH), data)
+            write_json_atomic(str(state_path()), data)
         return view(bot_id)
 
 
@@ -161,7 +168,7 @@ def set_peer_comms(bot_id, approve):
     with _LOCK:
         data = state()
         data["approve_peer_comms"][bot_id] = approve
-        write_json_atomic(str(STATE_PATH), data)
+        write_json_atomic(str(state_path()), data)
 
 
 def authorize(bot, target, action="coordinate_bots", *, approved=False, session_id=None):

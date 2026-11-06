@@ -12,10 +12,11 @@ import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Optional
 
-from core.constants import DATA_DIR
+from core import accounts
 
-PATH = Path(DATA_DIR) / "bot_assignments.sqlite3"
+PATH: Optional[str] = None  # a test can point it at its own file
 TERMINAL = frozenset(("completed", "failed", "cancelled"))
 STATUSES = TERMINAL | {"queued", "running", "needs_input", "waiting", "resume"}
 OUTCOMES = {"done", "needs_input", "stalled", "interrupted", "budget", "provider_error", "denied",
@@ -30,11 +31,16 @@ class Refused(ValueError):
     pass
 
 
+def db_path() -> str:
+    return PATH or accounts.path("bot_assignments.sqlite3")
+
+
 @contextmanager
 def _db():
     with _LOCK:
-        PATH.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(PATH, timeout=15)
+        path = Path(db_path())
+        path.parent.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(path, timeout=15)
         connection.row_factory = sqlite3.Row
         try:
             connection.executescript("""

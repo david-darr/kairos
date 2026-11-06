@@ -24,9 +24,9 @@ from datetime import datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from core.constants import DATA_DIR
+from core import accounts
 
-DB_FILE = os.path.join(DATA_DIR, "bot_outbound.sqlite3")
+DB_FILE: Optional[str] = None  # a test can point it at its own file
 RESERVED, COMMITTED, UNCERTAIN, RELEASED = "reserved", "committed", "uncertain", "released"
 CONSUMING = (RESERVED, COMMITTED, UNCERTAIN)
 KEEP_DAYS = 45
@@ -51,9 +51,13 @@ CREATE INDEX IF NOT EXISTS reservations_day ON reservations (owner, bot_id, date
 """
 
 
+def db_file() -> str:
+    return DB_FILE or accounts.path("bot_outbound.sqlite3")
+
+
 def _connect() -> sqlite3.Connection:
     global _ready_for
-    path = DB_FILE
+    path = db_file()
     conn = sqlite3.connect(path, timeout=15, isolation_level=None)
     conn.row_factory = sqlite3.Row
     if _ready_for != path:
