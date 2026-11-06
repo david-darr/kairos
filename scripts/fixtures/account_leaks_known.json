@@ -1,0 +1,39 @@
+{
+ "leaks": [
+  "bea reads david's data via GET /api/calendar/events/{event_id}",
+  "bea reads david's data via GET /api/chat/references",
+  "bea reads david's data via GET /api/documents",
+  "bea reads david's data via GET /api/documents/{doc_id}",
+  "bea reads david's data via GET /api/models/choices",
+  "bea reads david's data via GET /api/notes",
+  "bea reads david's data via GET /api/projects",
+  "bea reads david's data via GET /api/projects/{project_id}",
+  "bea reads david's data via GET /api/skills",
+  "bea reads david's data via GET /api/skills/{slug}",
+  "bea reads david's data via GET /api/vault/graph",
+  "david reads bea's data via GET /api/calendar/events/{event_id}",
+  "david reads bea's data via GET /api/chat/references",
+  "david reads bea's data via GET /api/designs",
+  "david reads bea's data via GET /api/designs/{design_id}",
+  "david reads bea's data via GET /api/documents",
+  "david reads bea's data via GET /api/documents/{doc_id}",
+  "david reads bea's data via GET /api/notes",
+  "david reads bea's data via GET /api/projects",
+  "david reads bea's data via GET /api/projects/{project_id}",
+  "david reads bea's data via GET /api/sessions",
+  "david reads bea's data via GET /api/sessions/{session_id}",
+  "david reads bea's data via GET /api/skills",
+  "david reads bea's data via GET /api/skills/{slug}",
+  "david reads bea's data via GET /api/system/status",
+  "david reads bea's data via GET /api/tasks",
+  "david reads bea's data via GET /api/tasks/{task_id}",
+  "david reads bea's data via GET /api/vault/activity",
+  "david reads bea's data via GET /api/vault/graph"
+ ],
+ "bea_denied": [
+  "bea cannot create bots: denied 403",
+  "bea cannot create hooks: denied 403",
+  "bea cannot create model connections: denied 403",
+  "bea cannot create triggers: denied 403"
+ ]
+}
