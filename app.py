@@ -150,11 +150,6 @@ async def lifespan(_app: FastAPI):
     skills_service.seed_default_skills()
     from core import addons
     addons.migrate()
-    try:
-        refreshed = addons.refresh()
-        if refreshed: logging.getLogger(__name__).info('Refreshed add-on files: %s', ', '.join(refreshed))
-    except Exception:
-        logging.getLogger(__name__).exception('Add-on refresh failed; continuing')
     if addons.enabled('roblox'):
         custom_tabs.mount_one(_app, 'roblox')
     # Moves already-enabled built-ins onto a wall-clock schedule when their
@@ -365,6 +360,18 @@ app.include_router(design_routes.render_router)
 # Tabs the user builds live in the data directory so app updates can't wipe
 # them (David's ask 2026-09-03). migrate_user_tabs() relocates any created by
 # an older build, before discovery runs.
+# An app update can change an installed add-on's files (the Roblox tab lives in one): refresh them
+# before the tabs mount, so the tab loads the new code instead of failing once.
+def _refresh_addons():
+    from core import addons
+    try:
+        refreshed = addons.refresh()
+        if refreshed: logging.getLogger(__name__).info('Refreshed add-on files: %s', ', '.join(refreshed))
+    except Exception:
+        logging.getLogger(__name__).exception('Add-on refresh failed; continuing')
+
+
+_refresh_addons()
 custom_tabs.migrate_user_tabs()
 custom_tabs.mount_all(app)
 app.include_router(system_routes.custom_views_router)
