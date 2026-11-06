@@ -1232,8 +1232,16 @@ export async function render(container, tabId, options = {}) {
   });
   input.addEventListener("input", () => {
     historyIndex = -1;
-    input.style.height = "auto";
-    input.style.height = Math.min(input.scrollHeight, 200) + "px";
+    // Writing height:auto then reading scrollHeight forces a synchronous reflow
+    // of the whole transcript on every keystroke (about 75 ms with 200 messages
+    // in 2.2.0). Only touch the height when it has to change: grow when the text
+    // overflows, and do the full reset only while the box is taller than one line.
+    if (input.scrollHeight > input.clientHeight) {
+      input.style.height = Math.min(input.scrollHeight, 200) + "px";
+    } else if (input.offsetHeight > (parseFloat(getComputedStyle(input).minHeight) || 0) + 1) {
+      input.style.height = "auto";
+      input.style.height = Math.min(input.scrollHeight, 200) + "px";
+    }
   });
   input.addEventListener("paste", async event => {
     const images = [...(event.clipboardData?.files || [])].filter(file => file.type.startsWith("image/"));
@@ -1446,7 +1454,9 @@ function toggleMenu(menu, headerAnchor = null) {
     return;
   }
   // Composer menus open clear of the whole prompt card, never over the text being typed.
-  fitMenu(menu, menu.parentElement, { prefer: menu.classList.contains('below') ? 'below' : 'above', gap: 8, cap: 320, keepSide: true, clear: matchMedia('(min-width: 769px)').matches ? menu.closest('.chat-input-bar') : null });
+  // 2.2.1: on phones the + menu also clears the whole composer (its last row was hidden under it) and may be taller.
+  const phoneMenu = !matchMedia('(min-width: 769px)').matches && menu.id === 'overflow-menu';
+  fitMenu(menu, menu.parentElement, { prefer: menu.classList.contains('below') ? 'below' : 'above', gap: 8, cap: phoneMenu ? 460 : 320, keepSide: true, clear: (phoneMenu || matchMedia('(min-width: 769px)').matches) ? menu.closest('.chat-input-bar') : null });
 }
 function closeMenu(menu) { menu.classList.add("hidden"); }
 

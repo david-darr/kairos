@@ -15,7 +15,18 @@ export const keyboardLift = (height, viewport) => {
 // layout viewport, so they land on the keyboard's top edge.
 export function watchKeyboard(node) {
   const lifted = () => { const lift = mobileOn() ? keyboardLift(innerHeight, window.visualViewport) : 0; return lift ? lift + belowFold() : 0; };
-  const update = () => node.style.setProperty('--ms-keyboard', `${lifted()}px`);
+  // 2.2.1: an iOS home-screen app can leave the page scrolled once the keyboard
+  // closes, which strands bottom-docked surfaces (the chat bar) part or all of the
+  // way off screen. With the keyboard down the app shell never scrolls, so put it
+  // back. The lift is also capped so a bad reading can't throw the bar off the top.
+  let wasLifted = false;
+  const update = () => {
+    let lift = lifted();
+    lift = Math.min(lift, Math.round(innerHeight * 0.7));
+    node.style.setProperty('--ms-keyboard', `${lift}px`);
+    if (!lift && wasLifted && mobileOn() && (window.scrollY || document.documentElement.scrollTop)) window.scrollTo(0, 0);
+    wasLifted = lift > 0;
+  };
   update(); window.visualViewport?.addEventListener('resize', update); window.visualViewport?.addEventListener('scroll', update); window.addEventListener('resize', update);
   phone.addEventListener('change', update); document.addEventListener('kairos:appearance', update);
   return () => { window.visualViewport?.removeEventListener('resize', update); window.visualViewport?.removeEventListener('scroll', update); window.removeEventListener('resize', update); phone.removeEventListener('change', update); document.removeEventListener('kairos:appearance', update); node.style.removeProperty('--ms-keyboard'); };

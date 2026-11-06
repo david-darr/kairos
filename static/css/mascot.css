@@ -162,3 +162,9 @@ kairos-mascot[still] * { animation: none !important; transition: none !important
 :root:not([data-mascot="off"]) .agent-call-orb::before, :root:not([data-mascot="off"]) .agent-call-orb-core { display: none; }
 :root:not([data-mascot="off"]) .agent-call-orb kairos-mascot { display: block; width: 100%; height: 100%; --m-stage: var(--ui-wash, var(--bg-panel-solid)); }
 .agent-call-orb .ajar:is([data-state=listening], [data-state=speaking]) .aj-voice { opacity: calc(.14 + var(--m-v) * .4); transform: scale(calc(1 + var(--m-v) * .32)); }
+
+/* 2.2.1: every assistant message carries a mascot, and laying out hundreds of
+   them made each send re-layout the whole chat (about 250 ms at 200 messages).
+   The mascot always has a fixed size, so it can skip its own layout and paint
+   while it is off screen without moving anything around it. */
+.msg kairos-mascot { contain: strict; content-visibility: auto; }
