@@ -353,6 +353,7 @@ app.include_router(video_routes.router)
 app.include_router(design_routes.router)
 app.include_router(design_routes.systems_router)
 app.include_router(design_routes.render_router)
+from routes import library_routes; app.include_router(library_routes.router)  # shared library (Multi-Account phase 5)
 
 # Developer Mode (David's ask 2026-09-01) — the only app.py edit a custom
 # tab ever needs. Eligible folder tabs and approved legacy routes get
