@@ -6,7 +6,7 @@ import re
 from core import session_manager_store as store
 from core.atomic_io import read_json
 from core.auth import SINGLE_USER
-from services.task_service import TASKS_FILE, TASK_RUNS_FILE
+from services.task_service import runs_file, tasks_file
 
 
 def home_week(user: str, week: str | None = None) -> dict:
@@ -52,10 +52,10 @@ def home_week(user: str, week: str | None = None) -> dict:
 
     # This is one row per execution, including live runs. Model telemetry can
     # contain several runs for one routine, so counting it would double-count.
-    tasks = read_json(TASKS_FILE, {})
+    tasks = read_json(tasks_file(), {})
     unavailable = ['notes_done']  # Notes have updated_at, not completed_at, and no owner.
     missing_start = False
-    for run in read_json(TASK_RUNS_FILE, []):
+    for run in read_json(runs_file(), []):
         task = tasks.get(run.get('task_id'), {})
         owner = next((task.get(k) for k in ('owner_user', 'owner', 'user_id', 'created_by') if task.get(k)), None)
         owned = owner == user if owner else owns_session(task.get('origin_session_id'))

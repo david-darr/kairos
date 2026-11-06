@@ -20,7 +20,7 @@ from core.constants import DATA_DIR
 from core.vault import resolve_vault_dir
 from services.notes_service import notes_service
 from services.skills_service import SKILLS_DIR, create_skill, get_skill, list_skills
-from services.task_service import TASKS_FILE, task_service
+from services.task_service import task_service
 
 BACKUP_VERSION = 1
 
@@ -138,7 +138,7 @@ def wipe(kind: str) -> None:
         write_json_atomic(notes_service._file, [])  # this account's notes only
         notes_service._notes = {}
     elif kind == "tasks":
-        write_json_atomic(TASKS_FILE, [])
+        write_json_atomic(task_service._file, [])
         task_service._tasks = {}
     elif kind == "skills":
         for skill_dir in glob.glob(os.path.join(SKILLS_DIR, "*")):

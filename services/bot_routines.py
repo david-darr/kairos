@@ -62,7 +62,11 @@ TRASH_MAX = 50
 OUTPUT_BOUND, ERROR_BOUND = 4000, 1000
 EVENT_MAX_EVENTS, EVENT_MAX_CHARS, EVENT_MAX_PENDING = 20, 48000, 3
 RECEIPTS_KEPT = 200
-BACKUP_FILE = task_module.TASKS_FILE + ".pre-routines.bak"
+BACKUP_FILE = None  # a test can point it at its own file
+
+
+def backup_file() -> str:
+    return BACKUP_FILE or task_module.tasks_file() + ".pre-routines.bak"
 
 # Everything the person configures (the snapshot Undo restores). Status and
 # the revision are not configuration.
@@ -347,9 +351,9 @@ def normalize_config(raw: dict, *, partial: bool = False, owner: Optional[str] =
 
 def _backup_once() -> None:
     """Before the first routine write, keep a copy of tasks.json."""
-    if not os.path.exists(BACKUP_FILE) and os.path.exists(task_module.TASKS_FILE):
+    if not os.path.exists(backup_file()) and os.path.exists(task_module.tasks_file()):
         try:
-            shutil.copyfile(task_module.TASKS_FILE, BACKUP_FILE)
+            shutil.copyfile(task_module.tasks_file(), backup_file())
         except OSError:
             pass
 

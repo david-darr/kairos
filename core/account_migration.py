@@ -87,6 +87,11 @@ STEPS: list[Step] = [
                              "bot_rooms.sqlite3*", "bot_outbound.sqlite3*", "bot_usage", "bot_workbench.json",
                              "bot_routine_trash.json", "bot_defaults.json", "bot_presets.json", "bot_reports",
                              "bot_voice", "front_desk")),
+    # Tasks, cards and routines with their run history and the routines' first-write copy, webhooks and
+    # triggers, and lifecycle hooks. The outbox and helpers live in the chat database (step 3). Checked
+    # against the installed tabs and add-ons: the job tab only goes through task_service.
+    Step(5, "tasks, routines, triggers and hooks", ("tasks.json", "tasks.json.*", "task_runs.json",
+                                                    "triggers.json", "hooks.json")),
 ]
 
 

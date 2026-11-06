@@ -148,24 +148,24 @@ class LegacyTranslation(RoutineCase):
     async def test_an_old_goal_is_read_as_a_routine_without_a_write_until_it_is_edited(self):
         goal = task_service.create_task("Old goal", "check things", "daily", run_time="06:00", agent_id=self.bot["id"],
                                         time_zone="America/New_York", weekdays=[0, 2], owner_user="local")
-        if os.path.exists(bot_routines.BACKUP_FILE):
-            os.remove(bot_routines.BACKUP_FILE)
-        before = Path(task_module.TASKS_FILE).read_bytes()
+        if os.path.exists(bot_routines.backup_file()):
+            os.remove(bot_routines.backup_file())
+        before = Path(task_module.tasks_file()).read_bytes()
         view = bot_routines.get_routine("local", True, goal["id"])
         self.assertTrue(view["legacy"])
         self.assertEqual(view["schedule"], {"kind": "daily", "time": "06:00", "time_zone": "America/New_York",
                                             "weekdays": [0, 2]})
-        self.assertEqual(Path(task_module.TASKS_FILE).read_bytes(), before, "reading writes nothing")
+        self.assertEqual(Path(task_module.tasks_file()).read_bytes(), before, "reading writes nothing")
         self.assertNotIn("routine", task_service.get_task(goal["id"]))
-        self.assertFalse(os.path.exists(bot_routines.BACKUP_FILE), "no backup until the first write")
+        self.assertFalse(os.path.exists(bot_routines.backup_file()), "no backup until the first write")
         edited = bot_routines.patch("local", True, goal["id"], {"overlap": "queue"}, view["revision"])
         self.assertFalse(edited["legacy"])
         self.assertEqual(edited["overlap"], "queue")
         self.assertEqual(task_service.get_task(goal["id"])["id"], goal["id"], "the id survives")
-        self.assertEqual(Path(bot_routines.BACKUP_FILE).read_bytes(), before, "one backup, taken first")
+        self.assertEqual(Path(bot_routines.backup_file()).read_bytes(), before, "one backup, taken first")
         second = bot_routines.patch("local", True, goal["id"], {"name": "Old goal again"}, edited["revision"])
         self.assertEqual(second["name"], "Old goal again")
-        self.assertEqual(Path(bot_routines.BACKUP_FILE).read_bytes(), before, "the backup is never overwritten")
+        self.assertEqual(Path(bot_routines.backup_file()).read_bytes(), before, "the backup is never overwritten")
 
     async def test_legacy_revision_changes_when_the_goal_does(self):
         goal = task_service.create_task("Rev goal", "x", "interval", interval_seconds=3600, agent_id=self.bot["id"],

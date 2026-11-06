@@ -69,14 +69,25 @@ from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
 import os
 
-TASKS_FILE = os.path.join(DATA_DIR, "tasks.json")
+# Overrides a test can point at its own files; otherwise each account has its own tasks, cards and
+# routines (Multi-Account group 5): tasks.json and task_runs.json in the account folder.
+TASKS_FILE = None
+TASK_RUNS_FILE = None
+
+
+def tasks_file() -> str:
+    from core import accounts
+    return TASKS_FILE or accounts.path("tasks.json")
+
+
+def runs_file(tasks_path: str = None) -> str:
+    return TASK_RUNS_FILE or os.path.join(os.path.dirname(tasks_path or tasks_file()), "task_runs.json")
 
 
 def _hook(event: str, data: dict) -> None:
     """The person's lifecycle hooks (services/hook_service.py); notify-only."""
     from services.hook_service import hook_service
     hook_service.emit(event, data)
-TASK_RUNS_FILE = os.path.join(DATA_DIR, "task_runs.json")
 
 # Kept per task, so a task that runs every few minutes cannot push another
 # task's or card's history out (one shared cap of 200 did, 2026-10-02).
@@ -103,9 +114,11 @@ CARD_RESULT_INSTRUCTION = (
 
 
 class TaskService:
-    def __init__(self) -> None:
-        self._tasks: dict = read_json(TASKS_FILE, {})
-        self._runs: list = read_json(TASK_RUNS_FILE, [])
+    def __init__(self, file: str = None) -> None:
+        self._file = file or tasks_file()
+        self._runs_file = runs_file(self._file)
+        self._tasks: dict = read_json(self._file, {})
+        self._runs: list = read_json(self._runs_file, [])
         # Builds through 1.15 wrote run records without an id; everything
         # since looks records up by it, so one left over stopped startup
         # (2.1.0, 2026-10-15). Give each one an id once, on load.
@@ -113,10 +126,10 @@ class TaskService:
         for run in legacy:
             run["id"] = uuid.uuid4().hex[:12]
         if legacy:
-            write_json_atomic(TASK_RUNS_FILE, self._runs)
+            write_json_atomic(self._runs_file, self._runs)
 
     def _save_tasks(self) -> None:
-        write_json_atomic(TASKS_FILE, self._tasks)
+        write_json_atomic(self._file, self._tasks)
 
     def _save_runs(self) -> None:
         counts: dict = {}
@@ -132,7 +145,7 @@ class TaskService:
                 if run["id"] not in active:
                     counts[run["task_id"]] = seen + 1
         self._runs = kept[::-1]
-        write_json_atomic(TASK_RUNS_FILE, self._runs)
+        write_json_atomic(self._runs_file, self._runs)
 
     def list_tasks(self) -> list[dict]:
         return sorted(self._tasks.values(), key=lambda t: t["created_at"], reverse=True)
@@ -1065,4 +1078,6 @@ def _advance_routine(task: dict, now: float) -> list[str]:
     return [m.isoformat() for m in skipped][-MAX_RUNS_PER_TASK:]
 
 
-task_service = TaskService()
+from core import accounts as _accounts
+
+task_service = _accounts.PerAccount(TaskService, tasks_file)

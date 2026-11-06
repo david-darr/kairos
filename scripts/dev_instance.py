@@ -227,6 +227,12 @@ def switch_off(data_dir: Path, vault_copy: str) -> dict:
 
     report = {}
     tasks_file = data_dir / "tasks.json"
+    try:  # the account layout may have moved it into the account folder (core/account_migration.py)
+        account = json.loads((data_dir / "layout.json").read_text(encoding="utf-8")).get("account")
+    except (OSError, ValueError):
+        account = None
+    if account and (data_dir / "accounts" / account / "tasks.json").exists():
+        tasks_file = data_dir / "accounts" / account / "tasks.json"
     tasks = read_json(str(tasks_file), {})
     disabled, held = [], []
     for task in tasks.values():

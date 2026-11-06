@@ -40,7 +40,17 @@ from core.secret_storage import decrypt, encrypt
 
 logger = logging.getLogger(__name__)
 
-HOOKS_FILE = os.path.join(DATA_DIR, "hooks.json")
+HOOKS_FILE = None  # a test can point it at its own file
+
+
+def hooks_file() -> str:
+    """The current account's hooks (Multi-Account group 5)."""
+    from core import accounts
+    return HOOKS_FILE or accounts.path("hooks.json")
+
+
+# Listeners hear every account's events (connected-app triggers subscribe once, at start).
+_LISTENERS: list = []
 
 EVENTS = {
     "tool.before": "Before a tool runs",
@@ -95,14 +105,15 @@ def render(template: str, payload: dict) -> str:
 
 
 class HookService:
-    def __init__(self) -> None:
-        data = read_json(HOOKS_FILE, {})
+    def __init__(self, file: str = None) -> None:
+        self._file = file or hooks_file()
+        data = read_json(self._file, {})
         self._hooks: dict = data.get("hooks", {})
         self.paused: bool = bool(data.get("paused"))
         self._in_flight: set = set()
         # In-process listeners for every emitted event (Bots Phase 3 U4: connected-app triggers that
         # watch Kairos's own activity). They never change what a hook does and never raise into the emitter.
-        self._listeners: list = []
+        self._listeners = _LISTENERS
 
     def subscribe(self, listener) -> None:
         if listener not in self._listeners:
@@ -122,7 +133,7 @@ class HookService:
                 logger.exception("hook listener failed for %s", event)
 
     def _save(self) -> None:
-        write_json_atomic(HOOKS_FILE, {"hooks": self._hooks, "paused": self.paused})
+        write_json_atomic(self._file, {"hooks": self._hooks, "paused": self.paused})
 
     # -- the hooks -----------------------------------------------------------------
 
@@ -486,4 +497,6 @@ def _kill_tree(pid: int) -> None:
         pass
 
 
-hook_service = HookService()
+from core import accounts as _accounts
+
+hook_service = _accounts.PerAccount(HookService, hooks_file)

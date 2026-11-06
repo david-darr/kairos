@@ -19,7 +19,7 @@ from core.atomic_io import write_json_atomic
 from core.middleware import require_user
 from routes.system_routes import custom_views_router
 from services.home_week import home_week
-from services.task_service import TASKS_FILE, TASK_RUNS_FILE
+from services.task_service import tasks_file, runs_file
 
 
 def stamp(day, hour=0, minute=0):
@@ -31,8 +31,8 @@ class WeekTests(unittest.IsolatedAsyncioTestCase):
         with store.transaction() as conn:
             conn.execute('DELETE FROM messages')
             conn.execute('DELETE FROM sessions')
-        write_json_atomic(TASKS_FILE, {})
-        write_json_atomic(TASK_RUNS_FILE, [])
+        write_json_atomic(tasks_file(), {})
+        write_json_atomic(runs_file(), [])
         self.user = 'alice'
         app = FastAPI()
         app.include_router(custom_views_router)
@@ -80,8 +80,8 @@ class WeekTests(unittest.IsolatedAsyncioTestCase):
         self.session('a', 'alice', [('user', stamp('2026-10-20', 10))])
         self.session('b', 'bob', [('user', stamp('2026-10-20', 10))])
         self.session('legacy', None, [('user', stamp('2026-10-20', 10))])
-        write_json_atomic(TASKS_FILE, {'a': {'owner_user': 'alice'}, 'b': {'owner_user': 'bob'}, 'shared': {}})
-        write_json_atomic(TASK_RUNS_FILE, [{'task_id': key, 'started_at': stamp('2026-10-20', 12)} for key in ('a', 'b', 'shared')])
+        write_json_atomic(tasks_file(), {'a': {'owner_user': 'alice'}, 'b': {'owner_user': 'bob'}, 'shared': {}})
+        write_json_atomic(runs_file(), [{'task_id': key, 'started_at': stamp('2026-10-20', 12)} for key in ('a', 'b', 'shared')])
         data = await self.week()
         self.assertEqual(data['totals']['chats'], 1)
         self.assertEqual(data['totals']['agent_runs'], 1)
@@ -91,24 +91,24 @@ class WeekTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data['totals']['agent_runs'], 0)
 
     async def test_runs_not_messages_and_boundaries(self):
-        write_json_atomic(TASKS_FILE, {'a': {'owner_user': 'alice'}})
-        write_json_atomic(TASK_RUNS_FILE, [{'task_id': 'a', 'started_at': stamp(day, hour)} for day, hour in
+        write_json_atomic(tasks_file(), {'a': {'owner_user': 'alice'}})
+        write_json_atomic(runs_file(), [{'task_id': 'a', 'started_at': stamp(day, hour)} for day, hour in
                                          [('2026-10-18', 23), ('2026-10-19', 0), ('2026-10-19', 12), ('2026-10-25', 23), ('2026-10-26', 0)]])
         data = await self.week()
         self.assertEqual(data['totals']['agent_runs'], 3)
         self.assertEqual([data['slots'][i]['agent_runs'] for i in (0, 1, 13)], [1, 1, 1])
 
     async def test_old_runs_do_not_use_finish_time(self):
-        write_json_atomic(TASKS_FILE, {'a': {'owner_user': 'alice'}})
-        write_json_atomic(TASK_RUNS_FILE, [{'task_id': 'a', 'ran_at': stamp('2026-10-20')}])
+        write_json_atomic(tasks_file(), {'a': {'owner_user': 'alice'}})
+        write_json_atomic(runs_file(), [{'task_id': 'a', 'ran_at': stamp('2026-10-20')}])
         data = await self.week()
         self.assertEqual(data['totals']['agent_runs'], 0)
         self.assertIn('agent_runs', data['unavailable'])
 
     async def test_origin_owner_live_and_queued_runs(self):
         self.session('origin', 'alice', [])
-        write_json_atomic(TASKS_FILE, {'a': {'origin_session_id': 'origin'}})
-        write_json_atomic(TASK_RUNS_FILE, [
+        write_json_atomic(tasks_file(), {'a': {'origin_session_id': 'origin'}})
+        write_json_atomic(runs_file(), [
             {'task_id': 'a', 'started_at': stamp('2026-10-20', 9), 'outcome': 'running'},
             {'task_id': 'a', 'started_at': None, 'admitted_at': stamp('2026-10-20', 9), 'outcome': 'queued'},
             {'task_id': 'a', 'ran_at': stamp('2026-10-18', 9)},

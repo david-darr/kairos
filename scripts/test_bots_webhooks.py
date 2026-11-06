@@ -142,7 +142,7 @@ class WebhookTests(unittest.TestCase):
         listed = json.dumps(self.client.get("/api/bot-webhooks").json())
         self.assertNotIn(self.secret_of(hook), listed)
         self.assertNotIn("secret", self.client.get("/api/bot-webhooks").json()["webhooks"][0])
-        self.assertNotIn(self.secret_of(hook), Path(trigger_module.TRIGGERS_FILE).read_text(), "stored encrypted")
+        self.assertNotIn(self.secret_of(hook), Path(trigger_module.triggers_file()).read_text(), "stored encrypted")
         mine = self.client.get(f"/api/bot-webhooks/{hook['id']}/address")
         self.assertEqual(mine.status_code, 200)
         self.assertEqual(mine.json()["address"], hook["address"])

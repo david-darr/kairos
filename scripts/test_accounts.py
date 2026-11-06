@@ -268,7 +268,7 @@ class Migration(unittest.TestCase):
                                      backup=kwargs.pop("backup", self.backup), **kwargs)
 
     def test_group_one_moves_its_five_stores(self):
-        self.assertEqual([s.version for s in account_migration.STEPS], [1, 2, 3, 4], "group 4 added the bots step")
+        self.assertEqual([s.version for s in account_migration.STEPS], [1, 2, 3, 4, 5], "group 5 added the tasks step")
         self.assertEqual(set(account_migration.STEPS[0].entries), {
             "notes.json", "calendar_events.json", "documents", "documents_index.json", "projects.json", "contacts.json"})
         (self.data / "documents").mkdir()
@@ -360,8 +360,8 @@ class Stores(unittest.TestCase):
         with accounts.as_account(self.ids["bea"]):
             self.assertEqual(accounts.path("documents", "a.md"),
                              os.path.join(accounts.ACCOUNTS_DIR, self.ids["bea"], "documents", "a.md"))
-            self.assertEqual(accounts.path("tasks.json"), os.path.join(_DATA.name, "tasks.json"),
-                             "routines have not moved yet")
+            self.assertEqual(accounts.path("email_accounts.json"), os.path.join(_DATA.name, "email_accounts.json"),
+                             "mail has not moved yet")
 
     def setUp(self):
         fresh_users()
@@ -1081,22 +1081,26 @@ class BotsPerAccount(unittest.TestCase):
         self.assertNotEqual(first_task["id"], second_task["id"])
         self.assertEqual((first_task["agent_id"], second_task["agent_id"]), (first_bot, second_bot))
 
-    def test_the_routine_runner_runs_a_routine_as_its_bots_account(self):
+    def test_the_routine_runner_starts_up_once_per_account(self):
         from core import bot_routine_runner
-        from services import agent_service as agent_service_module
-        bots = {}
-        for account_id in (self.first, self.second):
-            with accounts.as_account(account_id):
-                bots[account_id] = agent_service_module.agent_service.create("Runner")["id"]
-        homes = bot_routine_runner._bot_homes()
-        self.assertEqual({homes[b]: a for a, b in bots.items()}, {a: a for a in bots})
-        for account_id, bot_id in bots.items():
-            with bot_routine_runner._in_bot_account({"agent_id": bot_id}, homes):
-                self.assertEqual(accounts.current_account(), account_id)
-        with bot_routine_runner._in_bot_account({"agent_id": "no-such-bot"}, homes):
-            self.assertEqual(accounts.current_account(), accounts.local_account())
-        with bot_routine_runner._in_bot_account({}, homes):
-            self.assertEqual(accounts.current_account(), accounts.local_account())
+        saved = set(bot_routine_runner._started_up)
+        self.addCleanup(lambda: (bot_routine_runner._started_up.clear(), bot_routine_runner._started_up.update(saved)))
+        bot_routine_runner.start_up_state()
+        self.assertEqual(bot_routine_runner._started_up, set())
+        with patch.object(bot_routine_runner, "_startup_runs") as startup:
+            with accounts.as_account(self.first):
+                asyncio.run(bot_routine_runner.tick())
+            self.assertEqual(bot_routine_runner._started_up, {self.first}, "only the account that ticked")
+            self.assertEqual(startup.call_count, 1)
+            with accounts.as_account(self.first):
+                asyncio.run(bot_routine_runner.tick())
+            self.assertEqual(startup.call_count, 1, "not twice for the same account")
+            with accounts.as_account(self.second):
+                asyncio.run(bot_routine_runner.tick())
+            self.assertEqual(bot_routine_runner._started_up, {self.first, self.second})
+            self.assertEqual(startup.call_count, 2, "the second account still gets its own start-up")
+            bot_routine_runner.start_up_state()
+            self.assertEqual(bot_routine_runner._started_up, set(), "a fresh process starts every account again")
 
     def test_keep_warm_remembers_the_account_a_chat_belongs_to(self):
         from types import SimpleNamespace
@@ -1202,6 +1206,191 @@ class BotsMigration(unittest.TestCase):
             self.assertEqual(accounts.path("bot_rooms.sqlite3"),
                              os.path.join(accounts.account_dir(account_id), "bot_rooms.sqlite3"))
             self.assertEqual(accounts.path("bot-skills-library"), os.path.join(_DATA.name, "bot-skills-library"))
+
+
+class TasksPerAccount(unittest.TestCase):
+    """Group 5: each account has its own tasks, cards, routines, hooks and triggers, and the scheduler's lanes."""
+
+    @classmethod
+    def setUpClass(cls):
+        account_migration.run(_DATA.name, backup=lambda path: None)  # layout 5, as app.py leaves it
+        assert "tasks.json" in account_migration.moved_names()
+
+    def setUp(self):
+        from core import session_manager_store
+        self.addCleanup(session_manager_store.close)
+        fresh_users()
+        auth_manager.create_user("david-darr", "password-one-1", is_admin=True)
+        auth_manager.create_user("bea", "password-two-2")
+        self.first, self.second = (auth_manager.account_id(n) for n in ("david-darr", "bea"))
+
+    def make_task(self, account_id, name="A task"):
+        from services.task_service import task_service
+        with accounts.as_account(account_id):
+            task = task_service.create_task(name, "do it", "interval", interval_seconds=3600)
+        self.addCleanup(self.delete_task, account_id, task["id"])
+        return task
+
+    @staticmethod
+    def delete_task(account_id, task_id):
+        from services.task_service import task_service
+        with accounts.as_account(account_id):
+            task_service.delete_task(task_id)
+
+    @staticmethod
+    def delete_hook(account_id, hook_id):
+        from services.hook_service import hook_service
+        with accounts.as_account(account_id):
+            hook_service.delete(hook_id)
+
+    @staticmethod
+    def delete_trigger(account_id, trigger_id):
+        from services.trigger_service import trigger_service
+        with accounts.as_account(account_id):
+            trigger_service.delete(trigger_id)
+
+    def test_a_task_is_listed_only_in_its_own_account(self):
+        from services.task_service import task_service
+        task = self.make_task(self.first, "First's task")
+        with accounts.as_account(self.first):
+            self.assertIn(task["id"], [t["id"] for t in task_service.list_tasks()])
+            self.assertIsNotNone(task_service.get_task(task["id"]))
+        with accounts.as_account(self.second):
+            self.assertNotIn(task["id"], [t["id"] for t in task_service.list_tasks()])
+            self.assertIsNone(task_service.get_task(task["id"]))
+
+    def test_the_task_and_run_files_sit_in_each_account_folder(self):
+        from services import task_service as task_module
+        self.make_task(self.first)
+        self.make_task(self.second)
+        for account_id in (self.first, self.second):
+            with accounts.as_account(account_id):
+                folder = accounts.account_dir(account_id)
+                self.assertEqual(task_module.tasks_file(), os.path.join(folder, "tasks.json"))
+                self.assertEqual(task_module.runs_file(), os.path.join(folder, "task_runs.json"))
+                self.assertTrue(os.path.exists(task_module.tasks_file()), "created in the account folder")
+        self.assertFalse(os.path.exists(os.path.join(_DATA.name, "tasks.json")), "nothing at the shared place")
+
+    def test_a_test_can_still_point_the_tasks_at_its_own_file(self):
+        from services import task_service as task_module
+        own = os.path.join(_DATA.name, "own-tasks", "tasks.json")
+        with patch.object(task_module, "TASKS_FILE", own):
+            self.assertEqual(task_module.tasks_file(), own)
+            self.assertEqual(task_module.runs_file(), os.path.join(os.path.dirname(own), "task_runs.json"),
+                             "the run history is its sibling")
+            with accounts.as_account(self.second):
+                self.assertEqual(task_module.tasks_file(), own, "whatever the account")
+
+    def test_a_hook_is_listed_only_in_its_own_account(self):
+        from services.hook_service import hook_service
+        with accounts.as_account(self.first):
+            hook = hook_service.create("First's hook", event="chat.reply", action="vault_note",
+                                       config={"path": "Logs/x.md"})
+            self.addCleanup(self.delete_hook, self.first, hook["id"])
+            self.assertEqual([h["id"] for h in hook_service.hooks()], [hook["id"]])
+            self.assertTrue(os.path.exists(os.path.join(accounts.account_dir(), "hooks.json")))
+        with accounts.as_account(self.second):
+            self.assertEqual(hook_service.hooks(), [])
+            self.assertIsNone(hook_service.get(hook["id"]))
+
+    def test_a_listener_added_in_one_account_hears_every_accounts_events(self):
+        from services import hook_service as hook_module
+        service = hook_module.hook_service
+        heard = []
+        listener = lambda event, data: heard.append(event)
+        with accounts.as_account(self.first):
+            service.subscribe(listener)
+        self.addCleanup(service.unsubscribe, listener)
+        with accounts.as_account(self.second):
+            self.assertIn(listener, service.current()._listeners)
+            self.assertIs(service.current()._listeners, hook_module._LISTENERS)
+            service.current()._notify_listeners("chat.reply", {})
+        self.assertEqual(heard, ["chat.reply"])
+
+    def test_a_trigger_is_found_by_the_account_that_owns_it(self):
+        from services.trigger_service import owning_account, trigger_service
+        with accounts.as_account(self.second):
+            trigger, _secret = trigger_service.create("Bea's trigger")
+        self.addCleanup(self.delete_trigger, self.second, trigger["id"])
+        with accounts.as_account(self.first):
+            self.assertIsNone(trigger_service.get(trigger["id"]))
+        self.assertTrue(os.path.exists(os.path.join(accounts.account_dir(self.second), "triggers.json")))
+        self.assertIsNone(accounts.current_account())
+        with owning_account(trigger["id"]):
+            self.assertEqual(accounts.current_account(), self.second)
+            self.assertIsNotNone(trigger_service.get(trigger["id"]))
+        self.assertIsNone(accounts.current_account())
+        with owning_account("no-such-trigger"):
+            self.assertEqual(accounts.current_account(), accounts.local_account())
+            self.assertEqual(accounts.current_account(), self.first, "the first admin's, as before")
+
+    def test_each_account_has_its_own_scheduler_lanes(self):
+        from core import task_scheduler
+        loop = asyncio.new_event_loop()
+        self.addCleanup(loop.close)
+        pending = loop.create_future()
+        saved = dict(task_scheduler._lanes)
+        self.addCleanup(lambda: (task_scheduler._lanes.clear(), task_scheduler._lanes.update(saved)))
+        task_scheduler._lanes[(self.first, "card")] = pending
+        self.assertFalse(task_scheduler._lane_free("card", self.first), "busy in the first account")
+        self.assertTrue(task_scheduler._lane_free("card", self.second), "free in the second")
+        self.assertTrue(task_scheduler._lane_free("schedule", self.first), "another lane of the same account")
+        self.assertIs(task_scheduler.lane("card", self.first), pending)
+        self.assertIsNone(task_scheduler.lane("card", self.second))
+        with accounts.as_account(self.first):
+            self.assertIs(task_scheduler.lane("card"), pending, "the current account's by default")
+        with accounts.as_account(self.second):
+            self.assertIsNone(task_scheduler.lane("card"))
+        pending.set_result(None)
+        self.assertTrue(task_scheduler._lane_free("card", self.first), "free again once it is done")
+
+    def test_schedules_are_migrated_in_every_account_but_built_ins_switch_on_in_the_local_one(self):
+        from core import builtin_tasks
+        seen = []
+        with patch.object(builtin_tasks, "_migrate_schedules",
+                          side_effect=lambda: seen.append(accounts.current_account()) or 1):
+            self.assertEqual(builtin_tasks.migrate_builtin_schedules(), 2, "the counts add up")
+        self.assertEqual(sorted(seen), sorted([self.first, self.second]))
+        seen.clear()
+        with patch.object(builtin_tasks, "_autoenable",
+                          side_effect=lambda: seen.append(accounts.current_account()) or ["sync_all"]):
+            self.assertEqual(builtin_tasks.autoenable_builtins(), ["sync_all"])
+        self.assertEqual(seen, [accounts.local_account()])
+        self.assertEqual(seen, [self.first], "only the first admin's account")
+
+
+class TasksMigration(unittest.TestCase):
+    """Migration step 5: tasks, routines, triggers and hooks move into the account folder."""
+
+    MOVES = ("tasks.json", "tasks.json.pre-routines.bak", "task_runs.json", "triggers.json", "hooks.json")
+    STAYS = ("email_accounts.json", "jobs.json", "settings.json")
+
+    def setUp(self):
+        self.root = TemporaryDirectory(prefix="kairos-layout5-", dir=tempfile.gettempdir())
+        self.addCleanup(self.root.cleanup)
+        self.data = Path(self.root.name)
+        self.account = self.data / "accounts" / "abc123"
+
+    def test_the_task_stores_move_and_the_rest_stays(self):
+        for name in self.MOVES + self.STAYS:
+            (self.data / name).write_text(name, encoding="utf-8")
+        (self.data / "layout.json").write_text(json.dumps({"version": 4}), encoding="utf-8")
+        step = account_migration.STEPS[4]
+        self.assertEqual(step.version, 5)
+        result = account_migration.run(str(self.data), [step], account="abc123",
+                                       backup=lambda path: Path(path).write_text("backup", encoding="utf-8"))
+        self.assertTrue(result["ok"], result)
+        self.assertEqual((result["from_version"], result["to_version"]), (4, 5))
+        for name in self.MOVES:
+            self.assertEqual((self.account / name).read_text(encoding="utf-8"), name, f"{name} moved")
+            self.assertFalse((self.data / name).exists(), f"{name} left the top level")
+        for name in self.STAYS:
+            self.assertEqual((self.data / name).read_text(encoding="utf-8"), name, f"{name} stays at the top")
+            self.assertFalse((self.account / name).exists(), f"{name} must not be in the account folder")
+        self.assertEqual(account_migration.layout_version(str(self.data)), 5)
+        self.assertTrue(account_migration.is_moved("tasks.json.pre-routines.bak", str(self.data)))
+        self.assertFalse(account_migration.is_moved("email_accounts.json", str(self.data)))
+        account_migration._moved.pop(str(self.data), None)
 
 
 if __name__ == "__main__":

@@ -219,7 +219,7 @@ class TriggerTests(unittest.TestCase):
         listed = self.client.get("/api/triggers").json()["triggers"][0]
         self.assertNotIn("secret", listed)
         self.assertNotIn(trigger["secret"], json.dumps(listed))
-        self.assertNotIn(trigger["secret"], Path(trigger_module.TRIGGERS_FILE).read_text(), "stored encrypted")
+        self.assertNotIn(trigger["secret"], Path(trigger_module.triggers_file()).read_text(), "stored encrypted")
         fresh = self.client.post(f"/api/triggers/{trigger['id']}/secret").json()["secret"]
         self.assertEqual(self.post(trigger, delivery="old").status_code, 403, "the old secret stops working")
         self.assertEqual(self.post(trigger, secret=fresh, delivery="new").status_code, 202)

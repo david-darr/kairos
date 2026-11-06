@@ -415,6 +415,15 @@ def autoenable_builtins() -> list[str]:
     task for this action" — otherwise disabling one would just bring it back
     on the next launch, which is worse than never enabling it at all.
     """
+    from core import accounts
+    # The first admin's account only, where these always ran (Multi-Account group 5: tasks are per account).
+    # Mail and the synced sources are still one per install until group 6; switching triage on in every
+    # account would read the same mailbox into each. Group 6 turns them on per account.
+    with accounts.as_account(accounts.local_account()):
+        return _autoenable()
+
+
+def _autoenable() -> list[str]:
     from core.settings import get_setting, update_settings
     from services.task_service import task_service
 
@@ -456,6 +465,15 @@ def migrate_builtin_schedules() -> int:
     no UI for editing a task's schedule, so an interval here can only be the
     old default, never a deliberate choice.
     """
+    from core import accounts
+    migrated = 0
+    for account_id in accounts.all_accounts():  # every account's tasks (Multi-Account group 5)
+        with accounts.as_account(account_id):
+            migrated += _migrate_schedules()
+    return migrated
+
+
+def _migrate_schedules() -> int:
     from services.task_service import task_service  # local: avoids an import cycle
 
     migrated = 0

@@ -32,6 +32,8 @@ from services.agent_service import AdmissionDenied, agent_service, is_silent
 from services.task_service import task_service
 from services.bot_spend import SpendCap
 
+from core import accounts
+
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL_SECONDS = 15
@@ -47,8 +49,9 @@ _running: dict[str, asyncio.Task] = {}
 # occurrence is claimed. A second tick must leave that claim to it rather
 # than skipping the occurrence out from under it (2026-10-13).
 _scheduled: set[str] = set()
-# The two lanes' current background run (_tick).
-_lanes: dict[str, Optional[asyncio.Task]] = {"schedule": None, "card": None}
+# The two lanes' current background run (_tick), per account (Multi-Account group 5): one account's long
+# run never holds up another's. Keyed (account id, "schedule" | "card").
+_lanes: dict[tuple, Optional[asyncio.Task]] = {}
 # The regular MCP server check (core/mcp_client.check_all, roadmap phase 6).
 _mcp_check: dict = {"task": None, "last": 0.0}
 
@@ -475,16 +478,37 @@ async def _run_due() -> None:
                         task["name"], task["id"])
 
 
-def _lane_free(name: str) -> bool:
-    lane = _lanes[name]
+def lane(name: str, account_id: Optional[str] = None) -> Optional[asyncio.Task]:
+    """A lane's current run for an account (the current one by default)."""
+    return _lanes.get((account_id or accounts.effective_account(), name))
+
+
+def _lane_free(name: str, account_id: str = "") -> bool:
+    lane = _lanes.get((account_id, name))
     return lane is None or lane.done()
 
 
 async def _tick() -> None:
-    """One pass of the loop: start a lane that is free and has work, and send
-    the outbox's due messages. Never waits on a run."""
+    """One pass of the loop, for every account (Multi-Account group 5: each has its own tasks, cards,
+    outbox and bot notebooks): start a lane that is free and has work, and send the outbox's due
+    messages. A run started here keeps its account. Never waits on a run."""
     loop = asyncio.get_running_loop()
-    if _lane_free("schedule"):
+    for account_id in accounts.all_accounts():
+        with accounts.as_account(account_id):
+            try:
+                await _tick_account(loop, account_id)
+            except Exception:
+                logger.exception("scheduler: the pass for account %s failed", account_id)
+    _check_mcp_servers(loop)
+    try:
+        from services.bot_keep_warm import tick
+        await tick()
+    except Exception:
+        logger.exception("cache upkeep tick failed")
+
+
+async def _tick_account(loop, account_id: str) -> None:
+    if _lane_free("schedule", account_id):
         try:
             has_due = any(not t.get("routine") for t in task_service.due_tasks())
         except Exception:
@@ -492,18 +516,12 @@ async def _tick() -> None:
             logger.exception("scheduler: could not scan for due tasks")
             has_due = False
         if has_due:
-            _lanes["schedule"] = loop.create_task(_run_due())
-    if _lane_free("card"):
+            _lanes[(account_id, "schedule")] = loop.create_task(_run_due())
+    if _lane_free("card", account_id):
         # One card per pass (see dispatch_cards).
-        _lanes["card"] = loop.create_task(dispatch_cards())
+        _lanes[(account_id, "card")] = loop.create_task(dispatch_cards())
     await outbox.send_due()
     await _memory_tick()
-    _check_mcp_servers(loop)
-    try:
-        from services.bot_keep_warm import tick
-        await tick()
-    except Exception:
-        logger.exception("cache upkeep tick failed")
 
 
 async def _memory_tick() -> None:
@@ -577,24 +595,28 @@ async def _bots_loop() -> None:
     background workers, so no routine ever holds up another."""
     from core import bot_routine_runner
     while True:
-        try:
-            await bot_routine_runner.tick()
-        except Exception:
-            logger.exception("routine lane iteration failed")
+        for account_id in accounts.all_accounts():  # each account's routines and bots (Multi-Account group 5)
+            try:
+                with accounts.as_account(account_id):
+                    await bot_routine_runner.tick()
+            except Exception:
+                logger.exception("routine lane iteration failed")
         await asyncio.sleep(bot_routine_runner.TICK_SECONDS)
 
 
 def start() -> None:
     global _loop_task, _bots_task
     if _loop_task is None:
-        outbox.recover()
-        helpers.recover()
-        lost = task_service.recover_interrupted_runs()
-        for task in lost:
-            _report_lost(task)
         from core import bot_routine_runner
         bot_routine_runner.start_up_state()
-        bot_routine_runner.recover(lost)
+        for account_id in accounts.all_accounts():  # each account's queue, helpers and cut-off runs
+            with accounts.as_account(account_id):
+                outbox.recover()
+                helpers.recover()
+                lost = task_service.recover_interrupted_runs()
+                for task in lost:
+                    _report_lost(task)
+                bot_routine_runner.recover(lost)
         _loop_task = asyncio.create_task(_poll_loop())
         _bots_task = asyncio.create_task(_bots_loop())
         logger.info("task_scheduler started (poll every %ss, routines every %ss)", POLL_INTERVAL_SECONDS,

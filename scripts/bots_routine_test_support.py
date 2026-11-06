@@ -18,7 +18,7 @@ os.environ["JARVIS_DATA_DIR"] = DATA.name
 os.environ.pop("NO_COLOR", None)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import bot_routine_checks, bot_routine_runner as runner, runs, task_scheduler  # noqa: E402
+from core import accounts, bot_routine_checks, bot_routine_runner as runner, runs, task_scheduler  # noqa: E402
 from services import bot_limit_resets, bot_routines  # noqa: E402
 from services.agent_service import agent_service  # noqa: E402
 from services.task_service import task_service  # noqa: E402
@@ -87,7 +87,7 @@ class RoutineCase(unittest.IsolatedAsyncioTestCase):
         bot_routine_checks.unregister(sink="brief")
         runner._inflight.clear()
         runner._active.clear()
-        runner._started_up = True
+        runner._started_up.add(accounts.effective_account())
         self.addCleanup(self._clean)
 
     def make_bot(self, name=None):
@@ -104,7 +104,7 @@ class RoutineCase(unittest.IsolatedAsyncioTestCase):
                 agent_service.delete(bot_id)
             except Exception:
                 pass
-        task_scheduler._lanes.update(schedule=None, card=None)
+        task_scheduler._lanes.clear()
 
     def routine(self, name="Morning check", schedule=None, **extra):
         schedule = schedule or {"kind": "daily", "time": "09:00", "time_zone": "UTC"}

@@ -121,7 +121,7 @@ def run_benchmarks():
         with patch.object(task_module, "write_json_atomic", lambda *a, **k: saves.__setitem__("n", saves["n"] + 1)):
             async def one():
                 await task_scheduler._tick()
-                lane = task_scheduler._lanes["card"]
+                lane = task_scheduler.lane("card")
                 if lane:
                     await lane
             asyncio.run(one())
@@ -143,7 +143,7 @@ def run_benchmarks():
 
     async def drain():
         await task_scheduler._tick()
-        await task_scheduler._lanes["schedule"]
+        await task_scheduler.lane("schedule")
     asyncio.run(drain())
     total = time.perf_counter() - s
     done = [r for r in task_service.list_runs() if r["outcome"] == "succeeded"]
@@ -165,7 +165,7 @@ def run_benchmarks():
         c["status"] = ["backlog", "ready", "done", "review", "blocked"][i % 5]
         c["comments"] = [{"at": 0, "kind": "result", "text": "x" * 1500, "by": "jarvis"}]
     task_service._save_tasks()
-    size = Path(task_module.TASKS_FILE).stat().st_size
+    size = Path(task_module.tasks_file()).stat().st_size
     print(f"tasks.json with 3000 cards: {size / 1e6:.1f} MB")
     line("list_tasks (route payload build)", timed(lambda: json.dumps(task_service.list_tasks()), 10))
     line("next_card", timed(task_service.next_card, 30))
@@ -183,7 +183,7 @@ def run_benchmarks():
                                        "model": "Claude", "attempt": None})
     task_service._save_runs()
     ids = [t["id"] for t in task_service.list_tasks()]
-    print(f"task_runs.json: {len(task_service._runs)} runs, {Path(task_module.TASK_RUNS_FILE).stat().st_size / 1e6:.1f} MB")
+    print(f"task_runs.json: {len(task_service._runs)} runs, {Path(task_module.runs_file()).stat().st_size / 1e6:.1f} MB")
     line("list_runs(one task) (opened per task row)", timed(lambda: task_service.list_runs(ids[0]), 30))
     line("list_runs(all)", timed(task_service.list_runs, 5))
     line("_save_runs (3 per run: queued, running, finished)", timed(task_service._save_runs, 8))

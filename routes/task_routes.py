@@ -208,6 +208,8 @@ async def set_card_status(task_id: str, body: CardStatusRequest, user: str = Dep
 
 @router.delete("/{task_id}")
 async def delete_task(task_id: str, user: str = Depends(require_user), _own: None = Depends(task_is_visible), _: None = Depends(agent_task_is_admins)) -> dict:
+    if task_service.get_task(task_id) is None:  # not this account's (Multi-Account group 5), or gone
+        raise HTTPException(status_code=404, detail="task not found")
     task_service.delete_task(task_id)
     return {"ok": True}
 

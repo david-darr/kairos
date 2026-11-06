@@ -121,6 +121,12 @@ async def receive(trigger_id: str, request: Request) -> JSONResponse:
     if int(request.headers.get("content-length") or 0) > 2 * 1_000_000:
         return JSONResponse({"error": "too large"}, status_code=413)
     body = await request.body()
+    from services.trigger_service import owning_account
+    with owning_account(trigger_id):  # the trigger's own account; a run started here keeps it
+        return _receive(trigger_id, request, body)
+
+
+def _receive(trigger_id: str, request: Request, body: bytes) -> JSONResponse:
     status, content, work = trigger_service.receive(trigger_id, dict(request.headers), body)
     if work and work["trigger"].get("action") == "post":
         status, content = trigger_service.deliver_post(work)  # a room post needs no approval and starts no run

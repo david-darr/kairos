@@ -358,14 +358,14 @@ class CatchUpAndAnchors(RoutineCase):
 
     async def test_a_startup_run_happens_once_per_launch(self):
         task = self.routine("On startup", {"kind": "daily", "time": "09:00", "time_zone": "UTC"}, run_on_startup=True)
-        runner._started_up = False
+        runner._started_up.clear()
         await self.tick(task_id=task["id"])
         self.assertEqual(FakeBrain.started, 1)
         self.assertEqual(bot_routines.run_view(self.runs_of(task["id"])[0])["trigger_type"], "startup")
         await self.tick(task_id=task["id"])
         self.assertEqual(FakeBrain.started, 1, "not again in the same launch")
         with patch.object(runner, "LAUNCH_ID", "another-launch"):
-            runner._started_up = False
+            runner._started_up.clear()
             await self.tick(task_id=task["id"])
         self.assertEqual(FakeBrain.started, 2, "a new launch runs it once more")
 

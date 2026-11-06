@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import test_home_week as base  # noqa: E402  (sets up the isolated data dir)
 from core import session_manager_store as store  # noqa: E402
 from core.atomic_io import write_json_atomic  # noqa: E402
-from services.task_service import TASKS_FILE, TASK_RUNS_FILE  # noqa: E402
+from services.task_service import tasks_file, runs_file  # noqa: E402
 
 stamp = base.stamp
 
@@ -59,8 +59,8 @@ class DstWeek(base.unittest.IsolatedAsyncioTestCase):
     async def test_run_on_the_dst_sunday_lands_in_its_half_day(self):
         if round(local_day_hours('2026-11-01')) != 25:
             self.skipTest('local zone has no fall-back on 2026-11-01')
-        write_json_atomic(TASKS_FILE, {'a': {'owner_user': 'alice'}})
-        write_json_atomic(TASK_RUNS_FILE, [{'task_id': 'a', 'started_at': stamp('2026-11-01', 5)},
+        write_json_atomic(tasks_file(), {'a': {'owner_user': 'alice'}})
+        write_json_atomic(runs_file(), [{'task_id': 'a', 'started_at': stamp('2026-11-01', 5)},
                                          {'task_id': 'a', 'started_at': stamp('2026-11-01', 18)}])
         data = await self.week('2026-11-01')
         self.assertEqual([data['slots'][i]['agent_runs'] for i in (12, 13)], [1, 1])
@@ -84,8 +84,8 @@ class DstWeek(base.unittest.IsolatedAsyncioTestCase):
         import time
         for i in range(1500):
             self.session(f'bulk-{i}', 'alice', [('user', stamp('2026-10-19', 8) + k * 3600 * 7) for k in range(12)])
-        write_json_atomic(TASKS_FILE, {'a': {'owner_user': 'alice'}})
-        write_json_atomic(TASK_RUNS_FILE, [{'task_id': 'a', 'started_at': stamp('2026-10-19', 9) + k * 120} for k in range(3000)])
+        write_json_atomic(tasks_file(), {'a': {'owner_user': 'alice'}})
+        write_json_atomic(runs_file(), [{'task_id': 'a', 'started_at': stamp('2026-10-19', 9) + k * 120} for k in range(3000)])
         started = time.perf_counter()
         data = await self.week()
         elapsed = time.perf_counter() - started

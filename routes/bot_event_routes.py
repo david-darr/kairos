@@ -235,6 +235,12 @@ async def _read_capped(request: Request, cap: int) -> Optional[bytes]:
 
 
 async def _ingest(trigger_id: str, request: Request, path_credential: str = "") -> JSONResponse:
+    from services.trigger_service import owning_account
+    with owning_account(trigger_id):  # the trigger's own account (Multi-Account group 5)
+        return await _ingest_here(trigger_id, request, path_credential)
+
+
+async def _ingest_here(trigger_id: str, request: Request, path_credential: str = "") -> JSONResponse:
     trigger = trigger_service.get(trigger_id)
     if trigger is None or not trigger["enabled"] or trigger.get("ingress") != "address":
         return JSONResponse({"error": "not found"}, status_code=404)

@@ -31,6 +31,7 @@ from routes import task_routes, trigger_routes  # noqa: E402
 from services.agent_service import agent_service  # noqa: E402
 from services.task_service import task_service  # noqa: E402
 from services.trigger_service import trigger_service  # noqa: E402
+from services import trigger_service as trigger_module  # noqa: E402
 
 REAL_TASK_BRAIN = task_scheduler._task_brain  # Base.setUp swaps in a stand-in
 
@@ -179,7 +180,7 @@ class Validation(Routes):
 
         async def go():
             await task_scheduler._tick()
-            lane = task_scheduler._lanes["schedule"]
+            lane = task_scheduler.lane("schedule")
             if lane:
                 await lane
         try:
@@ -421,7 +422,7 @@ class History(Routes):
             asyncio.run(task_scheduler.start_run(task_service.get_task(busy["id"]), "manual"))
         self.assertEqual(len(task_service.list_runs(busy["id"])), task_module.MAX_RUNS_PER_TASK)
         self.assertEqual(len(task_service.list_runs(quiet["id"])), 1)
-        self.assertEqual(len(json.loads(Path(task_module.TASK_RUNS_FILE).read_text())), task_module.MAX_RUNS_PER_TASK + 1)
+        self.assertEqual(len(json.loads(Path(task_module.runs_file()).read_text())), task_module.MAX_RUNS_PER_TASK + 1)
 
     def test_a_deleted_tasks_history_and_a_removed_models_name_do_not_leak_into_others(self):
         a, b = self.make(name="a"), self.make(name="b")
@@ -544,7 +545,7 @@ class ConcurrencyAndRestart(Routes):
             manual = asyncio.create_task(task_scheduler.start_run(task_service.get_task(task["id"]), "manual"))
             await started()
             await task_scheduler._tick()
-            await task_scheduler._lanes["schedule"]
+            await task_scheduler.lane("schedule")
             SlowBrain.gate.set()
             await manual
         asyncio.run(go())
@@ -631,7 +632,7 @@ class TriggerApprovalStaleness(unittest.TestCase):
     def test_pending_approvals_survive_a_restart_and_a_duplicate_after_restart_is_noted(self):
         trig = self.trigger()
         self.fire(trig, {"type": "a"}, "same")
-        reloaded = type(trigger_service)()
+        reloaded = trigger_module.TriggerService()
         self.assertEqual([p["id"] for p in reloaded.pending()], [p["id"] for p in trigger_service.pending()])
         self.assertEqual(self.fire(trig, {"type": "a"}, "same").json()["status"], "duplicate")
         self.assertEqual(len(trigger_service.pending()), 1)

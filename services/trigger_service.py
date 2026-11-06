@@ -42,7 +42,13 @@ from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
 from core.secret_storage import decrypt, encrypt
 
-TRIGGERS_FILE = os.path.join(DATA_DIR, "triggers.json")
+TRIGGERS_FILE = None  # a test can point it at its own file
+
+
+def triggers_file() -> str:
+    """The current account's webhooks and triggers (Multi-Account group 5)."""
+    from core import accounts
+    return TRIGGERS_FILE or accounts.path("triggers.json")
 
 PRESETS = ("github", "generic")
 INGRESS = ("signed", "address")
@@ -104,8 +110,9 @@ def _header(headers: dict, name: str) -> str:
 
 
 class TriggerService:
-    def __init__(self) -> None:
-        data = read_json(TRIGGERS_FILE, {})
+    def __init__(self, file: str = None) -> None:
+        self._file = file or triggers_file()
+        data = read_json(self._file, {})
         self._triggers: dict = data.get("triggers", {})
         self._pending: dict = data.get("pending", {})
         # In memory only: a restart forgets recent deliveries and the rate
@@ -115,7 +122,7 @@ class TriggerService:
         self._address_hits: dict[str, list[float]] = {}
 
     def _save(self) -> None:
-        write_json_atomic(TRIGGERS_FILE, {"triggers": self._triggers, "pending": self._pending})
+        write_json_atomic(self._file, {"triggers": self._triggers, "pending": self._pending})
 
     # -- the triggers ------------------------------------------------------------
 
@@ -681,4 +688,20 @@ class TriggerService:
         return self.answer(pending["id"], words in APPROVALS)
 
 
-trigger_service = TriggerService()
+from core import accounts as _accounts
+
+trigger_service = _accounts.PerAccount(TriggerService, triggers_file)
+
+
+def owning_account(trigger_id: str):
+    """For the public webhook routes, which nobody signs in to: run as the account whose trigger this is
+    (Multi-Account group 5: every account has its own). A trigger no account has is looked for where all
+    work used to run, the first admin's, so an unknown id answers exactly as before. Ids are random and
+    already part of the address; the signature or credential check still comes after this."""
+    found = None
+    for account_id in _accounts.all_accounts():
+        with _accounts.as_account(account_id):
+            if trigger_id in trigger_service._triggers:
+                found = account_id
+                break
+    return _accounts.as_account(found or _accounts.local_account())

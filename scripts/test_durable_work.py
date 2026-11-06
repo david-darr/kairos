@@ -115,7 +115,7 @@ class Base(unittest.TestCase):
             task_service.delete_task(task_id)
         with store.transaction() as conn:
             conn.execute("DELETE FROM deliveries")
-        task_scheduler._lanes.update(schedule=None, card=None)
+        task_scheduler._lanes.clear()
 
     def task(self, name, kind="interval", due_seconds_ago=1, **extra):
         fields = {"interval_seconds": 3600} if kind == "interval" else \
@@ -175,10 +175,10 @@ class AtMostOnceTests(Base):
     def test_old_history_keeps_its_terminal_outcome_without_a_rewrite(self):
         task = self.task("old history", due_seconds_ago=None)
         task_service.record_run(task["id"], "old result")
-        before = (Path(task_module.TASK_RUNS_FILE)).read_bytes()
+        before = (Path(task_module.runs_file())).read_bytes()
         restarted = task_module.TaskService()
         self.assertEqual(restarted.list_runs(task["id"])[0]["outcome"], "succeeded")
-        self.assertEqual((Path(task_module.TASK_RUNS_FILE)).read_bytes(), before)
+        self.assertEqual((Path(task_module.runs_file())).read_bytes(), before)
 
     def test_history_from_before_run_ids_does_not_stop_startup(self):
         # 2.1.0 crashed on start with KeyError: 'id' when a record written by
@@ -187,7 +187,7 @@ class AtMostOnceTests(Base):
         legacy = {"task_id": task["id"], "task_name": task["name"], "ran_at": time.time() - 3600,
                   "output": "old result", "error": None, "delivered": None}
         task_service.claim_occurrence(task["id"])  # the run starts, then Kairos closes
-        task_module.write_json_atomic(task_module.TASK_RUNS_FILE, [legacy, *task_service._runs])
+        task_module.write_json_atomic(task_module.runs_file(), [legacy, *task_service._runs])
         restarted = task_module.TaskService()
         lost = restarted.recover_interrupted_runs()
         self.assertEqual([t["id"] for t in lost], [task["id"]])
@@ -510,9 +510,9 @@ class ScheduleTests(Base):
         self.assertNotIn("time_zone", task)
         self.assertNotIn("weekdays", task)
         self.assertEqual(datetime.fromisoformat(task["next_run_at"]).astimezone().hour, 6)
-        stored = Path(task_module.TASKS_FILE).read_bytes()
+        stored = Path(task_module.tasks_file()).read_bytes()
         restarted = task_module.TaskService()
-        self.assertEqual(Path(task_module.TASKS_FILE).read_bytes(), stored)
+        self.assertEqual(Path(task_module.tasks_file()).read_bytes(), stored)
         self.assertEqual(restarted.get_task(task["id"]), task)
         due = datetime.fromisoformat(task["next_run_at"]).timestamp()
         with patch.object(task_module.time, "time", return_value=due):
@@ -572,7 +572,7 @@ class LaneTests(Base):
                 self.assertTrue(task_service.list_runs(task["id"]), "the brief ran while the card was still running")
                 self.assertEqual(task_service.get_task(card["id"])["status"], "running")
                 gates["card"].set()
-                await task_scheduler._lanes["card"]
+                await task_scheduler.lane("card")
 
         asyncio.run(go())
         self.assertEqual(task_service.get_task(card["id"])["status"], "review")

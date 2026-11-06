@@ -126,7 +126,7 @@ class Hooks(unittest.IsolatedAsyncioTestCase):
     async def test_the_webhook_secret_is_encrypted_never_shown_and_kept_on_edit(self):
         made = self.create(event="chat.reply", action="webhook", config={"url": "https://example.test/h", "secret": "hunter2-secret"})
         self.assertIs(made["config"]["secret"], True, "the API says a secret exists, not what it is")
-        self.assertNotIn("hunter2-secret", Path(hook_module.HOOKS_FILE).read_text(encoding="utf-8"))
+        self.assertNotIn("hunter2-secret", Path(hook_module.hooks_file()).read_text(encoding="utf-8"))
         self.assertNotIn("hunter2-secret", self.admin.get("/api/hooks").text)
         self.admin.patch(f"/api/hooks/{made['id']}", json={"config": {"url": "https://example.test/other"}})
         from core.secret_storage import decrypt
