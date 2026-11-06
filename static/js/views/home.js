@@ -13,6 +13,7 @@ import { loadQuotas } from '../kairosParts.js';
 import { mountMobileHome } from '../mobileShell.js';
 import { SIGN_IN, toSnap, toneOf, usedCopy, pctText, resetCopy, ago, staleOf } from "../quotaReadings.js";
 
+import { settingsOpen } from "../settingsOpen.js";
 // Home cards use list rows, system status dots and usage rings.
 const navigate = (tab, options = {}) => document.dispatchEvent(new CustomEvent("jarvis:navigate", { detail: { tab, ...options } }));
 function icon(name) {
@@ -543,7 +544,11 @@ export function render(container, tabId, options = {}) {
   refresh();
   document.addEventListener("kairos:models-changed", refresh);
   document.addEventListener("jarvis:tabs-changed", refresh);
-  const refreshTimer = setInterval(() => { if (!document.hidden) refresh(); }, 30000);
+  // Paused while the page is hidden or Settings covers Home; resumes with one refresh when either ends.
+  const refreshTimer = setInterval(() => { if (!document.hidden && !settingsOpen()) refresh(); }, 30000);
+  const onResume = () => { if (!document.hidden && !settingsOpen()) refresh(); };
+  document.addEventListener("visibilitychange", onResume);
+  document.addEventListener("kairos:settings-visibility", onResume);
   const countdownTimer = setInterval(updateCountdown, 1000);
-  return () => { disposed = true; stopHeroStream(); kipSwitch.dispose(); mobile.dispose(); redesign?.dispose(); disposeBanner(); document.removeEventListener("kairos:models-changed", refresh); document.removeEventListener("jarvis:tabs-changed", refresh); document.removeEventListener("kairos:appearance", onAppearance); document.removeEventListener("kairos:layout", arrange); clearInterval(refreshTimer); clearInterval(countdownTimer); };
+  return () => { disposed = true; stopHeroStream(); kipSwitch.dispose(); mobile.dispose(); redesign?.dispose(); disposeBanner(); document.removeEventListener("kairos:models-changed", refresh); document.removeEventListener("jarvis:tabs-changed", refresh); document.removeEventListener("kairos:appearance", onAppearance); document.removeEventListener("kairos:layout", arrange); clearInterval(refreshTimer); clearInterval(countdownTimer); document.removeEventListener("visibilitychange", onResume); document.removeEventListener("kairos:settings-visibility", onResume); };
 }

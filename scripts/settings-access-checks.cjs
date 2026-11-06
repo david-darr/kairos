@@ -192,6 +192,9 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, demoState,
   await close();
 
   // -- 6. efficiency: requests and time per panel ------------------------------------------------------
+  // The Settings bot panels (/api/bots/*, /api/bot-usage/*, /api/agents/defaults, /api/bot-workbench/*) are answered by the
+  // in-memory Bots backend (scripts/fixtures/bots-*-backend.cjs) while demoState.botsLive is set; without it each is "No fixture".
+  const priorBotsLive = demoState.botsLive; demoState.botsLive = true;
   const costs = {};
   for (const section of sections) {
     const times = [], counts = [], duplicates = [];
@@ -223,8 +226,10 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, demoState,
   }
   // Idle: nothing may poll while Settings sits open on a quiet panel.
   await js("document.querySelector('.settings-nav-item[data-section=appearance]').click()"); await delay(500);
-  const idleBefore = reads.length + writes.length; await delay(6000);
-  const idle = reads.length + writes.length - idleBefore;
+  // The one poll allowed to run behind Settings is app.js refreshAgentBadge() reading /api/agents/inbox: bot notifications
+  // depend on it, so it keeps its 30-second beat. The Home refresh and the sidebar poll pause while Settings is open.
+  const idleReadsFrom = reads.length, idleWritesFrom = writes.length; await delay(6000);
+  const idle = reads.slice(idleReadsFrom).filter(r => r.path !== '/api/agents/inbox').length + (writes.length - idleWritesFrom);
   await close();
   // Channels redraws its list every 5 seconds while it is on screen; once Settings is closed nothing should keep asking.
   await open('channels'); await waitFor("document.querySelector('.set-page')?.dataset.page === 'channels' && document.querySelector('.channel-list')"); await delay(400);
@@ -243,6 +248,8 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, demoState,
     switchP50: percentile(switchTimes, 0.5), switchP95: percentile(switchTimes, 0.95), idleRequestsIn6s: idle,
     channelsRequestsWhileOpen5_6s: whileOpen, channelsRequestsAfterClose11s: afterClose }));
   expect(idle === 0, `Settings open on Appearance made ${idle} request(s) in 6 idle seconds`);
+
+  if (priorBotsLive === undefined) delete demoState.botsLive; else demoState.botsLive = priorBotsLive;
 
   // -- 7. phone: Back during a load stays on the list ------------------------------------------------------
   win.setContentSize(390, 844); await delay(400);

@@ -14,6 +14,7 @@ import { renderHooksPanel } from "./settingsHooks.js";
 import { pageHeader, group, row, field, toggle, pill, note, empty, badge, hueFor, staggerEntrance } from "../settingsKit.js";
 import { addReaIntegration } from "../reaSetup.js";
 import { renderNotificationsPanel } from './settingsNotifications.js';
+import { setSettingsOpen } from "../settingsOpen.js";
 
 // The side browser's page is a NATIVE view composited above the HTML in the
 // desktop app (see static/js/browserPane.js), so it would paint straight
@@ -24,11 +25,13 @@ let browserHidden = false;
 function hidePageBehind() {
   if (browserHidden) return;
   browserHidden = true;
+  setSettingsOpen(true);
   suppressBrowser();
 }
 function restorePageBehind() {
   if (!browserHidden) return;
   browserHidden = false;
+  setSettingsOpen(false);
   releaseBrowser();
 }
 

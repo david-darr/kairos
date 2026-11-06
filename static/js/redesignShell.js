@@ -1,4 +1,5 @@
 import { collectActivity } from "./activityModel.js";
+import { settingsOpen } from "./settingsOpen.js";
 // The app shell's "need you" row.
 //
 // The floating chat pill (floatingProgress.js) is hidden by
@@ -83,7 +84,8 @@ async function poll() {
   clearTimeout(timer);
   if (!started) return;
   timer = setTimeout(poll, POLL_MS);
-  if (document.hidden) return;
+  // Paused while the page is hidden or Settings covers it; both resume with one immediate poll.
+  if (document.hidden || settingsOpen()) return;
   await Promise.all([
     read("inbox", "/api/agents/inbox", data => { remote.inbox = { items: data?.items || [], reviews: data?.reviews || [] }; }),
     read("agents", "/api/agents", data => { remote.agents = Array.isArray(data) ? data : []; }),
@@ -303,6 +305,7 @@ addEventListener("resize", () => place());
 phone.addEventListener("change", () => { if (open) closeFlyout(false); });
 document.addEventListener("jarvis:agents-changed", () => { if (started) poll(); });
 document.addEventListener("visibilitychange", () => { if (started && !document.hidden) poll(); });
+document.addEventListener("kairos:settings-visibility", event => { if (started && !event.detail.open) poll(); });
 document.addEventListener("transitionend", event => { if (open && event.target?.id === "sidebar") place(); });
 
 function start() {

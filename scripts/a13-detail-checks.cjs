@@ -232,7 +232,7 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, reads, wri
   expect(await js("document.querySelector('.ts-sheet .tool-store-card-foot').textContent.includes('Built into Kairos')"), 'bundled provenance says Built into Kairos');
   await close();
   s = await toolState('my-notes');
-  eq(names(s).filter(n => n !== 'Share to store' && !/share/i.test(n)), ['View skill'], 'a user skill: View skill'); expect(names(s).length === 2, 'a user skill can be shared: ' + names(s));
+  eq(names(s).filter(n => n !== 'Share to store' && !/share/i.test(n)), ['View skill'], 'a user skill: View skill'); expect(names(s).includes('Share to store') && names(s).includes('Share with this Kairos') && names(s).length === 3, 'a user skill can be shared to the store and with this Kairos (shared library): ' + names(s));
   expect(await js("document.querySelector('.ts-sheet .tool-store-card-foot').textContent.includes('Local skill · v2.1')"), 'user skill shows Local skill and its version');
   await close();
   s = await toolState('from-github');

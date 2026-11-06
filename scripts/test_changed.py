@@ -266,7 +266,6 @@ STALE = {
     "mobile-chrome": "the small-phone Forge New composer overlaps the home indicator",
     "g8": "Logs filters: never sees the follow reload",
     "g10": "Forge's REA header button never appears",
-    "g7": "Settings opened on Appearance makes 22 requests in 6 idle seconds",
     "a14-settings": "the default sidebar order is now home, chat, notes",
     "g6": "reports two Tasks findings: a refused Schedule says nothing, and an unsent Schedule draft is lost on leaving",
 }
