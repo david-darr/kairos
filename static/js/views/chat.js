@@ -1454,7 +1454,9 @@ function toggleMenu(menu, headerAnchor = null) {
     return;
   }
   // Composer menus open clear of the whole prompt card, never over the text being typed.
-  fitMenu(menu, menu.parentElement, { prefer: menu.classList.contains('below') ? 'below' : 'above', gap: 8, cap: 320, keepSide: true, clear: matchMedia('(min-width: 769px)').matches ? menu.closest('.chat-input-bar') : null });
+  // 2.2.1: on phones the + menu also clears the whole composer (its last row was hidden under it) and may be taller.
+  const phoneMenu = !matchMedia('(min-width: 769px)').matches && menu.id === 'overflow-menu';
+  fitMenu(menu, menu.parentElement, { prefer: menu.classList.contains('below') ? 'below' : 'above', gap: 8, cap: phoneMenu ? 460 : 320, keepSide: true, clear: (phoneMenu || matchMedia('(min-width: 769px)').matches) ? menu.closest('.chat-input-bar') : null });
 }
 function closeMenu(menu) { menu.classList.add("hidden"); }
 

@@ -678,3 +678,18 @@
 /* More sheet: the app mode switch at its top (mobileTabSheet.js).
    A segmented radio group with a sliding thumb, like the New / Chats switch; the
    sheet-wide reduced-motion rule turns the slide off. */
+
+/* 2.2.1: the phone + menu. The composer's round icon-button rules (44px grid, and
+   padding/gap 0 !important in redesign-workspaces.css) also caught the Open Mic row
+   the menu borrows, stacking its icon over a clipped label; it is a menu row like the
+   others. (The menu's placement above the composer is in chat.js's fitMenu call.) */
+@media (max-width: 768px) {
+  .kairos-redesign .ms-composer .composer-menu-options .chat-openmic-btn:not([hidden]) {
+    display: flex !important; grid-template: none !important; place-items: initial; justify-content: flex-start !important; align-items: center !important;
+    width: 100% !important; height: 44px; min-height: 44px; gap: 10px !important; padding: 8px 10px !important; border-radius: 10px;
+    font-size: 14px; line-height: 21px; color: inherit; text-align: left; aspect-ratio: auto;
+  }
+  .kairos-redesign .ms-composer .composer-menu-options .chat-openmic-btn > svg { width: 16px; height: 16px; flex: none; }
+  .kairos-redesign .ms-composer .composer-menu-options .chat-permission-control { padding: 0 6px 0 10px; font-size: 14px; }
+  .kairos-redesign .ms-composer .composer-menu-options .chat-permission-control select { background-color: transparent; }
+}
