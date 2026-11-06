@@ -77,7 +77,8 @@ CREATE TABLE IF NOT EXISTS posts (
 CREATE TABLE IF NOT EXISTS snapshots (
   id INTEGER PRIMARY KEY, post_id INTEGER NOT NULL REFERENCES posts(id), taken_at REAL NOT NULL,
   views INTEGER NOT NULL, avg_view_duration_s REAL NOT NULL, video_length_s REAL NOT NULL,
-  likes INTEGER NOT NULL, comments INTEGER NOT NULL, shares INTEGER NOT NULL, follows_gained INTEGER NOT NULL);
+  likes INTEGER NOT NULL, comments INTEGER NOT NULL, shares INTEGER NOT NULL, follows_gained INTEGER NOT NULL,
+  source TEXT NOT NULL DEFAULT 'manual');
 CREATE INDEX IF NOT EXISTS snapshots_post ON snapshots(post_id, taken_at);
 CREATE TABLE IF NOT EXISTS reviews (id INTEGER PRIMARY KEY, at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS review_marks (
@@ -118,6 +119,8 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.executescript(SCHEMA)
+        if "source" not in {row["name"] for row in self.db.execute("PRAGMA table_info(snapshots)")}:
+            self.db.execute("ALTER TABLE snapshots ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")  # stores made before connectors
         self.db.commit()
 
     def close(self):
@@ -513,7 +516,7 @@ class Store:
     # -- metrics --------------------------------------------------------------------------------
 
     def add_snapshot(self, post_id, views, avg_view_duration_s, video_length_s, likes=0, comments=0, shares=0,
-                     follows_gained=0, taken_at=None, now=None):
+                     follows_gained=0, taken_at=None, source="manual", now=None):
         now = time.time() if now is None else now
         post = self.get_post(post_id)
         if post["state"] != "posted":
@@ -525,10 +528,10 @@ class Store:
         taken = now if taken_at is None else _num(taken_at, "taken_at")
         if post["posted_at"] is not None and taken < post["posted_at"]:
             raise StudioError("those numbers are dated before the post went up")
-        sid = self._insert("snapshots", post_id=post_id, taken_at=taken, **values)
+        sid = self._insert("snapshots", post_id=post_id, taken_at=taken, source=_clean_text(source, "source", 40), **values)
         return self._row("SELECT * FROM snapshots WHERE id = ?", (sid,))
 
-    def add_snapshots(self, rows, now=None):
+    def add_snapshots(self, rows, now=None, source="manual"):
         """A batch of snapshots, all or nothing: one bad row stores none of them."""
         if not isinstance(rows, list) or not rows or len(rows) > 500:
             raise StudioError("send between 1 and 500 rows")
@@ -543,7 +546,7 @@ class Store:
                                              "shares", "follows_gained", "taken_at"}
                     if unknown:
                         raise StudioError(f"unknown fields: {', '.join(sorted(unknown))}")
-                    stored.append(self.add_snapshot(row["post_id"], now=now, **fields))
+                    stored.append(self.add_snapshot(row["post_id"], now=now, source=source, **fields))
             except (StudioError, TypeError):
                 for snap in stored:
                     self._write("DELETE FROM snapshots WHERE id = ?", (snap["id"],))

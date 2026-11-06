@@ -499,12 +499,29 @@ async def _tick() -> None:
                 await _tick_account(loop, account_id)
             except Exception:
                 logger.exception("scheduler: the pass for account %s failed", account_id)
+    _youtube_daily(loop)
     _check_mcp_servers(loop)
     try:
         from services.bot_keep_warm import tick
         await tick()
     except Exception:
         logger.exception("cache upkeep tick failed")
+
+
+_youtube = {"task": None, "last": 0.0}
+YOUTUBE_LOOK_EVERY_SECONDS = 900
+
+
+def _youtube_daily(loop) -> None:
+    """Content Studio's daily YouTube analytics sync (read-only): every 15 minutes look at each account, and
+    sync the ones that connected it and are due. Starts nothing for an account that never connected."""
+    import time as clock
+    running = _youtube["task"]
+    if (running is not None and not running.done()) or clock.time() - _youtube["last"] < YOUTUBE_LOOK_EVERY_SECONDS:
+        return
+    _youtube["last"] = clock.time()
+    from services.content_studio import youtube
+    _youtube["task"] = loop.create_task(youtube.sync_all_due())
 
 
 async def _tick_account(loop, account_id: str) -> None:

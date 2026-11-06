@@ -1,6 +1,6 @@
 """Content Studio: pipeline view, scoring record, selection review and the approval queue (build spec
 "Content Studio Team", steps 2 and 4). Every route needs a signed-in user and works in that account's own
-store only (services/content_studio). No platform APIs: numbers come in by manual entry or import.
+store only (services/content_studio). Numbers come in by manual entry or import, or from YouTube's read-only analytics.
 """
 from typing import Optional
 
@@ -8,7 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.middleware import require_user
-from services.content_studio import StudioError, delivery, pipeline, report, review, studio
+from core.middleware import local_api_base
+from services.content_studio import StudioError, delivery, pipeline, report, review, studio, youtube
 
 router = APIRouter(prefix="/api/content-studio", tags=["content-studio"])
 
@@ -336,3 +337,34 @@ def get_settings(user: str = Depends(require_user)):
 @router.put("/settings")
 def put_settings(body: SettingsBody, user: str = Depends(require_user)):
     return _run(studio.update_settings, **_given(body))
+
+
+# -- YouTube analytics (read-only) ----------------------------------------------------------------
+
+class YouTubeConnectBody(Body):
+    account: Optional[str] = Field(None, max_length=256)  # which connected Google sign-in; default is the user's usual one
+
+
+@router.get("/analytics/youtube/status")
+def youtube_status(user: str = Depends(require_user)):
+    return youtube.status()
+
+
+@router.post("/analytics/youtube/connect")
+def youtube_connect(body: YouTubeConnectBody = YouTubeConnectBody(), user: str = Depends(require_user)):
+    """The consent URL that adds the two read-only YouTube scopes to a Google sign-in. Open it in the browser."""
+    from routes.google_routes import CALLBACK
+    return {"url": _run(youtube.connect_url, local_api_base() + CALLBACK, user, body.account)}
+
+
+@router.post("/analytics/youtube/sync")
+async def youtube_sync(user: str = Depends(require_user)):
+    try:
+        return {"result": await youtube.sync(studio), "status": youtube.status()}
+    except StudioError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+
+
+@router.delete("/analytics/youtube")
+def youtube_disconnect(user: str = Depends(require_user)):
+    return youtube.disconnect()

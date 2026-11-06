@@ -47,9 +47,14 @@ HOSTS = {
     "thumbnail": "https://lh3.googleusercontent.com",
     "calendar": "https://www.googleapis.com/calendar/v3",
     "gmail": "https://gmail.googleapis.com/gmail/v1",
+    "youtube": "https://www.googleapis.com/youtube/v3",
+    "youtube_analytics": "https://youtubeanalytics.googleapis.com/v2",
 }
 GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
 CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar"
+# Content Studio's read-only YouTube analytics. Never part of SCOPES: an account gets them only when its user
+# asks for them (start_sign_in(extra_scopes=...)), as an incremental grant on top of the sign-in it already has.
+YOUTUBE_SCOPES = ("https://www.googleapis.com/auth/youtube.readonly", "https://www.googleapis.com/auth/yt-analytics.readonly")
 SCOPES = (
     "openid", "email",
     "https://www.googleapis.com/auth/drive",
@@ -71,9 +76,11 @@ _calendar_generation = 0
 
 
 class GoogleError(Exception):
-    def __init__(self, message: str, status: int = 400):
+    def __init__(self, message: str, status: int = 400, reason: str = "", retry_after: float | None = None):
         super().__init__(message)
         self.status = status
+        self.reason = reason            # Google's error reason, e.g. "quotaExceeded"
+        self.retry_after = retry_after  # seconds, from a Retry-After header when Google sent one
 
 
 # Multi-Account group 6: the OAuth app (client id and secret, set once by an admin) stays in FILE for the
@@ -227,6 +234,20 @@ def _public(item: dict, chosen: str | None) -> dict:
             "calendar_connected": CALENDAR_SCOPE in (item.get("granted_scopes") or [])}
 
 
+def account_info(ident: str | None) -> dict | None:
+    """What a feature needs to know about one connected account, never a token: its id, email, the scopes it
+    granted and whether it has a refresh token. None when there is no such account."""
+    item = (_state().get("accounts") or {}).get(ident or "")
+    if not item:
+        return None
+    return {"id": item["id"], "email": item.get("email"), "granted_scopes": list(item.get("granted_scopes") or []),
+            "connected": bool(item.get("refresh_token")), "error": item.get("error")}
+
+
+def configured() -> bool:
+    return bool(_state().get("client_id"))
+
+
 def _id(value: str) -> str:
     if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,256}", value):
         raise GoogleError("Invalid Google file ID")
@@ -305,11 +326,15 @@ def disconnect(account_id: str | None = None, user: str | None = None) -> dict:
 
 
 def start_sign_in(redirect_uri: str, owner: str | None = None, add: bool = False,
-                  account_id: str | None = None) -> str:
+                  account_id: str | None = None, extra_scopes: tuple = ()) -> str:
     """With `add` the default account stays; otherwise the account signed in
     to becomes the default (the one-account behaviour, and Calendar's
     reconnect). `account_id` reconnects that account, which must be one this
-    user may use (a shared account too) and must sign in as the same email."""
+    user may use (a shared account too) and must sign in as the same email.
+    `extra_scopes` is an optional added grant (YouTube analytics): Google is told to keep what the account
+    already granted, and only a sign-in that asks for them ever carries them."""
+    if extra_scopes and not set(extra_scopes) <= set(YOUTUBE_SCOPES):
+        raise GoogleError("Unknown Google permission requested")
     if account_id is not None:
         account_id = resolve_account(owner, account_id)
     client_id = _state().get("client_id")
@@ -324,15 +349,17 @@ def start_sign_in(redirect_uri: str, owner: str | None = None, add: bool = False
     # callback can only finish a sign-in begun here, for that user.
     from core import accounts
     _pending[state] = {"verifier": verifier, "expires": time.time() + 600, "owner": owner, "add": add,
-                       "account": account_id, "client_id": client_id,
+                       "account": account_id, "client_id": client_id, "extra_scopes": list(extra_scopes),
                        "kairos_account": accounts.effective_account()}
     for stale, pending in list(_pending.items()):
         if pending["expires"] < time.time():
             _pending.pop(stale, None)
     # select_account: the chooser lets a second Google account be added.
     params = {"client_id": client_id, "redirect_uri": redirect_uri, "response_type": "code",
-              "scope": " ".join(SCOPES), "access_type": "offline", "prompt": "select_account consent",
+              "scope": " ".join((*SCOPES, *extra_scopes)), "access_type": "offline", "prompt": "select_account consent",
               "state": state, "code_challenge": challenge, "code_challenge_method": "S256"}
+    if extra_scopes:
+        params["include_granted_scopes"] = "true"
     return AUTH_URL + "?" + urlencode(params)
 
 
@@ -391,9 +418,12 @@ async def finish_sign_in(state: str, code: str | None, redirect_uri: str, error:
             else:
                 ident = "acct_" + secrets.token_urlsafe(12)
                 account = accounts[ident] = {"id": ident, "owner": owner, "added_at": time.time()}
+            granted = str(tokens.get("scope") or "").split()
+            if pending.get("extra_scopes"):  # an added grant keeps what the account already had
+                granted = list(dict.fromkeys([*(account.get("granted_scopes") or []), *granted]))
             account.update(refresh_token=encrypt(refresh), access_token=encrypt(access) if access else None,
                            expires_at=time.time() + int(tokens.get("expires_in") or 3600), email=email,
-                           granted_scopes=str(tokens.get("scope") or "").split())
+                           granted_scopes=granted)
             account.pop("error", None)
             if not pending["add"] or not _default(data):
                 data["default_account"] = account["id"]
@@ -482,11 +512,18 @@ async def request(api: str, method: str, path: str, *, params: dict | None = Non
         if response.is_redirect:
             raise GoogleError("Google API redirects are not allowed", 502)
         if response.status_code >= 400:
+            reason = ""
             try:
-                detail = response.json().get("error", {}).get("message") or response.text[:250]
-            except (ValueError, AttributeError):
+                error = response.json().get("error", {})
+                detail = error.get("message") or response.text[:250]
+                reason = str((error.get("errors") or [{}])[0].get("reason") or "")
+            except (ValueError, AttributeError, IndexError, TypeError):
                 detail = response.text[:250]
-            raise GoogleError(f"Google API: {detail}", response.status_code)
+            try:
+                wait = float(response.headers.get("retry-after")) if response.headers.get("retry-after") else None
+            except ValueError:
+                wait = None
+            raise GoogleError(f"Google API: {detail}", response.status_code, reason, wait)
         if not raw and response.headers.get("content-type", "").startswith("application/json"):
             return response.json()
         return response.content
