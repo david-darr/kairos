@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.middleware import require_user
-from services.content_studio import StudioError, pipeline, report, review, studio
+from services.content_studio import StudioError, delivery, pipeline, report, review, studio
 
 router = APIRouter(prefix="/api/content-studio", tags=["content-studio"])
 
@@ -115,6 +115,7 @@ class SettingsBody(Body):
     review_gap_days: Optional[int] = None
     step_windows_h: Optional[dict[str, float]] = None
     team_bot_ids: Optional[list[str]] = None
+    team_roles: Optional[dict[str, str]] = None
 
 
 def _run(fn, *args, **kwargs):
@@ -164,7 +165,8 @@ def restore_channel(channel_id: int, user: str = Depends(require_user)):
 @router.post("/channels/{channel_id}/warning")
 def channel_warning(channel_id: int, body: WarningBody, user: str = Depends(require_user)):
     """Records a platform warning; the channel is paused until it is resumed."""
-    return _run(studio.record_warning, channel_id, body.text)
+    channel = _run(studio.record_warning, channel_id, body.text)
+    return {**channel, "notified": delivery.deliver_warning(studio, channel_id)}
 
 
 @router.post("/channels/{channel_id}/resume")
@@ -311,6 +313,19 @@ def weekly_report(user: str = Depends(require_user)):
 @router.get("/watch")
 def watch(user: str = Depends(require_user)):
     return {"findings": pipeline.watch(studio)}
+
+
+@router.post("/watch/notify")
+def watch_notify(user: str = Depends(require_user)):
+    """Runs the watch and puts each urgent finding (platform warning, spend near the cap) in the Inbox once."""
+    findings = pipeline.watch(studio)
+    return {"findings": findings, "notified": delivery.deliver_findings(studio, findings)}
+
+
+@router.post("/report/send")
+def report_send(user: str = Depends(require_user)):
+    """Puts the weekly report in the Inbox, as the Producer."""
+    return delivery.deliver_report(studio)
 
 
 @router.get("/settings")

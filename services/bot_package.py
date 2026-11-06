@@ -316,3 +316,4 @@ def untrusted_text(text, taint):
 # Teams and rooms register themselves as sections (services/bot_package_sections.py).
 from services import bot_package_sections  # noqa: E402,F401
 from services import bot_package_policy  # noqa: E402,F401
+from services import content_studio_section  # noqa: E402,F401

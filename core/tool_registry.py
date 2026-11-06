@@ -2098,6 +2098,7 @@ def register_connection_tools() -> list[str]:
 register_resource_tools()
 
 from core import bot_team_tools  # noqa: E402,F401
+from core import bot_content_studio_tools  # noqa: E402,F401
 
 
 def _register_bots_tool_data() -> None:

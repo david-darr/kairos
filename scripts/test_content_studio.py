@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -22,7 +23,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 import app as kairos  # noqa: E402
 from core import accounts  # noqa: E402
 from core.auth import auth_manager  # noqa: E402
-from services.content_studio import StudioError, Store, close_all, pipeline, report, review, scoring  # noqa: E402
+from services.content_studio import StudioError, Store, close_all, delivery, pipeline, report, review, scoring  # noqa: E402
 import atexit  # noqa: E402
 
 _STORES = []
@@ -479,9 +480,10 @@ class Api(unittest.TestCase):
         auth_manager._sessions = {}
         auth_manager.create_user("david", "first-password-1", is_admin=True)
         auth_manager.create_user("bea", "second-password-2")
+        auth_manager.create_user("cy", "third-password-3")
         cls.david_id, cls.bea_id = auth_manager.account_id("david"), auth_manager.account_id("bea")
         cls.clients = {}
-        for name, password in (("david", "first-password-1"), ("bea", "second-password-2")):
+        for name, password in (("david", "first-password-1"), ("bea", "second-password-2"), ("cy", "third-password-3")):
             client = TestClient(kairos.app)
             r = client.post("/api/auth/login", json={"username": name, "password": password})
             assert r.status_code == 200, r.text
@@ -565,6 +567,36 @@ class Api(unittest.TestCase):
         self.assertEqual([x["kind"] for x in d.get(f"{P}/decisions").json()["decisions"]], ["retire"])
         self.assertEqual(d.post(f"{P}/channels/{channel['id']}/restore").json()["status"], "live")
         self.assertEqual(b.get(f"{P}/decisions").json()["decisions"], [])
+
+    def test_delivery_routes_reach_the_inbox_only_for_the_accounts_own_producer(self):
+        d, b = self.clients["cy"], self.clients["bea"]
+        P = "/api/content-studio"
+        sent = []
+
+        def fake(bot_id, title, body, urgent=False):
+            sent.append((bot_id, title, body, urgent))
+            return True
+        niche = d.post(f"{P}/niches", json={"name": "Delivery"}).json()
+        channel = d.post(f"{P}/channels", json={"niche_id": niche["id"], "platform": "tiktok", "handle": "@deliver"}).json()
+        self.assertEqual(d.put(f"{P}/settings", json={"team_roles": {"p1": "boss"}}).status_code, 400)
+        self.assertEqual(d.put(f"{P}/settings", json={"team_roles": {"p1": "producer"}}).json()["team_roles"], {"p1": "producer"})
+        with patch.object(delivery, "inbox_notifier", fake):
+            warned = d.post(f"{P}/channels/{channel['id']}/warning", json={"text": "limited"}).json()
+            self.assertTrue(warned["paused"] and warned["notified"])
+            self.assertEqual([(x[0], x[3]) for x in sent], [("p1", True)])
+            self.assertIn("@deliver", sent[0][2])
+            again = d.post(f"{P}/watch/notify").json()
+            self.assertEqual(again["notified"], [], "already told")
+            self.assertTrue(any(f["kind"] == "platform_warning" for f in again["findings"]))
+            report_out = d.post(f"{P}/report/send").json()
+            self.assertTrue(report_out["delivered"])
+            self.assertEqual(sent[-1][:2], ("p1", "Content Studio weekly report"))
+            before = len(sent)
+            # Bea's account has no Producer recorded: nothing is sent for her, and Cy's roles are not hers.
+            self.assertFalse(b.post(f"{P}/report/send").json()["delivered"])
+            self.assertEqual(b.post(f"{P}/watch/notify").json()["notified"], [])
+            self.assertEqual(b.get(f"{P}/settings").json()["team_roles"], {})
+            self.assertEqual(len(sent), before)
 
 
 if __name__ == "__main__":

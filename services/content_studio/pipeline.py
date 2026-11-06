@@ -68,7 +68,7 @@ def watch(store, now=None, spend=None):
 
     for warning in store.open_warnings():
         add("platform_warning", "urgent", f"{warning['platform']} warned {warning['handle']}: {warning['text']} The channel is paused.",
-            channel_id=warning["channel_id"])
+            channel_id=warning["channel_id"], warning_id=warning["id"])
     for item in pipeline(store, now):
         if item["kind"] != "post":
             continue
@@ -85,7 +85,7 @@ def watch(store, now=None, spend=None):
     if state and state.get("capped"):
         add("spend_capped", "urgent", "The team's spend cap is reached; the bots have stopped.", spend=state)
     elif state and state.get("near_cap"):
-        add("spend_near_cap", "warn", "Spend is near the monthly cap.", spend=state)
+        add("spend_near_cap", "urgent", "Spend is near the monthly cap.", spend=state)
     return findings
 
 

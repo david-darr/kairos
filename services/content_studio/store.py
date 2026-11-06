@@ -27,7 +27,10 @@ DEFAULT_SETTINGS = {
     "review_gap_days": 6,        # a real weekly review will not run twice inside this
     "step_windows_h": {"pick": 24, "script": 12, "render": 6, "queue": 12, "approval": 48, "publish": 48},
     "team_bot_ids": [],          # the Studio team's bots, for the spend line of the report
+    "team_roles": {},            # bot id -> role (producer, researcher, ...), filled in when the team template is imported
+    "notified": {},              # delivery keys already sent to the Inbox, so a watch does not repeat itself
 }
+TEAM_ROLES = ("producer", "researcher", "evaluator", "script_writer", "editor", "publisher", "executor")
 
 
 class StudioError(Exception):
@@ -186,6 +189,14 @@ class Store:
             elif key == "team_bot_ids":
                 if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
                     raise StudioError("team_bot_ids must be a list of bot ids")
+            elif key == "team_roles":
+                if not isinstance(value, dict) or len(value) > 100 or any(
+                        not isinstance(k, str) or v not in TEAM_ROLES for k, v in value.items()):
+                    raise StudioError("team_roles maps bot ids to team roles")
+            elif key == "notified":
+                if not isinstance(value, dict) or any(not isinstance(k, str) for k in value):
+                    raise StudioError("notified must be an object")
+                value = dict(sorted(value.items(), key=lambda kv: kv[1])[-500:])
             elif key in ("min_weeks", "min_posts", "behind_reviews", "start_niches", "score_after_days", "review_gap_days"):
                 value = _num(value, key, True, 0 if key == "review_gap_days" else 1)
             else:
@@ -516,6 +527,28 @@ class Store:
             raise StudioError("those numbers are dated before the post went up")
         sid = self._insert("snapshots", post_id=post_id, taken_at=taken, **values)
         return self._row("SELECT * FROM snapshots WHERE id = ?", (sid,))
+
+    def add_snapshots(self, rows, now=None):
+        """A batch of snapshots, all or nothing: one bad row stores none of them."""
+        if not isinstance(rows, list) or not rows or len(rows) > 500:
+            raise StudioError("send between 1 and 500 rows")
+        with self.lock:
+            stored = []
+            try:
+                for row in rows:
+                    if not isinstance(row, dict) or "post_id" not in row:
+                        raise StudioError("each row needs a post_id")
+                    fields = {k: v for k, v in row.items() if k != "post_id"}
+                    unknown = set(fields) - {"views", "avg_view_duration_s", "video_length_s", "likes", "comments",
+                                             "shares", "follows_gained", "taken_at"}
+                    if unknown:
+                        raise StudioError(f"unknown fields: {', '.join(sorted(unknown))}")
+                    stored.append(self.add_snapshot(row["post_id"], now=now, **fields))
+            except (StudioError, TypeError):
+                for snap in stored:
+                    self._write("DELETE FROM snapshots WHERE id = ?", (snap["id"],))
+                raise
+            return stored
 
     def snapshots(self, post_id=None):
         if post_id is not None:

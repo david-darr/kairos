@@ -54,6 +54,8 @@ CLAUDE_APPROVED_BEFORE = {f"mcp__hive_mind__{name}" for name in (
     'query_tool_result highlevel_search_contacts highlevel_get_contact highlevel_get_contact_notes highlevel_list_contact_tasks highlevel_list_calendars highlevel_get_free_slots '
     'highlevel_get_contact_appointments highlevel_list_pipelines highlevel_search_opportunities highlevel_get_opportunity x_search_recent x_count_recent x_user '
     'x_user_posts x_post trigger_info '
+    # Content Studio team, 2026-11-06: the pipeline read, role-gated to the team's bots and fenced as data.
+    'content_studio_pipeline '
     # Phase 4 teams, reviewed 2026-10-29: reads of the bot's own peers, assignments, rooms and team, fenced as data.
     'list_peers assignment_status list_room_targets search_team_memory list_team_setup read_incidents '
     # Phase 5 front desk (front-desk bot only, core/front_desk_tools.guard_call) and Phase 6 data, reviewed 2026-10-29:
