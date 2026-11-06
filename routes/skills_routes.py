@@ -183,7 +183,9 @@ async def update_skill(slug: str, body: UpdateSkillRequest, user: str = Depends(
 @router.delete("/{slug}")
 async def delete_skill(slug: str, user: str = Depends(require_user)) -> dict:
     try:
-        skills_service.delete_skill(slug)
+        removed = skills_service.delete_skill(slug)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    if not removed:
+        raise HTTPException(status_code=404, detail="skill not found")
     return {"ok": True}

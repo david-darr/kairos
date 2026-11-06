@@ -22,9 +22,13 @@ class Node {
 }
 const document = { activeElement: null, body: new Node('body'), handlers: {}, addEventListener(name, fn) { this.handlers[name] = fn; } };
 const posts = [];
+let failNext = false;
+const store = {};
 const context = vm.createContext({ document, matchMedia: () => ({ matches: false }), Date, Set, Object, encodeURIComponent, setTimeout, clearTimeout,
-  el: (tag, attrs, children) => new Node(tag, attrs, children), ICONS: { close: '' }, api: async (path, options) => posts.push([path, JSON.parse(options.body)]) });
-let code = fs.readFileSync('static/js/questionPrompt.js', 'utf8').replace(/^import .*$/gm, '').replaceAll('export function ', 'function ');
+  el: (tag, attrs, children) => new Node(tag, attrs, children), ICONS: { close: '' }, api: async (path, options) => { if (failNext) { failNext = false; throw new Error('offline'); } posts.push([path, JSON.parse(options.body)]); },
+  localStorage: { getItem: k => store[k] ?? null, setItem: (k, v) => { store[k] = String(v); }, removeItem: k => { delete store[k]; } } });
+const strip = file => fs.readFileSync(file, 'utf8').replace(/^import .*$/gm, '').replaceAll('export function ', 'function ');
+let code = strip('static/js/questionDraft.js') + strip('static/js/questionPrompt.js');
 vm.runInContext(code + '\nglobalThis.show = showQuestionPrompt; globalThis.dismiss = dismissQuestionPrompt;', context);
 const request = { id: 'q', questions: [
   { question: '<img>Q', header: '<b>Title</b>', options: [{ label: '<script>Yes</script>' }], multiSelect: false },
@@ -66,6 +70,24 @@ const request = { id: 'q', questions: [
   await new Promise(resolve => setTimeout(resolve, 5));
   assert.ok(expired.querySelectorAll('input, button').every(n => n.disabled));
   assert.equal(expired.querySelectorAll('p')[0].textContent, 'This question has expired.');
+  context.dismiss();
+  // A typed answer survives the sheet being dismissed, and clears once sent.
+  const draftReq = { id: 'draft1', questions: [{ question: 'Why?', options: [], multiSelect: false }] };
+  const first = context.show(draftReq, null, { dock });
+  const box = first.querySelector('input'); box.value = 'half an answer'; box.fire('input');
+  assert.ok(store['kairos.questionDrafts.v1'].includes('half an answer'), 'draft saved to localStorage');
+  context.dismiss();
+  const second = context.show(draftReq, null, { dock });
+  assert.equal(second.querySelector('input').value, 'half an answer', 'draft restored on reopen');
+  assert.equal(second.querySelectorAll('button')[1].disabled, false, 'restored draft can be submitted');
+  failNext = true;
+  await second.querySelectorAll('button')[0].fire('click'); await new Promise(setImmediate);
+  assert.ok(store['kairos.questionDrafts.v1'], 'a failed dismissal keeps the draft');
+  await second.querySelectorAll('button')[1].fire('click'); await new Promise(setImmediate);
+  assert.deepEqual(posts.pop(), ['/api/permissions/draft1/respond', { answers: { 'Why?': 'half an answer' } }]);
+  assert.equal(store['kairos.questionDrafts.v1'], undefined, 'sending clears the draft');
+  const third = context.show(draftReq, null, { dock });
+  assert.equal(third.querySelector('input').value, '', 'no draft after send');
   context.dismiss();
   console.log('question prompt checks passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

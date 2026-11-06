@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "1ef8a806b4a2a777c8e986511de2aac04f97278104e18c62448489a0f2c4baf8",
+  "app.js": "40a91311b820ca525e0c65897e709519ee116fe8f9916a389ce5b5b164e5976e",
   "fixtures.js": "3d2bfea869aebb649fde25b11598a456f82df6b977236f8f0ab61d269bb329da",
   "index.html": "14d95158c3292ac91495f3ec8395c0acb68f67bf3e3a4097a9f287e6c12d3c71",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -1268,7 +1268,7 @@
   "static/js/botsHelpCard.js": "9f7dc7298f6fc9b063d2d7f5348bcfb4a55345993b78707332bbe2ffb395be01",
   "static/js/botsHints.js": "b103dae52992fa42c337fd06416e377be2b0e556031931a53d44bd80f65880cf",
   "static/js/botsIcons.js": "bb7614cd64d8fbce8b2821f8791be384088a6237688a5e81a8db42ad2b8c3998",
-  "static/js/botsInbox.js": "7e3ae30ee684c5aec8234a546c6e211f33bf9c440d610f226723125f5183a068",
+  "static/js/botsInbox.js": "c59711b7a46cf7564b88c204fd7f3f07ff94ed5bc66d354d3b9a6af62c60e28c",
   "static/js/botsInspector.js": "b192713869be7eed0f0ebf01418402132517204a0aa2ce629f4428d1b38aac5a",
   "static/js/botsKip.js": "ac403b91f987d0be4b0775e0748e04b66589db5a4bcb03b10dab80acba47141b",
   "static/js/botsLimitReset.js": "7f2208c43d98efe0badc7d70ad89332f77d290a44d7d3d06c8574424362924d9",
@@ -1468,7 +1468,8 @@
   "static/js/pdfViewer.js": "146681ac92b9fa6af43776d8ec6ab274558929e457ba8cab1aec2dd835932c9e",
   "static/js/permissionPrompt.js": "c33008a35fa4e6bc9f46be54ae2b67b2fbd5763589945801e9c244475c9dc3ff",
   "static/js/phoneRowDetails.js": "8032c053a6574cddeb6888446cefe817b7a9892a9f1017ca0cd44c59b3ac5ff6",
-  "static/js/questionPrompt.js": "ff8514aea11a6dacee8f85bd1651b169d0e10ded379f843c7d28e96b12984b27",
+  "static/js/questionDraft.js": "26ba2ea9e446c0ae1320125326f8b36a971fdf3c0eb80f1e91607fec710b7bbe",
+  "static/js/questionPrompt.js": "29b7ff5c120dc9bf7524e935aeae1708a150da368e3a4d0e3b9fa3841e3a8eb8",
   "static/js/quotaReadings.js": "2a02b8bf60d37ff0791353dd32363c46193202acbda71c5bc4ac4f63cf472ef0",
   "static/js/reaSetup.js": "ff5f36ef0a4308d4378e5e979ab8aed0070e509fbe13b7d0e4072bbefd3eb5f1",
   "static/js/recordingReview.js": "9c6e41b3356f0ba833319e5d2b45be70c3c84f03d3a37aab515ddb3d231c1c6f",

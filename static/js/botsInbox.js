@@ -8,6 +8,7 @@
 // reason shows here.
 import { icon } from './botsIcons.js';
 import { Segmented } from './botsUi.js';
+import { getDraft, setDraftField, clearDraft, pruneDrafts } from './questionDraft.js';
 import {
   BASE, BUCKETS, ACTION_LABELS, bucketCounts, rowsFor, formatAge, kindLabel, hasAction, buildAnswers, h, errorText,
 } from './botsAttentionHost.js';
@@ -24,7 +25,10 @@ export async function mount(root, ctx) {
       const data = await ctx.get(`${BASE}/inbox`);
       if (disposed) return;
       const before = current()?.revision;
-      view.rows = data.rows || []; view.counts = bucketCounts(view.rows); view.loaded = true; view.failed = false;
+      view.rows = data.rows || [];
+      // Drafts belong to questions still waiting; answered or expired elsewhere, they go.
+      pruneDrafts(view.rows.filter(r => r.status === 'open').map(r => r.id));
+      view.counts = bucketCounts(view.rows); view.loaded = true; view.failed = false;
       ctx.setCounts({ inbox: data.count || 0 });
       // A poll that finds the open item unchanged must not rebuild it under a half-typed reply.
       if (view.openId && before && current()?.revision === before) return;
@@ -101,6 +105,9 @@ export async function mount(root, ctx) {
   // -- reading -----------------------------------------------------------------
   function readingView(row) {
     const reply = h('textarea', { class: 'bots-attn-reply', rows: '3', 'aria-label': 'Your reply', placeholder: row.kind === 'review' ? 'What should change?' : 'Write a reply' });
+    const saved = getDraft(row.id);
+    if (saved.reply) reply.value = saved.reply;
+    reply.addEventListener('input', () => setDraftField(row.id, 'reply', reply.value));
     const status = h('p', { class: `bots-attn-note${view.error ? ' error' : ''}`, role: view.error ? 'alert' : 'status', text: view.error });
     const buttons = [];
     const act = async (action, extra = {}) => {
@@ -110,6 +117,7 @@ export async function mount(root, ctx) {
       try {
         await ctx.post(`${BASE}/inbox/${encodeURIComponent(row.id)}/respond`, { action, expected_revision: row.revision, ...extra });
         view.busy = false;
+        clearDraft(row.id);
         await load();
         // Answered: the item moves to Done; go back to the list it left.
         view.openId = ''; view.error = ''; draw();
@@ -178,22 +186,28 @@ export async function mount(root, ctx) {
   // A live question: each one is a set of options (or a typed answer).
   function questionForm(row, act, status, buttons) {
     const values = {};
+    const saved = getDraft(row.id);
     const form = h('div', { class: 'bots-attn-questions' });
     for (const [index, question] of (row.questions || []).entries()) {
       const name = `q${index}`;
       const group = h('fieldset', { class: 'bots-attn-question' }, [h('legend', { text: question.header ? `${question.header}: ${question.question}` : question.question })]);
       const typed = h('input', { type: 'text', class: 'bots-attn-search', placeholder: question.options?.length ? 'Or write your own' : 'Your answer', 'aria-label': `Answer for ${question.question}`, maxlength: '4000' });
       const chosen = new Set();
+      if (saved[`t${index}`]) {
+        typed.value = saved[`t${index}`];
+        values[question.question] = question.multiSelect ? [typed.value.trim()] : typed.value;
+      }
       for (const option of question.options || []) {
         const input = h('input', { type: question.multiSelect ? 'checkbox' : 'radio', name, value: option.label });
         input.addEventListener('change', () => {
           if (question.multiSelect) { input.checked ? chosen.add(option.label) : chosen.delete(option.label); }
-          else { chosen.clear(); chosen.add(option.label); typed.value = ''; }
+          else { chosen.clear(); chosen.add(option.label); typed.value = ''; setDraftField(row.id, `t${index}`, ''); }
           values[question.question] = question.multiSelect ? [...chosen, ...(typed.value.trim() ? [typed.value.trim()] : [])] : [...chosen][0];
         });
         group.append(h('label', { class: 'bots-attn-option' }, [input, h('span', {}, [h('span', { text: option.label }), option.description ? h('small', { text: option.description }) : null])]));
       }
       typed.addEventListener('input', () => {
+        setDraftField(row.id, `t${index}`, typed.value);
         if (!question.multiSelect) { group.querySelectorAll('input[type=radio]').forEach(r => { r.checked = false; }); chosen.clear(); values[question.question] = typed.value; }
         else values[question.question] = [...chosen, ...(typed.value.trim() ? [typed.value.trim()] : [])];
       });

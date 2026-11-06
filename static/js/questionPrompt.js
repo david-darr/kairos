@@ -1,6 +1,7 @@
 // Model output must stay text: questions, headers, labels and descriptions can contain markup.
 import { api, el } from './api.js';
 import { ICONS } from './icons.js';
+import { getDraft, setDraftField, clearDraft } from './questionDraft.js';
 
 let current = null;
 export function dismissQuestionPrompt(requestId = null) {
@@ -8,7 +9,7 @@ export function dismissQuestionPrompt(requestId = null) {
   current.dismiss();
   current = null;
 }
-document.addEventListener('kairos:permission-closed', event => dismissQuestionPrompt(event.detail.id));
+document.addEventListener('kairos:permission-closed', event => { clearDraft(event.detail.id); dismissQuestionPrompt(event.detail.id); });
 
 export function showQuestionPrompt(request, onAnswered, { dock = null, mount = document.body } = {}) {
   dismissQuestionPrompt();
@@ -36,6 +37,7 @@ export function showQuestionPrompt(request, onAnswered, { dock = null, mount = d
     const values = readers.map(read => read());
     return values.some(value => value === null) ? null : Object.fromEntries(request.questions.map((q, i) => [q.question, values[i]]));
   }
+  const draft = getDraft(request.id);
   function update() { submit.disabled = sending || expired || !answers(); }
   request.questions.forEach((q, i) => {
     const legend = el('legend', { text: q.question });
@@ -55,7 +57,8 @@ export function showQuestionPrompt(request, onAnswered, { dock = null, mount = d
     const text = el('input', { type: 'text', 'aria-label': other ? 'Other answer' : 'Your answer', placeholder: other ? 'Type your own answer' : 'Your answer', maxlength: '4000' });
     if (other && phoneSheet) text.placeholder = 'Other: type your own answer';
     item.append(other ? text : el('label', { class: 'question-free' }, [el('span', { text: 'Your answer' }), text]));
-    text.addEventListener('input', () => { if (other) other.checked = true; update(); });
+    if (draft[`t${i}`]) { text.value = draft[`t${i}`]; if (other) other.checked = true; }
+    text.addEventListener('input', () => { if (other) other.checked = true; setDraftField(request.id, `t${i}`, text.value); update(); });
     text.addEventListener('keydown', event => { if (event.key === 'Enter' && !submit.disabled) { event.preventDefault(); send(false); } });
     readers.push(() => {
       const value = text.value.trim();
@@ -68,6 +71,7 @@ export function showQuestionPrompt(request, onAnswered, { dock = null, mount = d
     });
     body.append(item);
   });
+  update();
   const footer = el('footer', { class: 'question-footer' }, [error,
     el('p', { class: 'muted', text: request.expires_at ? `Waiting until ${new Date(request.expires_at * 1000).toLocaleTimeString()}` : '' }),
     dock && !phoneSheet ? null : el('p', { class: 'muted', text: 'Closing skips the question.' }),
@@ -109,7 +113,7 @@ export function showQuestionPrompt(request, onAnswered, { dock = null, mount = d
     sending = true; skip.disabled = true; update(); error.textContent = '';
     try {
       await api(`/api/permissions/${encodeURIComponent(request.id)}/respond`, { method: 'POST', body: JSON.stringify(isSkip ? { skip: true } : { answers: value }) });
-      onAnswered?.(); dismissQuestionPrompt(request.id);
+      clearDraft(request.id); onAnswered?.(); dismissQuestionPrompt(request.id);
     } catch (problem) {
       sending = false; skip.disabled = expired; update(); error.textContent = problem.message;
       if (dialog && !dialog.open && !removed) dialog.showModal();

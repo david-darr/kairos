@@ -37,6 +37,7 @@ class Node {
   find(pred) { return this.all().find(pred); }
   filter(pred) { return this.all().filter(pred); }
   querySelector() { return null; }
+  querySelectorAll(sel) { return sel === 'input[type=radio]' ? this.all().filter(n => n.tag === 'input' && n.attrs.type === 'radio') : []; }
   get dataset() { return new Proxy({}, { get: (_, k) => this.attrs[`data-${k}`], set: (_, k, v) => { this.attrs[`data-${k}`] = v; return true; } }); }
 }
 global.document = { createElement: tag => new Node(tag), hidden: false, addEventListener() {}, removeEventListener() {} };
@@ -188,6 +189,36 @@ const posts = ctx => ctx.calls.filter(c => c[0] === 'POST');
     radio.checked = true; radio.fire('change');
     button(root, 'Send answers').click(); await tick();
     assert.deepEqual(posts(ctx).find(c => c[1].endsWith('/respond'))[2], { action: 'respond', expected_revision: 'rev-permission:q1', answers: { 'Which slot?': 'Wed' } });
+  });
+
+  await named('a typed answer survives closing the reading view and clears once sent', async () => {
+    const store = {};
+    global.localStorage = { getItem: k => store[k] ?? null, setItem: (k, v) => { store[k] = String(v); }, removeItem: k => { delete store[k]; } };
+    const questions = [{ question: 'Why?', header: '', multiSelect: false, options: [] }];
+    const rows = [row('permission:d1', 'needs-you', { actions: ['respond', 'skip'], questions })];
+    const root = new Node('div');
+    const ctx = makeCtx(rows);
+    await Inbox.mount(root, ctx);
+    root.find(n => n.has('bots-attn-row')).click(); await tick();
+    const typedBox = () => root.find(n => n.tag === 'input' && n.attrs.type === 'text');
+    typedBox().value = 'half typed'; typedBox().fire('input');
+    root.find(n => n.attrs['data-action'] === 'back').click(); await tick();
+    assert.ok(store['kairos.questionDrafts.v1'].includes('half typed'), 'the draft is in localStorage');
+    root.find(n => n.has('bots-attn-row')).click(); await tick();
+    assert.equal(typedBox().value, 'half typed', 'reopening restores the draft');
+    button(root, 'Send answers').click(); await tick();
+    assert.equal(posts(ctx).find(c => c[1].endsWith('/respond'))[2].answers['Why?'], 'half typed');
+    assert.equal(store['kairos.questionDrafts.v1'], undefined, 'sending clears the draft');
+    // Settled elsewhere: a draft for a question that left the open list is dropped on the next load.
+    const root2 = new Node('div');
+    const ctx2 = makeCtx(rows);
+    const view2 = await Inbox.mount(root2, ctx2);
+    root2.find(n => n.has('bots-attn-row')).click(); await tick();
+    root2.find(n => n.tag === 'input' && n.attrs.type === 'text').value = 'again'; root2.find(n => n.tag === 'input' && n.attrs.type === 'text').fire('input');
+    assert.ok(store['kairos.questionDrafts.v1'].includes('again'));
+    ctx2.state.rows = []; await view2.refresh();
+    assert.equal(store['kairos.questionDrafts.v1'], undefined, 'a question answered elsewhere drops its draft');
+    delete global.localStorage;
   });
 
   await named('Mark done files it and approves nothing', async () => {

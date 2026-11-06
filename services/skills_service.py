@@ -401,13 +401,16 @@ def import_skill(filename: str, raw_content: str, confirmed: bool = False, *,
             "scan": scan["verdict"]}
 
 
-def delete_skill(slug: str) -> None:
+def delete_skill(slug: str) -> bool:
+    """Remove a skill from this account; False when it does not exist here."""
     path = _skill_path(slug)
-    if os.path.exists(path):
-        from core import tab_folders
-        # Bundle files share the same checked folder as SKILL.md.
-        tab_folders.code_files(os.path.dirname(path), user=False)
-        skill_dir = os.path.dirname(path)
-        shutil.rmtree(skill_dir)
-        from services import skill_curator
-        skill_curator.forget(slug)
+    if not os.path.exists(path):
+        return False
+    from core import tab_folders
+    # Bundle files share the same checked folder as SKILL.md.
+    tab_folders.code_files(os.path.dirname(path), user=False)
+    skill_dir = os.path.dirname(path)
+    shutil.rmtree(skill_dir)
+    from services import skill_curator
+    skill_curator.forget(slug)
+    return True
