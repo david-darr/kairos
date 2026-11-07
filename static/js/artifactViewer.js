@@ -70,7 +70,7 @@ export function renderSheets(content, actions, data) {
   };
   sheets.forEach((sheet, index) => tabs.append(el('button', { type: 'button', class: 'office-tab', role: 'tab', text: sheet.name, onclick: () => show(index) })));
   root.append(tabs, body);
-  content.dataset.pages = String(sheets.length); content.dataset.pageUnit = 'sheets';
+  content.pageCount = { count: sheets.length, unit: 'sheets' };
   if (data.truncated_sheets) root.append(note('Only the first sheets are shown.'));
   if (sheets.length) show(0); else body.append(note('This workbook has no readable sheets.'));
   content.replaceChildren(root);
@@ -190,7 +190,7 @@ export function renderDeck(content, actions, data, controller) {
   const pane = content.closest('.artifact-tab-panel') || root;
   pane.addEventListener('keydown', key, { signal: controller.signal });
   actions.append(prev, label, next);
-  content.dataset.pages = String(slides.length); content.dataset.pageUnit = 'slides';
+  content.pageCount = { count: slides.length, unit: 'slides' };
   content.replaceChildren(root, note('Approximate layout. Download for the exact slides.'));
   if (!slides.length) body.append(note('This presentation has no readable slides.')); else show(0);
   if (data.truncated) content.append(note('Only the first slides are shown.'));

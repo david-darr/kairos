@@ -97,7 +97,7 @@ export function openMediaViewer(items, start = 0, { opener = document.activeElem
     controller = new AbortController();
     const signal = controller.signal;
     tools.replaceChildren(); tools.hidden = true;
-    delete content.dataset.pages; delete content.dataset.pageUnit;
+    content.pageCount = null;
     content.artifact = null;
     content.className = `media-viewer-content artifact-preview is-${item.kind}`;
     count.textContent = counterText(index, items.length);
@@ -125,7 +125,7 @@ export function openMediaViewer(items, start = 0, { opener = document.activeElem
     } catch (error) { if (error?.name !== 'AbortError') onError(error); }
     if (mine !== ticket || signal.aborted) return;
     tools.hidden = !tools.childElementCount;
-    if (content.dataset.pages) { info.pages = Number(content.dataset.pages); info.pageUnit = content.dataset.pageUnit || 'pages'; }
+    if (content.pageCount?.count) { info.pages = content.pageCount.count; info.pageUnit = content.pageCount.unit; }
     paintFacts(info);
     const picture = content.querySelector('.artifact-image-viewport img, img.artifact-svg-image');
     const media = content.querySelector('video, audio');
