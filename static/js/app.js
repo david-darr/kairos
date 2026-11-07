@@ -1,6 +1,6 @@
 import { ICONS } from "./icons.js";
 import { WORDMARK, ICON as KAIROS_MARK } from "./brand.js";
-import { api, useAppMenusForSelects } from "./api.js";
+import { api, toast, useAppMenusForSelects } from "./api.js";
 import * as onboarding from "./onboarding.js";
 import * as auth from "./auth.js";
 import * as commandPalette from "./commandPalette.js";
@@ -9,7 +9,7 @@ import * as chatStream from "./chatStream.js";
 import { setupSidebar, restoreSidebar } from "./sidebar.js";
 import { parseChatWindow } from './chatWindowRoute.js';
 import { setPaneUser } from './chatPaneStack.js';
-import { closeBrowser, openBrowser } from "./browserPane.js";
+import { closeBrowser, openBrowser, openInBrowse } from "./browserPane.js";
 import { initAppearance } from "./appearance.js";
 import { initLayout, setKnownTabs, sidebarLayout, pinnedTabs } from "./layout.js";
 import { renderDesktopNav, clearDesktopNav, mountSearchRow } from "./sidebarNav.js";
@@ -69,12 +69,15 @@ const STUB_TABS = new Set();
 const SHARED_TABS = new Set();
 let forgeAccess = false; // this account may use this computer's shell and files (Forge needs it)
 let appMode = 'kairos';
+// Browse is the desktop app's alone (Kairos Browser Phase 1): its tabs are
+// native views, which the web and phone clients cannot have.
+const browseDesktop = !!(window.jarvis && window.jarvis.browse);
 // Whether this person has machine access is not known yet; buildSidebar() puts an account without it back out of Forge.
-try { appMode = restoreMode(localStorage.getItem('kairos:app-mode'), true, true); } catch { /* Device storage is optional. */ }
+try { appMode = restoreMode(localStorage.getItem('kairos:app-mode'), true, true, browseDesktop); } catch { /* Device storage is optional. */ }
 // The marker must match a mode restored at startup, not only one switched to.
 document.documentElement.dataset.appMode = appMode;
 // Bots is for every account; Forge needs machine access (it builds and runs apps on this computer).
-function modeAllowed(mode) { return mode === 'kairos' || mode === 'bots' || (mode === 'forge' && forgeAccess); }
+function modeAllowed(mode) { return mode === 'kairos' || mode === 'bots' || (mode === 'forge' && forgeAccess) || (mode === 'browse' && browseDesktop); }
 function allowedModes() { return MODES.filter(modeAllowed); }
 function rememberMode(mode) {
   appMode = mode;
@@ -354,22 +357,43 @@ async function buildSidebar() {
   if (!modeAllowed(appMode)) rememberMode('kairos');
   if (appMode === 'bots') mountAttention(); else unmountAttention();
   document.getElementById('forge-mode-switch')?.remove();
-  {
-    const modes = allowedModes();
+  document.getElementById('titlebar-modes')?.remove();
+  // The desktop app shows the modes in its title bar (David, 2026-11-03,
+  // option C): Kairos, Forge and Bots as tabs, then Browse set apart as a
+  // pill, the same in every mode. The web and phone clients keep the
+  // sidebar switch, which never has Browse.
+  const titlebar = document.documentElement.classList.contains('electron-shell') && document.getElementById('titlebar');
+  const modeButton = (mode, label, className) => {
+    const button = document.createElement('button');
+    button.type = 'button'; button.className = className; button.dataset.mode = mode;
+    button.setAttribute('aria-pressed', String(appMode === mode));
+    button.classList.toggle('active', appMode === mode); button.textContent = label;
+    if (MODE_BADGES[mode]) { const badge = document.createElement('small'); badge.textContent = MODE_BADGES[mode]; button.append(badge); }
+    button.onclick = () => switchMode(mode);
+    return button;
+  };
+  const modes = allowedModes();
+  if (titlebar) {
+    const shown = MODE_SWITCH.filter(([mode]) => modes.includes(mode));
+    if (shown.length > 1) {
+      const nav = document.createElement('nav');
+      nav.id = 'titlebar-modes'; nav.className = 'titlebar-modes'; nav.setAttribute('aria-label', 'App mode');
+      for (const [mode, label] of shown.filter(([m]) => m !== 'browse')) nav.append(modeButton(mode, label, 'titlebar-mode'));
+      if (shown.some(([m]) => m === 'browse')) {
+        const divider = document.createElement('span'); divider.className = 'titlebar-modes-divider'; divider.setAttribute('aria-hidden', 'true');
+        const browse = modeButton('browse', 'Browse', 'titlebar-mode titlebar-browse');
+        browse.insertAdjacentHTML('afterbegin', '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>');
+        nav.append(divider, browse);
+      }
+      document.getElementById('titlebar-brand').after(nav);
+    }
+  } else {
     const control = document.createElement('div');
     control.id = 'forge-mode-switch';
     control.className = 'forge-mode-switch';
     control.setAttribute('role', 'group');
     control.setAttribute('aria-label', 'App mode');
-    for (const [mode, label] of MODE_SWITCH.filter(([mode]) => modes.includes(mode))) {
-      const button = document.createElement('button');
-      button.type = 'button'; button.className = 'segmented-tab'; button.dataset.mode = mode;
-      button.setAttribute('aria-pressed', String(appMode === mode));
-      button.classList.toggle('active', appMode === mode); button.textContent = label;
-      if (MODE_BADGES[mode]) { const badge = document.createElement('small'); badge.textContent = MODE_BADGES[mode]; button.append(badge); }
-      button.onclick = () => switchMode(mode);
-      control.append(button);
-    }
+    for (const [mode, label] of MODE_SWITCH.filter(([mode]) => mode !== 'browse' && modes.includes(mode))) control.append(modeButton(mode, label, 'segmented-tab'));
     const rail = document.createElement('button'); rail.type = 'button'; rail.className = 'forge-mode-rail';
     rail.setAttribute('aria-label', railLabel(appMode, modes));
     rail.title = rail.getAttribute('aria-label'); rail.innerHTML = KAIROS_MARK; // The Kairos circle mark (David, 2026-10-09).
@@ -418,7 +442,8 @@ async function buildSidebar() {
   }
   setKnownTabs([...items.values()]);
   // Groups, order and hidden tabs: Settings > Layout (layout.js).
-  const modeNav = appMode === 'forge' ? FORGE_NAV : appMode === 'bots' ? BOTS_NAV : null;
+  // Browse draws its own sidebar (views/browse.js); the app's is hidden there.
+  const modeNav = appMode === 'forge' ? FORGE_NAV : appMode === 'bots' ? BOTS_NAV : appMode === 'browse' ? [] : null;
   const groups = modeNav ? [{ ids: modeNav.map(item => item.id) }] : sidebarLayout([...items.keys()]);
   if (modeNav) for (const item of modeNav) items.set(item.id, { ...item, svg: ICONS[item.icon] });
   // Desktop Kairos: the redesigned sidebar and rail (sidebarNav.js).
@@ -724,7 +749,14 @@ async function startApp() {
   // chrome-less window. Registered globally because the click can happen
   // before the Chat view is mounted — the pane lives in Chat's layout, so
   // this switches there first.
+  // Since Browse (David, 2026-11-03): only a link in a Kairos chat opens in
+  // that pane; a link anywhere else in the desktop app opens a Browse tab.
   window.jarvis?.browser?.onOpenRequest(async (url) => {
+    if (activeTab !== "chat" && window.jarvis?.browse) {
+      const opened = await openInBrowse(url);
+      if (opened && !opened.ok) toast(opened.reason || "That address can't be opened here.", "error");
+      return;
+    }
     if (activeTab !== "chat") await switchTab("chat", { mobileConversation: true });
     openBrowser(url);
   });

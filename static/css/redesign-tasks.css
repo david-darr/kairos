@@ -314,3 +314,8 @@
   .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .triggers-card:has(+ .automation-library) { grid-column: span 5; }
   .kairos-redesign[data-view="tasks"] .view-constrained:has(> .task-board-card) > .triggers-card + .automation-library { grid-column: span 7; }
 }
+
+/* A refused Schedule names the field and what is missing, on one line under the form (views/tasks.js, 2026-11-05). */
+.tasks-workspace .field-error { flex-basis: 100%; grid-column: 1 / -1; margin: 2px 0 0; font-size: 12.5px; line-height: 1.35; color: var(--danger); }
+.tasks-workspace .field-error[hidden] { display: none; }
+.tasks-workspace .field [aria-invalid="true"] { border-color: var(--danger); }

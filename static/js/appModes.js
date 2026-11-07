@@ -5,9 +5,11 @@
 //
 // Bots is for every account. Forge builds and runs apps on this computer, so it
 // needs machine access (admins always have it); an account without it never
-// lands in Forge, whatever was stored on the device.
+// lands in Forge, whatever was stored on the device. Browse (Kairos Browser
+// Phase 1, D6) is for every account too, but only in the desktop app, where tabs
+// are real native views; the web and phone clients never get it.
 
-export const MODES = ['kairos', 'forge', 'bots'];
+export const MODES = ['kairos', 'forge', 'bots', 'browse'];
 
 export const FORGE_NAV = [
   { id: 'forgeHome', label: 'Home', icon: 'home' },
@@ -19,31 +21,45 @@ export const BOTS_NAV = [
   { id: 'botsHome', label: 'Bots', icon: 'agents' },
 ];
 
-export const MODE_LABELS = { kairos: 'Kairos', forge: 'Forge', bots: 'Bots' };
-// Forge and Bots carry a "Preview" badge on the switch until their phases finish
-// (Phase 0 design, Q4).
-export const MODE_BADGES = { forge: 'Preview', bots: 'Preview' };
+export const MODE_LABELS = { kairos: 'Kairos', forge: 'Forge', bots: 'Bots', browse: 'Browse' };
+// Forge and Bots carried a "Preview" badge until their phases finished (Phase 0
+// design, Q4). David removed it everywhere on 2026-11-03 ("Remove everywhere").
+export const MODE_BADGES = {};
 // The switch's segments, in order: [mode, label].
 export const MODE_SWITCH = MODES.map(mode => [mode, MODE_LABELS[mode]]);
 
 // Title-bar text for tabs that are not in the Kairos nav.
-export const TAB_LABELS = { forgeShell: 'Forge', botsHome: 'Bots', botsShell: 'Bots', botsAutomations: 'Automations' };
+export const TAB_LABELS = { forgeShell: 'Forge', botsHome: 'Bots', botsShell: 'Bots', botsAutomations: 'Automations', browse: 'Browse' };
 export const BOTS_TEAM_TABS = { botsRoom: 'Room', botsTeamMap: 'Team map' };
 
-const HOME_TABS = { kairos: 'home', forge: 'forgeHome', bots: 'botsHome' };
+const HOME_TABS = { kairos: 'home', forge: 'forgeHome', bots: 'botsHome', browse: 'browse' };
 
 // The tab each mode opens on.
 export function homeTabFor(mode) { return HOME_TABS[mode] || HOME_TABS.kairos; }
 
+// Whether this account, in this client, may be in a mode.
+export function modeAllowed(mode, machineAccess, desktop = false, signedIn = true) {
+  if (mode === 'kairos') return true;
+  if (mode === 'browse') return !!desktop;
+  if (mode === 'bots') return !!signedIn;
+  return mode === 'forge' && !!machineAccess;
+}
+
 // What a stored mode (localStorage 'kairos:app-mode') means. Bots comes back for
-// anyone signed in; Forge only with machine access; anything unknown is Kairos.
-export function restoreMode(stored, machineAccess, signedIn = true) {
-  if (stored === 'bots' && signedIn) return 'bots';
-  return stored === 'forge' && machineAccess ? 'forge' : 'kairos';
+// anyone signed in; Forge only with machine access; Browse only in the desktop
+// app; anything unknown is Kairos.
+export function restoreMode(stored, machineAccess, signedIn = true, desktop = false) {
+  return typeof stored === 'string' && stored !== 'kairos' && MODES.includes(stored) && modeAllowed(stored, machineAccess, desktop, signedIn) ? stored : 'kairos';
+}
+
+// The switch's segments this account sees.
+export function switchModes(machineAccess, desktop = false) {
+  return MODE_SWITCH.filter(([mode]) => modeAllowed(mode, machineAccess, desktop));
 }
 
 // The mode a tab id belongs to.
 export function modeForTab(tabId) {
+  if (tabId === 'browse') return 'browse';
   if (tabId === 'forgeShell' || FORGE_NAV.some(item => item.id === tabId)) return 'forge';
   if (tabId === 'botsShell' || tabId === 'botsAutomations' || Object.hasOwn(BOTS_TEAM_TABS, tabId) || BOTS_NAV.some(item => item.id === tabId)) return 'bots';
   return 'kairos';
@@ -62,7 +78,7 @@ export function nextRailMode(mode, allowed = RAIL_ORDER) {
 // The collapsed button's spoken name: where it goes next.
 export function railLabel(mode, allowed = RAIL_ORDER) {
   const next = nextRailMode(mode, allowed);
-  return next === 'kairos' ? 'Switch to Kairos' : `Switch to ${MODE_LABELS[next]} Preview`;
+  return `Switch to ${MODE_LABELS[next]}`;
 }
 
 // Mode entry is observed here so Home, a bot deep link and restored Bots mode

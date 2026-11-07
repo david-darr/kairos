@@ -416,13 +416,14 @@ module.exports = async ({ js, win, waitFor, delay, navigate, demoState, writes, 
     const homeIds = () => js("[...document.querySelectorAll('[data-home-section]')].map(n => n.dataset.homeSection)");
     const layoutStore = () => lsKey('kairos:layout:v1:');
     const defaultTabs = await tabs(), defaultHome = await homeIds();
-    assert.deepEqual(defaultTabs.slice(0, 3), ['home', 'chat', 'agents'], 'Layout: default sidebar order');
+    // Bots left the sidebar for its own mode (Bots Phase 1, layout.js DEFAULT_GROUPS); the order is checked on the Workspace group.
+    assert.deepEqual(defaultTabs.slice(0, 4), ['home', 'chat', 'notes', 'library'], 'Layout: default sidebar order');
     await open('layout'); await waitFor("document.querySelectorAll('.settings-window .layout-item').length > 8");
     let from = await mark();
-    // Move Chat below Agents with its arrow: saved at once, sidebar follows with no reload.
-    await js("document.querySelector('.settings-window [aria-label=\"Move Chats down\"]').click()"); await delay(250);
-    assert.deepEqual((await layoutStore()).groups.main.slice(0, 3), ['home', 'agents', 'chat'], 'Layout: the new order is saved');
-    assert.deepEqual((await tabs()).slice(0, 3), ['home', 'agents', 'chat'], 'Layout: the sidebar followed live');
+    // Move Notes below Library with its arrow: saved at once, sidebar follows with no reload.
+    await js("document.querySelector('.settings-window .layout-list[data-group=workspace] [aria-label=\"Move Notes down\"]').click()"); await delay(250);
+    assert.deepEqual((await layoutStore()).groups.workspace.slice(0, 2), ['library', 'notes'], 'Layout: the new order is saved');
+    assert.deepEqual((await tabs()).slice(2, 4), ['library', 'notes'], 'Layout: the sidebar followed live');
     // Hide Calendar and a Home card.
     await clickSwitch('Show Calendar'); await delay(250);
     assert.ok((await layoutStore()).hiddenTabs.includes('calendar'), 'Layout: hidden tab is saved');
@@ -436,18 +437,19 @@ module.exports = async ({ js, win, waitFor, delay, navigate, demoState, writes, 
     await reopen('layout');
     assert.equal(await switchOn('Show Calendar'), false, 'Layout: reopening shows Calendar hidden');
     assert.equal(await switchOn('Show Recent chats'), false, 'Layout: reopening shows Recent chats hidden');
-    assert.deepEqual(await js("[...document.querySelectorAll('.settings-window .layout-list[data-group=main] .layout-item')].map(n => n.dataset.id).slice(0, 3)"), ['home', 'agents', 'chat'], 'Layout: reopening shows the saved order');
+    assert.deepEqual(await js("[...document.querySelectorAll('.settings-window .layout-list[data-group=main] .layout-item')].map(n => n.dataset.id).slice(0, 2)"), ['home', 'chat'], 'Layout: reopening keeps the main group');
+    assert.deepEqual(await js("[...document.querySelectorAll('.settings-window .layout-list[data-group=workspace] .layout-item')].map(n => n.dataset.id).slice(0, 2)"), ['library', 'notes'], 'Layout: reopening shows the saved order');
     await close();
     await reload();
-    assert.deepEqual((await tabs()).slice(0, 3), ['home', 'agents', 'chat'], 'Layout: order survives a reload');
+    assert.deepEqual((await tabs()).slice(2, 4), ['library', 'notes'], 'Layout: order survives a reload');
     assert.ok(!(await tabs()).includes('calendar'), 'Layout: hidden tab survives a reload');
     // Reset sidebar restores order and tabs but not Home; Reset Home restores Home.
     await open('layout'); await waitFor("document.querySelectorAll('.settings-window .layout-item').length > 8");
     await clickText('Reset sidebar'); await delay(250);
     let store = await layoutStore();
-    assert.deepEqual(store.groups.main, ['home', 'chat', 'agents'], 'Layout: Reset sidebar restores the order');
+    assert.deepEqual([store.groups.main, store.groups.workspace.slice(0, 2)], [['home', 'chat'], ['notes', 'library']], 'Layout: Reset sidebar restores the order');
     assert.deepEqual(store.hiddenTabs, [], 'Layout: Reset sidebar shows every tab again');
-    assert.deepEqual((await tabs()).slice(0, 3), ['home', 'chat', 'agents'], 'Layout: the sidebar went back at once');
+    assert.deepEqual((await tabs()).slice(0, 4), ['home', 'chat', 'notes', 'library'], 'Layout: the sidebar went back at once');
     assert.ok(store.hiddenHome.includes('chats'), 'Layout: Reset sidebar leaves Home alone');
     await clickText('Reset Home'); await delay(300);
     store = await layoutStore();

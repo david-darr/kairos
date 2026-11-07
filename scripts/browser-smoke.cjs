@@ -30,7 +30,9 @@ const sideBrowser = require(path.join(root, 'electron', 'browser.js'));
 const failures = [];
 // Awaits the body, so an async check's rejection is recorded as a failure
 // instead of vanishing into an unhandled promise.
+let checksRun = 0;
 async function check(name, fn) {
+  checksRun += 1;
   try { await fn(); } catch (error) { failures.push(`${name}: ${error.message}`); }
 }
 
@@ -69,6 +71,297 @@ process.on('unhandledRejection', (error) => {
 // Live page loads are slower and depend on someone else's server, so the
 // watchdog is given real room when --live is on.
 setTimeout(() => finish(1, 'FAIL: timed out before finishing.'), process.argv.includes('--live') ? 180000 : 90000).unref();
+
+// Pages for the Browse checks, on their own port.
+const BROWSE_PORT = 8478;
+const PROXY_PORT = 8479; // stands in for the egress proxy, a reserved port
+const browseServer = http.createServer((req, res) => {
+  const page = (body) => { res.setHeader('Content-Type', 'text/html'); res.end(`<!doctype html><title>${req.url}</title>${body}`); };
+  if (req.url === '/ad.js') { res.setHeader('Content-Type', 'text/javascript'); res.end('window.adLoaded = true;'); return; }
+  if (req.url === '/file.bin') {
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'attachment; filename="report.bin"');
+    res.end(Buffer.alloc(2048, 7));
+    return;
+  }
+  if (req.url === '/ads') return page('<div class="ad-banner" id="banner">ad</div><p id="text">article</p><script src="/ad.js"></script>');
+  page(`<h1>browse fixture</h1><a id="link" href="/second">second</a>`);
+});
+
+async function browseChecks(win) {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const { createGate } = require(path.join(root, 'electron', 'browser-gate.js'));
+  const { openStore } = require(path.join(root, 'electron', 'browser-store.js'));
+  const { createAdblock } = require(path.join(root, 'electron', 'browser-adblock.js'));
+  const { createPermissions } = require(path.join(root, 'electron', 'browser-permissions.js'));
+  const { createDownloads, _markFromInternet } = require(path.join(root, 'electron', 'browser-downloads.js'));
+  const { createTabs } = require(path.join(root, 'electron', 'browser-tabs.js'));
+  const { resaveCookies } = require(path.join(root, 'electron', 'browser-engine.js'));
+  await new Promise(resolve => browseServer.listen(BROWSE_PORT, '127.0.0.1', resolve));
+  const base = `http://fixture.test:${BROWSE_PORT}`;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kairos-browse-smoke-'));
+  const partition = session.fromPartition('persist:browse-smoke');
+  const gate = createGate({ backendOrigin: BACKEND_ORIGIN, reservedPorts: [PROXY_PORT] });
+  const store = openStore(path.join(tmp, 'browser.db'));
+  const adblock = createAdblock();
+  adblock.load(['/ad.js$script\n##.ad-banner']);
+  const asked = [];
+  createPermissions({ store, ask: (req) => { asked.push(req.setting); return { answer: 'allow', remember: true }; } }).attach(partition);
+  const saved = [];
+  const downloads = createDownloads({ store, folder: () => path.join(tmp, 'Downloads'), notify: d => saved.push(d), shell: { openPath() {}, showItemInFolder() {} } });
+  downloads.attach(partition);
+  const events = [];
+  let tabs;
+  adblock.attach(partition, { enabledFor: url => store.getSite(url, 'adblock') !== 'off', onBlocked: id => tabs.countBlocked(id) });
+  tabs = createTabs({ host: () => win, session: partition, gate, store, adblock, notify: e => events.push(e) });
+  tabs.setBounds({ x: 300, y: 0, width: 900, height: 800 });
+  tabs.setVisible(true);
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  const loaded = (wc) => new Promise((resolve) => {
+    if (!wc.isLoading()) return resolve(true);
+    const t = setTimeout(() => resolve(false), 10000);
+    wc.once('did-stop-loading', () => { clearTimeout(t); resolve(true); });
+  });
+  const until = async (fn, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return true; await wait(100); } return false; };
+
+  await check('browse gate: localhost opens, Kairos ports never do', () => {
+    const opts = { allowLoopback: true };
+    assert.ok(gate.safeUrl('http://localhost:3000/', opts));
+    assert.ok(gate.safeUrl('http://127.0.0.1:5173/', opts), 'a dev server is just another local site');
+    assert.equal(gate.safeUrl(`${BACKEND_ORIGIN}/api/settings`, opts), null);
+    assert.equal(gate.safeUrl(`http://localhost:${BACKEND_PORT}/`, opts), null, 'backend port on any loopback spelling');
+    assert.equal(gate.safeUrl(`http://[::1]:${PROXY_PORT}/`, opts), null, 'proxy port reserved');
+    assert.equal(gate.safeUrl('file:///etc/passwd', opts), null);
+    assert.equal(gate.fromAddressBar('localhost:5173', opts), 'http://localhost:5173/');
+    assert.equal(gate.fromAddressBar('mailto:a@b.com', opts), null);
+    assert.equal(gate.safeUrl('http://localhost:3000/'), null, 'the strict policy is unchanged');
+  });
+
+  let first;
+  await check('browse: a tab opens, loads and lands in history', async () => {
+    const r = tabs.open(`${base}/`);
+    assert.equal(r.ok, true);
+    first = r.id;
+    const wc = tabs.webContentsOf(first);
+    assert.ok(await loaded(wc));
+    assert.ok(await until(() => store.recentHistory(5).some(h => h.url === `${base}/`)), 'history recorded');
+    assert.equal(tabs.list().activeId, first);
+  });
+
+  await check('browse: a tab page has no bridge, node or IPC', async () => {
+    const probe = await tabs.webContentsOf(first).executeJavaScript('({ j: typeof window.jarvis, r: typeof window.require, p: typeof window.process })');
+    assert.deepEqual(probe, { j: 'undefined', r: 'undefined', p: 'undefined' });
+  });
+
+  await check('browse: a refused address opens no tab', () => {
+    const before = tabs.list().tabs.length;
+    assert.equal(tabs.open(`${BACKEND_ORIGIN}/`).ok, false);
+    assert.equal(tabs.list().tabs.length, before);
+  });
+
+  await check('browse: pop-ups need the person, then open as tabs', async () => {
+    const wc = tabs.webContentsOf(first);
+    const before = tabs.list().tabs.length;
+    await wc.executeJavaScript(`window.open(${JSON.stringify(base + '/popup-a')}); 1`);
+    await wait(300);
+    assert.equal(tabs.list().tabs.length, before, 'no tab without a click');
+    assert.ok(events.some(e => e.event === 'popup-blocked'), 'the block is reported');
+    wc.sendInputEvent({ type: 'mouseDown', x: 50, y: 50, button: 'left', clickCount: 1 });
+    wc.sendInputEvent({ type: 'mouseUp', x: 50, y: 50, button: 'left', clickCount: 1 });
+    await wait(150);
+    await wc.executeJavaScript(`window.open(${JSON.stringify(base + '/popup-b')}); 1`);
+    assert.ok(await until(() => tabs.list().tabs.length === before + 1), 'a tab right after a click');
+  });
+
+  await check('browse: permission prompt asked once, then remembered', async () => {
+    const wc = tabs.webContentsOf(first);
+    const one = await wc.executeJavaScript('Notification.requestPermission()');
+    assert.equal(one, 'granted');
+    assert.deepEqual(asked, ['notifications']);
+    assert.equal(store.getSite(`${base}/`, 'permission:notifications'), 'allow');
+    await wc.executeJavaScript('Notification.requestPermission()');
+    assert.equal(asked.length, 1, 'no second prompt');
+    const geo = await wc.executeJavaScript(`navigator.permissions.query({ name: 'midi' }).then(s => s.state).catch(() => 'denied')`);
+    assert.notEqual(geo, 'granted', 'unlisted permissions are not granted');
+  });
+
+  await check('browse: ad blocking blocks the script, hides the element, counts it, and has an off switch', async () => {
+    const r = tabs.open(`${base}/ads`);
+    const wc = tabs.webContentsOf(r.id);
+    assert.ok(await loaded(wc));
+    await wait(300);
+    assert.equal(await wc.executeJavaScript('window.adLoaded === true'), false, 'ad script blocked');
+    assert.equal(await wc.executeJavaScript(`getComputedStyle(document.getElementById('banner')).display`), 'none');
+    assert.equal(await wc.executeJavaScript(`getComputedStyle(document.getElementById('text')).display`), 'block');
+    assert.ok(tabs.list().tabs.find(t => t.id === r.id).blocked >= 1, 'count shown');
+    store.setSite(`${base}/ads`, 'adblock', 'off');
+    wc.reload();
+    await wait(200);
+    assert.ok(await loaded(wc));
+    assert.ok(await until(() => wc.executeJavaScript('window.adLoaded === true')), 'off switch lets it load');
+    store.setSite(`${base}/ads`, 'adblock', null);
+  });
+
+  await check('browse: downloads save to the folder with the internet mark', async () => {
+    tabs.navigate(first, `${base}/file.bin`);
+    assert.ok(await until(() => saved.some(d => d.state === 'completed')), 'download completed');
+    const done = saved.find(d => d.state === 'completed');
+    assert.equal(path.basename(done.path), 'report.bin');
+    assert.equal(fs.statSync(done.path).size, 2048);
+    if (process.platform === 'win32') {
+      const zone = fs.readFileSync(`${done.path}:Zone.Identifier`, 'utf8');
+      assert.match(zone, /ZoneId=3/);
+      assert.match(zone, /HostUrl=http:\/\/fixture\.test/);
+    }
+    assert.equal(store.downloads().find(d => d.id === done.id).state, 'completed');
+    assert.equal(_markFromInternet(done.path, 'https://u:p@x.test/', '', 'linux'), false, 'only Windows gets the mark');
+  });
+
+  await check('browse: zoom is remembered per site', async () => {
+    tabs.activate(first);
+    tabs.navigate(first, `${base}/`);
+    assert.ok(await loaded(tabs.webContentsOf(first)));
+    assert.equal(tabs.zoom(first, 1), 1.1);
+    assert.equal(store.getSite(`${base}/`, 'zoom'), '1.1');
+    assert.equal(tabs.zoom(first, 0), 1);
+    assert.equal(store.getSite(`${base}/`, 'zoom'), null);
+  });
+
+  await check('browse: close, reopen closed, pin order', async () => {
+    const r = tabs.open(`${base}/closing`);
+    assert.ok(await loaded(tabs.webContentsOf(r.id)));
+    const count = tabs.list().tabs.length;
+    tabs.close(r.id);
+    assert.equal(tabs.list().tabs.length, count - 1);
+    const again = tabs.reopenClosed();
+    assert.equal(again.ok, true);
+    assert.equal(tabs.list().tabs.length, count);
+    tabs.setPinned(again.id, true);
+    assert.equal(tabs.list().tabs[0].id, again.id, 'pinned tabs lead');
+  });
+
+  await check('browse: session restore reopens the tabs, discarded until chosen', async () => {
+    await wait(700);
+    const urls = store.loadSession().map(t => t.url);
+    assert.ok(urls.length >= 3, `session saved: ${urls.length}`);
+    tabs.closeAll();
+    const again = createTabs({ host: () => win, session: partition, gate, store, adblock, notify: () => {} });
+    again.setBounds({ x: 300, y: 0, width: 900, height: 800 });
+    assert.equal(again.restore(), urls.length);
+    const list = again.list();
+    assert.equal(list.tabs.filter(t => !t.discarded).length, 1, 'only the chosen tab is live');
+    assert.equal(list.tabs[0].pinned, true, 'pin kept');
+    again.closeAll();
+  });
+
+  await check('browse: cookie re-save keeps cookies and runs once', async () => {
+    await partition.cookies.set({ url: `${base}/`, name: 'keep', value: 'v1', expirationDate: Date.now() / 1000 + 3600 });
+    const marker = path.join(tmp, 'cookies-resaved.json');
+    const n = await resaveCookies(partition, marker);
+    assert.ok(n >= 1);
+    assert.equal(await resaveCookies(partition, marker), null);
+    assert.equal((await partition.cookies.get({ name: 'keep' }))[0].value, 'v1');
+  });
+
+  try { store.close(); } catch { /* already closed */ }
+  browseServer.close();
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+// U2: the IPC boundary and the shared profile, through the real
+// createBrowse and installBrowseIpc with a stand-in ipcMain.
+async function browseIpcChecks(win) {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const { createBrowse, kairosPorts } = require(path.join(root, 'electron', 'browser-browse.js'));
+  const { installBrowseIpc } = require(path.join(root, 'electron', 'browser-ipc.js'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kairos-browse-ipc-'));
+  const sent = [];
+  sideBrowser.shareSession();
+  const browse = createBrowse({
+    host: () => win, partition: sideBrowser.PARTITION, folder: path.join(tmp, 'browser', 'default'),
+    downloadsFolder: () => path.join(tmp, 'Downloads'), backendOrigin: BACKEND_ORIGIN,
+    reservedPorts: kairosPorts({ instancePort: BACKEND_PORT }), shell: { openPath() {}, showItemInFolder() {} },
+    send: (channel, payload) => sent.push({ channel, payload }), log: { error() {} },
+  });
+  const handlers = {}, listeners = {};
+  const fakeIpc = { handle: (c, fn) => { handlers[c] = fn; }, on: (c, fn) => { listeners[c] = fn; } };
+  installBrowseIpc({ ipcMain: fakeIpc, fromAppWindow: e => e.sender === 'app', getBrowse: () => browse });
+  const app_ = { sender: 'app' }, page = { sender: 'page' };
+  const call = (c, ev, ...a) => handlers[c](ev, ...a);
+  const emit = (c, ev, ...a) => listeners[c](ev, ...a);
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  const base = `http://fixture.test:${BROWSE_PORT}`;
+  await new Promise(resolve => browseServer.listen(BROWSE_PORT, '127.0.0.1', resolve));
+
+  await check('browse ipc: Kairos instance ports are all reserved', () => {
+    const ports = kairosPorts({ instancePort: 8430, remotePort: 9443 });
+    for (const p of [8420, 8421, 8422, 8430, 8431, 8888, 8889, 9443]) assert.ok(ports.includes(p), `port ${p}`);
+    assert.equal(browse.gate.safeUrl('http://127.0.0.1:8420/', { allowLoopback: true }), null, 'the installed app is never opened');
+    assert.ok(browse.gate.safeUrl('http://127.0.0.1:5173/', { allowLoopback: true }));
+  });
+
+  await check('browse ipc: only the app window can drive it', async () => {
+    assert.deepEqual(await call('browse:list', page), { tabs: [], activeId: null });
+    assert.deepEqual(await call('browse:open', page, `${base}/`), { ok: false });
+    emit('browse:visible', page, true);
+    assert.equal(browse.tabs.list().tabs.length, 0, 'nothing opened for a page sender');
+  });
+
+  let tabId;
+  await check('browse ipc: open, list and malformed arguments', async () => {
+    assert.equal(browse.gate.fromAddressBar('example.test:8080/a', { allowLoopback: true }), 'https://example.test:8080/a', 'host:port is an address');
+    const ok = await call('browse:open', app_, `${base}/`);
+    assert.equal(ok.ok, true);
+    tabId = ok.id;
+    assert.equal((await call('browse:list', app_)).tabs.length, 1);
+    assert.deepEqual(await call('browse:navigate', app_, 'one', `${base}/`), { ok: false }, 'id must be a number');
+    assert.deepEqual(await call('browse:open', app_, { url: 'x' }), { ok: false });
+    assert.deepEqual(await call('browse:zoom', app_, tabId, 5), { ok: false });
+    emit('browse:bounds', app_, { x: 'a' });
+    emit('browse:reorder', app_, ['x']);
+    assert.equal((await call('browse:open', app_, 'file:///etc/passwd')).ok, false);
+  });
+
+  await check('browse ipc: site settings accept only known keys and values', async () => {
+    assert.deepEqual(await call('browse:site-set', app_, `${base}/`, 'adblock', 'off'), { ok: true });
+    assert.deepEqual(await call('browse:site-set', app_, `${base}/`, 'zoom', '9'), { ok: false });
+    assert.deepEqual(await call('browse:site-set', app_, `${base}/`, 'permission:camera', 'granted-forever'), { ok: false });
+    assert.deepEqual(await call('browse:site-set', app_, `${base}/`, 'permission:midi', 'allow'), { ok: false });
+    assert.equal((await call('browse:site', app_, `${base}/`)).settings.adblock, 'off');
+    assert.deepEqual(await call('browse:site-set', app_, `${base}/`, 'adblock', null), { ok: true });
+  });
+
+  await check('browse ipc: a permission prompt goes to the app and the answer comes back', async () => {
+    const wc = browse.tabs.webContentsOf(tabId);
+    await new Promise(r => (wc.isLoading() ? wc.once('did-stop-loading', r) : r()));
+    const answer = wc.executeJavaScript('Notification.requestPermission()');
+    let prompt = null;
+    for (let i = 0; i < 50 && !prompt; i++) { await wait(100); prompt = sent.find(s => s.channel === 'browse:permission'); }
+    assert.ok(prompt, 'prompt sent to the app');
+    assert.equal(prompt.payload.setting, 'notifications');
+    assert.equal(prompt.payload.origin, base);
+    emit('browse:permission-answer', page, prompt.payload.requestId, 'allow', true);
+    await wait(200);
+    emit('browse:permission-answer', app_, prompt.payload.requestId, 'block', false);
+    assert.equal(await answer, 'denied', 'the page sender was ignored; the app said block');
+  });
+
+  await check('browse ipc: the side pane on the shared profile gets no prompt', async () => {
+    const before = sent.filter(s => s.channel === 'browse:permission').length;
+    assert.equal(sideBrowser.open(`http://other.test:${BROWSE_PORT}/`, { x: 0, y: 0, width: 300, height: 300 }).ok, true);
+    const pane = sideBrowser._webContents();
+    await new Promise(r => (pane.isLoading() ? pane.once('did-stop-loading', r) : r()));
+    assert.equal(await pane.executeJavaScript('Notification.requestPermission()'), 'denied');
+    assert.equal(sent.filter(s => s.channel === 'browse:permission').length, before, 'no prompt for a non-Browse view');
+    sideBrowser.close();
+  });
+
+  browse.close();
+  browseServer.close();
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
 
 app.whenReady().then(async () => {
   console.log(`Runtime: Electron ${process.versions.electron}, Chromium ${process.versions.chrome}`);
@@ -143,7 +436,7 @@ app.whenReady().then(async () => {
   await check('address bar distinguishes hosts from searches', () => {
     assert.equal(sideBrowser._fromAddressBar('example.test'), 'https://example.test/');
     assert.equal(sideBrowser._fromAddressBar('  example.test/a?b=1  '), 'https://example.test/a?b=1');
-    assert.ok(sideBrowser._fromAddressBar('how tall is k2').startsWith('https://duckduckgo.com/?q='));
+    assert.ok(sideBrowser._fromAddressBar('how tall is k2').startsWith('https://www.google.com/search?q='), 'Google is the default search (David, 2026-11-03)');
     // A typed scheme is honoured, which means a typed BAD scheme is refused
     // rather than silently turned into a search.
     assert.equal(sideBrowser._fromAddressBar('file:///etc/passwd'), null);
@@ -282,6 +575,12 @@ app.whenReady().then(async () => {
   });
 
 
+  // -- Browse (vault: "Kairos Browser - Phase 1", U1): the person's tabbed
+  // browser, driven through its real modules on a separate partition. Same
+  // hermetic rule: a local fixture server behind host-rule names.
+  await browseChecks(win);
+  await browseIpcChecks(win);
+
   // -- live check against the real web. OFF by default (--live), because the
   // rest of this file is deliberately hermetic and must stay deterministic
   // in CI. Everything above proves the pane REFUSES the right things; this
@@ -342,5 +641,5 @@ app.whenReady().then(async () => {
   }
 
   if (failures.length) finish(1, 'FAIL\n' + failures.map(f => ' - ' + f).join('\n'));
-  else finish(0, (process.argv.includes('--live') ? 'PASS (with live web check): ' : 'PASS: ') + 'side-browser isolation — scheme and loopback blocking, backend origin refused, separate session partition with unshared cookies, no bridge/node/IPC in the page, permissions denied, view destroyed on close.');
+  else finish(0, (process.argv.includes('--live') ? 'PASS (with live web check): ' : 'PASS: ') + `${checksRun} checks. ` + 'side-browser isolation — scheme and loopback blocking, backend origin refused, separate session partition with unshared cookies, no bridge/node/IPC in the page, permissions denied, view destroyed on close. Browse — gate policies, tabs and history, pop-ups only after a click, remembered permissions, ad blocking with off switch, marked downloads, zoom per site, reopen and pin, session restore, cookie re-save.');
 });

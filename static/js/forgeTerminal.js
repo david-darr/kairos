@@ -1,4 +1,5 @@
 import { api, el } from './api.js';
+import { openInBrowse } from './browserPane.js';
 import { forgeVendor } from './forgeEditor.js';
 
 export async function mountForgeTerminal(panel, tab, onNew) {
@@ -30,6 +31,8 @@ export async function mountForgeTerminal(panel, tab, onNew) {
   fit = new FitAddon(); terminal.loadAddon(fit);
   terminal.loadAddon(new WebLinksAddon((_event, url) => {
     if (!/^https?:\/\//i.test(url)) return;
+    // In the desktop app a terminal link opens a Browse tab (David, 2026-11-03).
+    if (window.jarvis?.browse) { openInBrowse(url).then(r => { if (r && !r.ok) status.textContent = r.reason || "That address can't be opened in Browse."; }); return; }
     if (window.jarvis?.forgeTerminal) window.jarvis.forgeTerminal.openExternal(url).catch(error => { status.textContent = error.message; });
     else window.open(url, '_blank', 'noopener,noreferrer');
   }));

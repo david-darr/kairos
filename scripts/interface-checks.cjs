@@ -41,13 +41,15 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
         await waitFor("!!document.querySelector('.cal-calendars-dialog .cal-calendar-choice')");
         await capture(`interface-${label}-calendar-selection`);
         await click('.cal-calendars-dialog .modal-close-btn');
-        assert.equal(await js("document.activeElement.classList.contains('cal-calendars-trigger') && document.querySelector('.cal-calendar-list').getClientRects().length===0"), true, 'Calendar popup restores its button and hides its choices');
+        // On a phone the popup is a sheet that slides away before it hands focus back (mobileSheet.js).
+        await waitFor("document.activeElement.classList.contains('cal-calendars-trigger') && document.querySelector('.cal-calendar-list').getClientRects().length===0");  // restores its button, hides its choices
       }
       if (width <= 768 && tab === 'library') {
         await js("document.querySelector('.ms-drawer-row[data-drawer=more]').click()");
         assert.equal(await js("document.querySelector('.ms-tab-sheet[open]').contains(document.activeElement)"), true, 'More opens its sheet');
         await js("document.querySelector('.ms-tab-sheet').click()");
-        assert.equal(await js("document.activeElement === document.querySelector('.ms-menu-btn')"), true, 'The menu button regains focus');
+        // The sheet slides away first (mobileSheet.js), then hands focus back.
+        await waitFor("document.activeElement === document.querySelector('.ms-menu-btn')");
         await js('document.activeElement.blur()');
       }
       await capture(`interface-${label}-${tab}`);
@@ -55,7 +57,10 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     await navigate('chat', { sessionId: 's1' });
     await waitFor("!!document.querySelector('#model-picker-label') && !!document.querySelector('.msg')");
     await delay(300); // Let the view/composer entrance finish before measuring.
-    assert.equal(await js(`!!document.querySelector('.chat-mobile-header #context-pill') && !document.querySelector('.chat-composer-dock #context-pill') && (${width <= 768} ? document.querySelector('.composer-hint').getClientRects().length===0 : true)`), true, 'Capacity at top, help hidden in the phone menu');
+    const capacity = await js(`({ top: !!document.querySelector('.chat-mobile-header #context-pill'), dock: !!document.querySelector('.chat-composer-dock #context-pill'), hint: document.querySelector('.composer-hint')?.getClientRects().length ?? null, parent: document.getElementById('context-pill')?.parentElement?.className || null })`);
+    // Phone: capacity in the header and the help hidden; desktop: both sit under the composer (views/chat.js promptFoot).
+    assert.ok(width <= 768 ? capacity.top && !capacity.dock && capacity.hint === 0 : capacity.parent === 'chat-prompt-foot' && capacity.hint > 0,
+      'Capacity at top and help hidden on a phone, under the composer on a desktop: ' + JSON.stringify({ label, ...capacity }));
     assert.equal(await js(`(() => {
       const targets=['#overflow-plus-btn','#chat-send','.chat-phone-tools > button'];
       return targets.every(selector=>{const b=document.querySelector(selector), i=b.querySelector('svg');

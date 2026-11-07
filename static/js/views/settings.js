@@ -3,6 +3,7 @@ import { ICONS } from "../icons.js";
 import { appearanceName } from '../appearance.js';
 import { api, el, customSelect, toast, confirmDialog, modelMark } from "../api.js";
 import { openModelSetup } from "../modelSetup.js";
+import { openOutside } from "../browserPane.js";
 import { shortcutGroups, readQuickEntry } from '../shortcuts.js';
 import { suppressBrowser, releaseBrowser } from "../browserPane.js";
 import { renderSpeechPanel } from "./speechPanel.js";
@@ -1188,9 +1189,11 @@ async function signInToMcp(itemId, name, rerender, host) {
     await rerender();
     return;
   }
-  window.open(started.url, "_blank", "noopener");
+  // The provider sends the browser back to Kairos's own address, so this
+  // sign-in happens in the system browser (browserPane.js openOutside).
+  openOutside(started.url);
   host.replaceChildren(el("span", { class: "meta", text: "Waiting for sign-in…" }),
-    el("a", { class: "meta mcp-signin-link", href: started.url, target: "_blank", rel: "noopener", text: "Open the sign-in page" }));
+    el("a", { class: "meta mcp-signin-link", href: started.url, rel: "noopener", text: "Open the sign-in page", onclick: (event) => { event.preventDefault(); openOutside(started.url); } }));
   const deadline = Date.now() + 5 * 60 * 1000;
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 2000));

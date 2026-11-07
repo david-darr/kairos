@@ -38,7 +38,8 @@ const GLYPHS = {
 };
 const mode = () => document.documentElement.dataset.appMode || 'kairos';
 // Forge and Bots are admin-only; the sidebar's own mode switch exists only for an admin.
-const hasMode = id => !!document.querySelector(`#forge-mode-switch [data-mode="${id}"]`);
+// The desktop app keeps its modes in the title bar (app.js), the web client in the sidebar switch.
+const hasMode = id => !!document.querySelector(`#forge-mode-switch [data-mode="${id}"], #titlebar-modes [data-mode="${id}"]`);
 const ROWS = [
   { id: 'home', label: 'Home', badge: 'activity', open: () => go('home') },
   { id: 'chats', label: 'Chats', open: () => {

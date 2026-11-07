@@ -4,6 +4,7 @@ import { ICONS } from "../icons.js";
 import { pill } from "../settingsKit.js";
 import { shareButton, githubStrip } from "../storePublish.js";
 import { libraryShareButton, renderSharedLibrary } from "../libraryShare.js";
+import { openOutside } from "../browserPane.js";
 import { builderMessage, startBuilderChat, openBuilderBrief } from "../builderBrief.js";
 import { addReaIntegration } from "../reaSetup.js";
 import { initToolStoreMobile } from "../redesignToolStoreMobile.js";
@@ -896,10 +897,11 @@ export async function render(container) {
       dialog?.close();
       return;
     }
-    window.open(started.url, "_blank", "noopener");
+    // The provider sends the browser back to Kairos's own address: system browser.
+    openOutside(started.url);
     host.replaceChildren(
       el("span", { class: "meta", text: "Waiting for sign-in…" }),
-      el("a", { href: started.url, target: "_blank", rel: "noopener", text: "Open sign-in" }),
+      el("a", { href: started.url, rel: "noopener", text: "Open sign-in", onclick: (event) => { event.preventDefault(); openOutside(started.url); } }),
     );
     const deadline = Date.now() + 5 * 60 * 1000;
     let outcome = "Sign-in timed out. Try again from this server's card.";

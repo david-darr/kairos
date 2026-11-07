@@ -53,7 +53,7 @@ export function render(container, tabId, options = {}) {
   const recovery = el('div', { class: 'forge-first-commit forge-warning', hidden: true }, [firstCommitNote, firstCommitButton]);
   const composer = el('form', { class: 'forge-composer chat-input-bar' }, [el('div', { class: 'chat-input-top' }, [message]), recovery, pickers]);
   const hero = el('section', { class: 'forge-hero' }, [banner, el('div', { class: 'forge-hero-copy' }, [
-    el('div', { class: 'eyebrow' }, ['Forge ', el('small', { class: 'forge-preview', text: 'Preview' })]),
+    el('div', { class: 'eyebrow', text: 'Forge' }),
     el('h1', { text: 'What should your agents work on?' }), composer, hint,
   ])]);
   const grid = el('div', { class: 'forge-widget-grid' });

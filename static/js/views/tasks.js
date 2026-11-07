@@ -19,6 +19,17 @@ import { runHistory, outcomeLabel, formatDuration, runTime, deliveryState } from
 // subset (core/builtin_tasks.py) with a one-click Enable/Disable instead of
 // filling out the custom name/prompt/schedule form by hand.
 
+// The Schedule form's unsent draft, kept while Kairos stays open so leaving Tasks
+// and coming back doesn't lose it (2026-11-05, found by g6-checks.cjs). Cleared
+// once the task is scheduled. Not saved to disk: it is a draft, not a setting.
+// readDraft reads the last form's fields (they stay readable once the view is gone).
+let readDraft = null;
+// 2026-11-05: a task can deliver to a channel that is no longer in /api/channels
+// (removed, or never set up here). Keep it as its own option so the menu says
+// where it goes instead of showing a blank label.
+const missingChannel = (channels, id) => id && !channels.some((c) => c.id === id)
+  ? el("option", { value: id, text: `${id} (not set up)` }) : null;
+
 export async function render(container) {
   container.innerHTML = "";
 
@@ -76,6 +87,8 @@ export async function render(container) {
     dailyField.style.display = kind === "daily" ? "" : "none";
   });
 
+  // One line under the whole form, so a narrow field (Every (min)) doesn't wrap it or shift the row.
+  const refusal = el("div", { class: "field-error", id: "tasks-form-error", role: "alert", hidden: true });
   form.append(
     el("summary", { text: "+ Schedule a task" }),
     el("div", { class: "form-grid" }, [
@@ -88,8 +101,35 @@ export async function render(container) {
       el("div", { class: "field" }, [el("label", { text: "Model" }), formModelSelect]),
       el("div", { class: "field" }, [el("label", { text: "Deliver to" }), channelSelect]),
       addBtn,
+      refusal,
     ])
   );
+  // A refused Schedule says what is missing next to the field (2026-11-05: it used to do nothing).
+  const fieldInputs = [nameInput, promptInput, runAtInput, dailyInput, intervalInput];
+  const clearRefusal = (input) => {
+    if (input.getAttribute("aria-invalid") !== "true") return;
+    input.removeAttribute("aria-invalid"); input.removeAttribute("aria-describedby");
+    refusal.hidden = true; refusal.textContent = "";
+  };
+  const refuse = (input, message) => {
+    for (const other of fieldInputs) clearRefusal(other);
+    input.setAttribute("aria-invalid", "true"); input.setAttribute("aria-describedby", refusal.id);
+    refusal.textContent = message; refusal.hidden = false;
+    input.focus();
+  };
+
+  for (const input of fieldInputs) input.addEventListener("input", () => clearRefusal(input));
+  const d = readDraft?.();
+  readDraft = () => ({ open: form.open, name: nameInput.value, prompt: promptInput.value, kind: kindSelect.value, runAt: runAtInput.value,
+    daily: dailyInput.value, interval: intervalInput.value, channel: channelSelect.value, model: formModelSelect.value });
+  if (d && (d.name || d.prompt)) {
+    nameInput.value = d.name; promptInput.value = d.prompt; runAtInput.value = d.runAt; dailyInput.value = d.daily; intervalInput.value = d.interval;
+    kindSelect.value = d.kind; kindSelect.dispatchEvent(new Event("change"));
+    if (d.channel && channels.some((c) => c.id === d.channel)) channelSelect.value = d.channel;
+    if (d.model && models.some((m) => m.id === d.model)) formModelSelect.value = d.model;
+    form.open = d.open;
+  }
+
   const create = el('button', { type: 'button', class: 'btn workspace-phone-only workspace-round', 'aria-label': 'New task', onclick: () => { form.open = true; nameInput.focus(); } });
   create.innerHTML = ICONS.plus;
   header.append(create);
@@ -114,20 +154,22 @@ export async function render(container) {
   addBtn.addEventListener("click", async () => {
     const name = nameInput.value.trim();
     const prompt = promptInput.value.trim();
-    if (!name || !prompt) return;
+    if (!name) return refuse(nameInput, "Name: give the task a name.");
+    if (!prompt) return refuse(promptInput, "Prompt to run: say what the task should do.");
     const body = { name, prompt, schedule_kind: kindSelect.value, deliver_to_channel: channelSelect.value || null,
                    endpoint_id: formModelSelect.value || null };
     if (kindSelect.value === "once") {
-      if (!runAtInput.value) return;
+      if (!runAtInput.value) return refuse(runAtInput, "Run at: pick when it runs.");
       body.run_at = new Date(runAtInput.value).toISOString();
     } else if (kindSelect.value === "daily") {
-      if (!dailyInput.value) return;
+      if (!dailyInput.value) return refuse(dailyInput, "At (time): pick a time of day.");
       body.run_time = dailyInput.value; // "HH:MM", local — the backend anchors to it
     } else {
       const minutes = parseInt(intervalInput.value, 10);
-      if (!minutes) return;
+      if (!(minutes > 0)) return refuse(intervalInput, "Every (min): use a whole number of minutes, 1 or more.");
       body.interval_seconds = minutes * 60;
     }
+    for (const input of fieldInputs) clearRefusal(input);
     await api("/api/tasks", { method: "POST", body: JSON.stringify(body) });
     nameInput.value = ""; promptInput.value = ""; runAtInput.value = ""; intervalInput.value = "";
     await refresh(list);
@@ -158,6 +200,7 @@ async function refreshBuiltins(card) {
     const channelSelect = customSelect({ style: "font-size:11px;", disabled: b.enabled }, [
       el("option", { value: "", text: "Tasks tab only" }),
       ...channels.map((c) => el("option", { value: c.id, text: c.label })),
+      missingChannel(channels, b.deliver_to_channel),
     ]);
     channelSelect.value = b.deliver_to_channel || "";
     channelSelect.disabled = Boolean(b.task_id);
@@ -286,6 +329,7 @@ async function refresh(list) {
     const deliverySelect = customSelect({ style: "font-size:11.5px;" }, [
       el("option", { value: "", text: "Tasks tab only" }),
       ...channels.map((c) => el("option", { value: c.id, text: `${c.label}${c.configured ? "" : " (not configured)"}` })),
+      missingChannel(channels, task.deliver_to_channel),
     ]);
     deliverySelect.value = task.deliver_to_channel || "";
     deliverySelect.addEventListener("change", async () => {

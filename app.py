@@ -315,6 +315,7 @@ app.include_router(project_routes.router)
 app.include_router(swarm_routes.router)
 app.include_router(permission_routes.router)
 from routes import notch_routes; app.include_router(notch_routes.router)
+from routes import browse_routes; app.include_router(browse_routes.router)
 app.include_router(sandbox_routes.router)
 app.include_router(checkpoint_routes.router)
 # Bots Phase 1 routers (conversations at /api/bot-chat, attention at /api/bot-attention), declared

@@ -104,6 +104,41 @@ contextBridge.exposeInMainWorld("jarvis", {
   // Raising a bot's approval level: the desktop shell asks you in its own prompt (electron/bot-approvals.js).
   botApprovals: { elevate: request => ipcRenderer.invoke("bot-approvals:elevate", request) },
 
+  // Browse (Kairos Browser Phase 1). Controls and metadata only, like the
+  // side browser below, except sharePage, which Ask Kairos calls only when
+  // the person sends with "Share this page" ticked. Main checks the sender
+  // and every argument (electron/browser-ipc.js).
+  browse: (() => {
+    const invoke = (channel) => (...args) => ipcRenderer.invoke(channel, ...args);
+    const send = (channel) => (...args) => ipcRenderer.send(channel, ...args);
+    // Each subscription returns its own unsubscribe; the raw event (which
+    // carries `sender`) never reaches page code.
+    const subscribe = (channel) => (handler) => {
+      const wrapped = (_event, payload) => handler(payload);
+      ipcRenderer.on(channel, wrapped);
+      return () => ipcRenderer.removeListener(channel, wrapped);
+    };
+    return {
+      list: invoke("browse:list"), open: invoke("browse:open"), navigate: invoke("browse:navigate"),
+      find: invoke("browse:find"), zoom: invoke("browse:zoom"), sharePage: invoke("browse:share-page"),
+      activate: send("browse:activate"), close: send("browse:close"), reopenClosed: send("browse:reopen-closed"),
+      back: send("browse:back"), forward: send("browse:forward"), reload: send("browse:reload"), stop: send("browse:stop"),
+      pin: send("browse:pin"), mute: send("browse:mute"), reorder: send("browse:reorder"),
+      setBounds: send("browse:bounds"), setVisible: (visible) => ipcRenderer.send("browse:visible", !!visible), shortcut: send("browse:shortcut"),
+      suggest: invoke("browse:suggest"), history: invoke("browse:history"), deleteHistory: invoke("browse:history-delete"),
+      clearHistory: invoke("browse:history-clear"), pinned: invoke("browse:pinned"), pinSite: invoke("browse:pin-site"),
+      unpinSite: invoke("browse:unpin-site"), orderPinned: invoke("browse:pinned-order"),
+      home: invoke("browse:home"), setHome: invoke("browse:home-set"), editPin: invoke("browse:pin-edit"),
+      clearPinThumb: invoke("browse:pin-thumb-clear"), duplicate: invoke("browse:duplicate"),
+      site: invoke("browse:site"), setSite: invoke("browse:site-set"), clearSite: invoke("browse:site-clear"),
+      searchEngines: invoke("browse:search-engines"), setSearchEngine: invoke("browse:search-engine"), adblockStats: invoke("browse:adblock-stats"),
+      answerPermission: send("browse:permission-answer"),
+      downloads: invoke("browse:downloads"), download: invoke("browse:download"),
+      onState: subscribe("browse:state"), onEvent: subscribe("browse:event"), onDownload: subscribe("browse:download"),
+      onPermission: subscribe("browse:permission"), onShortcut: subscribe("browse:shortcut"),
+    };
+  })(),
+
   // Side browser (David's ask 2026-09-15). Controls only: nothing here can
   // read page content, and the main process re-validates every URL anyway
   // (electron/browser.js's safeUrl) rather than trusting this side.

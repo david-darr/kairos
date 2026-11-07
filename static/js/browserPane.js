@@ -35,6 +35,31 @@ let suppressDepth = 0;
 
 export function isBrowserOpen() { return !!pane; }
 
+// Where a link goes (David, 2026-11-03): in a Kairos chat, this pane; anywhere
+// else in the desktop app, a new Browse tab. Returns the open result, or null
+// where there is no Browse (the web and phone clients).
+export async function openInBrowse(url) {
+  const browse = window.jarvis && window.jarvis.browse;
+  if (!browse) return null;
+  const result = await browse.open(url);
+  if (result && result.ok) {
+    const { switchMode } = await import('./app.js');
+    await switchMode('browse');
+  }
+  return result;
+}
+
+// Sign-in pages that send the browser back to Kairos's own address leave
+// Kairos: Browse and this pane never open Kairos's ports, so the sign-in
+// could not finish inside. The system browser takes them (https only, checked
+// in the main process), as Google sign-in already does.
+export function openOutside(url) {
+  const shell = window.jarvis && window.jarvis.browser;
+  if (shell && shell.openExternal) return shell.openExternal(url);
+  window.open(url, '_blank', 'noopener');
+  return Promise.resolve({ ok: true });
+}
+
 // Called by anything that renders HTML over the chat area. Only meaningful
 // for the native view; the iframe path obeys normal stacking and ignores it.
 export function suppressBrowser() {
@@ -80,12 +105,15 @@ export function openBrowser(initialUrl) {
   });
   const external = el('button', { type: 'button', class: 'btn quiet', text: 'Open externally', title: 'Open this page in your default browser' });
   const close = el('button', { type: 'button', class: 'btn quiet', text: '×', 'aria-label': 'Close browser' });
+  // Kairos Browser U4: the pane shares Browse's profile (same sign-ins, D10),
+  // and this moves the page into a Browse tab. Desktop app only.
+  const toBrowse = el('button', { type: 'button', class: 'btn quiet', text: 'Open in Browse', title: 'Open this page as a tab in Browse', hidden: true });
   const status = el('p', { class: 'browser-status', role: 'status' });
   const viewport = el('div', { class: 'browser-viewport' });
 
   const form = el('form', { class: 'browser-address-form', onsubmit: e => { e.preventDefault(); go(address.value); } }, [address]);
   const panel = el('aside', { class: 'artifact-panel browser-panel', role: 'region', 'aria-label': 'Web browser' }, [
-    el('div', { class: 'browser-toolbar' }, [back, forward, reload, form, external, close]),
+    el('div', { class: 'browser-toolbar' }, [back, forward, reload, form, toBrowse, external, close]),
     status, viewport,
   ]);
 
@@ -126,8 +154,22 @@ export function openBrowser(initialUrl) {
     }
     cleanups.push(api.onHostResized(syncBounds));
 
+    const browse = window.jarvis && window.jarvis.browse;
+    let currentUrl = '';
+    if (browse) {
+      toBrowse.hidden = false;
+      toBrowse.onclick = async () => {
+        if (!currentUrl) return;
+        const url = currentUrl;
+        const result = await browse.open(url);
+        if (result && !result.ok) { status.textContent = result.reason || "That address can't be opened in Browse."; return; }
+        const { switchMode } = await import('./app.js');
+        await switchMode('browse');
+      };
+    }
     cleanups.push(api.onState(state => {
       if (!pane) return;
+      currentUrl = state.open ? state.url || '' : '';
       back.disabled = !state.canGoBack;
       forward.disabled = !state.canGoForward;
       if (document.activeElement !== address) address.value = normalizeForDisplay(state.url);

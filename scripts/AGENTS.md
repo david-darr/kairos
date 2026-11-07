@@ -23,8 +23,14 @@ Tests, Electron checks and helpers. Every suite runs on its own, with temp data
 - One Electron run at a time machine-wide: create the folder
   `data/electron.lock` (wait if it exists), run, remove it only if you created
   it. The lock is for test runs, never for a window a person opened.
-- The full `ui-smoke.cjs` takes about 17 minutes; run a flag instead while
-  working, and the full run before merging.
+- The full `ui-smoke.cjs` takes about 20 minutes. While working, run
+  `node scripts/run-electron-test.cjs ui-smoke --changed`: it runs only the
+  checks for the files this branch changed (`ui-smoke-areas.cjs`; `--list`
+  shows the areas, `--dry` prints the plan). It falls back to the full run
+  when a shared or unmapped screen file changed, and names it: map new screen
+  files to an area there. Run the full suite once before merging.
+- `run-electron-test.cjs` takes the lock above itself (in the main checkout,
+  so every worktree shares it); don't take it again around it.
 - Clear `NO_COLOR` before CLI suites: its colour snapshots fail with it set.
 - Keep a failing test that shows a real app bug; fix the test only when the
   test is wrong.

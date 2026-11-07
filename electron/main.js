@@ -26,6 +26,10 @@ const fs = require("fs");
 const path = require("path");
 const { autoUpdater } = require("electron-updater");
 const sideBrowser = require("./browser");
+const browserEngine = require("./browser-engine");
+const { createBrowse, kairosPorts, browseFolder } = require("./browser-browse");
+const { installBrowseIpc } = require("./browser-ipc");
+let browse = null;
 const forgePreview = require('./forgePreview');
 const textMenu = require('./contextMenu');
 const { installScreenGrab } = require("./screen-grab");
@@ -411,6 +415,17 @@ async function createWindow() {
   if (INSTANCE.name) win.on("page-title-updated", (event) => event.preventDefault());
   sideBrowser.attach(win, { backendOrigin: new URL(BACKEND_URL).origin });
   textMenu.attach(win);
+  // Browse (Kairos Browser Phase 1, browser-browse.js): the person's tabbed
+  // browser on the side pane's partition. It takes over that session's
+  // handlers, so shareSession() comes first.
+  sideBrowser.shareSession();
+  browse = createBrowse({
+    host: () => mainWindow, partition: sideBrowser.PARTITION, folder: browseFolder(app.getPath("userData")),
+    downloadsFolder: () => app.getPath("downloads"), backendOrigin: new URL(BACKEND_URL).origin,
+    reservedPorts: kairosPorts({ instancePort: INSTANCE.port }), shell,
+    send: (channel, payload) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload); },
+  });
+  win.on("closed", () => { browse?.close(); browse = null; });
   forgePreview.attach(win, { backendOrigin: new URL(BACKEND_URL).origin,
     getAllowedPorts: async id => {
       const response = await session.defaultSession.fetch(`${BACKEND_URL}/api/forge/sessions/${encodeURIComponent(id)}/app/allowed-ports`, { redirect: 'error', signal: AbortSignal.timeout(10000) });
@@ -524,6 +539,13 @@ async function createWindow() {
   // Before the first page loads: with accounts off, the backend answers only
   // requests carrying this (ui-access.js). The usage overlay shares the session.
   if (UI_SECRET) await session.defaultSession.cookies.set(uiCookie(BACKEND_URL, UI_SECRET));
+  // Remote access can listen on a port the person chose; Browse keeps it
+  // closed along with the fixed Kairos ports. Best effort: the defaults
+  // already include remote access's usual port.
+  session.defaultSession.fetch(`${BACKEND_URL}/api/settings`, { signal: AbortSignal.timeout(10000) })
+    .then((r) => (r.ok ? r.json() : {}))
+    .then((s) => browse?.setReservedPorts(kairosPorts({ instancePort: INSTANCE.port, remotePort: Number(s.remote_access_port) || undefined })))
+    .catch(() => {});
   if (RENDER_TOKEN) designRender.start({ backendUrl: BACKEND_URL, token: RENDER_TOKEN });
   await win.loadURL(BACKEND_URL);
   if (process.platform === "win32" && !screenGrab) {
@@ -657,6 +679,9 @@ ipcMain.handle("google:open-sign-in", async (event, url) => {
   return true;
 });
 
+// Browse's channels (browser-ipc.js): app window only, arguments checked there.
+installBrowseIpc({ ipcMain, fromAppWindow, getBrowse: () => browse });
+
 const browserFor = event => fromAppWindow(event) ? sideBrowser : chatWindows.browserFor(event);
 ipcMain.handle("browser:open", (event, url, bounds) => browserFor(event)?.open(url, bounds) || { ok: false, reason: 'denied' });
 ipcMain.handle("browser:navigate", (event, url) => browserFor(event)?.navigate(url) || { ok: false, reason: 'denied' });
@@ -778,6 +803,14 @@ if (!gotTheLock) {
   app.on("second-instance", (_event, argv) => { if (!wantsBackground(argv)) showWindow(); });
 
   app.whenReady().then(() => {
+    // Kairos Browser U0 (browser-engine.js): Widevine for DRM video, and the
+    // one-time rewrite that encrypts cookies saved before the cookie fuse.
+    // Only a packaged build has the fuse (afterPack.js), so only it rewrites.
+    browserEngine.startWidevine(require("electron"));
+    if (app.isPackaged) {
+      browserEngine.resaveCookies(session.fromPartition(sideBrowser.PARTITION),
+        path.join(app.getPath("userData"), "browser", "cookies-resaved.json")).catch(console.error);
+    }
     loadOverlayPreference();
     const replaceOverlay = () => {
       overlayTracking?.setDragging(false);

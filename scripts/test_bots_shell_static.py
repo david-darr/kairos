@@ -15,7 +15,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 JS = REPO / "static" / "js"
 CSS = REPO / "static" / "css"
-MODES = {"kairos", "forge", "bots"}
+# Browse (Kairos Browser Phase 1) is the fourth mode, desktop app only.
+MODES = {"kairos", "forge", "bots", "browse"}
 
 
 def text(path: Path) -> str:

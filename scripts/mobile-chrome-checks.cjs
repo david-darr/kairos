@@ -88,7 +88,10 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow, 
       await forgeControl(selector, top, side, name + ' Forge New controls clear status area: ' + selector);
     }
     assert.equal(await js("document.querySelector('#mf-tab-0').getAttribute('aria-selected')"), 'true', name + ' New page is selected');
-    assert.equal(await js(`document.querySelector('#mf-new .forge-composer').getBoundingClientRect().bottom <= innerHeight - ${bottom} + 1`), true, name + ' Forge New composer clears home indicator inset');
+    // Measure after the view's 0.18 s entrance (style.css view-in), which starts it a few pixels low.
+    await waitFor("document.getElementById('view-content').getAnimations().length === 0");
+    const forgeComposer = await js(`(() => { const c = document.querySelector('#mf-new .forge-composer'), r = c.getBoundingClientRect(), page = c.closest('.mf-project'); return { bottom: Math.round(r.bottom), height: Math.round(r.height), limit: innerHeight - ${bottom}, innerHeight, pageBottom: Math.round(page.getBoundingClientRect().bottom), scrolls: page.scrollHeight > page.clientHeight }; })()`);
+    assert.ok(forgeComposer.bottom <= forgeComposer.limit + 1, name + ' Forge New composer clears home indicator inset: ' + JSON.stringify(forgeComposer));
     assert.deepEqual(await overflow(), [], name + ' Forge New fits');
     await capture(name + '-forge-new-safe-area');
     await navigate('forgeShell', { projectId: 'fp1', sessionId: 'fs1' });

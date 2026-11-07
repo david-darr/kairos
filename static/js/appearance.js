@@ -103,6 +103,22 @@ function normalize(raw = {}) {
   return value;
 }
 settings = normalize(DEFAULTS);
+// A look laid over the saved one while a part of the app shows, never saved
+// as the account's appearance (Browse's own look and Chameleon, David
+// 2026-11-03). `saved` holds the account's settings while one is applied.
+let overridePatch = null, saved = null;
+const OVERRIDE_KEYS = ['mode', 'color', 'glassWallpaper', 'animatedPiece', 'artLook', 'artBase', 'artAccent'];
+export function setAppearanceOverride(patch) {
+  const clean = patch && typeof patch === 'object' ? Object.fromEntries(OVERRIDE_KEYS.filter(k => k in patch).map(k => [k, patch[k]])) : null;
+  if (clean && Object.keys(clean).length) {
+    if (!saved) saved = settings;
+    overridePatch = clean;
+    settings = normalize({ ...saved, ...clean });
+  } else if (saved) {
+    settings = saved; saved = null; overridePatch = null;
+  } else return;
+  apply();
+}
 const rgb = hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
 const css = values => `rgb(${values.map(Math.round).join(', ')})`;
 const mix = (color, target, amount) => color.map(v => v * (1 - amount) + target * amount);
@@ -212,8 +228,9 @@ export async function initAppearance(username) {
   storageKey = 'jarvis:appearance:v1:' + String(username || 'local');
   try { settings = normalize(JSON.parse(localStorage.getItem(storageKey) || '{}')); }
   catch { settings = normalize(DEFAULTS); }
+  if (overridePatch) { saved = settings; settings = normalize({ ...saved, ...overridePatch }); }
   // Persist normalized preferences so obsolete look flags migrate on load.
-  try { localStorage.setItem(storageKey, JSON.stringify(settings)); }
+  try { localStorage.setItem(storageKey, JSON.stringify(saved || settings)); }
   catch { storageIssue = 'Preferences could not be saved on this device.'; }
   if (startupPatch) {
     const patch = startupPatch; startupPatch = null;
@@ -250,9 +267,12 @@ export function updateAppearance(patch) {
   // The old on/off Show Kip still works: on keeps the chosen look, off is hidden.
   if (typeof patch.mascot === 'boolean' && !('kip' in patch)) patch = { ...patch, kip: patch.mascot ? (settings.kip === 'hidden' ? DEFAULT_KIP_STYLE : settings.kip) : 'hidden' };
   if (!storageKey) startupPatch = { ...startupPatch, ...patch };
-  settings = normalize({ ...settings, ...patch });
+  // With a look laid over (Browse), a change goes to the saved settings and
+  // the look stays on top.
+  if (saved) { saved = normalize({ ...saved, ...patch }); settings = normalize({ ...saved, ...overridePatch }); }
+  else settings = normalize({ ...settings, ...patch });
   storageIssue = '';
-  try { if (storageKey) localStorage.setItem(storageKey, JSON.stringify(settings)); }
+  try { if (storageKey) localStorage.setItem(storageKey, JSON.stringify(saved || settings)); }
   catch { storageIssue = 'Preview applied, but preferences could not be saved on this device.'; }
   apply();
 }
@@ -410,7 +430,11 @@ async function refreshArtColors() {
     else colors = pieceColors(await loadArtPiece(piece));
   } catch { /* the last colours stay */ }
   if (!colors || key !== artColorsKey) return;
-  if (colors.base !== settings.artBase || (colors.accent || '') !== settings.artAccent) updateAppearance({ artBase: colors.base, artAccent: colors.accent || '' });
+  if (colors.base === settings.artBase && (colors.accent || '') === settings.artAccent) return;
+  // Art chosen by a look laid over the saved one (Browse) keeps its colours
+  // in that look, not in the account's appearance.
+  if (saved && overridePatch && 'animatedPiece' in overridePatch) setAppearanceOverride({ ...overridePatch, artBase: colors.base, artAccent: colors.accent || '' });
+  else updateAppearance({ artBase: colors.base, artAccent: colors.accent || '' });
 }
 
 export async function resetAppearance() {
@@ -450,7 +474,9 @@ function apply() {
   syncRedesign(root);
   syncGlass(root);
   syncArt(root);
-  try { localStorage.setItem('jarvis:welcome-appearance:v1', JSON.stringify({ mode: settings.mode === 'color' ? 'color' : 'default', color: settings.color, halftone: settings.halftone, backgroundEffect: settings.backgroundEffect, effectOptions: settings.effectOptions, animatedPiece: settings.animatedPiece })); } catch { /* Appearance still works without storage. */ }
+  // The signed-out screens follow the account's own look, never one laid over it.
+  const own = saved || settings;
+  try { localStorage.setItem('jarvis:welcome-appearance:v1', JSON.stringify({ mode: own.mode === 'color' ? 'color' : 'default', color: own.color, halftone: own.halftone, backgroundEffect: own.backgroundEffect, effectOptions: own.effectOptions, animatedPiece: own.animatedPiece })); } catch { /* Appearance still works without storage. */ }
   if (settings.mode === 'default') {
     TOKENS.forEach(key => root.style.removeProperty(key));
     root.style.removeProperty('color-scheme');

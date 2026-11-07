@@ -418,6 +418,12 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['design canvas'], errors }, null, 2));
       console.log('PASS: design canvas.'); console.log('Screenshots: ' + output); return;
     }
+    if (process.argv.includes('--browse-only')) {  // Browse mode's screen alone (browse-ui-checks.cjs, Kairos Browser Phase 1).
+      const count = await require('./browse-ui-checks.cjs')({ js, base, output, fs });
+      assert.deepEqual(errors, [], 'Browse check renderer errors');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['Browse mode screen'], errors }, null, 2));
+      console.log(`PASS: Browse mode screen (${count} steps).`); console.log('Screenshots: ' + output); return;
+    }
     if (process.argv.includes('--google-only')) {  // Library's Google Drive and accounts alone (google-workspace-checks.cjs).
       for (const [label, width, height] of [['desktop', 1440, 900], ['mobile', 390, 844]]) {
         win.setContentSize(width, height);
@@ -497,6 +503,19 @@ app.whenReady().then(async () => {
       assert.deepEqual(errors, [], 'Bots ' + botsFlag + ' renderer errors');
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['bots ' + botsFlag], errors }, null, 2));
       console.log('PASS: Bots ' + botsFlag + ' checks.'); console.log('Screenshots: ' + output); return;
+    }
+    if (process.argv.includes('--bots-only')) {  // Every Bots check in one window, as the full run does them (2026-11-05, for --changed).
+      for (const file of botsChecks) {
+        win.setContentSize(1440, 900);
+        await win.loadURL(base);
+        await waitFor("!!document.querySelector('.dashboard-core')");
+        try { await runBotsCheck(file); }
+        finally { delete demoState.botsLive; delete demoState.botsCore; }
+        console.log('PASS: ' + file);
+      }
+      assert.deepEqual(errors, [], 'Bots renderer errors');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: botsChecks, errors }, null, 2));
+      console.log('PASS: every Bots check.'); console.log('Screenshots: ' + output); return;
     }
     if (process.argv.includes('--agents-profile-only')) {
       await require('./agents-profile-checks.cjs')({ js, waitFor, delay, navigate, writes, demoState, agents: calendarFixtures.agentsFixture, win, capture, base });
@@ -596,7 +615,10 @@ app.whenReady().then(async () => {
       win.destroy(); server.close(); exitAfterFlush(process.exitCode || 0); return;
     }
     if (process.argv.includes('--g7-only')) {  // A14 Settings window: search, gating, drag/resize, close-during-load, panel cost.
-      await require('./settings-access-checks.cjs')({ js, win, waitFor, delay, navigate, capture, demoState, reads, writes });
+      // Settings' Bots sections (Connections and the rest) read /api/bots/*, which the Bots fixtures answer.
+      demoState.botsLive = true;
+      try { await require('./settings-access-checks.cjs')({ js, win, waitFor, delay, navigate, capture, demoState, reads, writes }); }
+      finally { delete demoState.botsLive; }
       assert.deepEqual(errors, []);
       console.log('PASS: Settings search, member/admin sections, window drag/resize/minimize, close during load, retired controls, panel cost.');
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['settings access'], errors }, null, 2));
@@ -1121,7 +1143,7 @@ app.whenReady().then(async () => {
         // The collapsed button steps Kairos, Bots, Forge, back to Kairos.
         await js("document.querySelector('.forge-mode-rail').click()");
         await waitFor("document.documentElement.dataset.appMode === 'bots' && !!document.querySelector('.bots-home')");
-        assert.equal(await js("document.querySelector('.forge-mode-rail').getAttribute('aria-label')"), 'Switch to Forge Preview');
+        assert.equal(await js("document.querySelector('.forge-mode-rail').getAttribute('aria-label')"), 'Switch to Forge');
         await js("document.querySelector('.forge-mode-rail').click()");
         await waitFor("!!document.querySelector('.forge-home') && document.querySelectorAll('#nav [data-tab]').length === 1");
         assert.equal(await js("document.querySelector('.forge-mode-rail').getAttribute('aria-label')"), 'Switch to Kairos');
@@ -3005,6 +3027,11 @@ app.whenReady().then(async () => {
     await require('./agents-appearance-checks.cjs')({ js, waitFor, navigate, capture, win, demoState, base, delay });
     console.log('PASS: Agents appearance checks');
     await require('./app-shell-checks.cjs')({ js, win, waitFor, delay, navigate, capture, base, demoState, fixtures: calendarFixtures });
+    // Browse mode (Kairos Browser Phase 1): absent here, checked in its own window with a stand-in bridge.
+    win.setContentSize(1440, 900);
+    await win.loadURL(base);
+    await waitFor("!!document.querySelector('.dashboard-core')");
+    console.log(`PASS: Browse mode screen (${await require('./browse-ui-checks.cjs')({ js, base, output, fs })} steps).`);
     // Every Bots check (scripts/bots-*-checks.cjs), each from a fresh page and the plain demo, leaving it as it found it.
     for (const file of botsChecks) {
       win.setContentSize(1440, 900);

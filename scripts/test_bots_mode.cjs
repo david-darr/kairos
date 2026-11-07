@@ -14,13 +14,32 @@ const check = (name, fn) => { fn(); passed.push(name); };
   const M = await load('js/appModes.js');
   const N = await load('js/botsNavigation.js');
 
-  check('there are three modes, in the switch order', () => {
-    assert.deepEqual(M.MODES, ['kairos', 'forge', 'bots']);
-    assert.deepEqual(M.MODE_SWITCH, [['kairos', 'Kairos'], ['forge', 'Forge'], ['bots', 'Bots']]);
+  check('there are four modes, in the switch order', () => {
+    assert.deepEqual(M.MODES, ['kairos', 'forge', 'bots', 'browse']);
+    assert.deepEqual(M.MODE_SWITCH, [['kairos', 'Kairos'], ['forge', 'Forge'], ['bots', 'Bots'], ['browse', 'Browse']]);
   });
 
-  check('Forge and Bots carry the Preview badge, Kairos does not', () => {
-    assert.deepEqual(M.MODE_BADGES, { forge: 'Preview', bots: 'Preview' });
+  // Kairos Browser Phase 1 (D6): Browse is for every account, in the desktop app only.
+  // restoreMode(stored, machineAccess, signedIn, desktop); switchModes(machineAccess, desktop).
+  check('Browse: desktop only, for every account', () => {
+    assert.equal(M.restoreMode('browse', false, true, true), 'browse', 'an account without machine access, in the desktop app');
+    assert.equal(M.restoreMode('browse', true, true, true), 'browse');
+    assert.equal(M.restoreMode('browse', true, true, false), 'kairos', 'never in the web or phone client');
+    assert.equal(M.restoreMode('browse', true), 'kairos', 'desktop defaults to no');
+    assert.equal(M.restoreMode('forge', false, true, true), 'kairos', 'the desktop app does not open Forge without machine access');
+    assert.equal(M.modeAllowed('browse', false, true), true);
+    assert.equal(M.modeAllowed('browse', true, false), false);
+    assert.deepEqual(M.switchModes(false, true).map(([m]) => m), ['kairos', 'bots', 'browse']);
+    assert.deepEqual(M.switchModes(true, true).map(([m]) => m), ['kairos', 'forge', 'bots', 'browse']);
+    assert.deepEqual(M.switchModes(true, false).map(([m]) => m), ['kairos', 'forge', 'bots']);
+    assert.deepEqual(M.switchModes(false, false).map(([m]) => m), ['kairos', 'bots']);
+    assert.equal(M.modeForTab('browse'), 'browse');
+    assert.equal(M.homeTabFor('browse'), 'browse');
+    assert.equal(M.MODE_BADGES.browse, undefined, 'no Preview badge');
+  });
+
+  check('no mode carries a Preview badge (David, 2026-11-03)', () => {
+    assert.deepEqual(M.MODE_BADGES, {});
     assert.equal(M.MODE_BADGES.kairos, undefined);
   });
 
@@ -78,14 +97,14 @@ const check = (name, fn) => { fn(); passed.push(name); };
   });
 
   check('title-bar labels', () => {
-    assert.deepEqual(M.TAB_LABELS, { forgeShell: 'Forge', botsHome: 'Bots', botsShell: 'Bots', botsAutomations: 'Automations' });
+    assert.deepEqual(M.TAB_LABELS, { forgeShell: 'Forge', botsHome: 'Bots', botsShell: 'Bots', botsAutomations: 'Automations', browse: 'Browse' });
     assert.equal(M.modeForTab('botsAutomations'), 'bots');
   });
 
   check('the collapsed rail steps Kairos, Bots, Forge and back, and names where it goes', () => {
     assert.deepEqual(['kairos', 'bots', 'forge'].map(M.nextRailMode), ['bots', 'forge', 'kairos']);
-    assert.equal(M.railLabel('kairos'), 'Switch to Bots Preview');
-    assert.equal(M.railLabel('bots'), 'Switch to Forge Preview');
+    assert.equal(M.railLabel('kairos'), 'Switch to Bots');
+    assert.equal(M.railLabel('bots'), 'Switch to Forge');
     assert.equal(M.railLabel('forge'), 'Switch to Kairos');
     let mode = 'kairos';
     const seen = new Set();
@@ -98,7 +117,7 @@ const check = (name, fn) => { fn(); passed.push(name); };
     const memberModes = ['kairos', 'bots'];
     assert.equal(M.nextRailMode('kairos', memberModes), 'bots');
     assert.equal(M.nextRailMode('bots', memberModes), 'kairos');
-    assert.equal(M.railLabel('kairos', memberModes), 'Switch to Bots Preview');
+    assert.equal(M.railLabel('kairos', memberModes), 'Switch to Bots');
     assert.equal(M.railLabel('bots', memberModes), 'Switch to Kairos');
     assert.equal(M.nextRailMode('forge', memberModes), 'kairos', 'a stale Forge steps back to Kairos');
   });

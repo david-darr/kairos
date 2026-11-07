@@ -36,6 +36,20 @@
 // page can't keep running (or keep playing audio) behind the app.
 
 const { WebContentsView, session, shell } = require("electron");
+const { createGate, isLoopback } = require("./browser-gate");
+
+// Browse (browser-browse.js) shares this partition so the person's sign-ins
+// carry over, and installs its own handlers on it: per-site permission
+// prompts limited to Browse tabs, downloads saved with the internet mark,
+// the ad blocker. Once it has, the pane must not overwrite them with its
+// deny-all set. Shared by every pane instance (main window and detached
+// chats), so it lives outside createBrowser.
+let sessionOwnedByBrowse = false;
+function shareSession() { sessionOwnedByBrowse = true; }
+// Sessions that already have the pane's download hand-off. Adding it on
+// every create() stacked one listener per opening, so a single download was
+// handed to the system browser once per time the pane had been opened.
+const handedOff = new WeakSet();
 
 // Each detached chat owns its native view; closing it cannot close the
 // main window's browser. The isolated site session and all gates are shared.
@@ -51,50 +65,11 @@ let host = null;
 let backendOrigin = null;
 let notify = () => {};
 
-function isLoopback(hostname) {
-  const name = (hostname || "").toLowerCase().replace(/^\[|\]$/g, "");
-  if (name === "localhost" || name.endsWith(".localhost")) return true;
-  if (name === "::1" || name === "0:0:0:0:0:0:0:1") return true;
-  // Only a bare IPv4 literal can be a loopback address. A prefix test like
-  // /^127\./ also matches "127.0.0.1.example.test", which is an ordinary
-  // registrable domain someone can own — blocking it would be wrong, and
-  // silently so. Caught by scripts/browser-smoke.cjs.
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(name)) {
-    const octets = name.split(".").map(Number);
-    if (octets.every((o) => o <= 255)) return octets[0] === 127 || name === "0.0.0.0";
-  }
-  return false;
-}
-
-// Single gate for every entry point: the address bar, link clicks,
-// redirects, and window.open all funnel through this. Returns a normalized
-// absolute URL string, or null when the target must not load.
-function safeUrl(raw) {
-  let parsed;
-  try {
-    parsed = new URL(String(raw || "").trim());
-  } catch {
-    return null;
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-  if (isLoopback(parsed.hostname)) return null;
-  // Belt and braces: even if the backend somehow isn't on loopback (a
-  // JARVIS_BACKEND_URL override), its origin stays off limits.
-  if (backendOrigin && parsed.origin === backendOrigin) return null;
-  return parsed.toString();
-}
-
-// What the user types is not a URL yet. "example.com" and "how tall is k2"
-// both arrive here; the first is a host, the second is a search.
-function fromAddressBar(input) {
-  const text = String(input || "").trim();
-  if (!text) return null;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(text)) return safeUrl(text);
-  // A bare token with a dot and no spaces is a hostname; anything else is a
-  // search phrase. Deliberately simple and predictable rather than clever.
-  if (/^[^\s/]+\.[^\s/]{2,}(\/|$|\?|#)/i.test(text)) return safeUrl(`https://${text}`);
-  return safeUrl(`https://duckduckgo.com/?q=${encodeURIComponent(text)}`);
-}
+// The address rules live in browser-gate.js, shared with Browse tabs. The
+// side pane keeps the strict policy: no loopback at all.
+const gate = createGate();
+const safeUrl = (raw) => gate.safeUrl(raw, { allowLoopback: false });
+const fromAddressBar = (input) => gate.fromAddressBar(input, { allowLoopback: false });
 
 // Navigation history moved from webContents onto webContents.navigationHistory
 // across Electron versions, and the two overlap: on the version bundled here
@@ -149,6 +124,7 @@ function denyDevicePermission() { return false; }
 
 function buildSession() {
   const partition = session.fromPartition(PARTITION);
+  if (sessionOwnedByBrowse) return partition;
   partition.setPermissionRequestHandler(denyPermissionRequest);
   partition.setPermissionCheckHandler(denyPermissionCheck);
   // Device pickers are a separate path from the permission handlers above.
@@ -200,11 +176,16 @@ function create() {
   // A download inside a sandboxed pane would write to disk with the app's
   // privileges. Hand the URL to the real browser instead, where the user's
   // normal download UI and safe-browsing checks apply.
-  browserSession.on("will-download", (event, item) => {
-    event.preventDefault();
-    const safe = safeUrl(item.getURL());
-    if (safe) shell.openExternal(safe).catch(() => {});
-  });
+  if (!sessionOwnedByBrowse && !handedOff.has(browserSession)) {
+    handedOff.add(browserSession);
+    browserSession.on("will-download", (event, item) => {
+      // Browse may have taken the session over since this was added.
+      if (sessionOwnedByBrowse) return;
+      event.preventDefault();
+      const safe = safeUrl(item.getURL());
+      if (safe) shell.openExternal(safe).catch(() => {});
+    });
+  }
 
   for (const evt of ["did-navigate", "did-navigate-in-page", "did-finish-load", "did-stop-loading", "did-start-loading", "page-title-updated"]) {
     wc.on(evt, push);
@@ -225,6 +206,7 @@ function create() {
 function attach(window, options = {}) {
   host = window;
   backendOrigin = options.backendOrigin || null;
+  gate.setBackendOrigin(backendOrigin);
   notify = options.notify || (() => {});
 }
 
@@ -354,4 +336,4 @@ return {
   _webContents: () => (view && !view.webContents.isDestroyed() ? view.webContents : null),
 };
 }
-module.exports = Object.assign(createBrowser(), { createBrowser });
+module.exports = Object.assign(createBrowser(), { createBrowser, shareSession });

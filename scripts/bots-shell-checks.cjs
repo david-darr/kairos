@@ -71,7 +71,7 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
 
     // -- The switch ---------------------------------------------------------------------
     assert.deepEqual(await js("[...document.querySelectorAll('#forge-mode-switch [data-mode]')].map(n => n.dataset.mode)"), ['kairos', 'forge', 'bots'], 'the switch has three modes, in order');
-    assert.equal(await js("document.querySelector('#forge-mode-switch [data-mode=bots] small').textContent"), 'Preview', 'Bots carries the Preview badge');
+    assert.equal(await js("!!document.querySelector('#forge-mode-switch [data-mode=bots] small')"), false, 'Bots carries no Preview badge (David, 2026-11-03)');
     assert.equal(await js("!!document.querySelector('#forge-mode-switch [data-mode=kairos] small')"), false, 'Kairos carries no badge');
     assert.equal(await mode(), 'kairos');
     await js("document.querySelector('#forge-mode-switch [data-mode=bots]').click()");
@@ -267,7 +267,7 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
     // The collapsed rail steps Kairos, Bots, Forge.
     await js("document.querySelector('#sidebar-toggle').click()");
     await delay(350);
-    assert.equal(await js("document.querySelector('.forge-mode-rail').getAttribute('aria-label')"), 'Switch to Forge Preview', 'in Bots the rail goes to Forge next');
+    assert.equal(await js("document.querySelector('.forge-mode-rail').getAttribute('aria-label')"), 'Switch to Forge', 'in Bots the rail goes to Forge next');
     assert.equal(await js("getComputedStyle(document.querySelector('.bots-rail-name')).display"), 'none', 'the collapsed rail shows faces only');
     await capture('desktop-bots-collapsed');
     await js("document.querySelector('.forge-mode-rail').click()");
@@ -275,7 +275,7 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
     assert.equal(await js("document.querySelector('.forge-mode-rail').getAttribute('aria-label')"), 'Switch to Kairos');
     await js("document.querySelector('.forge-mode-rail').click()");
     await waitFor("document.documentElement.dataset.appMode === 'kairos' && !!document.querySelector('.dashboard-content.is-filled')");
-    assert.equal(await js("document.querySelector('.forge-mode-rail').getAttribute('aria-label')"), 'Switch to Bots Preview', 'in Kairos the rail goes to Bots next');
+    assert.equal(await js("document.querySelector('.forge-mode-rail').getAttribute('aria-label')"), 'Switch to Bots', 'in Kairos the rail goes to Bots next');
     await js("document.querySelector('.forge-mode-rail').click()");
     await waitFor("document.documentElement.dataset.appMode === 'bots' && !!document.querySelector('.bots-home')");
     await js("document.querySelector('#sidebar-toggle').click()");

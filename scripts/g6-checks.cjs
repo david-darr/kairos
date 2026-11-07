@@ -46,6 +46,7 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, reads, wri
   assert.equal(taskPosts(mark).length, 0, 'an interval of 0 minutes sends nothing');
   expect(await js("document.querySelectorAll('#toast-host .toast').length > 0 || !!document.querySelector('.field-error, [aria-invalid=true]')"),
     'A refused Schedule (empty, 0 minutes) says nothing: no toast and no field message; the button just does nothing');
+  await js(`document.querySelector('${form}').scrollIntoView({ block: 'start' })`); await capture('g6-tasks-refused');
   await setValue(`${form} input[type=number]`, '15');
   await js(`document.querySelector('${form} .form-grid > button.btn').click()`);
   await delay(700);

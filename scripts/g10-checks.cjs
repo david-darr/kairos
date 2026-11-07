@@ -99,12 +99,13 @@ module.exports = async ({ js, win, waitFor, delay, navigate, writes, reads, demo
 
   // ---- REA availability --------------------------------------------------------------------------
   assert.equal(await js(`${reaButton}?.hidden`), true, 'REA hidden when the integration does not exist');
-  await installRea(); await js("window.__rea = 'down'");
+  await installRea(); await js("window.__rea = 'down'; import('/static/js/api.js').then(m => m.clearSharedReads())");
   await navigate('forgeHome'); await openSession();
   await waitFor(`${reaButton}?.hidden === false`);
   assert.equal(await js(`${reaButton}.disabled`), true, 'REA disabled until the tool is working');
   assert.equal(await js(`${reaButton}.title`), 'Check REA in Tool Store first');
-  await js("window.__rea = 'working'");
+  // api.js shares identical GETs for 1 s, so drop the share as a real tool-state change would.
+  await js("window.__rea = 'working'; import('/static/js/api.js').then(m => m.clearSharedReads())");
   await navigate('forgeHome'); await openSession();
   await waitFor(`${reaButton}?.hidden === false && ${reaButton}.disabled === false`);
   const reaAt = await js('window.__reaPosts.length');

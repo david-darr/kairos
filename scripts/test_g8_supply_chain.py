@@ -71,6 +71,15 @@ class ActionsPinningTests(unittest.TestCase):
             self.assertNotRegex(text, r"curl[^\n|]*\|\s*(ba)?sh", workflow.name)
 
 
+# The one package allowed from outside the npm registry (David, 2026-11-03: "Allow the
+# exception"): castlabs' Electron for Content Security, which adds Widevine for DRM video
+# (Kairos Browser D2) and is published only on GitHub. Exactly this package, from exactly this
+# host, pinned to one commit, with an integrity hash; its binary is checked against castlabs'
+# SHASUMS256 on install. Anything else still has to come from the registry.
+OUTSIDE_REGISTRY = {("electron/package-lock.json", "node_modules/electron"):
+                    re.compile(r"^https://github\.com/castlabs/electron-releases/archive/[0-9a-f]{40}\.tar\.gz$")}
+
+
 class NodeAndPackagingTests(unittest.TestCase):
     def test_npm_locks_use_integrity_hashes_and_the_public_registry(self):
         for rel in ("package-lock.json", "electron/package-lock.json"):
@@ -81,8 +90,22 @@ class NodeAndPackagingTests(unittest.TestCase):
                 if info.get("link"):
                     continue
                 if "resolved" in info:
-                    self.assertTrue(info["resolved"].startswith("https://registry.npmjs.org/"), f"{rel} {key}")
+                    allowed = OUTSIDE_REGISTRY.get((rel, key))
+                    if allowed:
+                        self.assertRegex(info["resolved"], allowed, f"{rel} {key} must stay pinned to one castlabs commit")
+                    else:
+                        self.assertTrue(info["resolved"].startswith("https://registry.npmjs.org/"), f"{rel} {key}")
                     self.assertTrue(info.get("integrity", "").startswith("sha"), f"{rel} {key} has no integrity hash")
+
+    def test_the_outside_registry_exception_is_exactly_castlabs_electron(self):
+        lock = json.loads((ROOT / "electron" / "package-lock.json").read_text(encoding="utf-8"))
+        entry = lock["packages"]["node_modules/electron"]
+        self.assertRegex(entry["resolved"], OUTSIDE_REGISTRY[("electron/package-lock.json", "node_modules/electron")])
+        self.assertTrue(entry["version"].endswith("+wvcus"), entry["version"])
+        self.assertTrue(entry.get("integrity", "").startswith("sha512-"))
+        manifest = json.loads((ROOT / "electron" / "package.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["devDependencies"]["electron"], entry["resolved"], "package.json names the same pinned commit")
+        self.assertEqual(len(OUTSIDE_REGISTRY), 1)
 
     def test_the_installer_leaves_secrets_data_and_dev_files_out(self):
         build = json.loads((ROOT / "electron" / "package.json").read_text(encoding="utf-8"))["build"]

@@ -60,6 +60,7 @@ COOKIE_ONLY = (
     re.compile(r"/api/remote(/.*)?"),
     re.compile(r"/api/auth(/.*)?"),
     re.compile(r"/api/notch(/.*)?"),  # the desktop notch is the app's own window
+    re.compile(r"/api/browse(/.*)?"),  # Browse is the desktop app's own window
 )
 # The /api/auth routes a terminal does need, carved back out of the rule above.
 TOKEN_AUTH_ROUTES = {"/api/auth/status", "/api/auth/cli/heartbeat", "/api/auth/cli/session"}

@@ -16,11 +16,16 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, writes, re
   };
   const clickText = (selector, text) => js(`[...document.querySelectorAll(${JSON.stringify(selector)})].find(n => n.textContent.trim() === ${JSON.stringify(text)}).click()`);
   const openSettings = async name => {
+    // Close the window the last section left open first, or its sections can be clicked mid-close.
+    await js("document.querySelector('.modal-backdrop:not(.hidden) .settings-window .settings-titlebar-btn[title=\"Close\"]')?.click()");
+    await waitFor("!document.querySelector('.modal-backdrop:not(.hidden) .settings-window')");
     win.setContentSize(1440, 900); await delay(300);
     await navigate('home');
     await js("document.querySelector('.sidebar-settings-btn').click()");
-    await waitFor(`!!document.querySelector('[data-section=${name}]')`);
+    // The window draws its first page (Appearance) after it opens; a click before that is drawn over.
+    await waitFor(`!!document.querySelector('[data-section=${name}]') && !!document.querySelector('.modal-backdrop:not(.hidden) .settings-window .set-page')`);
     await js(`document.querySelector('[data-section=${name}]').click()`);
+    await waitFor(`document.querySelector('.set-page')?.dataset.page === ${JSON.stringify(name)}`);
   };
   const setSelect = (selector, value) => js(`(() => { const s = document.querySelector(${JSON.stringify(selector)}); s.value = ${JSON.stringify(value)}; s.dispatchEvent(new Event('change')); return s.value; })()`);
   const logReads = from => reads.slice(from).filter(r => r.path === '/api/system/logs');
@@ -46,6 +51,8 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, writes, re
       { level: 'ERROR', component: 'chat', since: '1h', tag: 's1', text: 'turn failed', limit: '300' }, 'the final request carries every filter at once');
     assert.equal(await js("document.querySelectorAll('.log-entry .log-tag')[0]?.textContent"), 'A clearer direction for the workspace', 'a chat is named, not an id');
     // Follow polls with the byte cursor the last read returned, then stops when the page is left.
+    // api.js shares an identical GET for 1 s, and Follow's reload asks exactly what the search just did; drop the share.
+    await js("import('/static/js/api.js').then(m => m.clearSharedReads())");
     const before = reads.length;
     await js("document.querySelector('.logs-follow').click()");
     await waitRead(() => logReads(before).some(r => r.query.limit === '300'), 'follow reload');

@@ -26,9 +26,10 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   })()`), 'Sheet traps Tab in both directions');
   await capture('mobile-workspace-focus');
   await key('.ms-tab-sheet', { key: 'Escape' });
-  assert.equal(await js("document.activeElement === document.querySelector('.ms-menu-btn')"), true);
+  // The sheet slides away first (mobileSheet.js), then hands focus back.
+  await waitFor("document.activeElement === document.querySelector('.ms-menu-btn')");
   await js(MORE + ".click(); document.querySelector('.ms-tab-sheet').click()");
-  assert.ok(await js("document.getElementById('sidebar').inert && document.activeElement === document.querySelector('.ms-menu-btn')"), 'Backdrop dismisses and returns focus');
+  await waitFor("document.getElementById('sidebar').inert && document.activeElement === document.querySelector('.ms-menu-btn')");  // backdrop dismisses and returns focus
   await navigate('chat', { sessionId: 's1' });
   await waitFor("!!document.querySelector('.ms-conversation .chat-phone-tools')");
   await waitFor("document.querySelector('.ms-menu-btn').hidden");
@@ -54,14 +55,18 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
     dispatch(${JSON.stringify(cancel ? 'touchcancel' : 'touchend')}, []);
     return prevented;
   })()`);
-  assert.equal(await swipe('#chat-messages', 40, 160, 120), false, 'Former sidebar swipe stays native');
+  // Since ae29cc9c a right swipe on a pushed page (this conversation) goes back first; mobile-sidebar-checks.cjs covers it.
+  assert.equal(await swipe('#chat-messages', 40, 160, 120), true, 'A right swipe in a conversation goes back');
+  await navigate('chat', { sessionId: 's1' });
+  await waitFor("!!document.querySelector('.ms-conversation .chat-phone-tools')");
   assert.equal(await swipe('#chat-messages', 40, 160, 15, 90), false, 'Vertical scrolling stays native');
   assert.equal(await swipe('#chat-messages', 10, 160, 120), false, 'System back edge stays free');
   assert.ok(await js("!document.getElementById('sidebar').classList.contains('open') && !!document.querySelector('.ms-conversation')"), 'Swipes do not open sidebar or perform app Back');
   await swipe('#chat-messages', 40, 160, 120, 0, true);
   assert.ok(await js("!document.querySelector('.drawer-dragging') && !document.getElementById('mobile-backdrop').style.display"), 'Cancelled gesture leaves no preview');
-  await swipe('.chat-title', 155, 35, 120);
-  assert.ok(await js("document.getElementById('chat-sessions').classList.contains('open') && document.getElementById('sidebar').inert"), 'Header swipe opens history alone');
+  // A right swipe on the header now goes back like the rest of a pushed page (ae29cc9c); history opens from the tools menu.
+  await js("document.querySelector('.chat-phone-tools > button').click(); [...document.querySelectorAll('.chat-phone-tools .overflow-menu-item')].find(n => n.textContent.includes('Conversations and projects')).click()");
+  assert.ok(await js("document.getElementById('chat-sessions').classList.contains('open') && document.getElementById('sidebar').inert"), 'History opens alone');
   await capture('mobile-swipe-history');
   await swipe('.mobile-drawer-heading', 160, 120, -130);
   assert.ok(await js("document.getElementById('chat-sessions').inert && document.activeElement === document.querySelector('.chat-phone-tools > button')"), 'History swipe dismissal restores focus to the tools capsule');
