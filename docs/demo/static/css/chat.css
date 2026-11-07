@@ -267,6 +267,62 @@
 .context-pill[data-level='high'] .context-ring-fill { stroke: var(--danger); }
 .context-pill[data-level='high'] .context-text { color: var(--danger); }
 @media (prefers-reduced-motion: reduce) { .context-ring-fill { transition: none; } }
+/* Chat details: the context pill's popover (Session Usage and Model Tracking), after Hermes mobile's
+   Session Details in Kairos's own tokens. Context, Model and Usage cards; a full sheet on a phone.
+   Figures are read-only; n/a is dimmed, never shown as zero. */
+.usage-meter-popover { width: 340px; padding: 0; z-index: 70; overflow-y: auto; color: var(--rd-ink, var(--text));
+  background: var(--rd-surface-solid, var(--bg-panel)); border: 1px solid var(--rd-line-strong, var(--border-strong));
+  box-shadow: var(--rd-shadow, 0 8px 24px rgba(0,0,0,.18)); border-radius: var(--rd-radius-card, 12px); }
+.usage-meter-header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 10px 14px; background: inherit; border-bottom: 1px solid var(--rd-line, var(--border)); }
+.usage-meter-header h2 { margin: 0; font: 600 14px/1.2 var(--rd-font-title, inherit); }
+.usage-meter-close { min-height: 28px; padding: 2px 10px; border: 1px solid var(--rd-line, var(--border)); border-radius: var(--rd-radius-pill, 999px);
+  background: transparent; color: var(--rd-ink-dim, var(--text-dim)); font: inherit; font-size: 12px; cursor: pointer; }
+.usage-meter-close:hover { color: var(--rd-ink, var(--text)); border-color: var(--rd-line-strong, var(--border-strong)); }
+.usage-meter-body { display: grid; gap: 12px; padding: 12px 14px 14px; }
+.usage-card { display: grid; gap: 6px; }
+.usage-card-title { margin: 0; font-size: var(--rd-label-size, 11px); letter-spacing: var(--rd-label-tracking, .06em); font-weight: 600;
+  text-transform: uppercase; color: var(--rd-ink-faint, var(--text-faint)); }
+.usage-card > :not(.usage-card-title) { margin: 0; }
+.usage-card > .usage-meter-rows, .usage-card > .usage-context-head { padding: 8px 12px; border: 1px solid var(--rd-line, var(--border));
+  border-radius: var(--rd-radius-field, 10px); background: var(--rd-ground, var(--surface-2, transparent)); }
+.usage-card > .usage-context-head { border-bottom: 0; border-radius: var(--rd-radius-field, 10px) var(--rd-radius-field, 10px) 0 0; margin-bottom: -6px; padding-bottom: 4px; }
+.usage-context-head { display: flex; align-items: baseline; gap: 6px; }
+.usage-context-used { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.usage-context-of { color: var(--rd-ink-dim, var(--text-dim)); font-size: 13px; }
+.usage-context-percent { margin-left: auto; color: var(--rd-ink-dim, var(--text-dim)); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.usage-card > .usage-context-bar, .usage-card > .usage-context-parts { border: 1px solid var(--rd-line, var(--border)); border-top: 0; border-bottom: 0;
+  background: var(--rd-ground, var(--surface-2, transparent)); }
+.usage-context-bar { display: flex; gap: 2px; height: 8px; padding: 4px 12px; box-sizing: content-box;
+  background: linear-gradient(var(--rd-line, var(--border)), var(--rd-line, var(--border))) content-box, var(--rd-ground, var(--surface-2, transparent)) !important; }
+.usage-context-segment { display: block; min-width: 4px; height: 8px; border-radius: 999px; }
+.usage-context-parts { list-style: none; padding: 6px 12px 8px; border-bottom: 1px solid var(--rd-line, var(--border)) !important;
+  border-radius: 0 0 var(--rd-radius-field, 10px) var(--rd-radius-field, 10px); }
+.usage-context-part { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 12.5px; border-bottom: 1px solid var(--rd-line, var(--border)); }
+.usage-context-part:last-child { border-bottom: 0; }
+.usage-context-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.usage-context-label { flex: 1; }
+.usage-context-tokens { color: var(--rd-ink-dim, var(--text-dim)); font-variant-numeric: tabular-nums; }
+/* One colour per part, the same in the bar and the list. */
+:is(.usage-context-segment, .usage-context-dot)[data-index='0'] { background: var(--rd-ink-faint, #8a8a8a); }
+:is(.usage-context-segment, .usage-context-dot)[data-index='1'] { background: #d98a3d; }
+:is(.usage-context-segment, .usage-context-dot)[data-index='2'] { background: #3fa7a0; }
+:is(.usage-context-segment, .usage-context-dot)[data-index='3'] { background: #6aa84f; }
+:is(.usage-context-segment, .usage-context-dot)[data-index='4'] { background: #4a7fd4; }
+:is(.usage-context-segment, .usage-context-dot)[data-part='whole'] { background: var(--rd-ink-dim, var(--text-dim)); }
+.usage-meter-empty, .usage-meter-note, .usage-meter-source { margin: 0; font-size: 12px; line-height: 1.4; color: var(--rd-ink-dim, var(--text-dim)); }
+.usage-meter-source { color: var(--rd-ink-faint, var(--text-faint)); font-size: 11px; }
+.usage-meter-rows { display: grid; margin: 0; }
+.usage-meter-row { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; font-size: 12.5px; border-bottom: 1px solid var(--rd-line, var(--border)); }
+.usage-meter-row:last-child { border-bottom: 0; }
+.usage-meter-row dt { color: var(--rd-ink, var(--text)); }
+.usage-meter-row dd { margin: 0; color: var(--rd-ink-dim, var(--text-dim)); font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
+.usage-meter-row dd.is-na { color: var(--rd-ink-faint, var(--text-faint)); }
+.usage-meter-compact { width: 100%; justify-content: center; }
+/* A phone gets a full sheet rather than a small popover. */
+.usage-meter-popover.is-sheet { position: fixed; inset: auto 0 0 0; width: auto; max-width: none; max-height: 88dvh;
+  border-radius: var(--rd-radius-card, 16px) var(--rd-radius-card, 16px) 0 0; padding-bottom: env(safe-area-inset-bottom, 0); }
+.usage-meter-popover.is-sheet .usage-meter-row, .usage-meter-popover.is-sheet .usage-context-part { font-size: 14px; padding: 8px 0; }
 .artifact-card { display: flex; align-items: center; gap: 14px; width: min(100%, 430px); margin: 12px 0; padding: 16px; text-align: left; border: 1px solid var(--border); border-radius: 12px; color: var(--text); background: var(--bg-panel); cursor: pointer; transition: border-color 180ms, background 180ms; font: inherit; }
 .artifact-card:hover { border-color: var(--border-strong); background: var(--surface-2); }
 .artifact-icon { display: grid; place-items: center; flex: 0 0 44px; height: 48px; border: 1px solid var(--border-strong); border-radius: 7px; font: 10px monospace; color: var(--text-dim); }

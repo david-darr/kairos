@@ -1267,6 +1267,11 @@
     // Must precede the generic /api/sessions/ match below, which would
     // otherwise swallow this and return a whole session object.
     if (route.endsWith("/context")) return { available: true, used_tokens: 48200, capacity_tokens: 258400, percent: 18.7, estimated_capacity: false, capacity_source: "cli_cache", model: "synthetic-model" };
+    // The usage meter (unit 1): one chat's sums from its runs; null where the provider reported nothing.
+    if (route.startsWith("/api/sessions/") && route.endsWith("/usage")) return { session_id: route.split("/")[3], source: "runs", turns: 6, runs: 7, reported_runs: 7,
+      input_tokens: 182400, output_tokens: 9120, cache_read_tokens: 151300, cache_write_tokens: 12800, total_tokens: 204320, cache_hit_percent: 83, tool_calls: 14,
+      compactions: 1, helper_runs: 1, failed: 0, stopped: 0, last_reply: { run_id: "r-computer", model: "synthetic-model", ttft_seconds: 1.42, tokens_per_second: 61.3, output_tokens: 1210 },
+      context: { used_tokens: 48200, capacity_tokens: 258400, percent: 18.7 } };
     if (route === '/api/sessions/s2') return { ...sessions[1], model_endpoint_id: 'm1', messages: [
       { role: 'user', content: 'Plan the week ahead.', ts: now - 100 },
       { role: 'assistant', content: '[Weekly plan](/generated-files/fedcba987654_weekly-plan.md)', ts: now - 90 } ] };

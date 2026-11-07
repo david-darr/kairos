@@ -159,7 +159,7 @@ const server = http.createServer(async (req, res) => {
       }
       return json(Object.values(chats));
     }
-    const match = url.pathname.match(/^\/api\/sessions\/([^/]+)(\/model|\/context|\/open-mic|\/rewind)?$/);
+    const match = url.pathname.match(/^\/api\/sessions\/([^/]+)(\/model|\/context|\/usage|\/open-mic|\/rewind)?$/);
     if (match) {
       const chat = chats[match[1]];
       if (match[2] === '/rewind') {
@@ -181,6 +181,11 @@ const server = http.createServer(async (req, res) => {
         return json(data.active ? { open_mic: true } : { open_mic: false, summarised: false, reason: 'too short to summarise' });
       }
       if (match[2] === '/context') return json(chat.context_state ? { available: true, ...chat.context_state } : { available: false });
+      // The usage meter (Session Usage and Model Tracking, unit 1): sums from the chat's runs.
+      if (match[2] === '/usage') {
+        if (!chat.usage) { res.writeHead(404); return json({ detail: 'session not found' }); }
+        return json(chat.usage);
+      }
       return json(chat);
     }
     // Structured Office contents, shaped exactly like core/office_preview.py's
@@ -445,6 +450,42 @@ app.whenReady().then(async () => {
     await waitFor("document.querySelector('#context-pill').dataset.level==='high'");
     assert.equal(await js("document.querySelector('.context-text').textContent"), '96.7%');
     assert.ok(await js("document.querySelector('#context-pill').title.includes('estimated capacity')"));
+    // The pill opens the usage meter: the chat's recorded figures, n/a where a provider reported nothing.
+    chats.s1.context_state = { used_tokens: 45000, capacity_tokens: 90000, percent: 50, estimated_capacity: false, capacity_source: 'cli_cache', model: 'catalog-astra' };
+    chats.s1.usage = { session_id: 's1', source: 'runs', turns: 4, runs: 5, reported_runs: 4, input_tokens: 120000, output_tokens: 3400,
+      cache_read_tokens: 96000, cache_write_tokens: null, total_tokens: 123400, cache_hit_percent: 80, tool_calls: 6, compactions: 1,
+      helper_runs: 1, failed: 0, stopped: 0, last_reply: { run_id: 'r9', ttft_seconds: 0.84, tokens_per_second: null, output_tokens: 900 },
+      model: { model: 'catalog-astra', provider: 'Claude', kind: 'claude_cli', context_window: 90000, context_window_estimated: false } };
+    await win.loadURL(base); await mount();
+    await waitFor("!document.querySelector('#context-pill').hidden");
+    await js("document.querySelector('#context-pill').click()");
+    await waitFor("!!document.querySelector('#usage-meter .usage-meter-rows')");
+    const meter = await js("Object.fromEntries([...document.querySelectorAll('#usage-meter .usage-meter-row')].map(r => [r.querySelector('dt').textContent, r.querySelector('dd').textContent]))");
+    assert.equal(meter['Input'], '120,000');
+    assert.equal(meter['Cache write'], 'n/a', 'unreported is n/a, never 0');
+    assert.equal(meter['Cache hit'], '80%');
+    assert.equal(meter['Speed'], 'n/a', 'a whole-piece reply has no rate');
+    assert.equal(meter['First output'], '0.84 s');
+    assert.equal(meter['Model'], 'catalog-astra');
+    assert.equal(meter['Context window'], '90K');
+    assert.ok(await js("document.querySelector('#usage-meter .usage-meter-note').textContent.includes('4 of 5')"));
+    assert.equal(await js("document.querySelector('#usage-meter .usage-context-used').textContent"), '45K');
+    assert.equal(await js("document.querySelector('#usage-meter .usage-context-percent').textContent"), '50%');
+    assert.equal(await js("document.querySelectorAll('#usage-meter .usage-context-segment').length"), 1);
+    assert.ok(await js("!!document.querySelector('#usage-meter .usage-meter-compact')"), 'Compact is offered in the meter');
+    assert.equal(await js("document.querySelector('#context-pill').getAttribute('aria-expanded')"), 'true');
+    assert.ok(await js("(() => { const r=document.querySelector('#usage-meter').getBoundingClientRect(); return r.top >= 0 && r.left >= 0 && r.right <= innerWidth+1 && r.bottom <= innerHeight+1; })()"), 'meter stays on screen');
+    await js("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))");
+    await waitFor("!document.querySelector('#usage-meter')");
+    // No context reading, but recorded runs: a reopened chat still shows its stored usage.
+    chats.s1.context_state = null;
+    await win.loadURL(base); await mount();
+    await waitFor("!document.querySelector('#context-pill').hidden && document.querySelector('.context-text').textContent==='Usage'");
+    await js("document.querySelector('#context-pill').click()");
+    await waitFor("!!document.querySelector('#usage-meter .usage-meter-rows')");
+    assert.ok(await js("[...document.querySelectorAll('#usage-meter .usage-card')][0].textContent.includes('No context reading')"));
+    await js("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))");
+    delete chats.s1.usage;
     chats.s1.context_state = null;
     await win.loadURL(base); await mount();
     await waitFor("document.querySelector('#context-pill').hidden");
@@ -869,6 +910,17 @@ app.whenReady().then(async () => {
       win.setContentSize(width, 844); await open('s1'); await delay(100);
       await waitFor("!document.querySelector('#context-pill').hidden");
       assert.ok(await js("document.querySelector('.chat-input-bar').scrollWidth <= document.querySelector('.chat-input-bar').clientWidth+2"), 'Composer fits mobile ' + width);
+      // On a phone the pill opens chat details as a full sheet, inside the screen.
+      chats.s1.usage = { session_id: 's1', source: 'runs', turns: 1, runs: 1, reported_runs: 1, input_tokens: 900, output_tokens: 90,
+        cache_read_tokens: null, cache_write_tokens: null, cache_hit_percent: null, tool_calls: 0, compactions: 0, helper_runs: 0,
+        last_reply: null, model: { model: 'catalog-astra', provider: 'Claude', context_window: 90000 } };
+      await js("document.querySelector('#context-pill').click()");
+      await waitFor("!!document.querySelector('#usage-meter.is-sheet .usage-meter-rows')");
+      assert.ok(await js("(() => { const r=document.querySelector('#usage-meter').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth+1 && r.bottom <= innerHeight+1; })()"), 'sheet fits mobile ' + width);
+      await capture('mobile-chat-details-' + width);
+      await js("document.querySelector('#usage-meter .usage-meter-close').click()");
+      await waitFor("!document.querySelector('#usage-meter')");
+      delete chats.s1.usage;
       await js("document.querySelector('#chat-messages').scrollTop=0");
       await capture('mobile-chat-' + width);
       await js("document.querySelector('.artifact-card').click()");

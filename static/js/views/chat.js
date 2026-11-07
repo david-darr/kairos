@@ -31,6 +31,7 @@ import { mountChatBackdrop } from '../chatBackdrop.js';
 import { renderAgentHandoff, watchAgentHandoffs } from '../agentHandoff.js';
 import { paneIsOpen } from '../chatPaneStack.js';
 import { fitMenu } from '../menuFit.js';
+import { renderUsage } from '../usageMeter.js';
 import { mountRedesignChat } from '../redesignChat.js';
 import { mountMobileComposer } from '../mobileComposer.js';
 import { mountMobileModelSheet, appendEndpointCatalogs } from '../mobileModelSheet.js';
@@ -1026,7 +1027,8 @@ export async function render(container, tabId, options = {}) {
   // cumulative token spend. Hidden until a turn actually reports usable
   // usage, so it never occupies the composer with a placeholder.
   const contextPill = el("button", { type: 'button', id: "context-pill", class: "context-pill", hidden: true,
-    'aria-label': 'Conversation capacity', onclick: () => toast(contextPill.title) });
+    'aria-label': 'Conversation capacity', 'aria-haspopup': 'dialog', 'aria-expanded': 'false',
+    onclick: () => toggleUsageMeter(contextPill) });
 
   const sendBtn = el("button", { class: "btn", id: "chat-send", title: "Send" });
   sendBtn.insertAdjacentHTML("beforeend", ICON_SEND);
@@ -2080,6 +2082,7 @@ async function refreshContextMeter(sessionId) {
   const pill = document.getElementById('context-pill');
   const compactBtn = document.getElementById('chat-compact');
   if (!pill) return;
+  if (closeUsageMeter && document.getElementById('usage-meter')?.dataset.sessionId !== sessionId) closeUsageMeter();
   if (!sessionId) { pill.hidden = true; if (compactBtn) compactBtn.hidden = true; return; }
   let state = null;
   try { state = await api(`/api/sessions/${sessionId}/context`); } catch { /* a missing reading is not an error worth surfacing */ }
@@ -2087,8 +2090,19 @@ async function refreshContextMeter(sessionId) {
   // stale reading must never be painted onto a different session's composer.
   if (sessionId !== activeSessionId || !pill.isConnected) return;
   if (!state || !state.available || !Number.isFinite(state.used_tokens)) {
-    pill.hidden = true;
     if (compactBtn) compactBtn.hidden = true;
+    // No context reading, but the chat may still have recorded runs (a provider that reports no prompt size,
+    // a reading cleared by a model switch): the pill then opens the usage meter alone, so a reopened chat
+    // shows its stored figures before any new turn (unit 1).
+    let usage = null;
+    try { usage = await api(`/api/sessions/${sessionId}/usage`); } catch { /* no usage is not an error worth surfacing */ }
+    if (sessionId !== activeSessionId || !pill.isConnected) return;
+    if (!usage || !usage.runs) { pill.hidden = true; return; }
+    delete pill.dataset.level;
+    pill.replaceChildren(el('span', { class: 'context-text', text: 'Usage' }));
+    pill.title = 'No context reading for this chat yet. Open for its recorded usage.';
+    pill.setAttribute('aria-label', 'Chat usage');
+    pill.hidden = false;
     return;
   }
 
@@ -2121,6 +2135,49 @@ async function refreshContextMeter(sessionId) {
   }
   pill.setAttribute('aria-label', pill.title);
   pill.hidden = false;
+}
+
+// The usage meter (Session Usage and Model Tracking, unit 1): the pill's popover with this chat's recorded
+// figures and a Compact button. Read fresh on every open; a stale reading is never painted onto another chat.
+let closeUsageMeter = null;
+async function toggleUsageMeter(pill) {
+  if (closeUsageMeter) { closeUsageMeter(); return; }
+  const sessionId = activeSessionId;
+  if (!sessionId) { toast(pill.title); return; }
+  const menu = el('div', { class: 'overflow-menu usage-meter-popover', id: 'usage-meter', role: 'dialog', 'aria-label': 'Chat details',
+    'data-session-id': sessionId });
+  const close = () => {
+    menu.remove();
+    document.removeEventListener('pointerdown', outside, true);
+    document.removeEventListener('keydown', onKey);
+    pill.setAttribute('aria-expanded', 'false');
+    if (closeUsageMeter === close) closeUsageMeter = null;
+  };
+  const outside = (event) => { if (!menu.contains(event.target) && !pill.contains(event.target)) close(); };
+  const onKey = (event) => { if (event.key === 'Escape') { event.preventDefault(); close(); pill.focus(); } };
+  closeUsageMeter = close;
+  pill.setAttribute('aria-expanded', 'true');
+  menu.append(el('p', { class: 'usage-meter-empty', text: "Reading this chat's usage…" }));
+  document.body.append(menu);
+  // A phone gets a full sheet (Hermes mobile's Session Details); a wider window a popover by the pill.
+  const place = () => matchMedia('(max-width: 768px)').matches ? menu.classList.add('is-sheet')
+    : fitMenu(menu, pill, { prefer: 'above', fixed: true, cap: 560 });
+  place();
+  document.addEventListener('pointerdown', outside, true);
+  document.addEventListener('keydown', onKey);
+  let usage = null;
+  try { usage = await api(`/api/sessions/${sessionId}/usage`); } catch { /* shown as unreadable below */ }
+  if (closeUsageMeter !== close || sessionId !== activeSessionId) { if (closeUsageMeter === close) close(); return; }
+  const compact = el('button', { type: 'button', class: 'btn btn-secondary usage-meter-compact', onclick: () => {
+    close();
+    const target = document.getElementById('chat-compact');
+    runCompact(target || compact);
+  } }, [el('span', { text: 'Compact this chat' })]);
+  compact.title = 'Summarise older turns so later messages send less. Nothing is deleted.';
+  const closeButton = el('button', { type: 'button', class: 'usage-meter-close', 'aria-label': 'Close chat details', onclick: () => { close(); pill.focus(); } }, [el('span', { text: 'Done' })]);
+  menu.replaceChildren(el('header', { class: 'usage-meter-header' }, [el('h2', { text: 'Chat details' }), closeButton]),
+    renderUsage(usage, { compact }));
+  place();
 }
 
 // Summarizes older turns so future messages send less context, WITHOUT

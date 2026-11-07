@@ -1128,6 +1128,17 @@ def list_runs(session_id: Optional[str] = None, limit: int = 50) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def session_runs(session_id: str) -> list[dict]:
+    """Every run recorded for one chat, oldest first: its own turns and side work (session_id), and the runs
+    they started that carry no chat of their own (parent_id). Bounded by RUNS_KEPT."""
+    with _LOCK:
+        rows = _connect().execute(
+            "SELECT * FROM runs WHERE session_id = ? UNION "
+            "SELECT * FROM runs WHERE session_id IS NULL AND parent_id IN (SELECT id FROM runs WHERE session_id = ?) "
+            "ORDER BY started_at", (session_id, session_id)).fetchall()
+    return [dict(r) for r in rows]
+
+
 def get_run(run_id: str) -> Optional[dict]:
     with _LOCK:
         row = _connect().execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()

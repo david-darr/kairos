@@ -304,6 +304,22 @@ async def get_session_context(session_id: str, user: str = Depends(require_user)
     return {"available": True, **state}
 
 
+@router.get("/{session_id}/usage")
+async def get_session_usage(session_id: str, user: str = Depends(require_user)) -> dict:
+    """This chat's usage summed from its recorded runs (Session Usage and Model Tracking, unit 1), for
+    the context pill's popover. Only the chat's owner gets it; an unknown figure is null, never 0."""
+    from core import session_usage
+    from services.chat_live import require_session
+    session = require_session(session_id, user)
+    endpoint = model_endpoints.get_endpoint(session.get("model_endpoint_id") or "") or {}
+    context = session.get("context_state") or None
+    model = {"model": session.get("model_override") or endpoint.get("model") or (context or {}).get("model"),
+             "provider": endpoint.get("name"), "kind": endpoint.get("kind"),
+             "context_window": (context or {}).get("capacity_tokens"),
+             "context_window_estimated": bool((context or {}).get("estimated_capacity"))}
+    return {**session_usage.for_session(session_id, session), "context": context, "model": model}
+
+
 
 @router.post("/{session_id}/open-mic")
 @idle_session

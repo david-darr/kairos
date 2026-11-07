@@ -18,7 +18,8 @@ where state lives. Routes and services call into it; it never imports `tabs/`.
   `task_scope.py` (trusted owner of a background run), `workspace.py`,
   `secret_storage.py`, and the contained runtimes `sandbox.py` and `computer.py`.
 - **Sessions and runs:** `session_manager.py` over `session_manager_store.py`
-  (SQLite), `runs.py`, `chat_tasks.py`, `file_checkpoints.py`.
+  (SQLite), `runs.py`, `chat_tasks.py`, `file_checkpoints.py`. Usage read from the runs:
+  `session_usage.py` (one chat's sums, the context pill's meter).
 - **Integrations:** `integrations.py`, `mcp_client.py`, `mcp_bridge.py`,
   `mcp_oauth.py`, `connectors/`, `channels/`, `email_send.py`,
   `google_workspace.py`, `dav_client.py`.
