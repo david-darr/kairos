@@ -184,7 +184,7 @@ const server = http.createServer(async (req, res) => {
       // The usage meter (Session Usage and Model Tracking, unit 1): sums from the chat's runs.
       if (match[2] === '/usage') {
         if (!chat.usage) { res.writeHead(404); return json({ detail: 'session not found' }); }
-        return json(chat.usage);
+        return json({ ...chat.usage, context: chat.context_state || null });
       }
       return json(chat);
     }
