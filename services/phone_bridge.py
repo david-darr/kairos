@@ -178,21 +178,26 @@ class Pipeline:
     async def close(self) -> None: ...
 
 
-class PhoneBridge:
-    def __init__(self, provider: Provider, send: Callable, pipeline: Pipeline, *, stream_id: str = "", opening: str = "",
-                 smart_turn: bool = False, pace: bool = True, clock: Callable[[], float] = time.monotonic,
-                 sleep: Callable = asyncio.sleep, max_seconds: float = MAX_CALL_SECONDS):
-        self.provider, self.send_text, self.pipeline = provider, send, pipeline
-        self.stream_id, self.opening = stream_id, opening
-        self.pace, self.clock, self.sleep, self.max_seconds = pace, clock, sleep, max_seconds
-        self.inbound = phone_audio.PhoneToSpeech()
+class TurnBridge:
+    """The turn-taking both voice bridges share (a phone line here, a Discord voice channel in
+    services/discord_voice.py): the endpointer's events become turns, a turn is transcribed, answered and spoken a
+    sentence at a time, speech over a reply is a barge-in (long), a nod (short) or a real interjection (checked by
+    transcribing it), and a quick acknowledgement plays if the answer is slow. A subclass says how audio leaves:
+    `_new_converter` / `_converter_rate` (speech audio to its frames), `_emit` (one frame out), `_frame_seconds` and
+    `_clear_output` (drop what is queued); `_turn_over` and `_speech_started` are hooks."""
+    LABEL = "phone"
+    REQUEST_PREFIX = "phone"
+
+    def _init_turns(self, pipeline: Pipeline, *, opening: str, smart_turn: bool, pace: bool, clock, sleep) -> None:
+        self.pipeline, self.opening = pipeline, opening
+        self.pace, self.clock, self.sleep = pace, clock, sleep
         self.endpointer = Endpointer(smart=smart_turn)
         self.phase = "idle"                    # idle | thinking | speaking
         self.turn: Optional[asyncio.Task] = None
         self.background: set = set()
         self.play_end = 0.0
         self.backchannel = False
-        self.during = False                    # the caller started speaking while Kairos was thinking or speaking
+        self.during = False                    # the person started speaking while the bot was thinking or speaking
         self.played: list = []                 # (sentence, when it starts to play) of the reply being spoken
         self.last_filler: Optional[str] = None
         self.dropped_backchannels = 0
@@ -200,40 +205,40 @@ class PhoneBridge:
         self.heard: list[str] = []
         self.frames_in = 0
 
-    # -- the media loop --------------------------------------------------------------------------
+    # -- what a subclass provides ---------------------------------------------------------------------
 
-    async def run(self, recv: Callable) -> None:
-        """Read the provider's messages until the call ends. `recv()` returns the next text message, or None."""
-        started = self.clock()
-        try:
-            if self.opening:
-                self.turn = asyncio.create_task(self._open())
-            while self.clock() - started < self.max_seconds:
-                raw = await recv()
-                if raw is None:
-                    break
-                kind, data = self.provider.parse_stream(raw)
-                if kind == "start" and data.get("stream_id"):
-                    self.stream_id = data["stream_id"]
-                elif kind == "media":
-                    await self._audio(data)
-                elif kind == "stop":
-                    break
-        finally:
-            await self._shutdown()
+    def _new_converter(self, rate: int):
+        raise NotImplementedError
 
-    async def _audio(self, mulaw: bytes) -> None:
-        self.frames_in += 1
-        if self.frames_in % 50 == 0:
-            self.pipeline.touch()
-        pcm16 = self.inbound.feed(mulaw)
-        await self._events(self.endpointer.push(phone_audio.pcm16_to_float(pcm16)))
+    def _converter_rate(self, converter) -> int:
+        raise NotImplementedError
+
+    async def _emit(self, frame) -> None:
+        raise NotImplementedError
+
+    def _frame_seconds(self, frame) -> float:
+        raise NotImplementedError
+
+    async def _clear_output(self) -> None:
+        raise NotImplementedError
+
+    def _turn_over(self) -> None:
+        """A turn (or the opening) finished."""
+
+    def _speech_started(self) -> None:
+        """The endpointer heard speech begin."""
+
+    # -- inbound ---------------------------------------------------------------------------------------
+
+    async def _push(self, samples) -> None:
+        await self._events(self.endpointer.push(samples))
         if self.phase == "speaking" and self.endpointer.active and self.endpointer.voiced_ms >= BARGE_VOICED_MS:
             await self._barge_in()
 
     async def _events(self, events: list) -> None:
         for event in events:
             if event[0] == "start":
+                self._speech_started()
                 self.backchannel = self.phase == "speaking"
                 self.during = self.phase in ("speaking", "thinking")
             elif event[0] == "pause":
@@ -244,14 +249,14 @@ class PhoneBridge:
                     self.backchannel = False    # a short "mm-hm" over the bot's voice is not a turn
                     continue
                 if during and self.turn and not self.turn.done():
-                    # Kairos is mid-reply: find out whether this is a real turn before cutting the reply off.
+                    # The bot is mid-reply: find out whether this is a real turn before cutting the reply off.
                     self._spawn(self._interject(event[1]))
                     continue
                 await self._cancel_turn(spoken=False)
                 self.turn = asyncio.create_task(self._respond(event[1], during))
 
     def _asked(self) -> bool:
-        """Did the last thing Kairos said end in a question? ("yeah" then answers it instead of nodding along.)"""
+        """Did the last thing the bot said end in a question? ("yeah" then answers it instead of nodding along.)"""
         return bool(self.played) and self.played[-1][0].rstrip().endswith("?")
 
     async def _interject(self, samples) -> None:
@@ -261,7 +266,7 @@ class PhoneBridge:
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("phone: could not hear an interjection")
+            logger.exception("%s: could not hear an interjection", self.LABEL)
             return
         if not text:
             return
@@ -276,7 +281,7 @@ class PhoneBridge:
         try:
             verdict = await self.pipeline.end_of_turn(phone_audio.float_to_pcm16(samples))
         except Exception:
-            logger.info("phone: Smart Turn unavailable for this pause")
+            logger.info("%s: Smart Turn unavailable for this pause", self.LABEL)
         if verdict is not None:
             await self._events(self.endpointer.answer(pause_id, verdict))
 
@@ -295,9 +300,10 @@ class PhoneBridge:
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("phone: the opening line failed")
+            logger.exception("%s: the opening line failed", self.LABEL)
         finally:
             self.phase = "idle"
+            self._turn_over()
 
     @staticmethod
     async def _once(text: str):
@@ -315,17 +321,24 @@ class PhoneBridge:
                 return
             self.played = []
             self.heard.append(text)
-            await self._say(self.pipeline.converse(text, "phone:" + uuid.uuid4().hex), filler_for=text)
+            request_id = self.REQUEST_PREFIX + ":" + uuid.uuid4().hex
+            await self._say(self.pipeline.converse(text, request_id), filler_for=text)
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("phone: a turn failed")
+            logger.exception("%s: a turn failed", self.LABEL)
         finally:
             self.phase = "idle"
+            self._turn_over()
+
+    def _converted(self, converter, rate: int):
+        if converter is not None and self._converter_rate(converter) == rate:
+            return converter
+        return self._new_converter(rate)
 
     async def _say(self, deltas, filler_for: Optional[str] = None) -> None:
         """Speak a stream of text: each finished sentence is rendered while the one before it is still playing.
-        With `filler_for` (what the caller just said), a short acknowledgement plays if no sentence is ready within
+        With `filler_for` (what the person just said), a short acknowledgement plays if no sentence is ready within
         half a second; `self.played` records when each sentence starts so a barge-in knows what was heard."""
         queue: asyncio.Queue = asyncio.Queue(maxsize=4)
         first_sentence = asyncio.Event()
@@ -334,8 +347,7 @@ class PhoneBridge:
         async def render(number: int, sentence: str) -> None:
             converter = None
             async for rate, pcm in self.pipeline.speak(spoken_text(sentence)):
-                if converter is None or converter.resampler.source != rate:
-                    converter = phone_audio.SpeechToPhone(rate)
+                converter = self._converted(converter, rate)
                 frames = converter.frames(pcm)
                 if frames:
                     await queue.put((number, sentence, frames))
@@ -377,8 +389,7 @@ class PhoneBridge:
                 async for rate, pcm in parts:
                     if first_sentence.is_set():
                         return                    # the answer got there first
-                    if converter is None or converter.resampler.source != rate:
-                        converter = phone_audio.SpeechToPhone(rate)
+                    converter = self._converted(converter, rate)
                     frames = converter.frames(pcm)
                     if frames:
                         await queue.put((0, voice_fillers.text_of(ident) or "", frames))
@@ -388,7 +399,7 @@ class PhoneBridge:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.info("phone: no acknowledgement this time")
+                logger.info("%s: no acknowledgement this time", self.LABEL)
 
         producer = asyncio.create_task(produce())
         helper = asyncio.create_task(filler()) if filler_for else None
@@ -409,32 +420,31 @@ class PhoneBridge:
             for task in (producer, helper):
                 if task:
                     task.cancel()
-            await asyncio.gather(producer, *( [helper] if helper else [] ), return_exceptions=True)
+            await asyncio.gather(producer, *([helper] if helper else []), return_exceptions=True)
 
-    @staticmethod
-    async def _guarded(render, number: int, sentence: str) -> None:
+    async def _guarded(self, render, number: int, sentence: str) -> None:
         try:
             await render(number, sentence)
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.warning("phone: a sentence could not be spoken")
+            logger.warning("%s: a sentence could not be spoken", self.LABEL)
 
     async def _send_frames(self, frames: list) -> None:
         for frame in frames:
             now = self.clock()
             if self.pace and self.play_end - now > LEAD_SECONDS:
                 await self.sleep(self.play_end - now - LEAD_SECONDS)
-            await self.send_text(self.provider.media_frame(self.stream_id, frame))
+            await self._emit(frame)
             self.sent_frames += 1
-            self.play_end = max(self.play_end, self.clock()) + len(frame) / phone_audio.PHONE_RATE
+            self.play_end = max(self.play_end, self.clock()) + self._frame_seconds(frame)
 
     # -- interruption and the end ------------------------------------------------------------------
 
     async def _barge_in(self) -> None:
         self.backchannel = False
         await self._cancel_turn(spoken=True)
-        await self.send_text(self.provider.clear_frame(self.stream_id))
+        await self._clear_output()
         self.play_end = 0.0
 
     async def _cancel_turn(self, spoken: bool) -> None:
@@ -455,4 +465,58 @@ class PhoneBridge:
         try:
             await self.pipeline.close()
         except Exception:
-            logger.exception("phone: closing the call failed")
+            logger.exception("%s: closing the call failed", self.LABEL)
+
+
+class PhoneBridge(TurnBridge):
+    def __init__(self, provider: Provider, send: Callable, pipeline: Pipeline, *, stream_id: str = "", opening: str = "",
+                 smart_turn: bool = False, pace: bool = True, clock: Callable[[], float] = time.monotonic,
+                 sleep: Callable = asyncio.sleep, max_seconds: float = MAX_CALL_SECONDS):
+        self._init_turns(pipeline, opening=opening, smart_turn=smart_turn, pace=pace, clock=clock, sleep=sleep)
+        self.provider, self.send_text, self.stream_id, self.max_seconds = provider, send, stream_id, max_seconds
+        self.inbound = phone_audio.PhoneToSpeech()
+
+    # -- the media loop --------------------------------------------------------------------------
+
+    async def run(self, recv: Callable) -> None:
+        """Read the provider's messages until the call ends. `recv()` returns the next text message, or None."""
+        started = self.clock()
+        try:
+            if self.opening:
+                self.turn = asyncio.create_task(self._open())
+            while self.clock() - started < self.max_seconds:
+                raw = await recv()
+                if raw is None:
+                    break
+                kind, data = self.provider.parse_stream(raw)
+                if kind == "start" and data.get("stream_id"):
+                    self.stream_id = data["stream_id"]
+                elif kind == "media":
+                    await self._audio(data)
+                elif kind == "stop":
+                    break
+        finally:
+            await self._shutdown()
+
+    async def _audio(self, mulaw: bytes) -> None:
+        self.frames_in += 1
+        if self.frames_in % 50 == 0:
+            self.pipeline.touch()
+        await self._push(phone_audio.pcm16_to_float(self.inbound.feed(mulaw)))
+
+    # -- audio out -------------------------------------------------------------------------------
+
+    def _new_converter(self, rate: int):
+        return phone_audio.SpeechToPhone(rate)
+
+    def _converter_rate(self, converter) -> int:
+        return converter.resampler.source
+
+    async def _emit(self, frame) -> None:
+        await self.send_text(self.provider.media_frame(self.stream_id, frame))
+
+    def _frame_seconds(self, frame) -> float:
+        return len(frame) / phone_audio.PHONE_RATE
+
+    async def _clear_output(self) -> None:
+        await self.send_text(self.provider.clear_frame(self.stream_id))

@@ -72,33 +72,28 @@ def disclosure(name: str) -> str:
 
 # -- the bridge: one voice session's speech, thinking and talking ---------------------------------------------
 
-class VoiceBridge:
-    """Events in (audio, opus packets, the person joining or leaving), Opus packets out. Time comes from `clock`, so a
-    test steps it by hand and calls `tick()`; `run(queue)` is the same loop with a real wait. `ended` says why it ended.
+class VoiceBridge(phone_bridge.TurnBridge):
+    """Events in (audio, opus packets, the person joining or leaving), Opus packets out. The turn-taking is the phone
+    bridge's (phone_bridge.TurnBridge); this adds who is heard, silence filling, and when to leave. Time comes from
+    `clock`, so a test steps it by hand and calls `tick()`; `run(queue)` is the same loop with a real wait. `ended`
+    says why it ended.
     """
+    LABEL = "discord voice"
+    REQUEST_PREFIX = "discord"
 
     def __init__(self, pipeline: phone_bridge.Pipeline, *, linked_user: str, send: Callable, clear: Callable, codec,
                  opening: str = "", present: bool = False, smart_turn: bool = False, pace: bool = True,
                  clock: Callable[[], float] = time.monotonic, sleep: Callable = asyncio.sleep,
                  idle_seconds: float = IDLE_SECONDS, join_wait_seconds: float = JOIN_WAIT_SECONDS,
                  max_seconds: float = MAX_SECONDS):
-        self.pipeline, self.linked_user = pipeline, str(linked_user)
-        self.send, self.clear, self.codec, self.opening = send, clear, codec, opening
-        self.present, self.pace, self.clock, self.sleep = present, pace, clock, sleep
+        self._init_turns(pipeline, opening=opening, smart_turn=smart_turn, pace=pace, clock=clock, sleep=sleep)
+        self.linked_user, self.send, self.clear, self.codec = str(linked_user), send, clear, codec
+        self.present = present
         self.idle_seconds, self.join_wait_seconds, self.max_seconds = idle_seconds, join_wait_seconds, max_seconds
         self.inbound = audio.DiscordToSpeech()
-        self.endpointer = phone_bridge.Endpointer(smart=smart_turn)
         self.decoder = None
-        self.phase = "idle"                    # idle | thinking | speaking
-        self.turn: Optional[asyncio.Task] = None
-        self.background: set = set()
         self.begun = False
-        self.backchannel = False
-        self.play_end = 0.0
-        self.sent_frames = 0
-        self.frames_in = 0
         self.ignored = 0                       # events from anyone but the linked person
-        self.heard: list[str] = []
         self.started = clock()
         self.last_activity = self.started
         self.fed_until = self.started
@@ -199,166 +194,33 @@ class VoiceBridge:
         self.fed_until += len(samples) / phone_audio.SPEECH_RATE
         await self._push(samples)
 
-    async def _push(self, samples) -> None:
-        await self._events(self.endpointer.push(samples))
-        if self.phase == "speaking" and self.endpointer.active and self.endpointer.voiced_ms >= BARGE_VOICED_MS:
-            await self._barge_in()
+    def _speech_started(self) -> None:
+        self.last_activity = self.clock()
 
-    async def _events(self, events: list) -> None:
-        for event in events:
-            if event[0] == "start":
-                self.last_activity = self.clock()
-                self.backchannel = self.phase == "speaking"
-            elif event[0] == "pause":
-                self._spawn(self._ask(event[1], event[2]))
-            elif event[0] == "segment":
-                if self.backchannel:
-                    self.backchannel = False    # a short "mm-hm" over the bot's voice is not a turn
-                    continue
-                await self._cancel_turn(spoken=False)
-                self.turn = asyncio.create_task(self._respond(event[1]))
+    def _turn_over(self) -> None:
+        self.last_activity = self.clock()
 
-    async def _ask(self, pause_id: int, samples) -> None:
-        verdict = None
-        try:
-            verdict = await self.pipeline.end_of_turn(phone_audio.float_to_pcm16(samples))
-        except Exception:
-            logger.info("discord voice: Smart Turn unavailable for this pause")
-        if verdict is not None:
-            await self._events(self.endpointer.answer(pause_id, verdict))
+    # -- audio out -------------------------------------------------------------------------------------
 
-    def _spawn(self, coroutine) -> None:
-        task = asyncio.create_task(coroutine)
-        self.background.add(task)
-        task.add_done_callback(self.background.discard)
+    def _new_converter(self, rate: int):
+        return audio.SpeechToDiscord(rate)
 
-    # -- one turn --------------------------------------------------------------------------------------
+    def _converter_rate(self, converter) -> int:
+        return converter.source
 
-    async def _open(self) -> None:
-        self.phase = "speaking"
-        try:
-            await self.pipeline.announce(self.opening, "open:" + uuid.uuid4().hex)
-            await self._say(self._once(self.opening))
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("discord voice: the opening line failed")
-        finally:
-            self.phase = "idle"
-            self.last_activity = self.clock()
+    async def _emit(self, frame) -> None:
+        result = self.send(self.codec.encode(frame))
+        if inspect.isawaitable(result):
+            await result
 
-    @staticmethod
-    async def _once(text: str):
-        yield text
+    def _frame_seconds(self, frame) -> float:
+        return audio.FRAME_SECONDS
 
-    async def _respond(self, samples) -> None:
-        self.phase = "thinking"
-        try:
-            text = (await self.pipeline.transcribe(phone_audio.float_to_pcm16(samples))).strip()
-            if not text:
-                return
-            self.heard.append(text)
-            await self._say(self.pipeline.converse(text, "discord:" + uuid.uuid4().hex))
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("discord voice: a turn failed")
-        finally:
-            self.phase = "idle"
-            self.last_activity = self.clock()
-
-    async def _say(self, deltas) -> None:
-        """Speak a stream of text: each finished sentence is rendered while the one before it is still playing."""
-        queue: asyncio.Queue = asyncio.Queue(maxsize=4)
-
-        async def render(sentence: str) -> None:
-            converter = None
-            async for rate, pcm in self.pipeline.speak(phone_bridge.spoken_text(sentence)):
-                if converter is None or converter.source != rate:
-                    converter = audio.SpeechToDiscord(rate)
-                frames = converter.frames(pcm)
-                if frames:
-                    await queue.put(frames)
-            if converter:
-                tail = converter.frames(b"", final=True)
-                if tail:
-                    await queue.put(tail)
-
-        async def produce() -> None:
-            buffer = ""
-            try:
-                async for delta in deltas:
-                    buffer += delta
-                    sentences, buffer = phone_bridge.split_sentences(buffer)
-                    for sentence in sentences:
-                        await self._guarded(render, sentence)
-                if buffer.strip():
-                    await self._guarded(render, buffer)
-            finally:
-                await queue.put(None)
-
-        producer = asyncio.create_task(produce())
-        try:
-            while (frames := await queue.get()) is not None:
-                self.phase = "speaking"
-                await self._send_frames(frames)
-            await producer
-            if self.pace and self.phase == "speaking":
-                await self.sleep(max(0.0, self.play_end - self.clock()))
-        finally:
-            producer.cancel()
-            await asyncio.gather(producer, return_exceptions=True)
-
-    @staticmethod
-    async def _guarded(render, sentence: str) -> None:
-        try:
-            await render(sentence)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.warning("discord voice: a sentence could not be spoken")
-
-    async def _send_frames(self, frames: list) -> None:
-        for frame in frames:
-            now = self.clock()
-            if self.pace and self.play_end - now > LEAD_SECONDS:
-                await self.sleep(self.play_end - now - LEAD_SECONDS)
-            result = self.send(self.codec.encode(frame))
-            if inspect.isawaitable(result):
-                await result
-            self.sent_frames += 1
-            self.play_end = max(self.play_end, self.clock()) + audio.FRAME_SECONDS
-
-    # -- interruption and the end ----------------------------------------------------------------------
-
-    async def _barge_in(self) -> None:
-        self.backchannel = False
-        await self._cancel_turn(spoken=True)
+    async def _clear_output(self) -> None:
         result = self.clear()
         if inspect.isawaitable(result):
             await result
-        self.play_end = 0.0
 
-    async def _cancel_turn(self, spoken: bool) -> None:
-        task, self.turn = self.turn, None
-        if task and not task.done():
-            self.pipeline.interrupt(spoken)
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-        self.phase = "idle"
-
-    async def _shutdown(self) -> None:
-        await self._cancel_turn(spoken=False)
-        for task in list(self.background):
-            task.cancel()
-        await asyncio.gather(*self.background, return_exceptions=True)
-        try:
-            await self.pipeline.close()
-        except Exception:
-            logger.exception("discord voice: closing the call failed")
-
-
-# -- Discord itself, behind one seam --------------------------------------------------------------------------
 
 class DiscordHost:
     """The real Discord side: the connected client of a bot (core/channels/discord_channel), its channel, DMs and the
