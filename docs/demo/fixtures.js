@@ -1344,6 +1344,11 @@
     // Settings > Phone (phone calls): not set up in the demo.
     if (route === "/api/phone") return { connection: { configured: false }, fields: { twilio: ["account_sid", "auth_token"], telnyx: ["api_key", "public_key", "connection_id"] } };
     if (route === "/api/agent-calls/choices") return [];
+    // Calls to other people (build spec step 9): none in the demo.
+    if (route === "/api/phone/outbound/active") return { calls: [] };
+    if (route === "/api/phone/outbound") return { calls: [], blocked: [] };
+    // Free realtime voice (a Gemini key): not set up in the demo.
+    if (route === "/api/models/free-voice") return { configured: false, endpoint_id: null, model: null, key_page: "https://aistudio.google.com/apikey" };
     // Bots onboarding and voice (Phase 6): the welcome and tour are already seen here, and no voice engine is set up.
     if (route === "/api/bot-onboarding") return { welcome_seen: true, tour: { done: true, step: 0, variant: "simple" }, hints_seen: [], notices: {}, setup_checked_at: now };
     if (route === "/api/bot-onboarding/setup") return { checked_at: now, checks: [
