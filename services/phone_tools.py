@@ -24,19 +24,67 @@ async def _run(args, ctx, action):
         return f"Not sent: {error}"
 
 
-async def tool_call(args, ctx):
-    """A phone call when the account has a working Phone connection; otherwise the free in-app ring."""
+def _phone_ready() -> bool:
     from core import accounts
     try:
         record = phone_connection.get(accounts.effective_account())
     except Exception:
         record = None
-    if record and record.get("enabled") and phone_connection.calls_ready(record):
+    return bool(record and record.get("enabled") and phone_connection.calls_ready(record))
+
+
+def _preference() -> str:
+    """Settings > the ring preference: app (default) | discord | phone."""
+    from core import settings as settings_store
+    try:
+        return settings_store.get_setting("ring_preference") or "app"
+    except Exception:
+        return "app"
+
+
+async def _by_discord(args, ctx):
+    """Join the person in their Discord voice channel. None when that is not available here (not set up, not
+    installed, not connected), so the caller falls back; a limit or other refusal is returned to the bot as-is."""
+    from core import accounts
+    from core.tool_registry import _bot_scope
+    from services import discord_voice
+    try:
+        scope = _bot_scope(ctx)
+        message = args.get("reason") or args.get("message")
+        ident = ctx.invocation_id or f"discord-{scope['bot_id']}-{abs(hash(str(message)))}"
+        return await discord_voice.call_user(accounts.effective_account(), scope["bot_id"], message, ident)
+    except discord_voice.VoiceRefused as error:
+        return None if error.unavailable else f"Not sent: {error}"
+    except (ValueError, KeyError) as error:
+        return f"Not sent: {error}"
+
+
+async def tool_call(args, ctx):
+    """A phone call when the person prefers Discord (their voice channel) or the account has a working Phone
+    connection; otherwise the free in-app ring."""
+    if _preference() == "discord":
+        joined = await _by_discord(args, ctx)
+        if joined is not None:
+            return joined
+    if _phone_ready():
         return await _run(args, ctx, phone_calls.call_user)
-    return await tool_ring(args, ctx)
+    return await _ring_in_app(args, ctx)
 
 
 async def tool_ring(args, ctx):
+    """Reach the person the way they prefer (Settings): inside Kairos by default, in their Discord voice channel, or
+    on their phone. Anything not available falls back to the in-app ring."""
+    preference = _preference()
+    if preference == "discord":
+        joined = await _by_discord(args, ctx)
+        if joined is not None:
+            return joined
+    elif preference == "phone" and _phone_ready():
+        return await _run(args, ctx, phone_calls.call_user)
+    return await _ring_in_app(args, ctx)
+
+
+async def _ring_in_app(args, ctx):
     """Ring the person inside Kairos (phone and desktop), and say how it ended."""
     from core import accounts
     from core.tool_registry import _bot_scope

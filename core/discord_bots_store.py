@@ -97,6 +97,9 @@ def _masked(bot: dict) -> dict:
         # entry can be both "never talks back" and "where the daily brief
         # gets posted."
         "channels": bot.get("channels", []),
+        # The voice channel (in a server the bot is in) this bot may join to talk with its one allowed user. Off
+        # (None) until set; see services/discord_voice.py.
+        "voice_channel_id": bot.get("voice_channel_id"),
     }
 
 
@@ -140,6 +143,20 @@ def update_bot(bot_id: str, name: Optional[str] = None, token: Optional[str] = N
         bot["allowed_user_id"] = allowed_user_id or None
     if model_endpoint_id is not None:
         bot["model_endpoint_id"] = model_endpoint_id or None
+    write_json_atomic(BOTS_FILE, data)
+    return _masked(bot)
+
+
+def set_voice_channel(bot_id: str, channel_id: Optional[str]) -> dict:
+    """Allow this bot to join one voice channel (its Discord ID, digits only), or turn voice off with an empty value."""
+    cleaned = str(channel_id or "").strip()
+    if cleaned and not cleaned.isdigit():
+        raise ValueError("A Discord channel ID is digits only.")
+    data = _load()
+    bot = data.get(bot_id)
+    if bot is None:
+        raise KeyError(f"no such bot: {bot_id}")
+    bot["voice_channel_id"] = cleaned or None
     write_json_atomic(BOTS_FILE, data)
     return _masked(bot)
 

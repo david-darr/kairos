@@ -75,6 +75,7 @@ async def get_settings(user: str = Depends(require_user)) -> dict:
         "computer_steps_days": raw.get("computer_steps_days", 7),
         "helper_endpoint_id": raw["helper_endpoint_id"],
         "helper_endpoint": _helper_summary(),
+        "ring_preference": raw.get("ring_preference") or "app",
     }
 
 
@@ -82,6 +83,22 @@ def _helper_summary() -> dict | None:
     from core import helpers
     endpoint = helpers.helper_endpoint()
     return {"id": endpoint["id"], "name": endpoint["name"], "kind": endpoint["kind"]} if endpoint else None
+
+
+RING_PREFERENCES = ("app", "discord", "phone")
+
+
+class SetRingPreferenceRequest(BaseModel):
+    preference: str
+
+
+@router.post("/ring-preference")
+async def set_ring_preference(body: SetRingPreferenceRequest, user: str = Depends(require_user)) -> dict:
+    """How a bot reaching you by call does it: inside Kairos, in a Discord voice channel, or on your phone."""
+    if body.preference not in RING_PREFERENCES:
+        raise HTTPException(status_code=422, detail=f"preference must be one of {list(RING_PREFERENCES)}")
+    settings_store.update_settings(ring_preference=body.preference)
+    return {"ok": True, "ring_preference": body.preference}
 
 
 class SetAutoCompactRequest(BaseModel):
@@ -231,6 +248,24 @@ async def update_discord_bot(bot_id: str, body: UpdateDiscordBotRequest, user: s
     if existing_session_id:
         session_manager.set_model_endpoint(existing_session_id, body.model_endpoint_id)
     await discord_channel.restart()
+    return bot
+
+
+class SetDiscordVoiceRequest(BaseModel):
+    voice_channel_id: Optional[str] = None   # empty turns voice off
+
+
+@router.put("/discord-bots/{bot_id}/voice")
+async def set_discord_voice(bot_id: str, body: SetDiscordVoiceRequest, user: str = Depends(require_user)) -> dict:
+    """The one voice channel this bot may join to talk with its allowed user. Off until set."""
+    _own_discord_bot(bot_id)
+    try:
+        bot = discord_bots_store.set_voice_channel(bot_id, body.voice_channel_id)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error))
+    if not bot["voice_channel_id"]:
+        from services import discord_voice
+        await discord_voice.leave(bot_id)
     return bot
 
 

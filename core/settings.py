@@ -89,6 +89,10 @@ DEFAULTS: dict[str, Any] = {
     # systems > Use as default). None: models pick a look per brief with
     # creative_direction; a design made by hand starts in Kairos.
     "design_default_look": None,
+    # How a bot reaching you by call does it (ring_me, notify_me_by_call): "app" rings inside Kairos (the free
+    # default, and the phone when one is connected for notify_me_by_call), "discord" joins the Discord bot's voice
+    # channel, "phone" uses the Phone connection. See services/phone_tools.py.
+    "ring_preference": "app",
 }
 
 
@@ -140,7 +144,8 @@ def update_settings(**fields) -> dict:
 # The first admin keeps them in the install's settings.json, as before. Everything else is "This Kairos".
 ACCOUNT_KEYS = {"vault_dir", "auto_enabled_builtins", "seeded_skills", "seeded_skill_hashes",
                 "vault_pins", "vault_daily_folder", "vault_daily_template", "forge_root", "design_default_look",
-                "onboarding_complete", "auto_compact", "helper_endpoint_id", "computer_steps_days"}
+                "onboarding_complete", "auto_compact", "helper_endpoint_id", "computer_steps_days",
+                "ring_preference"}
 
 
 def _account_file(account_id=None) -> str:

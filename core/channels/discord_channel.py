@@ -174,6 +174,16 @@ def _build_client(discord, bot: dict):
         events.emit("channel.connected", f"Discord bot {bot['name']} connected", bot_id=bot["id"])
 
     @client.event
+    async def on_voice_state_update(member, before, after):
+        # Voice calls (services/discord_voice.py): the linked person joining or leaving the bot's channel.
+        try:
+            from services import discord_voice
+            discord_voice.notify_voice_state(bot["id"], str(member.id), getattr(before.channel, "id", None),
+                                             getattr(after.channel, "id", None))
+        except Exception:
+            logger.exception("discord_channel: voice state dispatch failed")
+
+    @client.event
     async def on_message(message):
         # Everything a message starts runs as the account that set this bot up (Multi-Account group 6).
         from core import accounts
@@ -212,6 +222,15 @@ def _build_client(discord, bot: dict):
             answered = await _answer_agent_reply(client, message)
             if answered is not None:
                 await _send_reply(discord, message, answered, bot)
+                return
+        # "call me" / "/kairos call" from the bot's own allowed user (never in an open channel): join its voice channel.
+        if trusted and not message.attachments:
+            from services import discord_voice
+            fresh = discord_bots_store.get_bot(bot["id"]) if discord_voice.is_call_request(message.content) else None
+            if fresh and fresh.get("voice_channel_id"):
+                refusal = await discord_voice.handle_call_request(discord_bots_store.account_of(fresh), fresh)
+                if refusal:
+                    await _send_reply(discord, message, refusal, bot)
                 return
         addressed = agent_routing.match_agent(message.content) if trusted else None
         if addressed:
@@ -410,6 +429,11 @@ def connected_bots(mine_only: bool = False) -> list[str]:
 
 
 async def stop() -> None:
+    try:
+        from services import discord_voice
+        await discord_voice.leave_all()
+    except Exception:
+        logger.exception("discord_channel: leaving voice channels failed")
     # Cancel the supervisor tasks first — otherwise a deliberate stop just
     # looks like a crash to _run_supervised and it restarts the bot right
     # back up.

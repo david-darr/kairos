@@ -13,6 +13,7 @@ const STATE = {
   error: ["Problem", "error"], off: ["Off", "muted"],
 };
 const POLL_MS = 5000;
+const RING_PREFERENCES = { app: "In Kairos (default)", discord: "In my Discord voice channel", phone: "On my phone" };
 const DISCORD_MODES = { normal: "Normal (allow list applies)", open: "Open: anyone can talk", silent: "Silent: never replies" };
 
 const errorText = (problem) => (problem?.message || String(problem)).replace(/^\d+: /, "");
@@ -275,6 +276,24 @@ export async function renderChannelsPanel(body, _status, page) {
       await reload();
     } });
 
+    // Voice (services/discord_voice.py): one voice channel the bot may join to talk with its allowed user. Off until set.
+    const voiceId = el("input", { placeholder: "Voice channel ID (empty = off)", value: bot.voice_channel_id || "" });
+    const voiceErr = el("div", { class: "set-error" });
+    const saveVoice = el("button", { class: "btn", text: "Save", onclick: async () => {
+      voiceErr.textContent = "";
+      try {
+        await api(`/api/settings/discord-bots/${bot.id}/voice`, { method: "PUT", body: JSON.stringify({ voice_channel_id: voiceId.value.trim() || null }) });
+        toast(voiceId.value.trim() ? "Voice channel saved" : "Voice turned off", "success");
+        await reload();
+      } catch (problem) { voiceErr.textContent = errorText(problem); }
+    } });
+    const ringPref = customSelect({}, Object.entries(RING_PREFERENCES).map(([v, t]) => el("option", { value: v, ...(v === "app" ? { selected: "" } : {}) }, t)));
+    api("/api/settings").then((settings) => { ringPref.value = settings.ring_preference || "app"; }).catch(() => {});
+    const saveRingPref = el("button", { class: "btn", text: "Save", onclick: async () => {
+      await api("/api/settings/ring-preference", { method: "POST", body: JSON.stringify({ preference: ringPref.value }) });
+      toast("Saved", "success");
+    } });
+
     // Named channels (David's ask 2026-09-10): "open" answers anyone there
     // regardless of the allow list, "silent" never answers there, and either
     // way the channel becomes its own delivery target on the Tasks tab.
@@ -316,6 +335,13 @@ export async function renderChannelsPanel(body, _status, page) {
           ? `Only Discord user ${bot.allowed_user_id} is answered outside open channels, and only they can reach your agents.`
           : "Answers anyone in its channels. Agents are never reachable through it." }),
         row({ title: "Default model", description: "Which model answers messages to this bot.", control: [model, saveModel] }),
+      ]),
+      group({ title: "Voice", description: "Talk with this bot by voice in a server channel. It joins when you say \"call me\" (or a bot rings you and you prefer Discord), speaks only to you, and leaves when you do." }, [
+        row({ title: "Voice channel", description: bot.voice_channel_id
+          ? `Joins channel ${bot.voice_channel_id} only. Needs an allowed user above, and the voice add-ons installed.`
+          : "Off. Paste a voice channel's ID (Copy Channel ID) from a server this bot is in.", control: [voiceId, saveVoice] }),
+        voiceErr,
+        row({ title: "When a bot calls you", description: "Where bot calls reach you. If that is not available, they ring inside Kairos.", control: [ringPref, saveRingPref] }),
       ]),
       group({ title: "Channel overrides", description: "Per-channel behaviour, and extra delivery targets for tasks." },
         [...(overrideRows.length ? overrideRows : [empty("No overrides. The bot follows its allow list everywhere.")])]),
