@@ -78,7 +78,7 @@ def voices() -> list[dict]:
 
 def warm() -> bool:
     """Load the model and voices and render one short phrase, so a call's first sentence does not pay the load and
-    onnxruntime's first-run setup (about four seconds cold on David's machine, against about a quarter second warm).
+    onnxruntime's first-run setup (a first sentence took about 3 s after a 2 s load on David's machine, against about a quarter second warm).
     A call start does this in the background when Kokoro is the call voice. Never raises; False when not set up."""
     if not ready()[0]:
         return False

@@ -139,7 +139,7 @@ def probability(samples) -> float:
 
 def warm() -> bool:
     """Load the model and run it once on silence, so a call's first pause does not pay the load and onnxruntime's
-    first-run setup (measured over a second cold on David's machine, past the client's 700 ms ask timeout). A call start
+    first-run setup (the first verdict took 645 ms to over a second cold on David's machine, at or past the client's 700 ms ask timeout). A call start
     does this in the background. Never raises; False when Smart Turn is not set up or could not run."""
     if not ready()[0]:
         return False

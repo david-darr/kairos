@@ -374,8 +374,12 @@ def summarize(result, fixtures, label):
     summary = {"label": label, "turns": len(turns), "failed": sum(1 for t in result["turns"] if t.get("failed") and t["fixture"] not in DIAGNOSTIC),
                "splits": sum(1 for t in turns if t.get("segments", 1) > 1),
                "long_pause_splits": sum(1 for t in diagnostic if t.get("segments", 1) > 1), "long_pause_n": len(diagnostic)}
+    # A turn that split (the endpoint fired mid-sentence) was answered from its first part: its times, anchored to the
+    # last endpoint, are not a latency. It is counted in `splits` (and Smart Turn's false cut-offs) instead.
+    whole = [t for t in turns if t.get("segments", 1) <= 1]
+    summary["timed"] = len(whole)
     for metric in metrics:
-        values = [t.get(metric) for t in turns]
+        values = [t.get(metric) for t in whole]
         summary[metric] = {"p50": percentile(values, 0.5), "p95": percentile(values, 0.95), "n": sum(v is not None for v in values)}
     fillers = [t for t in turns if t.get("filler_ms") is not None]
     summary["filler"] = {"turns": len(fillers), "p50": percentile([t["filler_ms"] for t in fillers], 0.5),
@@ -384,7 +388,7 @@ def summarize(result, fixtures, label):
     summary["stt_modes"] = {mode: sum(1 for t in turns if t.get("stt_mode") == mode) for mode in sorted({t.get("stt_mode") for t in turns if t.get("stt_mode")})}
     summary["by_fixture"] = {}
     for name in [n for n in texts if n not in DIAGNOSTIC]:
-        mine = [t for t in turns if t["fixture"] == name]
+        mine = [t for t in whole if t["fixture"] == name]
         summary["by_fixture"][name] = {"first_audio_p50": percentile([t.get("first_audio_ms") for t in mine], 0.5), "stt_p50": percentile([t.get("stt_ms") for t in mine], 0.5), "audio_ms": mine[0]["audio_ms"] if mine else None}
     barges = result["barges"]
     interrupt = [b for b in barges if b["fixture"] == "interrupt"]
@@ -434,7 +438,7 @@ def table(summaries, meta):
     lines.append(f"{'barge-in: voice starts to reply cancelled':<{width}}" + "".join(f"{fmt(s['barge']['commit_p50']):>{col}}" for s in summaries))
     lines.append("")
     for s in summaries:
-        lines.append(f"{s['label']}: {s['turns']} turns ({s['failed']} failed; split by the 0.6 s mid-sentence pause {s['splits']}; a 1.0 s pause split {s['long_pause_splits']}/{s['long_pause_n']}), "
+        lines.append(f"{s['label']}: {s['turns']} turns, {s['timed']} timed ({s['failed']} failed; split by the 0.6 s mid-sentence pause {s['splits']}; a 1.0 s pause split {s['long_pause_splits']}/{s['long_pause_n']}), "
                      f"word error {0 if s['wer'] is None else s['wer'] * 100:.0f}%, final pass {s['stt_modes']}, acknowledgement on {s['filler']['turns']} turns "
                      f"(first sound p50 {fmt(s['filler']['p50'])} ms, answer behind it p50 {fmt(s['filler']['after_filler_p50'])} ms), "
                      f"interrupts heard {s['barge']['interrupts_heard']}/{s['barge']['interrupt_n']}, nods ignored {s['barge']['nods_ignored']}/{s['barge']['nod_n']}")
