@@ -416,8 +416,15 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select
   justify-content: flex-start; padding: 0 10px; font-size: 13px;
 }
 .composer-menu-options .chat-openmic-btn > svg { width: 18px; height: 18px; }
-.composer-menu-options .chat-permission-control { padding: 0 8px 0 10px; gap: 8px; font-size: 13px; }
-.composer-menu-options .chat-permission-control select { min-width: 84px; height: 44px; font-size: 13px; }
+/* Mode in the + menu is a row like Open Mic beside it (2026-11-06, David: it "looks off"
+   as a tinted box): icon, label, and the choice at the right with its chevron. */
+.composer-menu-options .chat-permission-control { padding: 0 6px 0 10px; gap: 10px; border: 0; background: transparent; color: var(--text); font-size: 13px; }
+.composer-menu-options .chat-permission-control > svg { flex: none; width: 16px; height: 16px; color: var(--text-dim); }
+.composer-menu-options .chat-permission-control > span { flex: 1; min-width: 0; }
+.composer-menu-options .chat-permission-control[data-mode='auto'] > svg { color: var(--accent); }
+/* By id: the redesign's field fill (redesign.css) outranks a class selector. */
+.composer-menu-options #chat-permission-mode { min-width: 0; height: 44px; font-size: 13px; background-color: transparent; color: var(--text-dim); }
+.composer-menu-options .chat-permission-control:hover { background: var(--surface-2); }
 .composer-extra-tools > summary, .composer-input-help > summary {
   display: flex; align-items: center; justify-content: space-between;
   min-height: 44px; padding: 8px 10px; border-radius: 12px;

@@ -68,6 +68,10 @@
 .sc-import-count { margin: 8px 16px; font-size: 13px; }
 .sc-import [role=status] { padding-bottom: 12px; }
 .sc-import [role=status] > .btn { margin-left: 16px; }
+.sc-notice { margin: 6px 0 0; line-height: 1.5; overflow-wrap: anywhere; }
+.sc-batch { margin: 0 0 14px; }
+.sc .set-row-control > input[type=number] { width: 120px; }
+.sc [data-youtube] .set-row-control > select { width: 150px; }
 
 @media (max-width: 768px) {
   .sc .set-row { grid-template-columns: minmax(0, 1fr); }
@@ -78,6 +82,8 @@
   .sc-board { grid-template-columns: 1fr; }
   .sc-actions > .btn, .sc-alert > .btn, .sc-bar > .btn { flex: 1 1 auto; }
   .sc-dialog-panel input, .sc-dialog-panel select, .sc-dialog-panel textarea, .sc-dialog-panel .btn { min-height: 44px; }
+  .sc .set-row-control > select, .sc .set-row-control > input:not([type=file]) { min-height: 44px; }
+  .sc [data-youtube] .set-row-control > select { width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) { .sc * { transition: none; animation: none; } }
 

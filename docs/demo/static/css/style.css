@@ -2037,6 +2037,8 @@ button.dashboard-row:hover { background: var(--surface-2); }
   .nav-item { padding: 13px 14px; font-size: 14.5px; } /* bigger touch targets */
 
   html, body { height: var(--ms-page-height); }
+  /* No double-tap zoom on a phone (2026-11-06, David); pinch is off in mobileChrome.js. */
+  html { touch-action: manipulation; }
   #content { width: 100%; padding: 0 var(--mobile-safe-right) 0 var(--mobile-safe-left); }
   .view { padding: 72px 14px 14px; } /* clears the fixed hamburger button */
 

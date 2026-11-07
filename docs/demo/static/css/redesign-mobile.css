@@ -690,6 +690,6 @@
     font-size: 14px; line-height: 21px; color: inherit; text-align: left; aspect-ratio: auto;
   }
   .kairos-redesign .ms-composer .composer-menu-options .chat-openmic-btn > svg { width: 16px; height: 16px; flex: none; }
-  .kairos-redesign .ms-composer .composer-menu-options .chat-permission-control { padding: 0 6px 0 10px; font-size: 14px; }
-  .kairos-redesign .ms-composer .composer-menu-options .chat-permission-control select { background-color: transparent; }
+  .kairos-redesign .ms-composer .composer-menu-options .chat-permission-control { padding: 0 6px 0 10px; gap: 10px; border: 0; border-radius: 10px; background: transparent; color: inherit; font-size: 14px; }
+  .kairos-redesign .ms-composer .composer-menu-options #chat-permission-mode { background-color: transparent; font-size: 14px; }
 }
