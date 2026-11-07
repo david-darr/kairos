@@ -61,7 +61,7 @@ module.exports = async function checkChatForgePatch({ js, win, waitFor, capture,
   const entries = [
     ['documents', "document.querySelector('.chat-documents-toggle').click()"],
     ['session-files', "document.querySelector('.chat-files-toggle').click()"],
-    ['session-document', "document.querySelector('.artifact-card').click()"],
+    ['session-document', "document.querySelector('.artifact-card').dispatchEvent(new MouseEvent('click', {ctrlKey:true, bubbles:true, cancelable:true}))"],
   ];
   const hidePanes = () => js("Promise.all([import('/static/js/chatContent.js'), import('/static/js/chatFilesPane.js')]).then(([docs, files]) => { docs.hideArtifact(); files.closeChatFiles(); })");
   const assertSettled = async label => {
@@ -129,7 +129,7 @@ module.exports = async function checkChatForgePatch({ js, win, waitFor, capture,
   })()`);
   assert.ok(Math.abs(switchResult.before - switchResult.after) < 2, 'Selecting a session file keeps the open split steady');
   await assertSettled('Session file selection');
-  await js("document.querySelector('.artifact-card').click(); document.querySelector('.chat-documents-toggle').click(); document.querySelector('.artifact-tab-label').click()");
+  await js("document.querySelector('.artifact-card').dispatchEvent(new MouseEvent('click', {ctrlKey:true, bubbles:true, cancelable:true})); document.querySelector('.chat-documents-toggle').click(); document.querySelector('.artifact-tab-label').click()");
   await assertSettled('Switch already-open documents');
   await capture('patch-documents-open');
   // Rapid reopen cancels the old registration without replacing saved DOM.

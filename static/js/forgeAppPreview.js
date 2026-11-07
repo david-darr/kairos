@@ -130,7 +130,7 @@ export async function mountAppPreview(panel, id) {
   reload.onclick = () => native ? native.reload() : go(path.value, false);
   external.onclick = () => { if (native) native.openExternal(); else { const url = ownUrl(new URL(path.value, running?.url).href); if (url) window.open(url.href, '_blank', 'noopener,noreferrer'); } };
   function suppressed() {
-    return suspended || !!panel.closest('[inert]') || [...document.querySelectorAll('.modal-backdrop, .custom-select-menu, .artifact-panel, .settings-window, .chat-image-preview')]
+    return suspended || !!panel.closest('[inert]') || [...document.querySelectorAll('.modal-backdrop, .custom-select-menu, .artifact-panel, .settings-window, .media-viewer')]
       .some(node => node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden');
   }
   function syncBounds() {

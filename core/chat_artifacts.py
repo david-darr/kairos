@@ -14,6 +14,11 @@ from core.session_manager import session_manager
 LINK = re.compile(r"!?\[[^\]]*\]\(<?(/generated-(?:images|files)/[^\s)>]+)>?\)")
 TEXT_EXTENSIONS = {".txt", ".md", ".markdown", ".csv", ".json", ".py", ".js", ".ts", ".jsx", ".tsx", ".css", ".html", ".htm", ".xml", ".yaml", ".yml", ".sql", ".sh", ".ps1", ".java", ".c", ".cpp", ".rs", ".go", ".log", ".svg"}
 IMAGE_MIMES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp"}
+# Played inline by the chat's media viewer (2026-11-07). Only formats Chromium
+# plays natively; anything else stays a download.
+VIDEO_MIMES = {".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime"}
+AUDIO_MIMES = {".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac", ".wav": "audio/wav", ".ogg": "audio/ogg", ".oga": "audio/ogg", ".opus": "audio/ogg", ".flac": "audio/flac"}
+MEDIA_MIMES = {**IMAGE_MIMES, **VIDEO_MIMES, **AUDIO_MIMES}
 MAX_PREVIEW_BYTES = 2 * 1024 * 1024
 # Higher than the text ceiling because Office files carry their own
 # compression and embedded media, so a perfectly ordinary deck or workbook is
@@ -60,7 +65,7 @@ def resolve(session_id: str, url: str) -> tuple[Path, dict]:
     if ext in office_preview.PREVIEWABLE:
         kind = "office"
     else:
-        kind = "image" if ext in IMAGE_MIMES else "pdf" if ext == ".pdf" else "html" if ext in (".html", ".htm") else "markdown" if ext in (".md", ".markdown") else "text" if ext in TEXT_EXTENSIONS else "download"
+        kind = "image" if ext in IMAGE_MIMES else "video" if ext in VIDEO_MIMES else "audio" if ext in AUDIO_MIMES else "pdf" if ext == ".pdf" else "html" if ext in (".html", ".htm") else "markdown" if ext in (".md", ".markdown") else "text" if ext in TEXT_EXTENSIONS else "download"
     if kind in ("html", "markdown", "text") and size > MAX_PREVIEW_BYTES:
         kind = "download"
     if kind == "office" and size > MAX_OFFICE_BYTES:

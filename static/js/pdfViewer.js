@@ -23,6 +23,7 @@ export async function renderPDF(content, actions, contentURL, name, controller, 
     throw error;
   }
   if ((!artifacts && !content.isConnected) || controller.signal.aborted) return null;
+  content.dataset.pages = String(pdf.numPages); content.dataset.pageUnit = 'pages';
   let pageNumber = 1, mode = 'width', zoom = 1, generation = 0, rendering = false, pending = false;
   const root = el('div', { class: artifacts ? 'artifact-pdf-viewer' : 'artifact-pdf-viewer drive-pdf-viewer' });
   const rail = el('div', { class: 'artifact-thumbnail-rail', 'aria-label': 'Page thumbnails' });

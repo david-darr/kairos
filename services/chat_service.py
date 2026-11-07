@@ -398,7 +398,12 @@ def _user_message_extra(references: list[dict] | None, attachment_ids: list[str]
         saved = []
         for item in attachment_ids:
             info = attachments.staged_file_info(item)
-            saved.append({"id": item, "filename": info[1] if info else "Attachment"})
+            entry = {"id": item, "filename": info[1] if info else "Attachment"}
+            if info:
+                # The same link _apply_attachments records for this chat, so
+                # the bubble can open the file in the media viewer.
+                entry["url"] = chat_files.local_url(attachments.staging_dir(), Path(info[0]).name)
+            saved.append(entry)
         extra["attachments"] = saved
     return extra
 

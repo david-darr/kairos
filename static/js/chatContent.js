@@ -9,6 +9,8 @@ import { renderArtifact, loadingSkeleton } from './artifactViewer.js';
 import { mountArtifactReview } from './artifactReview.js';
 import { mountForeignReview } from './artifactForeignReview.js';
 import { reviewsChanged } from './artifactReview.js';
+import { inlineMedia, fileCard, arrangeMedia, addSourceCards } from './mediaInline.js';
+import { mediaKind, isInlineMedia, contentURL } from './mediaItems.js';
 
 const GENERATED = /^\/generated-(?:images|files)\/[^/?#]+$/;
 const ARTIFACT_URL = /^(?:\/generated-(?:images|files)\/[^/?#]+|\/chat-files\/[a-f0-9]{24}|\/designs\/[a-f0-9]{12})$/;
@@ -68,6 +70,9 @@ export function renderMessageBody(body, text, sessionId, rich = true, { live = f
   for (const input of fragment.querySelectorAll('input')) {
     input.type = 'checkbox'; input.disabled = true;
   }
+  // Pictures, video and audio a reply links show in the message (the media
+  // viewer, 2026-11-07). Their nodes survive re-paints while a reply streams.
+  const reuse = body._media ??= new Map(), used = new Set();
   for (const node of fragment.querySelectorAll('a, img')) {
     const url = node.getAttribute(node.tagName === 'IMG' ? 'src' : 'href') || '';
     const label = node.tagName === 'IMG' ? node.getAttribute('alt') : node.textContent;
@@ -75,15 +80,9 @@ export function renderMessageBody(body, text, sessionId, rich = true, { live = f
       let filename;
       try { filename = decodeURIComponent(url.split('/').pop()).replace(/^[a-f0-9]{12}_/, ''); }
       catch { filename = 'Generated file'; }
-      const ext = filename.split('.').pop().toUpperCase();
-      const card = el('button', { type: 'button', class: 'artifact-card', 'aria-label': `Preview ${filename}`, onclick: event => openArtifact(sessionId, url, filename, card, { background: event.ctrlKey || event.metaKey }) }, [
-        el('span', { class: 'artifact-icon', text: ext.slice(0, 5) }),
-        el('span', { class: 'artifact-info' }, [el('strong', { text: filename }), el('span', { text: label && label !== filename ? label : 'Generated file · Preview and download' })]),
-        el('span', { class: 'artifact-arrow', text: '↗', 'aria-hidden': 'true' }),
-      ]);
-      card.addEventListener('mousedown', event => { if (event.button === 1) event.preventDefault(); });
-      card.addEventListener('auxclick', event => { if (event.button === 1) { event.preventDefault(); openArtifact(sessionId, url, filename, card, { background: true }); } });
-      node.replaceWith(card);
+      const kind = mediaKind(filename);
+      const item = { kind, name: filename, url, sessionId, src: isInlineMedia(kind) ? contentURL(sessionId, url) : '' };
+      node.replaceWith(isInlineMedia(kind) ? inlineMedia(item, reuse, used) : fileCard(item, label, { openInPane: openArtifact }));
     } else if (node.tagName === 'A' && VIDEO_URL.test(url) && sessionId) {
       const videoId = url.match(VIDEO_URL)[1];
       const title = (label || 'Video').replace(/^Video:\s*/, '');
@@ -150,6 +149,11 @@ export function renderMessageBody(body, text, sessionId, rich = true, { live = f
     block.append(el('div', { class: 'chat-code-header' }, [
       el('span', { text: language }), el('button', { type: 'button', text: 'Copy code', onclick: () => copyText(raw) }),
     ]), pre);
+  }
+  if (used.size || reuse.size) {
+    for (const key of [...reuse.keys()]) if (!used.has(key)) reuse.delete(key);
+    arrangeMedia(fragment, body._mediaStacks ??= new Map());
+    addSourceCards(fragment);
   }
   formBlocks(body, fragment, live);
   body.replaceChildren(fragment);

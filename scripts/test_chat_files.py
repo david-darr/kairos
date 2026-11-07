@@ -111,6 +111,34 @@ class ChatFileTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([(file["name"], file["origin"]) for file in files], [("upload.txt", "attachment")])
         self.assertEqual(chat_artifacts.resolve("chat-one", files[0]["url"])[0].read_bytes(), b"original")
 
+    async def test_attachment_link_matches_recorded_chat_file(self):
+        """The media viewer (2026-11-07): the link saved on a message and returned by
+        the upload is the same /chat-files/ link the chat records, and only that chat
+        can open it."""
+        from services import chat_service
+        staging = Path(self.temp.name) / "staging"
+        with patch.object(attachments, "STAGING_DIR", str(staging)),              patch.object(chat_service, "session_manager", self.manager):
+            staged = attachments.stage_file("brief.pdf", b"%PDF-1.4")
+            upload_url = chat_files.local_url(attachments.staging_dir(), f"{staged['id']}_{staged['filename']}")
+            extra = chat_service._user_message_extra(None, [staged["id"]])
+            chat_service._apply_attachments("chat-one", "read this", [staged["id"]])
+            self.assertEqual(extra["attachments"], [{"id": staged["id"], "filename": "brief.pdf", "url": upload_url}])
+            path, meta = chat_artifacts.resolve("chat-one", upload_url)
+            self.assertEqual(path.read_bytes(), b"%PDF-1.4")
+            self.assertEqual(meta["kind"], "pdf")
+            with self.assertRaises(HTTPException):
+                chat_artifacts.resolve("chat-two", upload_url)
+
+    async def test_video_and_audio_kinds(self):
+        for name, kind in (("clip.mp4", "video"), ("clip.webm", "video"), ("voice.m4a", "audio"), ("tone.wav", "audio"),
+                           ("pic.png", "image"), ("icon.svg", "text"), ("tool.exe", "download")):
+            url = f"/generated-files/0123456789ab_{name}"
+            self.manager.sessions["chat-one"]["artifact_urls"].append(url)
+            (self.generated / f"0123456789ab_{name}").write_bytes(b"data")
+            self.assertEqual(chat_artifacts.resolve("chat-one", url)[1]["kind"], kind, name)
+        self.assertEqual(chat_artifacts.MEDIA_MIMES[".webm"], "video/webm")
+        self.assertEqual(chat_artifacts.MEDIA_MIMES[".mp3"], "audio/mpeg")
+
     async def test_tampered_path_cannot_escape_root(self):
         self.manager.sessions["chat-one"]["chat_files"].append({
             "id": "a" * 24, "root": str(self.vault), "path": "../outside.txt",

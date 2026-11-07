@@ -157,10 +157,6 @@
 [data-app-mode="bots"] .bots-file-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 220px; padding: 6px 10px; font-size: var(--bots-text-hint-lg); background: var(--bots-raised); border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-pill); }
 [data-app-mode="bots"] .bots-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 [data-app-mode="bots"] .bots-file-size { color: var(--bots-ink-tertiary); }
-[data-app-mode="bots"] .bots-preview { position: fixed; inset: 0; z-index: 70; display: flex; flex-direction: column; background: color-mix(in srgb, var(--bots-app) 82%, transparent); backdrop-filter: blur(6px); }
-[data-app-mode="bots"] .bots-preview-bar { display: flex; align-items: center; gap: 8px; padding: 12px 16px; }
-[data-app-mode="bots"] .bots-preview-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 16px 16px; }
-[data-app-mode="bots"] .bots-preview-stage img { flex: 1; min-width: 0; max-height: 100%; object-fit: contain; }
 
 /* -- Goal card, cite pill, support note ------------------------------------------------------- */
 

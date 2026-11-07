@@ -735,6 +735,34 @@ class ChatTests(unittest.TestCase):
             self.assertEqual(preview.headers['x-content-type-options'], 'nosniff')
             if kind == 'html': self.assertTrue(preview.headers['content-type'].startswith('text/plain'))
 
+    def test_video_and_audio_play_inline_with_ranges(self):
+        """The media viewer (2026-11-07): video and audio are served with their own
+        type and byte ranges (so they seek), still under the sandbox CSP and the
+        chat's own check; an SVG is still text, never served as an image."""
+        clip = bytes(range(256)) * 8
+        for name, mime in (("clip.webm", "video/webm"), ("clip.mp4", "video/mp4"), ("tone.wav", "audio/wav"), ("song.mp3", "audio/mpeg")):
+            url = self.publish(name, clip)
+            params = {"session_id": self.sid, "url": url}
+            self.assertEqual(client.get('/api/chat/artifacts', params=params).json()["kind"], mime.split("/")[0])
+            full = client.get('/api/chat/artifacts/content', params=params)
+            self.assertEqual(full.headers['content-type'], mime)
+            self.assertNotIn('attachment', full.headers.get('content-disposition', ''))
+            self.assertIn("sandbox", full.headers['content-security-policy'])
+            part = client.get('/api/chat/artifacts/content', params=params, headers={"Range": "bytes=10-19"})
+            self.assertEqual(part.status_code, 206)
+            self.assertEqual(part.content, clip[10:20])
+            other = session_manager.create_session()["id"]
+            self.assertEqual(client.get('/api/chat/artifacts/content', params={"session_id": other, "url": url}).status_code, 404)
+        svg = self.publish("icon.svg", b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>')
+        res = client.get('/api/chat/artifacts/content', params={"session_id": self.sid, "url": svg})
+        self.assertTrue(res.headers['content-type'].startswith('text/plain'))
+
+    def test_attachment_upload_returns_its_chat_file_link(self):
+        res = client.post('/api/chat/attachments', files={"file": ("notes.txt", b"hello", "text/plain")})
+        self.assertEqual(res.status_code, 200, res.text)
+        body = res.json()
+        self.assertRegex(body["url"], r"^/chat-files/[a-f0-9]{24}$")
+
     def test_existing_session_link_and_missing_file(self):
         path = self.root / 'legacy.txt'; path.write_text('legacy')
         url = image_gen.register_generated_file(str(path))["url"]

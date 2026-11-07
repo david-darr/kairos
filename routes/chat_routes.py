@@ -91,7 +91,10 @@ async def artifact_office(session_id: str, url: str, user: str = Depends(require
 async def artifact_content(session_id: str, url: str, download: bool = False, user: str = Depends(require_user)):
     _own_chat(session_id, user)
     path, metadata = chat_artifacts.resolve(session_id, url)
-    mime = chat_artifacts.IMAGE_MIMES.get(path.suffix.lower(), "application/pdf" if metadata["kind"] == "pdf" else "text/plain")
+    # Video and audio are served with their own type so the viewer can play
+    # and seek them (FileResponse answers byte ranges); the sandbox CSP the
+    # middleware sets on this path still applies to every kind.
+    mime = chat_artifacts.MEDIA_MIMES.get(path.suffix.lower(), "application/pdf" if metadata["kind"] == "pdf" else "text/plain")
     # An Office file served inline would be handed to whatever the browser
     # does with it; the preview reads it through /artifacts/office instead,
     # so the raw bytes are only ever a download.
@@ -302,7 +305,11 @@ async def upload_attachment(file: UploadFile, user: str = Depends(require_user))
     if len(content) > _MAX_ATTACHMENT_BYTES:
         from fastapi import HTTPException
         raise HTTPException(status_code=413, detail="file too large (25MB max)")
-    return attachments.stage_file(file.filename or "file", content)
+    staged = attachments.stage_file(file.filename or "file", content)
+    # The chat-file link this upload will have once it is sent with a message
+    # (chat_service records it then); the media viewer opens it from the bubble.
+    staged["url"] = chat_files.local_url(attachments.staging_dir(), f"{staged['id']}_{staged['filename']}")
+    return staged
 
 
 @router.get("/images/{session_id}/{attachment_id}")

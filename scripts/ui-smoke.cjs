@@ -647,6 +647,13 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['phone shell'], errors }, null, 2));
       return;
     }
+    if (process.argv.includes('--media-viewer-only')) {  // The in-chat media viewer alone (media-viewer-checks.cjs).
+      await require('./media-viewer-checks.cjs')({ js, win, waitFor, capture, delay, navigate, demoState });
+      assert.deepEqual(errors, [], 'No media viewer renderer errors');
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['media viewer'], errors }, null, 2));
+      console.log('Screenshots: ' + output);
+      return;
+    }
     if (process.argv.includes('--g2-only')) {  // Chat + menu, attachments, screen capture, dictation and Open Mic (g2-chat-checks.cjs).
       await require('./g2-chat-checks.cjs')({ js, win, waitFor, capture, delay, navigate, writes, demoState, base, reads });
       const voiceBugs = await require('./g2-voice-checks.cjs')({ js, win, waitFor, capture, delay, navigate, writes });  // known Open Mic defects, asserted below
@@ -662,6 +669,7 @@ app.whenReady().then(async () => {
           if (packet.error) liveChange(id, { status: 'failed', error: packet.error, permission: null });
           if (packet.done) liveFinish(id);
         } } });
+      await require('./media-viewer-checks.cjs')({ js, win, waitFor, capture, delay, navigate, demoState });
       assert.deepEqual(voiceBugs, [], 'Known Open Mic defects (see the g2 report)');
       assert.deepEqual(errors, [], 'No chat renderer errors');
       console.log('PASS: chat + actions, attachments, screen capture, artifact panes/viewer/review, dictation, Open Mic and spoken replies (g2).');
@@ -777,6 +785,7 @@ app.whenReady().then(async () => {
         if (packet.error) liveChange(id, { status: 'failed', error: packet.error, permission: null });
         if (packet.done) liveFinish(id);
       } } });
+    await require('./media-viewer-checks.cjs')({ js, win, waitFor, capture, delay, navigate, demoState });
     await require('./settings-patch-checks.cjs')({ js, win, waitFor, delay, capture });
     await js("(async () => { const overlay=document.getElementById('onboarding-overlay'); overlay.classList.remove('hidden'); await import('/static/js/onboarding.js').then(m => m.run(overlay, () => {})); })()");
     assert.equal(await js("document.querySelector('.onboarding-card h2').textContent"), 'Not more time. The right time.');

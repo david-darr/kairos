@@ -459,7 +459,7 @@
    bottom. The value is 0 everywhere else, so this is a no-op there. */
 @media (max-width: 768px) {
   :is(.modal-backdrop, .mobile-backdrop, .chat-sessions-backdrop, #chat-sessions, #sidebar, .chat-summary-backdrop,
-    .palette-backdrop, .onboarding-overlay, .screen-capture-dialog, .chat-image-preview, .agent-profile-backdrop,
+    .palette-backdrop, .onboarding-overlay, .screen-capture-dialog, .media-viewer, .agent-profile-backdrop,
     .agent-profile-sheet, .agent-item-sheet, .agents-rail-scrim, .hm-sheet-root, .rd-flyout-scrim, .ts-sheet-backdrop,
     .artifact-panel, .agent-conversations-home.is-open) { bottom: calc(-1 * var(--ms-below-fold, 0px)) !important; }
   .app-background { height: calc(100% + var(--ms-below-fold, 0px)); }

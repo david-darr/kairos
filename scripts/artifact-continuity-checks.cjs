@@ -19,7 +19,7 @@ module.exports = async function checkArtifactContinuity({ js, win, waitFor, capt
   const startWrites = writes.length;
   win.setContentSize(1920, 1080);
   await navigate('chat', { sessionId: 's1' }); await reset();
-  await click('.artifact-card'); await waitFor(`!!document.querySelector('${active} .artifact-document')`);
+  await js("(async () => { const card = document.querySelector('.artifact-card'); card.click(); for (let i = 0; i < 200 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); document.querySelector('.media-viewer-pane').click(); return true; })()"); await waitFor(`!!document.querySelector('${active} .artifact-document')`);
   await js(`window.retainedArtifact = document.querySelector('${active} .artifact-document'); document.querySelector('${active} .artifact-preview').scrollTop = 180`);
   await js("import('/static/js/views/chat.js').then(m => m.openSessionById('s2'))");
   assert.equal(await count(), 1);

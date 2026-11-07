@@ -771,37 +771,6 @@
   background: none;
   cursor: zoom-in;
 }
-.chat-image-preview {
-  position: fixed;
-  inset: 0;
-  z-index: 10000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 12px;
-  padding: 24px;
-  background: var(--scrim);
-}
-.chat-image-preview img {
-  max-width: 94vw;
-  max-height: calc(90vh - 60px);
-  object-fit: contain;
-}
-.msg-images {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 8px 0;
-}
-.msg-images img {
-  max-width: min(320px, 70vw);
-  max-height: 250px;
-  object-fit: contain;
-  border-radius: 9px;
-  cursor: zoom-in;
-}
-
 /* Device-local browser capture. The stream is stopped after one frame; this
    dialog only reviews the still image before adding it to the composer. */
 .screen-capture-dialog {

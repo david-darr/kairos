@@ -159,7 +159,7 @@ async function checkViewport(label, a, b, plain, other) {
     assert.notEqual(top, null, label + ': text line remains measurable');
     assert.ok(Math.abs(top-lineBefore)<=4, label + ': document ' + action + ' preserves text line');
   };
-  await js("document.querySelector('#chat-messages .artifact-card').click()");
+  await js("(async () => { const card = document.querySelector('#chat-messages .artifact-card'); card.click(); for (let i = 0; i < 200 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); document.querySelector('.media-viewer-pane').click(); return true; })()");
   await waitFor("!!document.querySelector('[aria-label=\"Close file preview\"]')");
   await delay(900);
   assert.ok(Math.abs(await offset()-before)<=4, label + ': document opening preserves anchor');
@@ -173,7 +173,7 @@ async function checkViewport(label, a, b, plain, other) {
   // Programmatic clicks let the reader stay at the bottom while opening a card above it.
   await js("{ const n=document.querySelector('#chat-messages'); n.scrollTop=n.scrollHeight; }");
   await delay(300);
-  await js("[...document.querySelectorAll('#chat-messages .artifact-card')].at(-1).click()");
+  await js("(async () => { const card = [...document.querySelectorAll('#chat-messages .artifact-card')].at(-1); card.click(); for (let i = 0; i < 200 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); document.querySelector('.media-viewer-pane').click(); return true; })()");
   await delay(900);
   assert.ok(await js("(() => { const n=document.querySelector('#chat-messages'); return n.scrollHeight-n.scrollTop-n.clientHeight<=2; })()"), label + ': bottom stays pinned');
   await js("document.querySelector('[aria-label=\"Close file preview\"]').click()");

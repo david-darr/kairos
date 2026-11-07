@@ -19,6 +19,11 @@ def _id(root: str, relative: str) -> str:
     return hashlib.sha256(f"{root}\0{relative}".encode()).hexdigest()[:24]
 
 
+def local_url(root: str, relative: str) -> str:
+    """The /chat-files/ link a file under root gets once recorded for a chat."""
+    return f"/chat-files/{_id(str(Path(root).resolve()), Path(relative).as_posix())}"
+
+
 def _local_record(root: str, relative: str, origin: str, created_at: float | None = None,
                   display_name: str | None = None, internal_paths: list[str] | None = None) -> dict:
     base = Path(root).resolve()

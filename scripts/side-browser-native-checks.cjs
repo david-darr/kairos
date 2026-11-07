@@ -192,15 +192,15 @@ const RESET = `(globalThis.__a05.calls.length = 0, true)`;
       input.dispatchEvent(new Event('change')); return true; })()`);
     await until(() => page.evaluate("!!document.querySelector('.attach-chip-preview-button')"), 15000, 'the staged image chip');
     await cycle('image-preview',
-      async () => { await click('.attach-chip-preview-button'); await until(() => page.evaluate("!!document.querySelector('.chat-image-preview')"), 5000, 'image preview'); },
-      async () => { await key('keyDown', 'Escape'); await key('keyUp', 'Escape'); await until(() => page.evaluate("!document.querySelector('.chat-image-preview')"), 5000, 'preview closed'); });
+      async () => { await click('.attach-chip-preview-button'); await until(() => page.evaluate("!!document.querySelector('.media-viewer')"), 5000, 'image preview'); },
+      async () => { await key('keyDown', 'Escape'); await key('keyUp', 'Escape'); await until(() => page.evaluate("!document.querySelector('.media-viewer')"), 5000, 'preview closed'); });
 
     // 4. Nested: Settings over an image preview. Depth counting: closing one must not reveal the page under the other.
     await click('.attach-chip-preview-button');
     await settled(false, 'nested: hidden by the preview');
     await click('.sidebar-settings-btn');
     await until(() => page.evaluate("!!document.querySelector('.settings-window') && !document.querySelector('.settings-window').closest('.hidden')"), 10000, 'Settings over preview');
-    await page.evaluate("(() => { const b = [...document.querySelector('.chat-image-preview').querySelectorAll('button')].find(x => x.textContent === 'Close'); b.click(); return true; })()");
+    await page.evaluate("(() => { const b = document.querySelector('.media-viewer .media-viewer-close'); b.click(); return true; })()");
     await sleep(400);
     assert.equal(await visibleNow(), false, 'nested: closing the preview while Settings is open keeps the native view hidden');
     await page.evaluate("(() => { const w = document.querySelector('.settings-window'); [...w.querySelectorAll('button')].find(x => /close/i.test(x.getAttribute('aria-label') || x.title || x.textContent)).click(); return true; })()");

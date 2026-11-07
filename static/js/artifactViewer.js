@@ -70,6 +70,7 @@ export function renderSheets(content, actions, data) {
   };
   sheets.forEach((sheet, index) => tabs.append(el('button', { type: 'button', class: 'office-tab', role: 'tab', text: sheet.name, onclick: () => show(index) })));
   root.append(tabs, body);
+  content.dataset.pages = String(sheets.length); content.dataset.pageUnit = 'sheets';
   if (data.truncated_sheets) root.append(note('Only the first sheets are shown.'));
   if (sheets.length) show(0); else body.append(note('This workbook has no readable sheets.'));
   content.replaceChildren(root);
@@ -189,12 +190,14 @@ export function renderDeck(content, actions, data, controller) {
   const pane = content.closest('.artifact-tab-panel') || root;
   pane.addEventListener('keydown', key, { signal: controller.signal });
   actions.append(prev, label, next);
+  content.dataset.pages = String(slides.length); content.dataset.pageUnit = 'slides';
   content.replaceChildren(root, note('Approximate layout. Download for the exact slides.'));
   if (!slides.length) body.append(note('This presentation has no readable slides.')); else show(0);
   if (data.truncated) content.append(note('Only the first slides are shown.'));
   return exposeRoot(content, root);
 }
-export function renderImage(content, actions, meta, contentURL, controller, onError) {
+// wheelZoom: the media viewer zooms on a plain wheel; the pane keeps Ctrl+wheel.
+export function renderImage(content, actions, meta, contentURL, controller, onError, { wheelZoom = false } = {}) {
   const root = el('div', { class: 'artifact-image-viewport', tabindex: '0', 'data-pick': 'image' });
   const img = el('img', { src: contentURL, alt: meta.filename, draggable: 'false', hidden: true });
   const skeleton = el('div');
@@ -212,14 +215,46 @@ export function renderImage(content, actions, meta, contentURL, controller, onEr
     fitBtn.setAttribute('aria-pressed', String(fit)); actualBtn.setAttribute('aria-pressed', String(!fit && zoom === 1));
   };
   const change = factor => { fit = false; zoom = Math.min(8, Math.max(.05, zoom * factor)); paint(); };
+  // Zoom about a point (the cursor, a double-tap or a pinch's middle) so it stays put.
+  const zoomAt = (next, x, y) => {
+    const box = root.getBoundingClientRect();
+    const px = x - box.left, py = y - box.top;
+    const fx = (root.scrollLeft + px) / Math.max(1, root.scrollWidth), fy = (root.scrollTop + py) / Math.max(1, root.scrollHeight);
+    fit = false; zoom = Math.min(8, Math.max(.05, next)); paint();
+    root.scrollLeft = fx * root.scrollWidth - px; root.scrollTop = fy * root.scrollHeight - py;
+  };
+  const fitScale = () => Math.min(1, Math.max(1, root.clientWidth - 24) / (img.naturalWidth || 1), Math.max(1, root.clientHeight - 24) / (img.naturalHeight || 1));
   const fitBtn = button('Fit', () => { fit = true; paint(); root.scrollTo(0, 0); });
   const actualBtn = button('100%', () => { fit = false; zoom = 1; paint(); });
   actions.append(fitBtn, actualBtn, button('−', () => change(1 / 1.25), 'Zoom out'), button('+', () => change(1.25), 'Zoom in'), label);
-  root.addEventListener('wheel', event => { if (event.ctrlKey) { event.preventDefault(); change(event.deltaY < 0 ? 1.15 : 1 / 1.15); } }, { passive: false, signal: controller.signal });
-  root.addEventListener('pointerdown', event => { if (root.classList.contains('is-zoomed') && event.button === 0 && !content.closest('[data-selecting="true"]')) { drag = { x: event.clientX, y: event.clientY, left: root.scrollLeft, top: root.scrollTop }; root.setPointerCapture(event.pointerId); event.preventDefault(); } }, { signal: controller.signal });
-  root.addEventListener('pointermove', event => { if (drag) { root.scrollLeft = drag.left - event.clientX + drag.x; root.scrollTop = drag.top - event.clientY + drag.y; } }, { signal: controller.signal });
-  root.addEventListener('pointerup', () => { drag = null; }, { signal: controller.signal });
-  root.addEventListener('pointercancel', () => { drag = null; }, { signal: controller.signal });
+  root.addEventListener('wheel', event => {
+    if (!event.ctrlKey && !wheelZoom) return;
+    event.preventDefault(); zoomAt(zoom * (event.deltaY < 0 ? 1.15 : 1 / 1.15), event.clientX, event.clientY);
+  }, { passive: false, signal: controller.signal });
+  // Double-click or double-tap: fill in, or back to Fit.
+  root.addEventListener('dblclick', event => {
+    if (content.closest('[data-selecting="true"]') || !img.naturalWidth) return;
+    event.preventDefault();
+    if (root.classList.contains('is-zoomed')) { fit = true; paint(); root.scrollTo(0, 0); }
+    else zoomAt(Math.max(1, fitScale() * 2.5), event.clientX, event.clientY);
+  }, { signal: controller.signal });
+  // Pinch with two fingers; drag to pan once zoomed.
+  const touches = new Map();
+  let pinch = null;
+  const spread = () => { const [a, b] = [...touches.values()]; return { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; };
+  root.addEventListener('pointerdown', event => {
+    if (event.pointerType !== 'mouse') touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (touches.size === 2) { drag = null; pinch = { ...spread(), zoom }; event.preventDefault(); return; }
+    if (root.classList.contains('is-zoomed') && event.button === 0 && !content.closest('[data-selecting="true"]')) { drag = { x: event.clientX, y: event.clientY, left: root.scrollLeft, top: root.scrollTop }; root.setPointerCapture(event.pointerId); event.preventDefault(); }
+  }, { signal: controller.signal });
+  root.addEventListener('pointermove', event => {
+    if (touches.has(event.pointerId)) touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pinch && touches.size === 2) { const now = spread(); zoomAt(pinch.zoom * now.d / pinch.d, now.x, now.y); return; }
+    if (drag) { root.scrollLeft = drag.left - event.clientX + drag.x; root.scrollTop = drag.top - event.clientY + drag.y; }
+  }, { signal: controller.signal });
+  const release = event => { touches.delete(event.pointerId); if (touches.size < 2) pinch = null; drag = null; };
+  root.addEventListener('pointerup', release, { signal: controller.signal });
+  root.addEventListener('pointercancel', release, { signal: controller.signal });
   // Paint on the next frame, not inside the observer: painting can change the
   // size being observed, which Chromium reports as a ResizeObserver loop (and
   // ui-smoke counts as a renderer error). artifactReview.js does the same.
@@ -237,6 +272,32 @@ export function renderImage(content, actions, meta, contentURL, controller, onEr
     catch (error) { if (error.name !== 'AbortError' && !controller.signal.aborted) onError?.(error); }
   };
   root.append(skeleton, img); content.replaceChildren(root);
+  return exposeRoot(content, root);
+}
+// Video and audio (2026-11-07, the media viewer): the browser's own player,
+// served by the same chat- and owner-checked content route.
+export function renderMedia(content, meta, contentURL, controller) {
+  const kind = meta.kind === 'audio' ? 'audio' : 'video';
+  const media = el(kind, { src: contentURL, controls: true, preload: 'metadata', playsinline: true, 'aria-label': meta.filename });
+  const root = el('div', { class: `artifact-media-viewport is-${kind}` }, kind === 'audio'
+    ? [el('div', { class: 'artifact-audio-title', text: meta.filename }), media] : [media]);
+  media.addEventListener('error', () => {
+    if (controller.signal.aborted) return;
+    root.replaceChildren(note(`This ${kind} could not be played here. Download the original.`));
+  });
+  controller.signal.addEventListener('abort', () => { media.pause(); media.removeAttribute('src'); media.load(); }, { once: true });
+  content.replaceChildren(root);
+  return exposeRoot(content, root);
+}
+// An SVG shows as a picture only through <img>, where its scripts never run.
+function renderSVG(content, text, name, controller) {
+  content._disposeRenderer?.();
+  const url = URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' }));
+  const root = el('div', { class: 'artifact-svg-viewport' }, [el('img', { class: 'artifact-svg-image', src: url, alt: name, draggable: 'false' })]);
+  const dispose = () => { URL.revokeObjectURL(url); controller.signal.removeEventListener('abort', dispose); content._disposeRenderer = null; };
+  content._disposeRenderer = dispose;
+  controller.signal.addEventListener('abort', dispose, { once: true });
+  content.replaceChildren(root);
   return exposeRoot(content, root);
 }
 export function renderSource(content, text, language = 'text') {
@@ -346,8 +407,9 @@ async function renderTextFile(content, actions, meta, contentURL, controller) {
   const text = await res.text();
   if (controller.signal.aborted) return;
   const source = () => renderSource(content, text, meta.extension);
-  const preview = () => meta.kind === 'html' ? renderHTML(content, actions, text, meta.filename, controller) : meta.kind === 'markdown' ? renderMarkdown(content, text) : source();
-  if (meta.kind !== 'text') {
+  const svg = meta.extension === 'svg';
+  const preview = () => meta.kind === 'html' ? renderHTML(content, actions, text, meta.filename, controller) : meta.kind === 'markdown' ? renderMarkdown(content, text) : svg ? renderSVG(content, text, meta.filename, controller) : source();
+  if (meta.kind !== 'text' || svg) {
     const previewBtn = button('Preview', () => { preview(); previewBtn.setAttribute('aria-pressed', 'true'); sourceBtn.setAttribute('aria-pressed', 'false'); });
     const sourceBtn = button('Source', () => { source(); previewBtn.setAttribute('aria-pressed', 'false'); sourceBtn.setAttribute('aria-pressed', 'true'); });
     previewBtn.setAttribute('aria-pressed', 'true'); sourceBtn.setAttribute('aria-pressed', 'false'); actions.append(previewBtn, sourceBtn);
@@ -403,7 +465,8 @@ async function renderOffice(content, actions, query, contentURL, controller) {
   return exposeRoot(content, root);
 }
 
-export async function renderArtifact({ sessionId, url, controller, content, actions, detail, onError }) {
+// download: false when the host shows its own Save (the media viewer).
+export async function renderArtifact({ sessionId, url, controller, content, actions, detail, onError }, { download = true, wheelZoom = false } = {}) {
   const query = new URLSearchParams({ session_id: sessionId, url }), contentURL = `/api/chat/artifacts/content?${query}`;
   loadingSkeleton(content);
   try {
@@ -411,8 +474,9 @@ export async function renderArtifact({ sessionId, url, controller, content, acti
     if (controller.signal.aborted) return;
     detail.textContent = `${meta.extension.toUpperCase() || 'FILE'} · ${fileSize(meta.size)}`;
     content.artifact = { sessionId, url, ...meta };
-    actions.append(el('a', { class: 'btn', text: 'Download', href: `${contentURL}&download=true`, download: meta.filename }));
-    if (meta.kind === 'image') renderImage(content, actions, meta, contentURL, controller, onError);
+    if (download) actions.append(el('a', { class: 'btn', text: 'Download', href: `${contentURL}&download=true`, download: meta.filename }));
+    if (meta.kind === 'image') renderImage(content, actions, meta, contentURL, controller, onError, { wheelZoom });
+    else if (meta.kind === 'video' || meta.kind === 'audio') renderMedia(content, meta, contentURL, controller);
     else if (meta.kind === 'pdf') { const root = await renderPDF(content, actions, contentURL, meta.filename, controller, { artifacts: true }); if (root && !controller.signal.aborted) exposeRoot(content, root); }
     else if (meta.kind === 'office') await renderOffice(content, actions, query, contentURL, controller);
     else if (['text', 'markdown', 'html'].includes(meta.kind)) await renderTextFile(content, actions, meta, contentURL, controller);

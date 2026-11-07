@@ -13,7 +13,7 @@ import { isComposingKey, shouldSendOnEnter } from '../composerKeyboard.js';
 import { registerMobileDrawer } from '../mobileDrawers.js';
 import * as chatStream from "../chatStream.js";
 import { renderMessageBody, copyText, hideArtifact, mountArtifactPane, setArtifactContext, showArtifactPane, openDesignTab } from "../chatContent.js";
-import { openBrowser, closeBrowser, suppressBrowser, releaseBrowser } from "../browserPane.js";
+import { openBrowser, closeBrowser } from "../browserPane.js";
 import { openChatFiles, closeChatFiles, refreshChatFiles } from "../chatFilesPane.js";
 import { openChatComputer, closeChatComputer, updateChatComputer } from "../chatComputerPane.js";
 import { mountComputerHistory, computerDetail } from '../runTimeline.js';
@@ -39,6 +39,9 @@ import { mountMobileModelSheet, appendEndpointCatalogs } from '../mobileModelShe
 import { mountMobileChat, clearMobileDraft, isPhoneShell } from '../mobileShell.js';
 import { createMascot } from '../mascot.js';
 import { openChatHistory, closeChatHistory } from '../chatHistoryPopout.js';
+import { attachmentMedia } from '../mediaInline.js';
+import { mediaKind, isInlineMedia, contentURL } from '../mediaItems.js';
+import { openMediaViewer, closeMediaViewer } from '../mediaViewer.js';
 
 // Composer rebuilt to match Odysseus's actual chat-input-bar structure
 // (David's ask 2026-08-31, cross-checked against the real repo at
@@ -116,14 +119,9 @@ function messageCard(role, text, ts, status = 'complete', imageSources = [], fai
     card.prepend(el('div', { class: 'chat-author' }, [mark, phoneKip, el('span', { text: 'Kairos' }), el('span', { class: 'rd-chat-author-time', text: ` · ${time}` })]));
   }
   if (role === 'user' && failure?.references?.length) card.insertBefore(renderReferenceChips(failure.references), actions);
-  if (role === "user" && imageSources.length) {
-    const images = el("div", { class: "msg-images" });
-    for (const source of imageSources) {
-      const img = el("img", { src: source, alt: "Attached image", loading: "lazy" });
-      img.addEventListener("click", () => showImagePreview(source, "Attached image"));
-      images.append(img);
-    }
-    card.insertBefore(images, actions);
+  if (role === "user") {
+    const media = attachmentMedia(attachmentItems(activeSessionId, imageSources, failure));
+    if (media) card.insertBefore(media, actions);
   }
   if (status === 'interrupted') card.append(el('div', { class: 'msg-interrupted', text: 'Response interrupted · Partial reply saved' }));
   if (status === 'failed') {
@@ -139,6 +137,26 @@ function messageCard(role, text, ts, status = 'complete', imageSources = [], fai
   }
   card.dataset.ts = String(ts || Date.now() / 1000);
   return card;
+}
+
+// Your attachments in the bubble (the media viewer, 2026-11-07): pictures in
+// the order sent, then other files. A saved attachment carries its chat-file
+// link, so the viewer can show its details and offer it to the Documents pane;
+// older messages have only their pictures.
+function attachmentItems(sessionId, imageSources, message) {
+  const saved = Array.isArray(message?.attachments) ? message.attachments : [];
+  const imageIds = Array.isArray(message?.image_attachment_ids) ? message.image_attachment_ids : [];
+  const linked = att => typeof att?.url === 'string' && /^\/chat-files\/[a-f0-9]{24}$/.test(att.url) && sessionId;
+  const items = imageSources.map((src, index) => {
+    const att = saved.find(entry => entry.id === imageIds[index]);
+    return { kind: 'image', name: att?.filename || 'Attached image', src, url: linked(att) ? att.url : '', sessionId: linked(att) ? sessionId : '' };
+  });
+  for (const att of saved) {
+    if (imageIds.includes(att.id) || !linked(att)) continue;
+    const kind = mediaKind(att.filename);
+    items.push({ kind, name: att.filename || 'Attachment', url: att.url, sessionId, src: isInlineMedia(kind) ? contentURL(sessionId, att.url) : '' });
+  }
+  return items;
 }
 
 // Edit and regenerate (David's ask 2026-09-25, after Hermes). Both cut the
@@ -410,7 +428,6 @@ function syncPermissionPill(mode) {
 }
 let activeProjectFilter = null; // David's ask 2026-09-12 — null = "All Chats"
 let stagedAttachments = []; // [{id, filename}]
-let activeImagePreview = null;
 let activeWebCapture = null;
 let activeCommandActions = null;
 let chatReferences = null;
@@ -1202,7 +1219,7 @@ export async function render(container, tabId, options = {}) {
   sessionsList.addEventListener("click", () => closeSessionsDrawer(true));
 
   function startNewChat() {
-    activeImagePreview?.();
+    closeMediaViewer();
     activeWebCapture?.();
     closeChatFiles();
     closeChatComputer();
@@ -1382,7 +1399,7 @@ export async function render(container, tabId, options = {}) {
     closeSessionMenu();
     closeDocumentsMenu?.();
     hideArtifact({ navigation: true });
-    activeImagePreview?.();
+    closeMediaViewer();
     activeWebCapture?.();
     closeChatFiles();
     closeChatComputer();
@@ -1563,28 +1580,6 @@ function imageDataUrl(file) {
   });
 }
 
-function showImagePreview(source, label) {
-  activeImagePreview?.();
-  suppressBrowser();
-  const backdrop = el("div", { class: "chat-image-preview", role: "dialog", "aria-label": `Preview ${label}` });
-  const full = el("img", { src: source, alt: label });
-  const close = el("button", { type: "button", class: "btn", text: "Close" });
-  const onKey = event => { if (event.key === "Escape") dismiss(); };
-  const dismiss = () => {
-    document.removeEventListener("keydown", onKey);
-    backdrop.remove();
-    releaseBrowser();
-    if (activeImagePreview === dismiss) activeImagePreview = null;
-  };
-  activeImagePreview = dismiss;
-  close.onclick = dismiss;
-  backdrop.onclick = event => { if (event.target === backdrop) dismiss(); };
-  backdrop.append(full, close);
-  document.body.append(backdrop);
-  document.addEventListener("keydown", onKey);
-  close.focus();
-}
-
 function renderAttachStrip(attachStrip) {
   attachStrip.innerHTML = "";
   for (const a of stagedAttachments) {
@@ -1593,7 +1588,7 @@ function renderAttachStrip(attachStrip) {
       const preview = el("button", { type: "button", class: "attach-chip-preview-button",
         title: "Preview image", "aria-label": `Preview ${a.filename}` });
       preview.append(el("img", { src: a.preview, alt: "", class: "attach-chip-preview" }));
-      preview.addEventListener("click", () => showImagePreview(a.preview, a.filename));
+      preview.addEventListener("click", () => openMediaViewer([{ kind: "image", name: a.filename, src: a.preview }], 0, { opener: preview }));
       chip.prepend(preview);
     }
     const removeBtn = el("button", { type: "button", title: "Remove" });
@@ -2920,7 +2915,7 @@ async function createSession({ preserveAttachments = false } = {}) {
 
 async function openSession(sessionId, sessionsList, messages) {
   activeTimeline?.reset();
-  activeImagePreview?.();
+  closeMediaViewer();
   activeWebCapture?.();
   closeChatFiles();
   closeChatComputer();
@@ -3114,6 +3109,8 @@ async function sendMessage(messages, input, sendBtn, attachStrip) {
     }
   }
   let imageSources;
+  const sentAttachments = stagedAttachments.map(({ id, filename, url }) => ({ id, filename, url }));
+  const sentImageIds = stagedAttachments.filter(item => item.file).map(item => item.id);
   try {
     imageSources = await Promise.all(stagedAttachments.filter(item => item.file).map(item => imageDataUrl(item.file)));
   } catch (error) {
@@ -3127,7 +3124,7 @@ async function sendMessage(messages, input, sendBtn, attachStrip) {
   chatReferences?.clear();
   input.style.height = "auto";
   messages.appendChild(entering(messageCard("user", text || (imageSources.length ? "" : "(attachment)"),
-    undefined, "complete", imageSources, { references })));
+    undefined, "complete", imageSources, { references, attachments: sentAttachments, image_attachment_ids: sentImageIds })));
   const replyCard = entering(messageCard("assistant", ""));
   replyCard.dataset.liveTurn = 'true';
   const replyBody = replyCard.querySelector(".msg-body");

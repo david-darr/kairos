@@ -106,9 +106,9 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, de
   // Image chip previews; text chip has no preview button.
   assert.equal(await js("document.querySelectorAll('.attach-chip-preview-button').length"), 1);
   await js("document.querySelector('.attach-chip-preview-button').click()");
-  assert.equal(await js("document.querySelector('.chat-image-preview img')?.alt"), 'dot.png', 'preview shows the clicked image');
+  assert.equal(await js("document.querySelector('.media-viewer .artifact-image-viewport img')?.alt"), 'dot.png', 'preview shows the clicked image');
   await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
-  assert.equal(await js("!!document.querySelector('.chat-image-preview')"), false, 'Escape closes the image preview');
+  assert.equal(await js("!!document.querySelector('.media-viewer')"), false, 'Escape closes the image preview');
   // Removal: the removed file is not sent.
   await js("[...document.querySelectorAll('.attach-chip')].find(c => c.textContent.includes('plan.txt')).querySelector('button[title=Remove]').click()");
   assert.deepEqual(await js("[...document.querySelectorAll('.attach-chip span')].map(n => n.textContent)"), ['dot.png'], 'removal leaves the other file staged');

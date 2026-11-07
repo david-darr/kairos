@@ -62,13 +62,15 @@ UI_FLAGS = {"design": "--design-only", "google": "--google-only", "g3": "--g3-on
             "g10": "--g10-only", "g1": "--g1-only", "g4": "--g4-only", "g4-calendar": "--g4-calendar-only", "g5": "--g5-only",
             "g6": "--g6-only", "a13-detail": "--a13-detail-only", "g7": "--g7-only", "a14-settings": "--a14-settings-only",
             "mobile": "--mobile-only", "mobile-shell": "--mobile-shell-only", "g2": "--g2-only",
-            "chat-references": "--chat-references-only", "desktop-layout": "--desktop-layout-only", "home": "--home-only"}
+            "chat-references": "--chat-references-only", "desktop-layout": "--desktop-layout-only", "home": "--home-only",
+            "media-viewer": "--media-viewer-only"}
 # Plain-language words for the units named after Part 2 groups, so file names can match them.
 UNIT_WORDS = {"g1": "kip appearance home mascot", "g2": "chat composer attachments voice dictation artifact panes",
               "g3": "agents phone appearance village", "g4": "notes email", "g4-calendar": "calendar", "g5": "library documents vault",
               "g6": "tasks toolstore tool store cookbook", "g7": "settings", "g8": "admin settings users", "g10": "forge",
               "a13-detail": "toolstore tool store", "a14-settings": "settings", "interface": "interface composer drawers",
-              "interface-details": "interface", "mobile-chrome": "mobile", "desktop-layout": "notes vault tasks"}
+              "interface-details": "interface", "mobile-chrome": "mobile", "desktop-layout": "notes vault tasks",
+              "media-viewer": "chat media viewer images video audio attachments artifact"}
 SYNONYMS = {"agents": "bots", "agent": "bots", "bot": "bots", "frontdesk": "fdbot fdwork frontdesk kip", "kip": "frontdesk mascot",
             "redesign": "", "views": ""}
 

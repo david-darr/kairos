@@ -121,45 +121,14 @@ export function attachmentGallery(attachments, { sessionId, beneath = false, loa
   return root;
 }
 
-// Preview dialog: n of N, arrows, Escape, a focus trap, Download and Open original.
+// Preview: the app's one media viewer (mediaViewer.js, 2026-11-07), with this
+// message's pictures: n of N, arrows and swipe, zoom, Save, a focus trap.
 export function openPreview(images, start, sessionId) {
   if (!images.length || start < 0) return null;
   const opener = document.activeElement;
-  let index = start;
-  const dialog = h('div', { class: 'bots-preview', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Attachment preview' });
-  const img = h('img', { alt: '' });
-  const count = h('span', { class: 'bots-preview-count', 'aria-live': 'polite' });
-  const download = h('a', { class: 'bots-btn', text: 'Download', rel: 'noopener' });
-  const original = h('a', { class: 'bots-btn', text: 'Open original', target: '_blank', rel: 'noopener noreferrer' });
-  const prev = h('button', { type: 'button', class: 'bots-btn', 'aria-label': 'Previous image', onclick: () => go(-1) }, [icon('chevron-left', { size: 18 })]);
-  const next = h('button', { type: 'button', class: 'bots-btn', 'aria-label': 'Next image', onclick: () => go(1) }, [icon('chevron-right', { size: 18 })]);
-  const close = h('button', { type: 'button', class: 'bots-btn', 'aria-label': 'Close preview', onclick: () => dismiss() }, [icon('x', { size: 18 })]);
-  function show() {
-    const att = images[index], url = fileUrl(sessionId, att);
-    img.src = url; img.alt = att.name || 'Attachment';
-    download.href = url; download.setAttribute('download', att.name || 'attachment'); original.href = url;
-    count.textContent = `${index + 1} of ${images.length}`;
-    prev.disabled = index === 0; next.disabled = index === images.length - 1;
-  }
-  function go(delta) { const to = index + delta; if (to >= 0 && to < images.length) { index = to; show(); } }
-  function dismiss() { document.removeEventListener('keydown', onKey, true); dialog.remove(); opener?.focus?.(); }
-  function onKey(event) {
-    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); dismiss(); }
-    else if (event.key === 'ArrowLeft') go(-1);
-    else if (event.key === 'ArrowRight') go(1);
-    else if (event.key === 'Tab') {
-      const stops = [...dialog.querySelectorAll('button:not([disabled]), a[href]')];
-      if (!stops.length) return;
-      const at = stops.indexOf(document.activeElement);
-      if (event.shiftKey && at <= 0) { event.preventDefault(); stops.at(-1).focus(); }
-      else if (!event.shiftKey && at === stops.length - 1) { event.preventDefault(); stops[0].focus(); }
-    }
-  }
-  dialog.addEventListener('click', event => { if (event.target === dialog) dismiss(); });
-  dialog.append(h('div', { class: 'bots-preview-bar' }, [count, h('span', { class: 'bots-head-fill' }), download, original, close]),
-    h('div', { class: 'bots-preview-stage' }, [prev, img, next]));
-  show(); document.body.append(dialog); document.addEventListener('keydown', onKey, true); close.focus();
-  return { close: dismiss };
+  const items = images.map(att => ({ kind: 'image', name: att.name || 'Attachment', src: fileUrl(sessionId, att), url: '', sessionId: '' }));
+  const viewer = import('./mediaViewer.js').then(m => m.openMediaViewer(items, start, { opener }));
+  return { close: () => viewer.then(v => v?.close()) };
 }
 
 // The composer's strip of staged files: remove buttons, upload state and errors.
