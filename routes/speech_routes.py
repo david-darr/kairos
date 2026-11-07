@@ -78,11 +78,31 @@ async def unregister_runtime(user: str = Depends(require_admin)) -> dict:
     return await asyncio.to_thread(remove)
 
 
+_warming = set()
+
+
+def _warm_optional() -> None:
+    """A call or Open Mic is starting: get Smart Turn, and Kokoro when it is the call voice, loaded and run once now,
+    so the first turn does not pay their cold start. Best effort; each module reports its own failures."""
+    from core import call_voices, kokoro_voice, turn_detect
+    turn_detect.warm()
+    try:
+        uses_kokoro = call_voices.configuration().get('protocol') == 'kokoro'
+    except Exception:
+        uses_kokoro = False
+    if uses_kokoro:
+        kokoro_voice.warm()
+
+
 @router.post('/prepare')
 async def prepare_speech(body: PrepareSpeech, user: str = Depends(require_user)) -> dict:
     def load():
         with _transcription_lock:
             return speech.prepare_call(body.model, body.backend) if body.backend else speech.prepare(body.model)
+    if body.backend:
+        # In the background, beside the speech model's own load: the call does not wait for it.
+        task = asyncio.ensure_future(asyncio.to_thread(_warm_optional))
+        _warming.add(task); task.add_done_callback(_warming.discard)
     try:
         started = time.perf_counter()
         model = await asyncio.to_thread(load)

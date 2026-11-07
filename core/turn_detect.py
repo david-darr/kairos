@@ -137,6 +137,21 @@ def probability(samples) -> float:
     return float(np.asarray(outputs[0]).reshape(-1)[0])
 
 
+def warm() -> bool:
+    """Load the model and run it once on silence, so a call's first pause does not pay the load and onnxruntime's
+    first-run setup (measured over a second cold on David's machine, past the client's 700 ms ask timeout). A call start
+    does this in the background. Never raises; False when Smart Turn is not set up or could not run."""
+    if not ready()[0]:
+        return False
+    try:
+        import numpy as np
+        probability(np.zeros(RATE, dtype=np.float32))
+        return True
+    except Exception:
+        logger.exception("turn: warm-up failed")
+        return False
+
+
 def predict(audio: bytes) -> dict:
     """16 kHz mono 16-bit WAV of the utterance so far -> {'complete': bool, 'probability': float}.
     Raises TurnUnavailable when the model or runtime is missing, and speech.SpeechUnavailable for bad audio."""

@@ -76,6 +76,20 @@ def voices() -> list[dict]:
     return [{"id": v, "name": v} for v in names]
 
 
+def warm() -> bool:
+    """Load the model and voices and render one short phrase, so a call's first sentence does not pay the load and
+    onnxruntime's first-run setup (about four seconds cold on David's machine, against about a quarter second warm).
+    A call start does this in the background when Kokoro is the call voice. Never raises; False when not set up."""
+    if not ready()[0]:
+        return False
+    try:
+        synthesize("Okay.", DEFAULT_VOICE)
+        return True
+    except Exception:
+        logger.exception("kokoro: warm-up failed")
+        return False
+
+
 def synthesize(text: str, voice: str) -> bytes:
     """One sentence -> 24 kHz mono PCM16 bytes. Blocking; call from a worker thread."""
     ok, reason = ready()

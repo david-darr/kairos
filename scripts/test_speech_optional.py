@@ -5,6 +5,7 @@ import io
 import os
 import sys
 import tempfile
+import time
 import unittest
 import wave
 from pathlib import Path
@@ -334,6 +335,71 @@ class KokoroEngine(Base):
         kokoro_voice.ENGINE_FACTORY = Bad
         with self.assertRaises(kokoro_voice.KokoroUnavailable):
             kokoro_voice.synthesize('Hi.', 'af_heart')
+
+
+class WarmAtCallStart(Base):
+    """A call start loads and runs the optional models once, so the first turn does not pay their cold start."""
+
+    def test_warm_is_a_no_op_when_not_set_up(self):
+        self.assertFalse(turn_detect.warm())
+        self.assertFalse(kokoro_voice.warm())
+
+    def test_warm_runs_each_model_once(self):
+        self.install('smart-turn')
+        self.install('kokoro')
+        session = FakeSession(.9)
+        turn_detect.SESSION_FACTORY = lambda path: session
+        made = []
+
+        class Counting(FakeKokoro):
+            def create(self, text, voice, speed, lang):
+                made.append((text, voice))
+                return super().create(text, voice, speed, lang)
+        kokoro_voice.ENGINE_FACTORY = Counting
+        self.assertTrue(turn_detect.warm())
+        self.assertEqual(len(session.seen), 1)
+        self.assertTrue(kokoro_voice.warm())
+        self.assertEqual(made, [('Okay.', kokoro_voice.DEFAULT_VOICE)])
+
+    def test_warm_failures_never_raise(self):
+        self.install('smart-turn')
+
+        class Broken(FakeSession):
+            def run(self, *a):
+                raise RuntimeError('onnx exploded')
+        turn_detect.SESSION_FACTORY = lambda path: Broken(0)
+        self.assertFalse(turn_detect.warm())
+
+    def test_kokoro_is_warmed_only_when_it_is_the_call_voice(self):
+        from routes import speech_routes
+        self.install('kokoro')
+        made = []
+
+        class Counting(FakeKokoro):
+            def create(self, *a, **k):
+                made.append(1)
+                return super().create(*a, **k)
+        kokoro_voice.ENGINE_FACTORY = Counting
+        speech_routes._warm_optional()
+        self.assertEqual(made, [], 'the device voice or a voice server is in use: Kokoro stays unloaded')
+        call_voices.configure('', 'kokoro')
+        speech_routes._warm_optional()
+        self.assertEqual(made, [1])
+
+    def test_a_call_start_warms_in_the_background_and_dictation_does_not(self):
+        from routes import speech_routes
+        calls = []
+        with patch.object(speech_routes, '_warm_optional', lambda: calls.append('warm')), \
+                patch.object(speech_routes.speech, 'prepare_call', lambda model, backend: {'engine': 'cpu'}), \
+                patch.object(speech_routes.speech, 'prepare', lambda model: model):
+            self.assertEqual(self.client.post('/api/speech/prepare', json={'model': 'small.en'}).status_code, 200)
+            self.assertEqual(calls, [])
+            self.assertEqual(self.client.post('/api/speech/prepare', json={'model': 'small.en', 'backend': 'auto'}).status_code, 200)
+            for _ in range(50):
+                if calls:
+                    break
+                time.sleep(.02)
+            self.assertEqual(calls, ['warm'])
 
 
 if __name__ == '__main__':
