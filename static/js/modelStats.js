@@ -6,7 +6,7 @@
 export const ERROR_WORDS = { rate_limit: 'rate limit', overload: 'overloaded', overflow: 'context full', auth: 'sign-in or key',
   network: 'network', other: 'other error' };
 
-function seconds(s) { return s < 10 ? `${s.toFixed(1)} s` : `${Math.round(s)} s`; }
+export function seconds(s) { return s < 10 ? `${s.toFixed(1)} s` : `${Math.round(s)} s`; }
 
 // "1 failed of 24 (rate limit)", "none failed of 24".
 export function reliabilityText(stat) {

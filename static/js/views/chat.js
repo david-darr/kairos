@@ -32,6 +32,7 @@ import { renderAgentHandoff, watchAgentHandoffs } from '../agentHandoff.js';
 import { paneIsOpen } from '../chatPaneStack.js';
 import { fitMenu } from '../menuFit.js';
 import { renderUsage } from '../usageMeter.js';
+import { adviceNote, rankAlternatives, switchCostText, switchSuggestion } from '../modelAdvice.js';
 import { mountRedesignChat } from '../redesignChat.js';
 import { mountMobileComposer } from '../mobileComposer.js';
 import { mountMobileModelSheet, appendEndpointCatalogs } from '../mobileModelSheet.js';
@@ -174,6 +175,7 @@ function addRewindActions(messages, session) {
           title: 'Choose another model after this failure',
           text: msg.content || msg.failure_had_tools ? 'Switch model' : 'Try another model',
           onclick: () => offerFallback(session, index, cards[index]) }));
+        suggestSwitch(session, index, cards[index]);
       }
       row.prepend(el('button', { type: 'button', class: 'msg-action-btn msg-regenerate', title: 'Regenerate this reply', text: 'Regenerate',
         onclick: () => rewindTo(session, index - 1, history[index - 1], { edit: false }) }));
@@ -187,7 +189,7 @@ async function refreshRewindActions(sessionId, messages) {
   let session;
   try { session = await api(`/api/sessions/${sessionId}`); } catch { return; }
   if (sessionId !== activeSessionId || !messages.isConnected) return;
-  messages.querySelectorAll('.msg-edit, .msg-regenerate, .msg-fork, .msg-fallback, .chat-fallback-panel')
+  messages.querySelectorAll('.msg-edit, .msg-regenerate, .msg-fork, .msg-fallback, .chat-fallback-panel, .chat-switch-suggestion')
     .forEach((node) => node.remove());
   addRewindActions(messages, session);
   activeTimeline?.update(session);
@@ -213,6 +215,30 @@ async function forkFrom(session, index) {
   }
 }
 
+// Each connection's recent speed and reliability (unit 3), read at most once a minute, for advice only.
+let statsCache = { at: 0, value: null };
+async function recentModelStats() {
+  if (statsCache.value && Date.now() - statsCache.at < 60000) return statsCache.value;
+  try { statsCache = { at: Date.now(), value: (await api('/api/models/stats'))?.endpoints || {} }; }
+  catch { return {}; }
+  return statsCache.value;
+}
+
+// A model that keeps failing: say so under its failed reply, with what a switch costs. Advice only; the
+// person chooses (unit 7).
+async function suggestSwitch(session, index, card) {
+  const failed = session.messages[index];
+  const stats = await recentModelStats();
+  if (!card.isConnected || session.id !== activeSessionId || card.querySelector('.chat-switch-suggestion')) return;
+  const text = switchSuggestion(stats[failed.failure_model_endpoint_id], failed.failure_model_name,
+    session.context_state?.used_tokens);
+  if (!text) return;
+  card.append(el('div', { class: 'chat-switch-suggestion', role: 'note' }, [
+    el('span', { text }),
+    el('button', { type: 'button', class: 'btn quiet', text: 'Choose another model', onclick: () => offerFallback(session, index, card) }),
+  ]));
+}
+
 async function offerFallback(session, failedIndex, card) {
   if (!composerRefs || session.id !== activeSessionId) return;
   if (chatStream.getInFlight(session.id)?.status === 'processing') {
@@ -235,8 +261,8 @@ async function offerFallback(session, failedIndex, card) {
   const choices = el('div', { class: 'chat-fallback-choices' });
   panel.append(choices);
   card.append(panel);
-  let endpoints;
-  try { endpoints = await apiRecent('/api/models/choices'); }
+  let endpoints, stats;
+  try { [endpoints, stats] = await Promise.all([apiRecent('/api/models/choices'), recentModelStats()]); }
   catch (error) { choices.textContent = `Couldn't load models: ${error.message}`; return; }
   if (!panel.isConnected || session.id !== activeSessionId) return;
   const source = endpoints.find(endpoint => endpoint.id === failed.failure_model_endpoint_id);
@@ -250,9 +276,13 @@ async function offerFallback(session, failedIndex, card) {
       : 'No other model is configured. Add one in Settings > Models.' }));
     return;
   }
-  for (const endpoint of alternatives) {
-    const button = el('button', { type: 'button', class: 'btn quiet',
-      text: `${endpoint.name} · ${endpoint.model || 'CLI default'}` });
+  // Best first by recent success and speed (unit 7); the person still chooses.
+  panel.insertBefore(el('p', { class: 'chat-fallback-cost', text: switchCostText(session.context_state?.used_tokens) }), choices);
+  for (const { endpoint, note } of rankAlternatives(alternatives, stats)) {
+    const button = el('button', { type: 'button', class: 'btn quiet chat-fallback-choice', 'data-endpoint-id': endpoint.id }, [
+      el('span', { text: `${endpoint.name} · ${endpoint.model || 'CLI default'}` }),
+      el('small', { class: 'chat-fallback-note', text: note }),
+    ]);
     button.addEventListener('click', async () => {
       if (session.id !== activeSessionId || chatStream.getInFlight(session.id)?.status === 'processing') return;
       let latest;
@@ -2303,10 +2333,24 @@ async function refreshModelPicker(currentEndpointId, modelOverride = null, model
       el("span", { class: "model-connection-sub", text: ep.model || "Default model" }),
     ])]);
     if (isCurrent) item.setAttribute('aria-current', 'true');
+    item.querySelector('.model-connection-text').append(el('span', { class: 'model-connection-note', hidden: true }));
     const itemMark = modelMark(ep.mark, optName);
     if (itemMark) item.prepend(itemMark);
     connectionList.appendChild(item);
   }
+
+  // A small speed and reliability note per connection (unit 7), filled in after the menu is built so the
+  // picker never waits on it.
+  recentModelStats().then(stats => {
+    if (generation !== modelPickerGeneration) return;
+    for (const item of connectionList.querySelectorAll('.model-connection-item')) {
+      const stat = stats[item.dataset.endpointId];
+      const note = item.querySelector('.model-connection-note');
+      if (!note || !stat?.runs) continue;
+      note.textContent = adviceNote(stat);
+      note.hidden = false;
+    }
+  });
 
   const ep = endpoints.find(e => e.id === currentEndpointId);
   const markSlot = document.getElementById("model-picker-mark");

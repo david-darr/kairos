@@ -993,3 +993,12 @@
 }
 /* Only the newest reply's Kip moves; earlier ones keep their face, still. */
 #chat-messages .msg:not(:last-child) kairos-mascot * { animation: none !important; }
+/* Advice from recent runs (Session Usage and Model Tracking, unit 7): notes only, never a switch. */
+.model-connection-note { display: block; font-size: 11px; color: var(--rd-ink-faint, var(--text-faint)); }
+.model-connection-note[hidden] { display: none; }
+.chat-fallback-choice { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left; }
+.chat-fallback-note { font-size: 11px; color: var(--rd-ink-faint, var(--text-faint)); }
+.chat-fallback-cost { font-size: 12px; color: var(--rd-ink-dim, var(--text-dim)); }
+.chat-switch-suggestion { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; padding: 8px 10px;
+  border: 1px solid var(--rd-line, var(--border)); border-radius: var(--rd-radius-field, 8px); font-size: 12.5px;
+  color: var(--rd-ink-dim, var(--text-dim)); }

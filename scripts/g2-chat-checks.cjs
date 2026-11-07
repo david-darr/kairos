@@ -21,7 +21,12 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, de
   await js(`(() => {
     const g = window.__g2 = { uploads: [], validations: [], transcribes: [], gum: [], stopped: 0, recorders: 0,
       speech: { engine_available: true, active_model: 'base.en', models: [] }, transcript: 'hello world', transcribeError: null,
-      transcribeDelay: 0, mic: 'ok', uploadRule: () => ({}), spoken: [], posts: [], session: null };
+      transcribeDelay: 0, mic: 'ok', uploadRule: () => ({}), spoken: [], posts: [], session: null,
+      // Recent runs per connection (Session Usage and Model Tracking, unit 7): m1 keeps failing, m3 beats m2.
+      stats: { endpoints: {
+        m1: { runs: 10, enough_data: true, failed: 6, failures_by_class: { overload: 6 }, recent_outcomes: ['failed', 'failed', 'finished', 'failed', 'failed', 'failed', 'finished', 'failed', 'finished', 'finished'] },
+        m2: { runs: 12, enough_data: true, failed: 3, ttft_median_s: 0.4, recent_outcomes: [] },
+        m3: { runs: 9, enough_data: true, failed: 0, ttft_median_s: 1.2, recent_outcomes: [] } } } };
     g.real = window.fetch.bind(window);
     const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
     window.fetch = async (input, init = {}) => {
@@ -40,6 +45,7 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, de
         return rule.status ? json({ detail: rule.detail }, rule.status) : json({ id: 'att-' + g.uploads.length, filename: file.name });
       }
       if (url.pathname === '/api/chat/validate-attachments' && method === 'POST') { g.validations.push(JSON.parse(init.body)); return json({ ok: true }); }
+      if (url.pathname === '/api/models/stats' && method === 'GET') return json(g.stats);
       if (url.pathname === '/api/sessions/s1/fork' && method === 'POST') { g.posts.push(['fork', JSON.parse(init.body)]); return json({ id: 'fork-1', title: 'A clearer direction (fork)', project_id: null }); }
       if (url.pathname === '/api/sessions/s1/fallback' && method === 'POST') { g.posts.push(['fallback', JSON.parse(init.body)]); return json({ ok: true }); }
       if (url.pathname === '/api/sessions/s1/model' && method === 'POST') { g.posts.push(['model', JSON.parse(init.body)]); return json({ ok: true }); }
@@ -429,6 +435,11 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, de
   assert.equal(await js("document.querySelectorAll('#chat-messages .msg-fallback').length"), 1, 'only the failed last reply offers another model');
   assert.equal(await js("document.querySelector('.msg-fallback').textContent"), 'Try another model', 'an empty failure offers a retry, not a continue');
   assert.equal(await js("document.querySelectorAll('#chat-messages .msg-regenerate').length"), 1);
+  // A model that keeps failing gets a suggestion with the cost of switching; showing it switches nothing.
+  await waitFor("!!document.querySelector('.chat-switch-suggestion')");
+  const suggestion = await js("document.querySelector('.chat-switch-suggestion span').textContent");
+  assert.ok(suggestion.startsWith('Claude has failed 6 of its last 10 runs, mostly overloaded.') && suggestion.includes('without the prompt cache'), suggestion);
+  assert.deepEqual(await g('posts'), [], 'advice alone posts nothing');
   // Fork from the first answer: one request, source untouched (no rewind), the new chat opens.
   await js("document.querySelectorAll('#chat-messages .msg-fork')[1].click()");
   await waitFor("window.__g2.posts.length === 1");
@@ -444,6 +455,10 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, de
   await waitFor("document.querySelectorAll('.chat-fallback-choices button').length > 0");
   const options = await js("[...document.querySelectorAll('.chat-fallback-choices button')].map(b => b.textContent)");
   assert.ok(options.length >= 2 && !options.some(t => t.startsWith('Claude')), 'the failed model is not offered; others are: ' + options.join(' | '));
+  // Ranked by recent success, then speed: m3 (none failed) before m2 (3 of 12 failed), each with its note.
+  assert.deepEqual(await js("[...document.querySelectorAll('.chat-fallback-choices button')].slice(0, 2).map(b => b.dataset.endpointId)"), ['m3', 'm2']);
+  assert.equal(await js("document.querySelector('.chat-fallback-note').textContent"), '9 runs, none failed, first output 1.2 s');
+  assert.ok((await js("document.querySelector('.chat-fallback-cost').textContent")).includes('without the prompt cache'));
   await js("document.querySelectorAll('.toast').forEach(t => t.remove()); document.querySelector('.chat-fallback-choices button').click()");
   await waitFor(toast('Finish or clear the current draft before retrying the failed message.'));
   assert.deepEqual(await g('posts'), [], 'a refused retry posts nothing');
