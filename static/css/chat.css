@@ -271,7 +271,7 @@
    Session Details in Kairos's own tokens. Context, Model and Usage cards; a full sheet on a phone.
    Figures are read-only; n/a is dimmed, never shown as zero. */
 .usage-meter-popover { width: 340px; padding: 0; z-index: 70; overflow-y: auto; color: var(--rd-ink, var(--text));
-  background: var(--rd-surface-solid, var(--bg-panel)); border: 1px solid var(--rd-line-strong, var(--border-strong));
+  background: var(--rd-surface-solid, var(--bg)); border: 1px solid var(--rd-line-strong, var(--border-strong));
   box-shadow: var(--rd-shadow, 0 8px 24px rgba(0,0,0,.18)); border-radius: var(--rd-radius-card, 12px); }
 .usage-meter-header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 10px 14px; background: inherit; border-bottom: 1px solid var(--rd-line, var(--border)); }
@@ -320,7 +320,8 @@
 .usage-meter-row dd.is-na { color: var(--rd-ink-faint, var(--text-faint)); }
 .usage-meter-compact { width: 100%; justify-content: center; }
 /* A phone gets a full sheet rather than a small popover. */
-.usage-meter-popover.is-sheet { position: fixed; inset: auto 0 0 0; width: auto; max-width: none; max-height: 88dvh;
+.usage-meter-popover.is-sheet { position: fixed; top: auto; right: 0; bottom: 0; left: 0; margin: 0; box-sizing: border-box;
+  width: 100%; max-width: none; max-height: 88dvh; transform: none;
   border-radius: var(--rd-radius-card, 16px) var(--rd-radius-card, 16px) 0 0; padding-bottom: env(safe-area-inset-bottom, 0); }
 .usage-meter-popover.is-sheet .usage-meter-row, .usage-meter-popover.is-sheet .usage-context-part { font-size: 14px; padding: 8px 0; }
 .artifact-card { display: flex; align-items: center; gap: 14px; width: min(100%, 430px); margin: 12px 0; padding: 16px; text-align: left; border: 1px solid var(--border); border-radius: 12px; color: var(--text); background: var(--bg-panel); cursor: pointer; transition: border-color 180ms, background 180ms; font: inherit; }

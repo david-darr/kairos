@@ -916,7 +916,8 @@ app.whenReady().then(async () => {
         last_reply: null, model: { model: 'catalog-astra', provider: 'Claude', context_window: 90000 } };
       await js("document.querySelector('#context-pill').click()");
       await waitFor("!!document.querySelector('#usage-meter.is-sheet .usage-meter-rows')");
-      assert.ok(await js("(() => { const r=document.querySelector('#usage-meter').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth+1 && r.bottom <= innerHeight+1; })()"), 'sheet fits mobile ' + width);
+      const sheet = await js("(() => { const r=document.querySelector('#usage-meter').getBoundingClientRect(); return { left: r.left, right: r.right, bottom: r.bottom, w: document.documentElement.clientWidth, h: document.documentElement.clientHeight }; })()");
+      assert.ok(sheet.left >= 0 && sheet.right <= sheet.w + 1 && sheet.bottom <= sheet.h + 1, 'sheet fits mobile ' + width + ': ' + JSON.stringify(sheet));
       await capture('mobile-chat-details-' + width);
       await js("document.querySelector('#usage-meter .usage-meter-close').click()");
       await waitFor("!document.querySelector('#usage-meter')");
