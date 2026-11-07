@@ -90,5 +90,61 @@ class LightRun(unittest.TestCase):
         self.assertIn("barge-in: voice starts to audio stops", self.text)
 
 
+class NewPaths(unittest.TestCase):
+    def test_scenarios_follow_the_flags(self):
+        labels = lambda argv: [s[0] for s in bench.scenario_list(bench.parser().parse_args(argv))]   # noqa: E731
+        self.assertEqual(labels(["--backend", "cuda"]), ["GPU", "GPU+SmartTurn*", "GPU slow 900"])
+        self.assertEqual(labels(["--backend", "cuda", "--smart-turn", "real", "--voice-engine", "both", "--ttft-slow", "0"]),
+                         ["GPU", "GPU+SmartTurn", "GPU+Kokoro", "GPU+SmartTurn+Kokoro"])
+        self.assertEqual(labels(["--backend", "none", "--kokoro-bench", "3"]), [])
+        smart_cpu = bench.scenario_list(bench.parser().parse_args(["--backend", "cpu", "--smart-turn", "real"]))
+        self.assertEqual([(s[0], s[3]) for s in smart_cpu], [("CPU", "real")])
+
+    def test_onnx_dir_is_found_beside_the_whisper_model(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / "onnx").mkdir()
+            self.assertEqual(bench.detect_onnx_dir(folder), str(Path(folder) / "onnx"))
+
+    def test_resample_keeps_duration(self):
+        import numpy as np
+        out = bench.resample(np.ones(24000, dtype=np.float32), 24000)
+        self.assertEqual(len(out), 16000)
+
+
+@unittest.skipUnless(shutil.which("node"), "node is needed to run the real browser modules")
+class LightRealModels(unittest.TestCase):
+    """--smart-turn real and --voice-engine kokoro through the app's core/turn_detect.py and core/kokoro_voice.py, with
+    fake model sessions (always 'finished', 50 ms renders): the plumbing, the verdict path and the counting."""
+
+    @classmethod
+    def setUpClass(cls):
+        from core import kokoro_voice, speech_optional, turn_detect
+        cls.before = (speech_optional.OPTIONAL_DIR, turn_detect.SESSION_FACTORY, kokoro_voice.ENGINE_FACTORY)
+        args = bench.parser().parse_args(["--light", "--smart-turn", "real", "--voice-engine", "kokoro", "--barge-repeats", "1"])
+        args.repeats = 1
+        cls.summaries, cls.text = bench.run(args)
+        cls.summary = cls.summaries[0]
+
+    def test_the_module_state_is_put_back(self):
+        from core import kokoro_voice, speech_optional, turn_detect
+        self.assertEqual((speech_optional.OPTIONAL_DIR, turn_detect.SESSION_FACTORY, kokoro_voice.ENGINE_FACTORY), self.before)
+
+    def test_smart_turn_answers_and_ends_turns_before_the_silence_wait(self):
+        smart = self.summary["smart"]
+        self.assertGreaterEqual(smart["asks"], self.summary["turns"])
+        self.assertEqual(smart["incomplete"], 0)
+        self.assertGreater(smart["complete"], 0)
+        self.assertLess(self.summary["endpoint_ms"]["p50"], 700, "a 'finished' verdict ends the turn before the 700 ms silence wait")
+        self.assertEqual(set(smart["false_cutoffs"]), {"pause", "pause_long"})
+        self.assertGreater(smart["early_complete"], 0, "an always-finished model is caught cutting the pauses")
+        self.assertIn("Smart Turn asked", self.text)
+
+    def test_kokoro_is_the_voice(self):
+        self.assertAlmostEqual(self.summary["voice_render"]["p50"], 50, delta=40)
+        self.assertAlmostEqual(self.summary["first_audio_ms"]["p50"] - self.summary["first_sentence_ms"]["p50"], 75, delta=60)
+        self.assertEqual(self.summary["barge"]["interrupts_heard"], self.summary["barge"]["interrupt_n"])
+
+
 if __name__ == "__main__":
     unittest.main()

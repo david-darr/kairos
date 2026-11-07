@@ -6,6 +6,8 @@
 //   chunker              static/js/voiceOutput.js createChunker (first clause / first sentence release, 100 ms flush)
 //   acknowledgement      static/js/voiceFiller.js createFillerGate (the half-second rule)
 //   barge-in             static/js/speechSegments.js BargeIn (pause after 120 ms of voice, interrupt after 320 ms)
+//   end of turn          static/js/turnEndpoint.js createTurnEndpoint (smart_turn "real": the app's 700 ms ask timeout and
+//                        latch-off, posting to the Python side's core/turn_detect.py), or a perfect stand-in ("oracle")
 //
 // Speech-to-text and the voice are the Python side's (HTTP on loopback): whisper and the OS voice, or fakes in CI-light
 // mode. The language model is a scripted stand-in that streams a reply at a fixed first-token delay and token rate
@@ -26,12 +28,18 @@ const { SpeechSegments, BargeIn, BARGE_DUCK_MS, BARGE_VOICE_MS } = await load('s
 const { createChunker } = await load('static/js/voiceOutput.js');
 const { createPartialTranscriber } = await load('static/js/partialTranscript.js');
 const { createFillerGate } = await load('static/js/voiceFiller.js', 'const readEvents=null;\n');
+const { createTurnEndpoint } = await load('static/js/turnEndpoint.js');
 
 const RATE = 16000;
 const BLOCK = 160;                               // 10 ms
 const LEAD_MS = 25;                              // the speaker schedules audio ~25 ms ahead of "now" (callVoice.js)
 const now = () => performance.timeOrigin + performance.now();
 const sleep = ms => new Promise(resolve => setTimeout(resolve, Math.max(0, ms)));
+// Windows timers tick every ~15.6 ms, so sleeping per 10 ms block fell behind real time (about 0.65x). Pacing is kept
+// against an absolute schedule instead: sleep only when ahead of it, and when behind catch up at once, still letting
+// pending I/O (a Smart Turn verdict, a partial transcript) run in between. The audio clock then tracks the wall clock
+// to within one timer tick, which is what makes a verdict's wall-clock delay show up as the right amount of audio.
+const sleepUntil = async target => { const wait = target - now(); if (wait > 1) await sleep(wait); else await new Promise(resolve => setImmediate(resolve)); };
 
 function readWav(file) {
   const bytes = fs.readFileSync(file);
@@ -64,6 +72,13 @@ async function post(pathname, body, headers = {}) {
 }
 const sttFinal = (wav, name) => post('/stt/final', wav, { 'content-type': 'audio/wav', 'x-fixture': name });
 const sttPartial = (wav, name) => post('/stt/partial', wav, { 'content-type': 'audio/wav', 'x-fixture': name });
+const turnPost = async (wav, signal) => {
+  const response = await fetch(cfg.service_url + '/turn', { method: 'POST', body: wav, headers: { 'content-type': 'audio/wav' }, signal });
+  if (!response.ok) throw new Error('turn ' + response.status);
+  return response.json();
+};
+// One endpoint for the whole run, as agentCall.js keeps one per call (its latch-off carries across turns).
+const turnEndpoint = cfg.smart_turn === 'real' ? createTurnEndpoint({ post: turnPost, encode: pcm => encodeWav(pcm, RATE) }) : null;
 const tts = async text => { const began = now(); const reply = await post('/tts', JSON.stringify({ text }), { 'content-type': 'application/json' }); reply.overhead_ms = Math.max(0, now() - began - reply.total_ms); return reply; };
 
 // A seeded generator so a run is repeatable.
@@ -80,6 +95,7 @@ async function runTurn(fixture, repeat) {
   let resolveDone; const done = new Promise(resolve => { resolveDone = resolve; });
   let inflightSegments = 0, speechActive = false, dispatched = false;
   const result = { fixture: fixture.name, repeat, audio_ms: Math.round(pcm.length / 16) };
+  const smart = { asks: 0, complete: 0, incomplete: 0, none: 0, verdict_ms: [], probabilities: [], early_complete: 0 };
 
   const partials = createPartialTranscriber({ send: async (wav) => { marks.partialSent++; return sttPartial(wav, fixture.name); }, encode: encodeWav });
   if (cfg.backend !== 'cuda' || !cfg.partials) partials.disable('cpu');
@@ -91,11 +107,24 @@ async function runTurn(fixture, repeat) {
     play: () => { result.filler_start_wall = now() + LEAD_MS; },
   });
 
-  // Smart Turn is not installed on this machine, so "oracle" stands in for it: a perfect verdict (finished only if the speaker's
-  // sentence really is over) after its measured ~12 ms CPU cost. The real hook is what runs: SpeechSegments asks at a 200 ms pause
-  // and the answer comes back through answer(); with no model the call keeps its plain 700 ms silence wait.
+  // End of turn by meaning. "real": the app's own path (agentCall.js onPause): the segmenter hands out the utterance so far
+  // at a 200 ms pause, turnEndpoint.ask posts it to core/turn_detect.py (the real Smart Turn model), and a verdict that
+  // arrives within the 700 ms ask timeout goes back through answer(); no verdict keeps the plain silence wait, and an
+  // endpoint that latched itself off switches Smart Turn off, as the call does. "oracle": a perfect verdict (finished only
+  // if the speaker's sentence really is over) after cfg.smart_ms, the upper bound for any turn model.
+  const onPause = cfg.smart_turn === 'oracle' ? (id) => setTimeout(() => segmenter.answer(id, fed >= speechEnd), cfg.smart_ms || 15)
+    : cfg.smart_turn === 'real' ? (id, pausePcm) => {
+      const asked = now(), beforeEnd = fed < speechEnd; smart.asks++;
+      turnEndpoint.ask(pausePcm).then(verdict => {
+        if (verdict) {
+          smart.verdict_ms.push(Math.round(now() - asked)); smart.probabilities.push(verdict.probability);
+          if (verdict.complete) { smart.complete++; if (beforeEnd) smart.early_complete++; } else smart.incomplete++;
+          segmenter.answer(id, verdict.complete);
+        } else { smart.none++; if (turnEndpoint.off) segmenter.smartTurn(false); }
+      });
+    } : null;
   const segmenter = new SpeechSegments({
-    onPause: cfg.smart_turn === 'oracle' ? (id) => setTimeout(() => segmenter.answer(id, fed >= speechEnd), cfg.smart_ms || 15) : null,
+    onPause,
     rate: RATE, silenceMs: cfg.silence_ms || 700, chunkMs: 1000,
     onStart: () => { speechActive = true; partials.begin(); },
     onChunk: chunk => { if (speechActive) partials.push(chunk); },
@@ -140,25 +169,25 @@ async function runTurn(fixture, repeat) {
         resolveDone();
       }
     });
-    await sleep(ttft);
+    const began = now(); await sleepUntil(began + ttft);
     result.first_token_wall = now(); gate.sentenceReady();   // the answer has started: no acknowledgement
     const words = cfg.reply.split(/(?<=\s)/);
     const gap = 1000 / cfg.tokens_per_s;
-    let flushTimer = null;
+    let flushTimer = null, due = now();
     for (const word of words) {
       chunker.feed(word); clearTimeout(flushTimer); flushTimer = setTimeout(() => chunker.flushSentence(), 100);
-      await sleep(gap * (word.split(/\s+/).length) * 1.3);
+      due += gap * (word.split(/\s+/).length) * 1.3; await sleepUntil(due);
       if (result.first_audio_wall != null) break;
     }
     clearTimeout(flushTimer); chunker.finish();
   }
 
   // Feed the audio at real-time pace (or as fast as possible when pace is 0).
-  if (cfg.smart_turn === 'oracle') segmenter.smartTurn(true);
+  if (cfg.smart_turn === 'oracle' || (cfg.smart_turn === 'real' && !turnEndpoint.off)) segmenter.smartTurn(true);
   const start = now(); turnStart = start;
   for (let at = 0; at < pcm.length; at += BLOCK) {
     const block = pcm.subarray(at, Math.min(pcm.length, at + BLOCK));
-    if (cfg.pace) await sleep(start + (at + block.length) / 16 / cfg.pace - now());
+    if (cfg.pace) await sleepUntil(start + (at + block.length) / 16 / cfg.pace);
     else if (at % 3200 === 0) await new Promise(resolve => setImmediate(resolve));
     fed = at + block.length;
     segmenter.push(block);
@@ -181,7 +210,9 @@ async function runTurn(fixture, repeat) {
     first_sentence_ms: since(result.first_sentence_wall),
     first_audio_ms: since(result.first_audio_wall),
     stt_ms: rel(result.transcript_wall),
+    tts_first_write_ms: result.tts_first_write_ms,
   };
+  if (cfg.smart_turn === 'real') out.smart = smart;
   if (result.filler_start_wall != null) {
     out.filler_ms = since(result.filler_start_wall);
     const fillerEnd = result.filler_start_wall + (cfg.filler_ms || 0);
@@ -216,7 +247,7 @@ async function runBarge(spec, leakPcm, repeat) {
       const voice = t >= lead && t - lead < user.length ? user[t - lead] : 0;
       block[j] = echo + voice + (random() - .5) * .002;
     }
-    if (cfg.pace) await sleep(start + (i + block.length) / 16 / cfg.pace - now());
+    if (cfg.pace) await sleepUntil(start + (i + block.length) / 16 / cfg.pace);
     at = i + block.length;
     detector.push(block);
     if (events.some(e => e.type === 'barge')) stopped = true;
