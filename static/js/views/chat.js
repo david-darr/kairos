@@ -2166,7 +2166,8 @@ async function toggleUsageMeter(pill) {
   document.addEventListener('pointerdown', outside, true);
   document.addEventListener('keydown', onKey);
   let usage = null;
-  try { usage = await api(`/api/sessions/${sessionId}/usage`); } catch { /* shown as unreadable below */ }
+  // Always a fresh read: opening the meter again within a second must not reuse the last answer.
+  try { usage = await api(`/api/sessions/${sessionId}/usage`, { cache: 'no-store' }); } catch { /* shown as unreadable below */ }
   if (closeUsageMeter !== close || sessionId !== activeSessionId) { if (closeUsageMeter === close) close(); return; }
   const compact = el('button', { type: 'button', class: 'btn btn-secondary usage-meter-compact', onclick: () => {
     close();
