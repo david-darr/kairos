@@ -25,7 +25,11 @@ const now = Date.now() / 1000;
 const customTab = { id: 'studio', label: 'Studio', user_tab: false, format: 'folder', view_url: '/tab-files/studio/view.js', style_url: '/tab-files/studio/view.css', icon_svg: '<svg viewBox="0 0 24 24"><path d="M3 6h18v15H3z"/></svg>' };
 
 // -- the mock Content Studio store ------------------------------------------------------------------------------
-const store = { forbidden: false, niches: [], channels: [], items: [], approvals: [], findings: [], decisions: [], posted: [], team: [] };
+const store = { forbidden: false, niches: [], channels: [], items: [], approvals: [], findings: [], decisions: [], posted: [], team: [],
+  settings: { weights: { views: 0.4, watch: 0.4, engagement: 0.2 }, batch_approval: false },
+  yt: { configured: true, connected: false, pending: false, google_account: null, needs_reconnect: false, last_sync: null, notice: 'Read only.' },
+  ytPost: { configured: true, connected: true, pending: false, google_account: { id: 'g1', email: 'me@example.com' }, needs_reconnect: false, privacy: 'private',
+    notice: 'YouTube may keep uploads from a project that has not passed its API audit private.' } };
 const post = (id, extra = {}) => ({ id, channel_id: 1, title: `Post ${id}`, caption: 'A caption', script_ref: 'Hook, three steps, ask', render_ref: 'https://example.com/render.mp4',
   render_status: 'ok', state: 'awaiting_approval', rejection_count: 0, platform: 'youtube', handle: '@cooks', niche_id: 1, niche_name: 'Cooking', ...extra });
 const board = () => ({ at: now, weights: { views: 0.4, watch: 0.4, engagement: 0.2 }, minimum: { weeks: 3, posts: 10 },
@@ -50,13 +54,19 @@ function content(method, p, body) {
     }
     return [200, { channels: store.channels }];
   }
+  if (/^\/channels\/\d+\/edit$/.test(p)) { Object.assign(channel, body); return [200, channel]; }
+  if (p === '/analytics/youtube/status') return [200, store.yt];
+  if (p === '/posting/youtube/status') return [200, store.ytPost];
+  if (p === '/posting/youtube/privacy') { store.ytPost.privacy = body.privacy; return [200, store.ytPost]; }
+  if (p === '/approvals/approve-batch') { const ids = body.post_ids; store.approvals = store.approvals.filter(x => !ids.includes(x.id)); return [200, { approved: ids.map(id => ({ id })), skipped: [] }]; }
+  if (/^\/posts\/\d+\/publish-youtube$/.test(p)) return [200, { video_id: 'NEWvideo_01', privacy: 'private', note: '' }];
   if (/^\/channels\/\d+\/archive$/.test(p)) { Object.assign(channel, { status: 'archived', archive_reason: 'archived by you' }); return [200, channel]; }
   if (/^\/channels\/\d+\/restore$/.test(p)) { Object.assign(channel, { status: 'live', archive_reason: null }); return [200, channel]; }
   if (/^\/channels\/\d+\/resume$/.test(p)) { channel.paused = 0; store.findings = store.findings.filter(f => f.channel_id !== id); return [200, channel]; }
   if (p === '/pipeline') return [200, { items: store.items }];
   if (p === '/approvals') return [200, { posts: store.approvals }];
   if (p === '/watch') return [200, { findings: store.findings }];
-  if (p === '/settings') return [200, { team_bot_ids: store.team }];
+  if (p === '/settings') { if (method === 'PUT') Object.assign(store.settings, body); return [200, { ...store.settings, team_bot_ids: store.team }]; }
   if (p === '/posts' && method === 'GET') return [200, { posts: store.posted }];
   let found = store.approvals.find(x => x.id === id) || store.items.find(x => x.kind === 'post' && x.id === id) && post(id, { state: store.items.find(x => x.id === id).state });
   if (/^\/posts\/\d+$/.test(p)) return [200, { ...found, metrics: [] }];
@@ -85,10 +95,13 @@ const populate = () => {
       { kind: 'post', id: 22, title: 'Render broke', niche_name: 'Cooking', platform: 'tiktok', step: 'render', owner: 'editor', status: 'failed', age_h: 8, in_step_h: 8, window_h: 6, overdue: false, rejection_count: 0, state: 'drafted' },
       { kind: 'post', id: 11, title: 'Five minute soup', niche_name: 'Cooking', platform: 'youtube', step: 'approval', owner: 'user', status: 'waiting', age_h: 3, in_step_h: 3, rejection_count: 0, state: 'awaiting_approval' },
       { kind: 'post', id: 23, title: 'Ready to post', niche_name: 'Travel', platform: 'instagram', step: 'publish', owner: 'publisher', status: 'waiting', age_h: 50, in_step_h: 20, rejection_count: 0, state: 'approved' },
-      { kind: 'post', id: 24, title: 'Already live', niche_name: 'Travel', platform: 'youtube', step: 'tracking', owner: 'executor', status: 'posted', age_h: 100, in_step_h: 90, rejection_count: 0, state: 'posted' }],
+      { kind: 'post', id: 24, title: 'Already live', niche_name: 'Travel', platform: 'youtube', step: 'tracking', owner: 'executor', status: 'posted', age_h: 100, in_step_h: 90, rejection_count: 0, state: 'posted' },
+      { kind: 'post', id: 26, title: 'YouTube ready', niche_name: 'Cooking', platform: 'youtube', step: 'publish', owner: 'publisher', status: 'waiting', age_h: 4, in_step_h: 2, rejection_count: 0, state: 'approved' }],
     decisions: [{ id: 1, kind: 'retire', subject_type: 'channel', subject_id: 1, subject_name: 'youtube:@cooks', status: 'awaiting_user', reason: 'Below half the team median two reviews running.', at: now - 3600,
       numbers: { score: 20.5, team_median: 71.5, posts_scored: 12, age_days: 30 } },
-    { id: 2, kind: 'promote', subject_type: 'niche', subject_id: 2, subject_name: 'Travel', status: 'confirmed', reason: 'Takes the freed slot.', at: now - 86400, numbers: { score: 71.5, slots_after: 2 } }],
+    { id: 2, kind: 'promote', subject_type: 'niche', subject_id: 2, subject_name: 'Travel', status: 'confirmed', reason: 'Takes the freed slot.', at: now - 86400, numbers: { score: 71.5, slots_after: 2 } },
+    { id: 4, kind: 'add', subject_type: 'niche', subject_id: 0, subject_name: 'Deep sea', status: 'awaiting_user', reason: 'A replacement for Chess.', at: now - 7200,
+      numbers: { live_niches: 2, cap: 5 }, payload: { name: 'Deep sea', source: 'https://trends.example.test/deep-sea', signal: 'up 40% in 30 days' } }],
     posted: [{ id: 24, title: 'Already live', posted_url: 'https://youtu.be/LIVE1234567' }, { id: 25, title: 'Second live', posted_url: 'https://youtu.be/LIVE7654321' }] });
 };
 
@@ -229,6 +242,21 @@ app.whenReady().then(async () => {
     await js("document.querySelector('button[aria-label=\"Restore TikTok @cooks.tt\"]').click()");
     await wait("document.querySelector('[data-channel-id=\"2\"] .set-pill').textContent==='Live'");
     assert.ok(last('/channels/2/restore'));
+    // The YouTube connections: analytics not connected offers Connect; posting is connected with its privacy.
+    assert.ok(await js("document.querySelector('[data-youtube=analytics]').textContent.includes('Not connected') && !!document.querySelector('button[aria-label=\"Connect YouTube analytics\"]')"));
+    assert.ok(await js("document.querySelector('[data-youtube=posting]').textContent.includes('As me@example.com') && document.querySelector('[data-youtube=posting]').textContent.includes('API audit')"));
+    await fill('Privacy of YouTube uploads', 'unlisted');
+    for (let n = 0; n < 100 && !last('/posting/youtube/privacy', 'PUT'); n++) await pause(50);
+    assert.deepEqual(last('/posting/youtube/privacy', 'PUT').body, { privacy: 'unlisted' });
+    // A channel's look: the Editor and Script Writer follow it.
+    assert.ok(await js("document.querySelector('[data-channel-id=\"1\"]').textContent.includes('No look set')"));
+    await js("document.querySelector('button[aria-label=\"Look for YouTube @cooks\"]').click()");
+    await wait("!!document.querySelector('[aria-label=\"Look id\"]')");
+    await fill('Look id', 'sport'); await fill('Aspect', '16:9'); await fill('Voice notes', 'Calm, curious.');
+    await click('.sc-dialog-panel button', 'Save look');
+    await wait("!document.querySelector('[aria-label=\"Look id\"]')");
+    assert.deepEqual(last('/channels/1/edit').body, { look: 'sport', aspect: '16:9', notes: 'Calm, curious.' });
+    await wait("document.querySelector('[data-channel-id=\"1\"]').textContent.includes('look sport, 16:9, voice notes set')");
     await noOverflow(); await labels();
 
     // 4. The pipeline board: steps, owner, age, overdue flag; a click opens the details.
@@ -248,6 +276,16 @@ app.whenReady().then(async () => {
     await click('.sc-dialog button', 'Mark posted');
     await wait("!document.querySelector('.sc-dialog')");
     assert.deepEqual(last('/posts/23/posted').body, { url: 'https://www.instagram.com/p/abc' });
+    assert.equal(writes.filter(w => w.path.endsWith('/publish-youtube')).length, 0, 'An Instagram post has no direct posting');
+    // An approved YouTube post can go out through the person's own Google project, after a confirmation.
+    await js("document.querySelector('[data-item=post-26]').click()");
+    await wait("!!document.querySelector('.sc-dialog .sc-preview')");
+    await click('.sc-dialog button', 'Post to YouTube');
+    await wait("!!document.querySelector('.confirm-panel')");
+    assert.ok(await js("document.querySelector('.confirm-panel').textContent.includes('exactly as approved') && document.querySelector('.confirm-panel').textContent.includes('AI-content label')"));
+    await click('.confirm-panel button', 'Post to YouTube');
+    await wait("!document.querySelector('.sc-dialog')");
+    assert.ok(last('/posts/26/publish-youtube'));
 
     // 5. Approvals: preview, then Approve / Edit / Reject with a note / Redraft call the right endpoints.
     await tab('approvals');
@@ -283,6 +321,17 @@ app.whenReady().then(async () => {
     await wait("document.querySelectorAll('.sc-post').length===1");
     assert.deepEqual(last('/posts/13/reject').body, { reason: 'Open with the result' });
     assert.ok(last('/posts/13/redraft'));
+    assert.equal(await js("!!document.querySelector('.sc-batch')"), false, 'No batch button while batch approval is off');
+    // With batch approval on, one tap approves the posts shown, after a confirmation.
+    store.settings.batch_approval = true;
+    store.approvals.push(post(15, { title: 'Soup two' }));
+    await pause(1100); await tab('pipeline'); await openContent(); await tab('approvals');
+    await wait("!!document.querySelector('button[aria-label=\"Approve all 2 posts\"]')");
+    await js("document.querySelector('button[aria-label=\"Approve all 2 posts\"]').click()");
+    await wait("!!document.querySelector('.confirm-panel')");
+    await click('.confirm-panel button', 'Approve all');
+    await wait("document.querySelectorAll('.sc-post').length===0");
+    assert.deepEqual(last('/approvals/approve-batch').body, { post_ids: [14, 15] });
 
     // 6. Scoreboard: needs more data, scores, awaiting decisions with Confirm / Reject.
     await tab('scoreboard');
@@ -295,13 +344,34 @@ app.whenReady().then(async () => {
     assert.ok(await js("document.querySelector('.sc-body').textContent.includes('views 40, watch time 40, follows and engagement 20')"));
     assert.ok(await js("document.querySelector('[data-decision-id=\"2\"]').textContent.includes('Promote niche Travel') && document.querySelector('[data-decision-id=\"2\"]').textContent.includes('score 71.5')"), 'Recent decision with numbers');
     assert.ok(await js("document.querySelector('[data-decision-id=\"1\"]').textContent.includes('team median 71.5')"), 'Awaiting decision with numbers');
+    assert.ok(await js("document.querySelector('[data-decision-id=\"4\"]').textContent.includes('Add niche Deep sea') && document.querySelector('[data-decision-id=\"4\"]').textContent.includes('Source: https://trends.example.test/deep-sea')"), 'A proposed niche shows its evidence');
+    // Team settings: the score weights and batch approval.
+    assert.equal(await js("document.querySelector('[aria-label=\"Views at 7 days weight, percent\"]').value"), '40');
+    await fill('Watch time weight, percent', '0'); await fill('Views at 7 days weight, percent', '0'); await fill('Follows and engagement weight, percent', '0');
+    await click('.sc button', 'Save score weights');
+    await wait("[...document.querySelectorAll('.sc .set-error')].some(n=>n.textContent.includes('above 0'))");
+    assert.equal(writes.filter(w => w.path.endsWith('/settings') && w.method === 'PUT' && w.body.weights).length, 0, 'All-zero weights are not sent');
+    await fill('Views at 7 days weight, percent', '50'); await fill('Watch time weight, percent', '30'); await fill('Follows and engagement weight, percent', '20');
+    await click('.sc button', 'Save score weights');
+    for (let n = 0; n < 100 && !last('/settings', 'PUT'); n++) await pause(50);
+    assert.deepEqual(last('/settings', 'PUT').body, { weights: { views: 0.5, watch: 0.3, engagement: 0.2 } });
+    await wait("!!document.querySelector('[aria-label=\"One-tap batch approval\"]')");
+    await fill('One-tap batch approval', 'off');
+    for (let n = 0; n < 100 && last('/settings', 'PUT').body.batch_approval !== false; n++) await pause(50);
+    assert.deepEqual(last('/settings', 'PUT').body, { batch_approval: false });
     await capture('desktop-scoreboard'); await noOverflow(); await labels();
-    await js("document.querySelector('button[aria-label^=\"Confirm: \"]').click()");
+    await js("document.querySelector('button[aria-label=\"Confirm: Retire channel youtube:@cooks\"]').click()");
     await wait("!!document.querySelector('.confirm-panel')");
     assert.ok(await js("document.querySelector('.confirm-panel').textContent.includes('Nothing is deleted')"));
     await click('.confirm-panel button', 'Confirm');
-    await wait("!document.querySelector('button[aria-label^=\"Confirm: \"]')");
+    await wait("!document.querySelector('button[aria-label=\"Confirm: Retire channel youtube:@cooks\"]')");
     assert.deepEqual(last('/decisions/1/confirm').body, { actor: 'user' });
+    await js("document.querySelector('button[aria-label=\"Confirm: Add niche Deep sea\"]').click()");
+    await wait("!!document.querySelector('.confirm-panel')");
+    assert.ok(await js("document.querySelector('.confirm-panel').textContent.includes('Create them yourself')"), 'A new niche says the person creates its channels');
+    await click('.confirm-panel button', 'Confirm');
+    await wait("!document.querySelector('button[aria-label=\"Confirm: Add niche Deep sea\"]')");
+    assert.deepEqual(last('/decisions/4/confirm').body, { actor: 'user' });
     store.decisions.push({ id: 3, kind: 'retire', subject_type: 'channel', subject_id: 2, subject_name: 'tiktok:@cooks.tt', status: 'awaiting_user', reason: 'Behind.', at: now, numbers: {} });
     await pause(1100); // identical reads within a second share one request (api.js)
     await tab('pipeline'); await tab('scoreboard');
@@ -347,7 +417,7 @@ app.whenReady().then(async () => {
     store.forbidden = false;
 
     assert.deepEqual(errors, []); assert.deepEqual(outside, []);
-    console.log(JSON.stringify({ ok: true, output, writes: writes.length, checks: ['empty state and template deep link', 'add channel', 'warning shown and resolved', 'archive and restore', 'pipeline board', 'details', 'approve', 'edit', 'reject with note', 'redraft', 'scoreboard needs more data', 'decisions confirm and reject', 'report', 'csv mapping and import', '390 phone', '403', 'offline'] }));
+    console.log(JSON.stringify({ ok: true, output, writes: writes.length, checks: ['empty state and template deep link', 'add channel', 'warning shown and resolved', 'archive and restore', 'youtube connections and privacy', 'channel look', 'pipeline board', 'details', 'post to youtube', 'approve', 'edit', 'reject with note', 'redraft', 'batch approval', 'scoreboard needs more data', 'niche proposal', 'team settings', 'decisions confirm and reject', 'report', 'csv mapping and import', '390 phone', '403', 'offline'] }));
   } catch (error) {
     console.error(error.stack);
     if (win && !win.isDestroyed()) fs.writeFileSync(path.join(output, 'failure.png'), (await win.webContents.capturePage()).toPNG());

@@ -118,7 +118,7 @@ export const roleTitle = role => ROLE_TITLES[role] || role;
 
 // -- decisions ------------------------------------------------------------------------------------
 
-export const DECISION_WORDS = { retire: 'Retire', promote: 'Promote', replace: 'Replace' };
+export const DECISION_WORDS = { retire: 'Retire', promote: 'Promote', replace: 'Replace', add: 'Add' };
 export function decisionTitle(d) {
   const noun = d.subject_type === 'channel' ? 'channel' : d.subject_type === 'strategy' ? 'strategy' : 'niche';
   return `${DECISION_WORDS[d.kind] || d.kind} ${noun} ${d.subject_name}`.trim();
@@ -136,7 +136,15 @@ export function decisionNumbers(d) {
   if (num(n.freed_slots) != null) bits.push(`${num(n.freed_slots)} slot${n.freed_slots === 1 ? '' : 's'} freed`);
   if (num(n.slots_after) != null) bits.push(`${num(n.slots_after)} slots after`);
   if (n.niche) bits.push(`niche ${n.niche}`);
+  if (num(n.live_niches) != null && num(n.cap) != null) bits.push(`${num(n.live_niches)} of ${num(n.cap)} niches live`);
   return bits.join(', ');
+}
+
+// A proposed new niche carries the Researcher's evidence: where it saw it and what is rising.
+export function decisionEvidence(d) {
+  const p = d.payload || {};
+  if (d.kind !== 'add' || !p.source) return '';
+  return `Source: ${p.source}${p.signal ? `. Signal: ${p.signal}` : ''}.`;
 }
 
 export function decisionStatus(d) {
@@ -152,6 +160,81 @@ export function sortDecisions(decisions) {
     producer: list.filter(d => d.status === 'proposed'),
     recent: list.filter(d => ['confirmed', 'rejected', 'open'].includes(d.status)),
   };
+}
+
+// -- channels, YouTube and team settings ----------------------------------------------------------
+
+export const ASPECTS = [['', 'Platform default (9:16)'], ['9:16', '9:16 tall'], ['16:9', '16:9 wide'], ['1:1', '1:1 square']];
+
+export function channelLookText(channel) {
+  const bits = [];
+  if (channel.look) bits.push(`look ${channel.look}`);
+  if (channel.aspect) bits.push(channel.aspect);
+  if (channel.notes) bits.push('voice notes set');
+  return bits.length ? bits.join(', ') : 'No look set';
+}
+
+const shortDate = seconds => new Date(seconds * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
+export function connectionState(status) {
+  if (!status) return ['Unavailable', 'muted'];
+  if (status.needs_reconnect) return ['Reconnect', 'error'];
+  if (status.connected) return ['Connected', 'ok'];
+  if (status.pending) return ['Waiting for Google', 'warn'];
+  return ['Not connected', 'muted'];
+}
+
+export function analyticsText(status) {
+  if (!status?.connected) return 'Reads views, watch time, likes and follows for your YouTube posts once a day. Read-only: it never posts.';
+  const parts = [status.google_account?.email ? `As ${status.google_account.email}.` : '',
+    status.last_sync ? `Last synced ${shortDate(status.last_sync)}.` : 'Not synced yet.'];
+  if (status.last_error) parts.push(status.last_error);
+  return parts.filter(Boolean).join(' ');
+}
+
+export function syncText(result) {
+  if (!result) return 'Synced.';
+  const stored = result.stored || 0;
+  const head = stored ? `Stored numbers for ${stored} post${stored === 1 ? '' : 's'}.` : 'No new numbers yet.';
+  if (result.stopped === 'quota') return head + ' YouTube\'s quota ran out; the rest comes at the next sync.';
+  if (result.channels_not_owned?.length) return head + ` Not on this Google account: ${result.channels_not_owned.join(', ')}.`;
+  return head;
+}
+
+export const PRIVACY = [['private', 'Private'], ['unlisted', 'Unlisted'], ['public', 'Public']];
+
+export function postingText(status) {
+  if (!status?.connected) return 'Post approved YouTube posts through your own Google project. Optional: Prepare post stays the default.';
+  return status.google_account?.email ? `As ${status.google_account.email}.` : 'Connected.';
+}
+
+export function publishText(result) {
+  if (result?.note) return result.note;
+  return `Posted to YouTube as ${result?.privacy || 'private'}.`;
+}
+
+export function batchText(result) {
+  const done = result?.approved?.length || 0, skipped = result?.skipped?.length || 0;
+  return `Approved ${done} post${done === 1 ? '' : 's'}.` + (skipped ? ` ${skipped} could not be approved and still wait.` : '');
+}
+
+export const WEIGHTS = [['views', 'Views at 7 days'], ['watch', 'Watch time'], ['engagement', 'Follows and engagement']];
+
+export function weightPercents(weights) {
+  const total = Object.values(weights || {}).reduce((a, b) => a + (Number(b) || 0), 0);
+  return Object.fromEntries(WEIGHTS.map(([k]) => [k, total > 0 ? Math.round(((Number(weights[k]) || 0) / total) * 100) : 0]));
+}
+
+// The three percentages as the weights the server takes, or a sentence saying what is wrong.
+export function weightsFromPercents(values) {
+  const out = {};
+  for (const [k, label] of WEIGHTS) {
+    const v = Number(values[k]);
+    if (!Number.isFinite(v) || v < 0 || v > 100) return { error: `${label} must be between 0 and 100.` };
+    out[k] = v / 100;
+  }
+  if (Object.values(out).reduce((a, b) => a + b, 0) <= 0) return { error: 'At least one weight must be above 0.' };
+  return { weights: out };
 }
 
 // -- failures -------------------------------------------------------------------------------------

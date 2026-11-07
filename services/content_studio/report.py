@@ -49,7 +49,8 @@ def build_report(store, now=None, days=7, spend=None):
                       "strategy_swaps": [d for d in recent if d["kind"] == "replace" and d["subject_type"] == "strategy"
                                          and d["status"] in review.OPEN + ("confirmed",)],
                       "niches_wanted": [d for d in decisions if d["kind"] == "replace" and d["subject_type"] == "niche"
-                                        and d["status"] == "open"]},
+                                        and d["status"] == "open"],
+                      "niches_proposed": [d for d in decisions if d["kind"] == "add" and d["status"] in review.OPEN]},
         "activity": {"posted_this_week": len(posted_week), "awaiting_approval": len(pipeline.approval_queue(store)),
                      "findings": len(pipeline.watch(store, now, spend=lambda: None))},
         "spend": team_spend(store, now) if spend is None else spend(),
@@ -74,6 +75,8 @@ def render_text(report):
     bits = [f"{d['subject_name']} takes freed slots" for d in rep["promotions"]]
     bits += [f"{d['subject_name']} swapped for a variation of {d['numbers'].get('winner', {}).get('name', 'the winner')}" for d in rep["strategy_swaps"]]
     bits += [f"a replacement for {d['subject_name']} is wanted" for d in rep["niches_wanted"]]
+    bits += [f"{d['subject_name']} is proposed as a new niche ({'waiting for you' if d['status'] == 'awaiting_user' else 'with the Producer'})"
+             for d in rep.get("niches_proposed", [])]
     lines.append("Replacing: " + ("; ".join(bits) or "nothing") + ".")
     spend = report["spend"]
     if spend.get("available"):

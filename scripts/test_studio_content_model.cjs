@@ -93,5 +93,39 @@ const { pathToFileURL } = require('node:url');
   const bad = M.buildImport([['Ghost', '5', '1', '0']], mapping, posts, { defaultLength: 30 });
   assert.equal(bad.body.rows.length, 0);
   assert.equal(bad.problems[0].line, 2);
+  // A proposed niche: its title, its numbers and the Researcher's evidence.
+  const add = { kind: 'add', subject_type: 'niche', subject_name: 'Deep sea', numbers: { live_niches: 3, cap: 5 },
+    payload: { source: 'https://trends.example.test', signal: 'up 40%' } };
+  assert.equal(M.decisionTitle(add), 'Add niche Deep sea');
+  assert.equal(M.decisionNumbers(add), '3 of 5 niches live');
+  assert.equal(M.decisionEvidence(add), 'Source: https://trends.example.test. Signal: up 40%.');
+  assert.equal(M.decisionEvidence({ kind: 'retire', payload: { source: 'x' } }), '');
+
+  // Channel looks, YouTube connections, batch results and the score weights.
+  assert.equal(M.channelLookText({}), 'No look set');
+  assert.equal(M.channelLookText({ look: 'sport', aspect: '16:9', notes: 'Calm.' }), 'look sport, 16:9, voice notes set');
+  assert.deepEqual(M.connectionState(null), ['Unavailable', 'muted']);
+  assert.deepEqual(M.connectionState({ connected: true, needs_reconnect: true }), ['Reconnect', 'error']);
+  assert.deepEqual(M.connectionState({ connected: false, pending: true }), ['Waiting for Google', 'warn']);
+  assert.deepEqual(M.connectionState({ connected: true }), ['Connected', 'ok']);
+  assert.match(M.analyticsText({ connected: false }), /never posts/);
+  assert.match(M.analyticsText({ connected: true, google_account: { email: 'a@b.test' }, last_sync: null }), /As a@b\.test\. Not synced yet\./);
+  assert.match(M.analyticsText({ connected: true, last_sync: 1_790_000_000, last_error: 'Quota.' }), /Last synced .*Quota\./);
+  assert.equal(M.syncText({ stored: 1 }), 'Stored numbers for 1 post.');
+  assert.match(M.syncText({ stored: 0, stopped: 'quota' }), /No new numbers yet\. YouTube's quota ran out/);
+  assert.match(M.syncText({ stored: 2, channels_not_owned: ['@x'] }), /Not on this Google account: @x\./);
+  assert.match(M.postingText({ connected: false }), /Prepare post stays the default/);
+  assert.equal(M.publishText({ privacy: 'unlisted', note: '' }), 'Posted to YouTube as unlisted.');
+  assert.equal(M.publishText({ privacy: 'private', note: 'YouTube kept it private.' }), 'YouTube kept it private.');
+  assert.equal(M.batchText({ approved: [1, 2], skipped: [] }), 'Approved 2 posts.');
+  assert.equal(M.batchText({ approved: [1], skipped: [{}] }), 'Approved 1 post. 1 could not be approved and still wait.');
+  assert.deepEqual(M.weightPercents({ views: 0.4, watch: 0.4, engagement: 0.2 }), { views: 40, watch: 40, engagement: 20 });
+  assert.deepEqual(M.weightPercents({ views: 1, watch: 1, engagement: 2 }), { views: 25, watch: 25, engagement: 50 });
+  assert.deepEqual(M.weightsFromPercents({ views: '50', watch: '30', engagement: '20' }), { weights: { views: 0.5, watch: 0.3, engagement: 0.2 } });
+  assert.match(M.weightsFromPercents({ views: '0', watch: '0', engagement: '0' }).error, /above 0/);
+  assert.match(M.weightsFromPercents({ views: '120', watch: '0', engagement: '0' }).error, /Views at 7 days must be between 0 and 100/);
+  assert.match(M.weightsFromPercents({ views: 'x', watch: '1', engagement: '1' }).error, /between 0 and 100/);
+  for (const text of [M.analyticsText({}), M.postingText({}), M.batchText({ approved: [], skipped: [{}] })]) assert.ok(!text.includes('—'), 'no em-dashes');
+
   console.log('studio content model ok');
 })().catch(error => { console.error(error); process.exit(1); });

@@ -37,10 +37,14 @@ The Content button beside Videos opens the Content Studio team's screens
 `static/css/studio-content.css`; the routes are `/api/content-studio/`). With no
 channels it explains the team and offers the Bots template and Add a channel.
 Otherwise: Approvals (approve, edit, reject with a note, redraft; approving only
-marks a post approved, Prepare post comes later), the Pipeline board, Channels
-(registered by you, never created by Kairos; platform warnings show at the top
-until resolved), the Scoreboard with pending decisions, and the weekly Report with
-a CSV import for platform analytics.
+marks a post approved, Prepare post comes with the Kairos Browser; Approve all
+once batch approval is on), the Pipeline board (an approved YouTube post can be
+posted through your own Google project from its details), Channels (registered by
+you, never created by Kairos; each with a look, aspect and voice notes; platform
+warnings show at the top until resolved; the YouTube analytics and posting
+connections), the Scoreboard with pending decisions (including new niches the
+Researcher proposes) and the team settings (score weights, batch approval), and
+the weekly Report with a CSV import for platform analytics.
 
 ## Integration prerequisite
 

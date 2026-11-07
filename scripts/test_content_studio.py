@@ -450,6 +450,12 @@ class Report(unittest.TestCase):
         self.assertEqual([d["subject_name"] for d in data["retiring"]["retired_this_week"]], ["Chess"])
         self.assertEqual([d["subject_name"] for d in data["replacing"]["promotions"]], ["Space"])
         self.assertEqual([d["subject_name"] for d in data["replacing"]["niches_wanted"]], ["Chess"])
+        proposed = review.propose_niche(store, "Deep sea", "https://trends.example.test", now=NOW2 + 6)
+        review.confirm(store, proposed["id"], "producer", "Producer", now=NOW2 + 7)
+        data = report.build_report(store, NOW2 + DAY, spend=lambda: {"available": True, "team_spent_usd": 12.5,
+                                                                      "all_bots_spent_usd": 20.0, "cap_usd": 50})
+        self.assertEqual([d["subject_name"] for d in data["replacing"]["niches_proposed"]], ["Deep sea"])
+        self.assertIn("Deep sea is proposed as a new niche (waiting for you)", report.render_text(data))
         text = report.render_text(data)
         for needle in ("What won: Space", "Retired this week: Chess", "Space takes freed slots", "replacement for Chess", "$12.50", "cap $50"):
             self.assertIn(needle, text)

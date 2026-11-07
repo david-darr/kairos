@@ -4,12 +4,20 @@ import * as M from './studioContentModel.js';
 
 // The Content section of the Studio tab: channels, the pipeline board, approvals, the scoreboard, the weekly report
 // and the numbers import for the Content Studio team (routes/content_studio_routes.py). Drawn with the Settings kit
-// rows and pills. Approving only marks a post approved; preparing it for the platform comes later.
+// rows and pills. Approving only marks a post approved; preparing it for the platform comes with the Kairos Browser.
+// A YouTube post can also go out through the person's own Google project when they connect posting (Channels tab).
 
 const BASE = '/api/content-studio';
 const TABS = [['approvals', 'Approvals'], ['pipeline', 'Pipeline'], ['channels', 'Channels'], ['scoreboard', 'Scoreboard'], ['report', 'Report']];
 const get = path => api(BASE + path);
 const send = (path, body = {}) => api(BASE + path, { method: 'POST', body: JSON.stringify(body), toast: false });
+const put = (path, body) => api(BASE + path, { method: 'PUT', body: JSON.stringify(body), toast: false });
+const remove = path => api(BASE + path, { method: 'DELETE', toast: false });
+// Google's consent page opens in the system browser (the desktop app) or a new tab.
+async function openGoogle(url) {
+  if (window.jarvis?.openGoogleSignIn) { if (!await window.jarvis.openGoogleSignIn(url)) throw new Error('Could not open Google sign-in.'); return; }
+  window.open(url, '_blank', 'noopener');
+}
 const say = error => toast(M.loadFailure(error), 'error');
 const longDate = seconds => new Date(seconds * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
@@ -63,7 +71,7 @@ export async function mountContent(host, { signal } = {}) {
   const alive = () => !disposed && root.isConnected;
 
   async function loadCore() {
-    const names = ['niches', 'channels', 'pipeline', 'approvals', 'watch', 'settings'];
+    const names = ['niches', 'channels', 'pipeline', 'approvals', 'watch', 'settings', 'analytics/youtube/status', 'posting/youtube/status'];
     const results = await Promise.allSettled(names.map(n => get('/' + n)));
     if (!alive()) return;
     if (results.every(r => r.status === 'rejected')) {
@@ -74,8 +82,9 @@ export async function mountContent(host, { signal } = {}) {
     data = { ...(data || {}), niches: value('niches', { niches: [] }).niches, maxLive: value('niches', {}).max_live,
       channels: value('channels', { channels: [] }).channels, items: value('pipeline', { items: [] }).items,
       approvals: value('approvals', { posts: [] }).posts, findings: value('watch', { findings: [] }).findings,
-      hasTeam: (value('settings', {}).team_bot_ids || []).length > 0,
-      failed: names.filter((n, i) => results[i].status === 'rejected') };
+      hasTeam: (value('settings', {}).team_bot_ids || []).length > 0, settings: value('settings', {}),
+      yt: value('analytics/youtube/status', null), ytPost: value('posting/youtube/status', null),
+      failed: names.filter((n, i) => results[i].status === 'rejected' && !n.includes('youtube')) };
     await draw();
   }
   const reload = () => loadCore();
@@ -149,6 +158,7 @@ export async function mountContent(host, { signal } = {}) {
     const out = [];
     const cap = data.maxLive ? ` At most ${data.maxLive} niches can be live at once.` : '';
     out.push(el('div', { class: 'sc-bar' }, [note('Channels you created. Kairos never creates accounts.' + cap), btn('Add a channel', () => addChannelDialog())]));
+    out.push(youtubeGroup());
     for (const { niche, channels } of M.groupChannels(data.niches, data.channels)) {
       const rows = channels.map(channelRow);
       if (!rows.length) rows.push(empty('No channels in this niche yet.'));
@@ -157,12 +167,67 @@ export async function mountContent(host, { signal } = {}) {
     if (!data.niches.length) out.push(empty('No channels yet. Add the first one above.'));
     return out;
   }
+  // After Google's consent page, the status is read again when the person comes back to Kairos.
+  function reloadOnReturn() { window.addEventListener('focus', () => { if (alive()) reload(); }, { once: true }); }
+
+  function youtubeGroup() {
+    const a = data.yt, p = data.ytPost;
+    if (!a && !p) return group({ title: 'YouTube' }, [empty('YouTube connections could not load. Try again in a moment.')]);
+    const configured = (a || p).configured;
+    const rows = [];
+    if (!configured) rows.push(row({ title: 'Google first', description: 'Set up Google in Library (your own Google OAuth client and a sign-in), then connect YouTube here.' }));
+    const [aLabel, aTone] = M.connectionState(a);
+    const aControls = [pill(aLabel, aTone)];
+    if (a?.connected) {
+      aControls.push(btn('Sync now', async () => { const out = await send('/analytics/youtube/sync'); toast(M.syncText(out.result)); await reload(); }, '', { 'aria-label': 'Sync YouTube numbers now' }),
+        btn('Disconnect', async () => { await remove('/analytics/youtube'); toast('YouTube analytics disconnected. Numbers already stored stay.'); await reload(); }, 'quiet', { 'aria-label': 'Disconnect YouTube analytics' }));
+    } else if (configured) {
+      aControls.push(btn(a?.needs_reconnect ? 'Reconnect' : 'Connect', async () => { const out = await send('/analytics/youtube/connect'); await openGoogle(out.url); reloadOnReturn(); toast('Finish in the Google window, then come back here.'); }, '', { 'aria-label': 'Connect YouTube analytics' }));
+    }
+    rows.push(row({ title: 'Analytics', description: M.analyticsText(a), control: aControls, attrs: { 'data-youtube': 'analytics' } }));
+    const [pLabel, pTone] = M.connectionState(p);
+    const pControls = [pill(pLabel, pTone)];
+    if (p?.connected) {
+      const privacy = selectOf('Privacy of YouTube uploads', M.PRIVACY, p.privacy || 'private');
+      privacy.addEventListener('change', async () => {
+        try { data.ytPost = await put('/posting/youtube/privacy', { privacy: privacy.value }); toast(`Uploads ask for ${privacy.value}.`); } catch (error) { say(error); privacy.value = data.ytPost.privacy; }
+      });
+      pControls.push(privacy, btn('Disconnect', async () => { await remove('/posting/youtube'); toast('YouTube posting disconnected.'); await reload(); }, 'quiet', { 'aria-label': 'Disconnect YouTube posting' }));
+    } else if (configured) {
+      pControls.push(btn(p?.needs_reconnect ? 'Reconnect' : 'Connect', async () => { const out = await send('/posting/youtube/connect'); await openGoogle(out.url); reloadOnReturn(); toast('Finish in the Google window, then come back here.'); }, '', { 'aria-label': 'Connect YouTube posting' }));
+    }
+    rows.push(row({ title: 'Posting', description: M.postingText(p), control: pControls, attrs: { 'data-youtube': 'posting' },
+      below: p ? el('p', { class: 'sc-dim sc-notice', text: p.notice }) : null }));
+    return group({ title: 'YouTube', description: 'Your own Google project. Analytics only reads; posting only sends posts you approved.' }, rows);
+  }
+
+  function lookDialog(channel) {
+    const name = `${M.platformName(channel.platform)} ${channel.handle}`;
+    const look = textInput('Look id', { value: channel.look || '', maxlength: '80', placeholder: 'For example, sport' });
+    const aspect = selectOf('Aspect', M.ASPECTS, channel.aspect || '');
+    const notes = el('textarea', { rows: 4, 'aria-label': 'Voice notes', maxlength: '1000', placeholder: 'How this channel talks. For example, calm and curious, no hype.' });
+    notes.value = channel.notes || '';
+    const status = el('p', { class: 'set-error', role: 'alert' });
+    const body = el('div', { class: 'sc-dialog' }, [
+      note('The Editor renders this channel\'s videos in its look and aspect, and the Script Writer follows its voice notes.'),
+      group({}, [row({ title: 'Look', description: 'A Studio video look id. Leave it empty to let the Editor choose.', control: look, stack: true }),
+        row({ title: 'Aspect', control: aspect }), row({ title: 'Voice notes', control: notes, stack: true })]), status]);
+    const save = btn('Save look', async () => {
+      status.textContent = '';
+      try { await send(`/channels/${channel.id}/edit`, { look: look.value.trim(), aspect: aspect.value, notes: notes.value.trim() }); }
+      catch (error) { status.textContent = M.loadFailure(error); return; }
+      dialog.close(); toast('Look saved.'); await reload();
+    }, 'primary');
+    const dialog = openPanelDialog({ title: `Look for ${name}`, body, footer: el('div', {}, [save]), className: 'sc-dialog-panel' });
+  }
+
   function channelRow(channel) {
     const state = M.channelState(channel), name = `${M.platformName(channel.platform)} ${channel.handle}`;
     const warning = channel.paused && channel.status !== 'archived' ? (M.warningFor(channel.id, data.findings) || 'The platform sent a warning.') : '';
     const controls = [pill(state.label, state.tone)];
     if (channel.status === 'archived') controls.push(btn('Restore', async () => { await send(`/channels/${channel.id}/restore`); toast('Channel restored.'); await reload(); }, 'quiet', { 'aria-label': `Restore ${name}` }));
     else {
+      controls.push(btn('Look', () => lookDialog(channel), 'quiet', { 'aria-label': `Look for ${name}` }));
       if (warning) controls.push(btn('Resolve warning', () => resolveWarning(channel.id, name), '', { 'aria-label': `Resolve warning for ${channel.handle}` }));
       controls.push(btn('Archive', async () => {
         const ok = await confirmDialog({ title: 'Archive this channel?', message: `${name} leaves the rotation. Its history is kept and you can restore it.`, confirmLabel: 'Archive', danger: false });
@@ -171,7 +236,7 @@ export async function mountContent(host, { signal } = {}) {
       }, 'quiet', { 'aria-label': `Archive ${name}` }));
     }
     return row({ icon: badge(M.platformName(channel.platform), hueFor(channel.platform)), title: channel.handle,
-      description: M.platformName(channel.platform) + (channel.archive_reason ? `. ${channel.archive_reason}` : ''),
+      description: M.platformName(channel.platform) + (channel.status === 'archived' ? '' : `. ${M.channelLookText(channel)}`) + (channel.archive_reason ? `. ${channel.archive_reason}` : ''),
       below: warning ? el('div', { class: 'sc-warning', role: 'alert' }, [el('strong', { text: 'Platform warning: ' }), warning]) : null,
       control: controls, cls: warning ? 'sc-row-warning' : '', attrs: { 'data-channel-id': channel.id } });
   }
@@ -221,6 +286,17 @@ export async function mountContent(host, { signal } = {}) {
     if (post.state === 'approved') {
       const link = textInput('Link to the live post', { placeholder: 'https://' });
       actions.push(btn('Prepare post', () => {}, '', { disabled: true, title: 'Coming later' }));
+      if (post.platform === 'youtube' && !post.direct_post_blocker) {
+        actions.push(btn('Post to YouTube', async () => {
+          const privacy = data.ytPost?.privacy || 'private';
+          const ok = await confirmDialog({ title: 'Post to YouTube?', message: `"${post.title}" is uploaded exactly as approved, as ${privacy}, with YouTube's AI-content label. YouTube may keep it private until your Google project passes its API audit.`, confirmLabel: 'Post to YouTube', danger: false });
+          if (!ok) return;
+          const out = await send(`/posts/${post.id}/publish-youtube`);
+          dialog.close(); toast(M.publishText(out)); await reload();
+        }, 'primary'));
+      } else if (post.platform === 'youtube' && post.direct_post_blocker) {
+        parts.push(note(`Posting straight to YouTube: ${post.direct_post_blocker}`));
+      }
       parts.push(note('Prepare post is not built yet. For now, post it yourself, then paste the link here to mark it posted.'),
         group({}, [row({ title: 'Mark as posted', description: 'Needed before you can import its numbers.', control: [link, btn('Mark posted', async () => {
           if (!link.value.trim()) { toast('Paste the link to the post.', 'error'); return; }
@@ -241,7 +317,9 @@ export async function mountContent(host, { signal } = {}) {
       : link.href ? el('a', { href: link.href, text: link.label, ...(link.external ? { target: '_blank', rel: 'noopener noreferrer' } : {}) })
       : el('span', { text: link.label });
     return el('div', { class: 'sc-preview' }, [
+      post.pick_reason ? el('div', { class: 'sc-block' }, [el('h4', { text: 'Why this topic' }), el('p', { class: 'sc-text', text: post.pick_reason })]) : null,
       el('div', { class: 'sc-block' }, [el('h4', { text: 'Caption' }), el('p', { class: 'sc-text', text: post.caption || 'No caption yet.' })]),
+      post.tags ? el('div', { class: 'sc-block' }, [el('h4', { text: 'Tags' }), el('p', { class: 'sc-text', text: post.tags })]) : null,
       el('div', { class: 'sc-block' }, [el('h4', { text: 'Script' }), el('p', { class: 'sc-text', text: post.script_ref || 'No script yet.' })]),
       el('div', { class: 'sc-block' }, [el('h4', { text: 'Video' }), renderNode]),
       el('div', { class: 'sc-block', 'data-ai-label': label.required ? 'required' : 'none' }, [el('h4', { text: 'AI label' }),
@@ -252,8 +330,17 @@ export async function mountContent(host, { signal } = {}) {
 
   function approvalsView() {
     if (!data.approvals.length) return [empty('Nothing is waiting for you. Posts appear here when the Producer brings them for approval.')];
-    return [note('Approving marks a post approved. Preparing it for the platform comes later, so approved posts wait in the Pipeline until then.'),
-      ...data.approvals.map(approvalCard)];
+    const out = [note('Approving marks a post approved. Preparing it for the platform comes later, so approved posts wait in the Pipeline until then.')];
+    const count = data.approvals.length;
+    if (data.settings?.batch_approval && count > 1) {
+      out.push(el('div', { class: 'sc-actions sc-batch' }, [btn(`Approve all ${count}`, async () => {
+        const ok = await confirmDialog({ title: `Approve all ${count} posts?`, message: 'Each post shown here is approved as it is now. Nothing is posted by approving.', confirmLabel: 'Approve all', danger: false });
+        if (!ok) return;
+        const result = await send('/approvals/approve-batch', { post_ids: data.approvals.map(p => p.id) });
+        toast(M.batchText(result)); await reload();
+      }, 'primary', { 'aria-label': `Approve all ${count} posts` })]));
+    }
+    return [...out, ...data.approvals.map(approvalCard)];
   }
   function approvalCard(post) {
     const node = el('article', { class: 'sc-post', 'data-post-id': post.id, 'aria-label': post.title });
@@ -282,7 +369,7 @@ export async function mountContent(host, { signal } = {}) {
     const editor = () => {
       const title = textInput('Title', { value: post.title, maxlength: '200' });
       const caption = el('textarea', { rows: 4, 'aria-label': 'Caption', maxlength: '5000' }); caption.value = post.caption || '';
-      const script = el('textarea', { rows: 4, 'aria-label': 'Script', maxlength: '500' }); script.value = post.script_ref || '';
+      const script = el('textarea', { rows: 4, 'aria-label': 'Script', maxlength: '20000' }); script.value = post.script_ref || '';
       const save = btn('Save changes', async () => {
         const changes = {};
         if (title.value !== post.title) changes.title = title.value;
@@ -313,7 +400,30 @@ export async function mountContent(host, { signal } = {}) {
     if (board.formats.length) out.push(group({ title: 'Formats' }, M.rankRows(board.formats).map(r => scoreRow(r, ''))));
     out.push(group({ title: 'Recent decisions', description: 'Every retirement, promotion and swap is kept with its numbers.' },
       sorted.recent.length ? sorted.recent.slice(0, 12).map(d => decisionRow(d)) : [empty('No decisions yet.')]));
+    out.push(settingsGroup());
     return out;
+  }
+
+  function settingsGroup() {
+    const s = data.settings || {};
+    const pct = M.weightPercents(s.weights || { views: 0.4, watch: 0.4, engagement: 0.2 });
+    const inputs = Object.fromEntries(M.WEIGHTS.map(([k, label]) => [k, el('input', { type: 'number', min: '0', max: '100', step: '1', inputmode: 'numeric', 'aria-label': `${label} weight, percent`, value: String(pct[k]) })]));
+    const status = el('p', { class: 'set-error', role: 'alert' });
+    const save = btn('Save weights', async () => {
+      status.textContent = '';
+      const built = M.weightsFromPercents(Object.fromEntries(Object.entries(inputs).map(([k, n]) => [k, n.value])));
+      if (built.error) { status.textContent = built.error; return; }
+      data.settings = await put('/settings', { weights: built.weights });
+      toast('Weights saved. Scores use them from now on.'); draw();
+    }, '', { 'aria-label': 'Save score weights' });
+    const batch = selectOf('One-tap batch approval', [['off', 'Off'], ['on', 'On']], s.batch_approval ? 'on' : 'off');
+    batch.addEventListener('change', async () => {
+      try { data.settings = await put('/settings', { batch_approval: batch.value === 'on' }); toast(batch.value === 'on' ? 'Batch approval is on.' : 'Batch approval is off.'); }
+      catch (error) { say(error); batch.value = data.settings?.batch_approval ? 'on' : 'off'; }
+    });
+    return group({ title: 'Team settings', description: 'Each part is ranked within its platform before mixing, so these are shares of the score.' }, [
+      ...M.WEIGHTS.map(([k, label]) => row({ title: label, control: inputs[k] })), row({ title: 'Save', description: 'Shares of 100. Scores use them from the next read.', control: save, below: status }),
+      row({ title: 'One-tap batch approval', description: 'Approve every post waiting for you with one tap. Off by default: each post gets its own OK.', control: batch })]);
   }
   function scoreRow(r, tag) {
     const enough = r.eligible && r.score != null;
@@ -323,11 +433,12 @@ export async function mountContent(host, { signal } = {}) {
   }
   function decisionRow(d, controls) {
     const [label, tone] = M.decisionStatus(d);
-    return row({ title: [M.decisionTitle(d)], description: [d.reason, M.decisionNumbers(d) ? ` (${M.decisionNumbers(d)})` : ''].join(''),
+    return row({ title: [M.decisionTitle(d)], description: [d.reason, M.decisionNumbers(d) ? ` (${M.decisionNumbers(d)})` : '', M.decisionEvidence(d) ? ` ${M.decisionEvidence(d)}` : ''].join(''),
       control: controls || [pill(label, tone), el('span', { class: 'sc-dim', text: longDate(d.at) })], attrs: { 'data-decision-id': d.id } });
   }
   function decisionAsk(d) {
-    const consequence = d.kind === 'retire' ? ` Its live channels are archived with their history kept. Nothing is deleted.` : '';
+    const consequence = d.kind === 'retire' ? ` Its live channels are archived with their history kept. Nothing is deleted.`
+      : d.kind === 'add' ? ' The niche starts with no channels. Create them yourself on each platform, then add them in Channels.' : '';
     return decisionRow(d, [
       btn('Confirm', async () => {
         const ok = await confirmDialog({ title: `${M.decisionTitle(d)}?`, message: `${d.reason}${consequence}`, confirmLabel: 'Confirm', danger: false });
