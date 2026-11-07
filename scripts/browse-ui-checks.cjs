@@ -29,7 +29,8 @@ module.exports = async function browseChecks({ js, base, output, fs }) {
   const until = async (condition, timeout = 10000) => {
     const end = Date.now() + timeout;
     while (Date.now() < end) { if (await run(`return !!(${condition});`)) return; await new Promise(r => setTimeout(r, 50)); }
-    throw new Error('Timed out waiting for ' + condition);
+    const seen = await run("return JSON.stringify({ view: document.getElementById('view-content')?.dataset.view, mode: document.documentElement.dataset.appMode });").catch(() => '');
+    throw new Error('Timed out waiting for ' + condition + ` (page: ${seen}; renderer errors: ${JSON.stringify(errors.slice(-3))})`);
   };
   const shot = async (name) => fs.writeFileSync(path.join(output, `browse-${name}.png`), (await win.webContents.capturePage()).toPNG());
   const calls = (name) => run(`return window.__browseStub.calls().filter(c => c.name === ${JSON.stringify(name)});`);
@@ -166,6 +167,66 @@ module.exports = async function browseChecks({ js, base, output, fs }) {
     assert.match(await run("return document.querySelector('.browse-list').textContent;"), /report\.pdf/);
     await run("document.querySelector('[aria-label=\"Close downloads\"]').click();");
 
+    // Browser settings (2026-11-06): Sound and the password manager. The
+    // manager's backend routes are stood in for in this window only.
+    await run(`
+      const real = window.fetch;
+      const rows = [{ id: 'a1', origin: 'https://example.com', username: 'dave', created: 1, updated: 1, last_used: null, times_used: 0 }];
+      window.__pwState = { unlocked: null, reveals: 0, unlocks: [] };
+      const reply = (body, status = 200) => Promise.resolve(new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }));
+      window.fetch = (url, options = {}) => {
+        const path = String(url);
+        if (!path.startsWith('/api/browse/passwords')) return real(url, options);
+        if (path.startsWith('/api/browse/passwords?')) return reply({ logins: rows, never: [], unlocked_until: window.__pwState.unlocked, needs_password: true, max: 5000 });
+        if (path === '/api/browse/passwords/unlock') { const body = JSON.parse(options.body); window.__pwState.unlocks.push(body.password); if (body.password !== 'kairos-pass') return reply({ detail: "That password isn't right." }, 403); window.__pwState.unlocked = Date.now() / 1000 + 300; return reply({ unlocked_until: window.__pwState.unlocked }); }
+        if (path === '/api/browse/passwords/a1/reveal') { window.__pwState.reveals++; return window.__pwState.unlocked ? reply({ password: 'fixture-secret-9' }) : reply({ detail: 'Confirm it is you first.' }, 403); }
+        return reply({ detail: 'unexpected' }, 404);
+      };`);
+    await run("document.querySelector('.browse-settings-btn').click();");
+    await until("document.querySelector('.browse-internal h2')?.textContent === 'Browser settings'");
+    await until("document.querySelector('[aria-label=\"Audio output\"]') && document.querySelector('[aria-label=\"Saved passwords\"] li')");
+    assert.equal(await run("return document.querySelector('[aria-label=\"Audio output\"] option').textContent;"), 'System default');
+    assert.match(await run("return document.querySelector('[aria-label=Sound] [role=status]').textContent;"), /isn't connected/, 'an unplugged output is said so');
+    await run("const s = document.querySelector('[aria-label=\"Audio output\"]'); s.value = ''; s.dispatchEvent(new Event('change'));");
+    await until("window.__browseStub.calls().some(c => c.name === 'setAudioOutput' && c.args[0] === '')");
+    assert.match(await run("return document.querySelector('[aria-label=\"Saved passwords\"]').textContent;"), /example\.com.*dave/);
+    assert.equal(await run("return document.body.textContent.includes('fixture-secret-9');"), false, 'no password on screen before the re-entry');
+    await run("document.querySelector('[aria-label=\"Show the password for example.com\"]').click();");
+    await until("document.querySelector('.browse-pw-unlock input[type=password]')");
+    assert.equal(await run("return window.__pwState.reveals;"), 0, 'Show asks for the Kairos password first');
+    await run("const f = document.querySelector('.browse-pw-unlock input'); f.value = 'wrong'; f.form.requestSubmit();");
+    await until("window.__pwState.unlocks.length === 1");
+    assert.equal(await run("return document.body.textContent.includes('fixture-secret-9');"), false, 'a wrong password shows nothing');
+    await run("const f = document.querySelector('.browse-pw-unlock input'); f.value = 'kairos-pass'; f.form.requestSubmit();");
+    await until("document.body.textContent.includes('fixture-secret-9')");
+    await shot('passwords');
+    await run("document.querySelector('[aria-label=\"Hide the password for example.com\"]').click();");
+    await until("!document.body.textContent.includes('fixture-secret-9')");
+    await run("document.querySelector('[aria-label=\"Close settings\"]').click();");
+
+    // Save-a-sign-in offer and a saved sign-in's Fill, as strips above the page.
+    await run("const s = await window.jarvis.browse.list(); await window.jarvis.browse.navigate(s.activeId, 'example.com');");
+    const activeTab = await run("const s = await window.jarvis.browse.list(); return s.tabs.find(t => t.id === s.activeId);");
+    const pageOrigin = new URL(activeTab.url).origin;
+    await run(`window.__browseStub.emit('passwordOffer', { offerId: 5, tabId: ${activeTab.id}, origin: ${JSON.stringify(pageOrigin)}, username: 'dave', update: false });`);
+    await until("document.querySelector('.browse-pw-offer')");
+    assert.match(await run("return document.querySelector('.browse-pw-offer').textContent;"), /Save the password for dave on /);
+    await shot('password-offer');
+    await run("[...document.querySelectorAll('.browse-pw-offer button')].find(b => b.textContent === 'Save').click();");
+    await until("window.__browseStub.calls().some(c => c.name === 'answerPassword')");
+    assert.deepEqual((await calls('answerPassword')).at(-1).args, [5, 'save']);
+    await run(`window.__browseStub.emit('passwordSuggest', { tabId: ${activeTab.id}, origin: ${JSON.stringify(pageOrigin)}, kind: 'password', logins: [{ id: 'a1', username: 'dave' }], generate: true });`);
+    await until("document.querySelector('.browse-pw-suggest')");
+    assert.ok(await run("return [...document.querySelectorAll('.browse-pw-suggest button')].some(b => b.textContent === 'Use a strong password');"));
+    await run("[...document.querySelectorAll('.browse-pw-suggest button')].find(b => b.textContent === 'Fill dave').click();");
+    await until("window.__browseStub.calls().some(c => c.name === 'fillPassword')");
+    assert.deepEqual((await calls('fillPassword')).at(-1).args, [activeTab.id, 'a1']);
+    await until("!document.querySelector('.browse-pw-suggest')");
+    // A suggestion for another site than the page on screen is never shown.
+    await run(`window.__browseStub.emit('passwordSuggest', { tabId: ${activeTab.id}, origin: 'https://elsewhere.example', kind: 'password', logins: [{ id: 'b1', username: 'x' }], generate: false });`);
+    await new Promise(r => setTimeout(r, 200));
+    assert.equal(await run("return !!document.querySelector('.browse-pw-suggest');"), false);
+
     // Ask Kairos opens a strip; sharing the page is off until ticked.
     await run("document.querySelector('.browse-ask-btn').click();");
     await until("!document.querySelector('.browse-ask').hidden");
@@ -246,7 +307,8 @@ module.exports = async function browseChecks({ js, base, output, fs }) {
     await until("document.documentElement.dataset.appMode === 'kairos'");
     // In a Kairos chat it still opens the chat's side pane, not Browse.
     const opensBefore = (await calls('open')).length;
-    await run("import('/static/js/app.js').then(m => m.switchTab('chat'));");
+    const switched = await run("return import('/static/js/app.js').then(m => m.switchTab('chat')).then(() => 'ok', e => 'error: ' + (e && e.stack || e));");
+    assert.equal(switched, 'ok', 'switching to a chat');
     await until("document.getElementById('view-content')?.dataset.view === 'chat' && document.querySelector('.chat-layout')");
     await run("window.__browseStub.emit('openRequest', 'https://news.example/story');");
     await until("window.__browseStub.calls().some(c => c.name === 'pane.open' && c.args[0] === 'https://news.example/story')");
@@ -265,7 +327,7 @@ module.exports = async function browseChecks({ js, base, output, fs }) {
     await until("window.__browseStub.calls().filter(c => c.name === 'setVisible').at(-1)?.args[0] === false");
 
     assert.deepEqual(errors, [], 'Browse renderer errors');
-    return 73;
+    return 92;
   } finally {
     win.destroy();
   }

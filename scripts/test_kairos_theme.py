@@ -23,6 +23,8 @@ ALLOWED_FILES = {
     "js/appearance.js": "derives the tokens for a person's own base color",
     "js/views/agents.js": "the agent colors the backend accepts (services/agent_service.py COLORS)",
     "js/views/appearancePanel.js": "the base colors a person can pick",
+    "js/browseLook.js": "the colours a person can pick for Browse's own look",
+    "js/browseHome.js": "Speed Dial tile colours, picked from a site's name",
 }
 # Single literals allowed elsewhere, each with why.
 ALLOWED_SNIPPETS = (

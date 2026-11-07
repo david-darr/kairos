@@ -199,7 +199,8 @@ console.log('PASS: Home gates, week matrix, live transitions, refresh motion, cu
   };
   vm.createContext(state);
   vm.runInContext(`let settings = {}, storageKey = '', startupPatch = null, identityRevision = 0,
-    imageRevision = 0, imageBitmap = null, storageIssue = '', artRevision = 0, ownArt = null, artColorsKey = '';
+    imageRevision = 0, imageBitmap = null, storageIssue = '', artRevision = 0, ownArt = null, artColorsKey = '',
+    overridePatch = null, saved = null;  // Browse's look layer (appearance.js setAppearanceOverride)
     const HALFTONE_SLOTS = [], halftoneUrl = {}, halftoneRevision = {}, DEFAULTS = {};
     ${startup}
     this.update = updateAppearance; this.init = initAppearance; this.welcome = restoreWelcomeAppearance;

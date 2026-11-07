@@ -27,9 +27,47 @@ const path = require("path");
 const { autoUpdater } = require("electron-updater");
 const sideBrowser = require("./browser");
 const browserEngine = require("./browser-engine");
-const { createBrowse, kairosPorts, browseFolder } = require("./browser-browse");
+const { createBrowse, kairosPorts, browseFolder, partitionFor } = require("./browser-browse");
 const { installBrowseIpc } = require("./browser-ipc");
-let browse = null;
+const { createBrowseProfiles } = require("./browser-profiles");
+const { importCsv: importBrowsePasswords } = require("./browser-passwords");
+// The password keeper's desktop routes (routes/browse_routes.py): the window's
+// sign-in cookie says whose passwords, and the secret this process gave the
+// backend says it is the desktop app asking, not a page. Bodies hold
+// passwords, so neither they nor the answers are ever logged.
+async function browsePasswordBackend(route, body) {
+  const response = await session.defaultSession.fetch(`${BACKEND_URL}/api/browse/passwords/desktop/${route}`, {
+    method: "POST", headers: { "Content-Type": "application/json", "X-Kairos-Desktop": DESKTOP_SECRET },
+    body: JSON.stringify(body), redirect: "error", signal: AbortSignal.timeout(8000),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+let browseReservedPorts = null;
+const browseProfiles = createBrowseProfiles({
+  // The window's own sign-in cookie names the account; the page can't choose.
+  fetchProfile: async () => {
+    if (!backendReady) return null;
+    const response = await session.defaultSession.fetch(`${BACKEND_URL}/api/browse/profile`, { redirect: "error", signal: AbortSignal.timeout(5000) });
+    return response.ok ? (await response.json()).profile : null;
+  },
+  open: (profile) => {
+    // Browse takes over that partition's handlers, so shareSession() comes
+    // first; the side pane follows the same account's partition.
+    const partition = partitionFor(profile);
+    sideBrowser.shareSession(partition);
+    sideBrowser.setPartition(partition);
+    return createBrowse({
+      host: () => mainWindow, partition, folder: browseFolder(app.getPath("userData"), profile),
+      downloadsFolder: () => app.getPath("downloads"), backendOrigin: new URL(BACKEND_URL).origin,
+      reservedPorts: browseReservedPorts || kairosPorts({ instancePort: INSTANCE.port }), shell,
+      send: (channel, payload) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload); },
+      passwordBackend: DESKTOP_SECRET ? browsePasswordBackend : null,
+    });
+  },
+  // Another account's pane must not stay open on the old profile.
+  onSwitch: () => sideBrowser.close(),
+});
 const forgePreview = require('./forgePreview');
 const textMenu = require('./contextMenu');
 const { installScreenGrab } = require("./screen-grab");
@@ -416,16 +454,13 @@ async function createWindow() {
   sideBrowser.attach(win, { backendOrigin: new URL(BACKEND_URL).origin });
   textMenu.attach(win);
   // Browse (Kairos Browser Phase 1, browser-browse.js): the person's tabbed
-  // browser on the side pane's partition. It takes over that session's
-  // handlers, so shareSession() comes first.
-  sideBrowser.shareSession();
-  browse = createBrowse({
-    host: () => mainWindow, partition: sideBrowser.PARTITION, folder: browseFolder(app.getPath("userData")),
-    downloadsFolder: () => app.getPath("downloads"), backendOrigin: new URL(BACKEND_URL).origin,
-    reservedPorts: kairosPorts({ instancePort: INSTANCE.port }), shell,
-    send: (channel, payload) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload); },
+  // browser, one profile per Kairos account (browser-profiles.js). It is
+  // opened on first use for whoever is signed in to this window, and closed
+  // when the window closes or its page reloads (signing out reloads it).
+  win.on("closed", () => browseProfiles.close());
+  win.webContents.on("did-start-navigation", (details) => {
+    if (details.isMainFrame && !details.isSameDocument) browseProfiles.close();
   });
-  win.on("closed", () => { browse?.close(); browse = null; });
   forgePreview.attach(win, { backendOrigin: new URL(BACKEND_URL).origin,
     getAllowedPorts: async id => {
       const response = await session.defaultSession.fetch(`${BACKEND_URL}/api/forge/sessions/${encodeURIComponent(id)}/app/allowed-ports`, { redirect: 'error', signal: AbortSignal.timeout(10000) });
@@ -544,7 +579,10 @@ async function createWindow() {
   // already include remote access's usual port.
   session.defaultSession.fetch(`${BACKEND_URL}/api/settings`, { signal: AbortSignal.timeout(10000) })
     .then((r) => (r.ok ? r.json() : {}))
-    .then((s) => browse?.setReservedPorts(kairosPorts({ instancePort: INSTANCE.port, remotePort: Number(s.remote_access_port) || undefined })))
+    .then((s) => {
+      browseReservedPorts = kairosPorts({ instancePort: INSTANCE.port, remotePort: Number(s.remote_access_port) || undefined });
+      browseProfiles.get()?.setReservedPorts(browseReservedPorts);
+    })
     .catch(() => {});
   if (RENDER_TOKEN) designRender.start({ backendUrl: BACKEND_URL, token: RENDER_TOKEN });
   await win.loadURL(BACKEND_URL);
@@ -680,10 +718,25 @@ ipcMain.handle("google:open-sign-in", async (event, url) => {
 });
 
 // Browse's channels (browser-ipc.js): app window only, arguments checked there.
-installBrowseIpc({ ipcMain, fromAppWindow, getBrowse: () => browse });
+installBrowseIpc({ ipcMain, fromAppWindow, getBrowse: () => browseProfiles.get(), resolveBrowse: () => browseProfiles.resolve(),
+  // Import a password CSV into the signed-in account (cookie-only route).
+  importPasswords: () => importBrowsePasswords({ dialog, fs, shell, parent: mainWindow,
+    post: async (csv) => {
+      const response = await session.defaultSession.fetch(`${BACKEND_URL}/api/browse/passwords/import`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ csv }), redirect: "error", signal: AbortSignal.timeout(30000) });
+      const answer = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(typeof answer.detail === "string" ? answer.detail : "Kairos couldn't import that file.");
+      return answer;
+    } }) });
 
 const browserFor = event => fromAppWindow(event) ? sideBrowser : chatWindows.browserFor(event);
-ipcMain.handle("browser:open", (event, url, bounds) => browserFor(event)?.open(url, bounds) || { ok: false, reason: 'denied' });
+// The pane opens on the signed-in account's profile, so that is settled first.
+ipcMain.handle("browser:open", async (event, url, bounds) => {
+  const browser = browserFor(event);
+  if (!browser) return { ok: false, reason: 'denied' };
+  if (!(await browseProfiles.resolve())) return { ok: false, reason: 'Sign in to Kairos first.' };
+  return browser.open(url, bounds) || { ok: false, reason: 'denied' };
+});
 ipcMain.handle("browser:navigate", (event, url) => browserFor(event)?.navigate(url) || { ok: false, reason: 'denied' });
 ipcMain.handle("browser:external", async (event, rawUrl) => {
   const browser = browserFor(event);

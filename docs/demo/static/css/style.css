@@ -2547,3 +2547,19 @@ button.dashboard-row:hover { background: var(--surface-2); }
   .dashboard-wide { grid-column: auto; }
   .dashboard-stat { flex: 1 1 40%; }
 }
+/* The desktop app's modes, in the title bar (David, 2026-11-03, option C): Kairos, Forge and
+   Bots as tabs, then Browse set apart as a pill. Buttons opt out of the window drag region. */
+.titlebar-modes { display: flex; align-items: center; gap: 2px; -webkit-app-region: no-drag; }
+.titlebar-mode {
+  display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 12px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--text-dim); font: inherit; font-size: 12.5px; cursor: pointer;
+}
+.titlebar-mode:hover { background: rgba(var(--ink-rgb), .06); color: var(--text); }
+.titlebar-mode.active { background: var(--bg-panel-solid); color: var(--text); font-weight: 500; box-shadow: inset 0 -2px 0 var(--accent); }
+.titlebar-mode:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* With the modes up here, the page name after them is left out (David, 2026-11-03). */
+.titlebar:has(.titlebar-modes) .titlebar-tab { display: none; }
+.titlebar-modes-divider { width: 1px; height: 16px; margin: 0 8px; background: var(--border-strong); }
+.titlebar-browse { border: 1px solid var(--border-strong); border-radius: 999px; }
+.titlebar-browse svg { color: var(--accent); }
+.titlebar-browse.active { box-shadow: none; border-color: var(--accent); }

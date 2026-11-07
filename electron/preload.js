@@ -134,6 +134,11 @@ contextBridge.exposeInMainWorld("jarvis", {
       searchEngines: invoke("browse:search-engines"), setSearchEngine: invoke("browse:search-engine"), adblockStats: invoke("browse:adblock-stats"),
       answerPermission: send("browse:permission-answer"),
       downloads: invoke("browse:downloads"), download: invoke("browse:download"),
+      // Password keeper: answers and actions only; no password ever comes back.
+      answerPassword: invoke("browse:password-answer"), fillPassword: invoke("browse:password-fill"),
+      useStrongPassword: invoke("browse:password-generate"), importPasswords: invoke("browse:passwords-import"),
+      onPasswordOffer: subscribe("browse:password-offer"), onPasswordSuggest: subscribe("browse:password-suggest"),
+      audioOutput: invoke("browse:audio"), setAudioOutput: invoke("browse:audio-set"),
       onState: subscribe("browse:state"), onEvent: subscribe("browse:event"), onDownload: subscribe("browse:download"),
       onPermission: subscribe("browse:permission"), onShortcut: subscribe("browse:shortcut"),
     };

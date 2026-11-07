@@ -85,6 +85,35 @@ const browseServer = http.createServer((req, res) => {
     return;
   }
   if (req.url === '/ads') return page('<div class="ad-banner" id="banner">ad</div><p id="text">article</p><script src="/ad.js"></script>');
+  // A stand-in for an OAuth pop-up sign-in ("Sign in with Google / Apple / X"):
+  // the site opens the identity provider (another origin) in a sized pop-up,
+  // which posts its result to window.opener and closes itself.
+  const site = `http://fixture.test:${BROWSE_PORT}`, idp = `http://other.test:${BROWSE_PORT}`;
+  // Sign-in forms for the password keeper (scripts/browse-keeper-checks.cjs).
+  const form = (action) => `<form id="f" method="post" action="${action}"><input id="u" name="u" autocomplete="username"><input id="p" name="p" type="password" autocomplete="current-password"><button id="go">Sign in</button></form>`;
+  if (req.url === '/login') return page(form('/welcome'));
+  if (req.url === '/welcome') return page('<p>Welcome</p>');
+  if (req.url === '/login-bad') { res.statusCode = req.method === 'POST' ? 401 : 200; return page('<p class="error">Wrong password</p>' + form('/login-bad')); }
+  if (req.url === '/spa') return page(`<div id="app"><input id="u" autocomplete="username"><button id="next">Next</button></div><script>
+    document.getElementById('next').onclick = () => {
+      document.getElementById('app').innerHTML = '<input id="p" type="password"><div role="button" id="go">Log in</div>';
+      document.getElementById('go').onclick = () => { history.pushState({}, '', '/spa/home'); document.getElementById('app').innerHTML = '<p>Home</p>'; };
+    };
+  </script>`);
+  if (req.url === '/signup') return page('<form id="f" method="post" action="/welcome"><input id="u" name="u" autocomplete="username"><input id="p1" name="p1" type="password" autocomplete="new-password"><input id="p2" name="p2" type="password" autocomplete="new-password"><button id="go">Create</button></form>');
+  if (req.url === '/framed') return page(`<p>Another site's sign-in inside</p><iframe src="${idp}/login" width="400" height="200"></iframe>`);
+  if (req.url === '/media') return page('<audio id="a"></audio>');
+  if (req.url === '/oauth-start') return page(`<button id="signin">Sign in</button><script>
+    window.addEventListener('message', (e) => { if (e.origin === ${JSON.stringify(idp)}) document.title = 'signed-in:' + e.data; });
+    document.getElementById('signin').onclick = () => { window.popup = window.open(${JSON.stringify(idp + '/oauth-popup')}, 'signin', 'width=480,height=600'); };
+    window.newTab = () => window.open(${JSON.stringify(idp + '/oauth-tab')}, '_blank');
+  </script>`);
+  if (req.url === '/oauth-popup') return page(`<p>Signing in</p><script>
+    setTimeout(() => { if (window.opener) window.opener.postMessage('token-123', ${JSON.stringify(site)}); else document.title = 'no-opener'; setTimeout(() => window.close(), 150); }, 150);
+  </script>`);
+  if (req.url === '/oauth-tab') return page(`<p>Signing in</p><script>
+    setTimeout(() => { if (window.opener) window.opener.postMessage('tab-token', ${JSON.stringify(site)}); setTimeout(() => window.close(), 150); }, 150);
+  </script>`);
   page(`<h1>browse fixture</h1><a id="link" href="/second">second</a>`);
 });
 
@@ -173,6 +202,75 @@ async function browseChecks(win) {
     await wc.executeJavaScript(`window.open(${JSON.stringify(base + '/popup-b')}); 1`);
     assert.ok(await until(() => tabs.list().tabs.length === before + 1), 'a tab right after a click');
   });
+
+  const click = (wc) => {
+    wc.sendInputEvent({ type: 'mouseDown', x: 5, y: 5, button: 'left', clickCount: 1 });
+    wc.sendInputEvent({ type: 'mouseUp', x: 5, y: 5, button: 'left', clickCount: 1 });
+  };
+
+  await check('browse: a sign-in pop-up is a real window with its opener, and closes back', async () => {
+    const r = tabs.open(`${base}/oauth-start`);
+    const wc = tabs.webContentsOf(r.id);
+    assert.ok(await loaded(wc));
+    const before = tabs.list().tabs.length;
+    click(wc); await wait(100);
+    await wc.executeJavaScript("document.getElementById('signin').click(); 1");
+    assert.ok(await until(() => tabs.popups.list().length === 1), 'a pop-up window opened');
+    const popup = tabs.popups.list()[0];
+    assert.equal(popup.webContents.session, partition, 'on the person profile');
+    assert.equal(popup.getParentWindow(), win, 'a child of the Kairos window');
+    assert.equal(tabs.list().tabs.length, before, 'not a tab');
+    assert.ok(await until(() => wc.getTitle() === 'signed-in:token-123'), `the opener got the result (title ${wc.getTitle()})`);
+    assert.ok(await until(() => tabs.popups.list().length === 0), 'it closed itself');
+    const prefs = popup.isDestroyed() ? null : popup.webContents.getLastWebPreferences();
+    if (prefs) assert.equal(prefs.sandbox, true);
+    tabs.close(r.id);
+  });
+
+  await check('browse: a page opening a sign-in tab keeps its opener; the tab closes back', async () => {
+    const r = tabs.open(`${base}/oauth-start`);
+    const wc = tabs.webContentsOf(r.id);
+    assert.ok(await loaded(wc));
+    const before = tabs.list().tabs.length;
+    click(wc); await wait(100);
+    await wc.executeJavaScript('window.newTab(); 1');
+    assert.ok(await until(() => tabs.list().tabs.length === before + 1), 'a Browse tab opened');
+    assert.ok(await until(() => wc.getTitle() === 'signed-in:tab-token'), `the opener got the result (title ${wc.getTitle()})`);
+    assert.ok(await until(() => tabs.list().tabs.length === before), 'window.close() closed that tab');
+    tabs.close(r.id);
+  });
+
+  await check('browse: a sign-in pop-up still needs the person', async () => {
+    const r = tabs.open(`${base}/oauth-start`);
+    const wc = tabs.webContentsOf(r.id);
+    assert.ok(await loaded(wc));
+    await wait(5200); // past the gesture window of opening the tab from this test
+    const blockedBefore = events.filter(e => e.event === 'popup-blocked').length;
+    await wc.executeJavaScript("window.open('http://other.test:" + BROWSE_PORT + "/oauth-popup', 'x', 'width=300,height=300'); 1");
+    await wait(300);
+    assert.equal(tabs.popups.list().length, 0, 'no window without a click');
+    assert.equal(events.filter(e => e.event === 'popup-blocked').length, blockedBefore + 1);
+    tabs.close(r.id);
+  });
+
+  await check('browse: sites see the Chrome user agent, not the Electron one', async () => {
+    const { cleanUserAgent } = require(path.join(root, 'electron', 'browser-browse.js'));
+    const ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Kairos/2.2.2 Chrome/150.0.7871.250 Electron/43.8.3 Safari/537.36';
+    assert.equal(cleanUserAgent(ua), 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.250 Safari/537.36');
+    partition.setUserAgent(cleanUserAgent(partition.getUserAgent()));
+    const r = tabs.open(`${base}/`);
+    const wc = tabs.webContentsOf(r.id);
+    assert.ok(await loaded(wc));
+    const seen = await wc.executeJavaScript('navigator.userAgent');
+    assert.ok(!/Electron|Kairos/i.test(seen) && /Chrome\/\d+/.test(seen), seen);
+    tabs.close(r.id);
+  });
+
+  const keeper = require('./browse-keeper-checks.cjs');
+  await keeper.passwordChecks({ check, win, partition, gate, store, adblock, base, otherBase: `http://other.test:${BROWSE_PORT}`, loaded, until, wait });
+  // localhost: media devices exist only in secure contexts (https, or localhost).
+  await keeper.audioChecks({ check, win, gate, store, base: `http://localhost:${BROWSE_PORT}`, until });
+  await keeper.profileChecks({ check });
 
   await check('browse: permission prompt asked once, then remembered', async () => {
     const wc = tabs.webContentsOf(first);
@@ -641,5 +739,5 @@ app.whenReady().then(async () => {
   }
 
   if (failures.length) finish(1, 'FAIL\n' + failures.map(f => ' - ' + f).join('\n'));
-  else finish(0, (process.argv.includes('--live') ? 'PASS (with live web check): ' : 'PASS: ') + `${checksRun} checks. ` + 'side-browser isolation — scheme and loopback blocking, backend origin refused, separate session partition with unshared cookies, no bridge/node/IPC in the page, permissions denied, view destroyed on close. Browse — gate policies, tabs and history, pop-ups only after a click, remembered permissions, ad blocking with off switch, marked downloads, zoom per site, reopen and pin, session restore, cookie re-save.');
+  else finish(0, (process.argv.includes('--live') ? 'PASS (with live web check): ' : 'PASS: ') + `${checksRun} checks. ` + 'side-browser isolation — scheme and loopback blocking, backend origin refused, separate session partition with unshared cookies, no bridge/node/IPC in the page, permissions denied, view destroyed on close. Browse — gate policies, tabs and history, pop-ups only after a click, sign-in pop-ups and tabs keeping their opener, Chrome user agent, password offers and exact-origin fill, audio output routing, remembered permissions, ad blocking with off switch, marked downloads, zoom per site, reopen and pin, session restore, cookie re-save.');
 });

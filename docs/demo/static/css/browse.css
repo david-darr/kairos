@@ -1,0 +1,263 @@
+/* Browse mode (Kairos Browser Phase 1, U3). Layout from David's references:
+   a monospace sidebar, the page as a rounded inset over the app background.
+   Colours come from the app's theme tokens, so Browse follows Appearance. */
+
+/* Browse draws its own sidebar; the app's is hidden in this mode. */
+html[data-app-mode="browse"] #sidebar,
+html[data-app-mode="browse"] #sidebar-toggle { display: none; }
+html[data-app-mode="browse"] #view-content { padding: 0; }
+
+.browse-view { height: 100%; min-height: 0; }
+.browse {
+  --browse-mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  display: flex; height: 100%; min-height: 0; gap: 8px; padding: 8px; box-sizing: border-box;
+}
+
+/* -- sidebar */
+.browse-side {
+  flex: 0 0 248px; min-width: 0; display: flex; flex-direction: column; gap: 10px;
+  font-family: var(--browse-mono); font-size: 12.5px; color: var(--text); overflow-y: auto; overflow-x: hidden;
+}
+.browse.side-hidden .browse-side { flex: 0 0 52px; min-width: 52px; max-width: 52px; }
+.browse-side > [hidden] { display: none !important; }
+.browse-top, .browse-bottom { display: flex; align-items: center; gap: 2px; }
+.browse-spacer, .browse-grow { flex: 1; }
+.browse-icon-btn {
+  font: inherit; color: var(--text-dim); background: transparent; border: 0; border-radius: 6px;
+  min-width: 30px; height: 30px; padding: 0 6px; cursor: pointer;
+}
+.browse-icon-btn:hover:not(:disabled) { background: var(--accent-dim); color: var(--text); }
+.browse-icon-btn:disabled { opacity: .4; cursor: default; }
+.browse-icon-btn:focus-visible, .browse-tab-main:focus-visible, .browse-pin:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.browse-address-row {
+  display: flex; align-items: center; gap: 4px; height: 36px; padding: 0 4px 0 10px;
+  background: var(--bg-panel-solid); border: 1px solid var(--border-strong); border-radius: 9px;
+}
+.browse-address-row:focus-within, .browse-address-row.open { border-color: var(--accent); }
+.browse-address { flex: 1; min-width: 0; font: inherit; color: var(--text); background: transparent; border: 0; outline: none; }
+/* redesign.css styles every input through .kairos-redesign :is(input:not(...)x5),
+   which outranks any reasonable selector here; only the font needs to win. */
+.browse-address { font-family: var(--browse-mono) !important; padding: 0 !important; box-shadow: none !important; }
+.browse-address-extras { display: flex; align-items: center; gap: 2px; }
+.browse-blocked {
+  font-size: 11px; line-height: 16px; padding: 0 5px; border-radius: 5px;
+  background: var(--danger); color: var(--bg-panel-solid);
+}
+.browse-site-btn { color: var(--success); }
+
+.browse-suggest, .browse-site {
+  list-style: none; margin: 0; padding: 6px; background: var(--bg-panel-solid);
+  border: 1px solid var(--border-strong); border-radius: 10px;
+}
+.browse-suggest li { display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.browse-suggest li.selected, .browse-suggest li:hover { background: var(--accent-dim); }
+.browse-suggest-title { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browse-suggest-url { color: var(--text-faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.browse-site { display: flex; flex-direction: column; gap: 8px; padding: 12px; font-family: var(--k-font-sans, system-ui, sans-serif); font-size: 13px; }
+.browse-site-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.browse-secure { color: var(--success); font-size: 12px; }
+.browse-insecure { color: var(--danger); font-size: 12px; }
+.browse-site-label, .browse-side-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-faint); }
+.browse-site-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.browse-site-row select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); border-radius: 6px; padding: 3px 6px; }
+.browse-site-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.browse-pins { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.browse-pin {
+  height: 36px; display: flex; align-items: center; justify-content: center; cursor: pointer;
+  background: var(--bg-panel-solid); border: 1px solid var(--border); border-radius: 8px;
+}
+.browse-pin.active { border-color: var(--border-strong); background: var(--accent-dim); }
+.browse-favicon { width: 16px; height: 16px; flex: 0 0 16px; border-radius: 3px; object-fit: contain; }
+.browse-favicon-letter {
+  display: inline-flex; align-items: center; justify-content: center; font-size: 10px;
+  background: var(--accent-dim); color: var(--text-dim);
+}
+
+.browse-tabs { display: flex; flex-direction: column; gap: 2px; }
+.browse-new-tab { font: inherit; color: var(--text-dim); background: transparent; border: 0; text-align: left; padding: 8px; border-radius: 7px; cursor: pointer; white-space: pre; }
+.browse-new-tab:hover { background: var(--accent-dim); color: var(--text); }
+.browse-tab-group { display: flex; flex-direction: column; gap: 2px; }
+.browse-divider { border: 0; border-top: 1px solid var(--border); margin: 4px 0; width: 100%; }
+.browse-tab { display: flex; align-items: center; border-radius: 7px; }
+.browse-tab.active { background: var(--bg-panel-solid); box-shadow: 0 0 0 1px var(--border); }
+.browse-tab:hover:not(.active) { background: var(--accent-dim); }
+.browse-tab-main {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; font: inherit; color: var(--text-dim);
+  background: transparent; border: 0; text-align: left; padding: 7px 8px; cursor: pointer;
+}
+.browse-tab.active .browse-tab-main { color: var(--text); }
+.browse-tab-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browse-tab-audio { font-size: 11px; color: var(--text-faint); }
+.browse-tab-close { visibility: hidden; }
+.browse-tab:hover .browse-tab-close, .browse-tab.active .browse-tab-close, .browse-tab-close:focus-visible { visibility: visible; }
+
+.browse-botwork { display: flex; flex-direction: column; gap: 2px; }
+.browse-botwork-row { display: flex; align-items: center; gap: 8px; font: inherit; color: var(--text-dim); background: transparent; border: 1px solid var(--border); border-radius: 8px; padding: 7px 8px; text-align: left; cursor: pointer; }
+.browse-bot-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); flex: 0 0 8px; }
+.browse-profile-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-dim); margin: 0 6px; }
+
+/* -- page column */
+.browse-page {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden;
+  background: var(--bg-panel-solid); border: 1px solid var(--border); border-radius: 10px;
+}
+.browse-strips:empty { display: none; }
+.browse-strips > div:empty { display: none; }
+.browse-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.browse-strip[hidden] { display: none; }
+.browse-strip > span:first-child { flex: 1 1 240px; min-width: 0; }
+.browse-prompt { background: var(--accent-dim); }
+.browse-notice.error { color: var(--danger); }
+.browse-remember { display: flex; align-items: center; gap: 6px; color: var(--text-dim); }
+.browse-find-input { flex: 1 1 200px; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); border-radius: 6px; padding: 5px 8px; }
+.browse-find-count { color: var(--text-faint); min-width: 70px; }
+.browse-ask-text { flex: 1 1 320px; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); border-radius: 8px; padding: 6px 10px; resize: vertical; }
+.browse-ask-status { color: var(--text-faint); }
+.browse-ask-btn { color: var(--accent); }
+
+/* The native page is placed over this box by the main process. A native
+   view is square, so the box sits inside the panel's rounded corners. */
+.browse-viewport { flex: 1; min-height: 0; margin: 4px; border-radius: 6px; background: #fff; }
+.browse-viewport[hidden], .browse-inner[hidden] { display: none; }
+.browse-inner { flex: 1; min-height: 0; overflow: auto; }
+
+
+.browse-internal { max-width: 860px; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: 14px; }
+.browse-internal-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.browse-internal-head h2 { margin: 0; flex: 1; font-size: 20px; }
+.browse-page-search { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); border-radius: 8px; padding: 6px 10px; min-width: 200px; }
+.browse-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.browse-list li { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--border); padding: 4px 0; }
+.browse-list-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font: inherit; color: var(--text); background: transparent; border: 0; text-align: left; padding: 6px 4px; cursor: pointer; border-radius: 6px; }
+.browse-list-main.static { cursor: default; }
+.browse-list-main:not(.static):hover { background: var(--accent-dim); }
+.browse-list-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browse-list-meta { color: var(--text-faint); font-size: 12px; margin: 0; }
+.browse-empty { color: var(--text-faint); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .browse-side { transition: flex-basis .2s ease; }
+}
+
+/* -- home screen (Speed Dial, browseHome.js) */
+.browse-home { position: relative; min-height: 100%; display: flex; justify-content: center; overflow: hidden; }
+.browse-home-backdrop { position: absolute; inset: 0; background-size: cover; background-position: center; }
+.browse-home-dim { position: absolute; inset: 0; background: #000; pointer-events: none; }
+/* The Kairos background: the app's own ground shows through the page panel. */
+.browse-page:has(.browse-home[data-background="kairos"]:not([hidden])) { background: transparent; }
+.browse-home-body { position: relative; width: min(920px, 100%); padding: 56px 24px 40px; box-sizing: border-box; display: flex; flex-direction: column; gap: 22px; }
+.browse-home-gear { position: absolute; top: 12px; right: 12px; z-index: 2; width: 36px; height: 36px; border-radius: 9px; border: 1px solid var(--border);
+  background: var(--bg-panel); color: var(--text); font-size: 16px; cursor: pointer; }
+.browse-home-gear:hover { border-color: var(--border-strong); }
+
+.browse-home-search { display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 14px; border-radius: 12px;
+  background: var(--bg-panel-solid); border: 1px solid var(--border-strong); max-width: 620px; width: 100%; margin: 0 auto; box-sizing: border-box; }
+.browse-home-search:focus-within { border-color: var(--accent); }
+.browse-home-g { width: 24px; height: 24px; border-radius: 6px; background: #fff; color: #4285f4; font: 700 14px/24px system-ui, sans-serif; text-align: center; }
+.browse-home-search-input { flex: 1; min-width: 0; font: inherit; color: var(--text); background: transparent !important; border: 0 !important; outline: none; padding: 0 !important; box-shadow: none !important; }
+
+.browse-dials { --tile: 150px; display: grid; grid-template-columns: repeat(auto-fill, var(--tile)); justify-content: center; gap: 16px; }
+.browse-home[data-tiles="small"] .browse-dials { --tile: 112px; }
+.browse-home[data-tiles="large"] .browse-dials { --tile: 196px; }
+.browse-dial { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.browse-dial.dragging { opacity: .5; }
+.browse-dial-open { aspect-ratio: 16 / 10; width: 100%; padding: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; cursor: pointer;
+  background: var(--bg-panel-solid); display: flex; align-items: center; justify-content: center; transition: transform .12s ease, border-color .12s ease; }
+.browse-dial-open:hover { transform: translateY(-2px); border-color: var(--border-strong); }
+.browse-dial-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.browse-dial-picture { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+.browse-dial-letter { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 8px; box-sizing: border-box;
+  color: #fff; font: 600 15px/1.2 var(--k-font-sans, system-ui, sans-serif); text-align: center; overflow: hidden; word-break: break-word; }
+.browse-dial-add { font-size: 28px; color: var(--text-dim); background: var(--bg-panel); border-style: dashed; }
+.browse-dial-name { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 12.5px; color: var(--text); text-align: center;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-height: 18px; text-shadow: 0 1px 2px rgba(0, 0, 0, .25); }
+.browse-dial-name > span { overflow: hidden; text-overflow: ellipsis; }
+.browse-dial-pin { border: 0; background: transparent; color: var(--accent); cursor: pointer; font-size: 15px; padding: 0 2px; }
+.browse-home-label { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--text-faint); }
+.browse-home-suggest-label { margin-top: 8px; }
+.browse-home-note { margin: 0; color: var(--text-dim); font-size: 13px; }
+
+.browse-home-menu { position: absolute; z-index: 3; min-width: 190px; display: flex; flex-direction: column; padding: 6px; border-radius: 10px;
+  background: var(--bg-panel-solid); border: 1px solid var(--border-strong); box-shadow: 0 12px 30px rgba(0, 0, 0, .25); }
+.browse-home-menu button { font: inherit; text-align: left; padding: 8px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--text); cursor: pointer; }
+.browse-home-menu button:hover, .browse-home-menu button:focus-visible { background: var(--accent-dim); }
+
+.browse-home-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; padding: 14px; border-radius: 12px;
+  background: var(--bg-panel-solid); border: 1px solid var(--border-strong); max-width: 620px; width: 100%; margin: 0 auto; box-sizing: border-box; }
+.browse-home-form label { display: flex; flex-direction: column; gap: 4px; flex: 1 1 200px; font-size: 12px; color: var(--text-dim); }
+.browse-home-form-actions { display: flex; gap: 8px; margin-left: auto; }
+.browse-home-error { flex-basis: 100%; color: var(--danger); font-size: 12px; }
+.browse-home-error:empty { display: none; }
+
+.browse-home-customize { position: absolute; top: 56px; right: 12px; z-index: 3; width: min(300px, calc(100% - 24px)); display: flex; flex-direction: column; gap: 10px;
+  padding: 14px; border-radius: 12px; background: var(--bg-panel-solid); border: 1px solid var(--border-strong); box-shadow: 0 12px 30px rgba(0, 0, 0, .25); font-size: 13px; }
+.browse-home-customize[hidden] { display: none; }
+.browse-home-customize-head { display: flex; justify-content: space-between; align-items: center; }
+.browse-home-choice { display: flex; align-items: center; gap: 8px; }
+.browse-home-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.browse-home-row input[type="file"] { max-width: 150px; font-size: 11px; }
+.browse-home-slider { display: flex; flex-direction: column; gap: 4px; }
+
+/* -- right-click tab menu, inside the sidebar under its tab */
+.browse-tab-menu { margin: 2px 0 6px; display: flex; flex-direction: column; gap: 8px; }
+.browse-tab-menu-actions { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px; border-radius: 9px; background: var(--bg-panel-solid); border: 1px solid var(--border-strong);
+  font-family: var(--k-font-sans, system-ui, sans-serif); }
+.browse-tab-menu-actions .btn { font-size: 12px; padding: 4px 8px; }
+/* On a colour or picture of the person's choosing, names and labels go light so they read on dark grounds. */
+.browse-home:not([data-background="kairos"]) .browse-dial-name,
+.browse-home:not([data-background="kairos"]) .browse-home-body > .browse-home-label,
+.browse-home:not([data-background="kairos"]) .browse-home-note { color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, .7); }
+/* redesign.css restyles every input; the colour picker must stay a swatch. */
+.browse-home-row input[type="color"] { width: 44px !important; height: 28px !important; padding: 0 !important; border-radius: 6px !important; background: none !important; cursor: pointer; }
+
+/* -- icon buttons (Kairos line icons) */
+.browse-icon-btn { display: inline-flex; align-items: center; justify-content: center; }
+.browse-icon-btn svg { display: block; }
+.browse-icon-btn:active:not(:disabled) { transform: translateY(1px); }
+
+/* -- collapsed rail: the open tabs as icons */
+.browse-rail { display: flex; flex-direction: column; align-items: center; gap: 6px; min-height: 0; flex: 1; }
+.browse-rail[hidden] { display: none; }
+.browse-rail .browse-divider { width: 28px; }
+.browse-rail-tabs { display: flex; flex-direction: column; align-items: center; gap: 4px; overflow-y: auto; min-height: 0; padding: 2px 0; }
+.browse-rail-tab { width: 38px; height: 38px; flex: 0 0 38px; display: flex; align-items: center; justify-content: center; border-radius: 9px;
+  border: 1px solid transparent; background: transparent; cursor: pointer; }
+.browse-rail-tab:hover { background: var(--accent-dim); }
+.browse-rail-tab.active { background: var(--bg-panel-solid); border-color: var(--border-strong); }
+.browse-rail-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.browse-rail-tab .browse-favicon { width: 18px; height: 18px; flex-basis: 18px; }
+
+/* -- Customize: Browse's own look */
+.browse-look-choice { display: flex; align-items: center; gap: 8px; }
+.browse-look-swatches { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 24px; }
+.browse-look-swatch { width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--border-strong); cursor: pointer; padding: 0; }
+.browse-look-swatch.active { outline: 2px solid var(--accent); outline-offset: 2px; }
+.browse-look-picker { width: 32px !important; height: 26px !important; padding: 0 !important; border-radius: 6px !important; background: none !important; }
+.browse-look-chips { display: flex; flex-wrap: wrap; gap: 4px; padding-left: 24px; }
+.browse-look-chips .btn.active { background: var(--accent-dim); }
+.browse-look-art { margin-left: 24px; max-width: calc(100% - 24px); }
+
+/* Chameleon: colours change with the open site; a short fade, none with reduced motion. */
+@media (prefers-reduced-motion: no-preference) {
+  html[data-browse-chameleon] body, html[data-browse-chameleon] .titlebar, html[data-browse-chameleon] .browse-page,
+  html[data-browse-chameleon] .browse-address-row, html[data-browse-chameleon] .browse-tab {
+    transition: background-color .35s ease, color .35s ease, border-color .35s ease;
+  }
+}
+
+/* Browser settings sections, the password manager and its strips (Kairos
+   Browser feedback, 2026-11-06). */
+.browse-settings-section { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+.browse-settings-title { margin: 0; font-size: 15px; flex: 1; }
+.browse-pw-form, .browse-pw-unlock { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; }
+.browse-pw-form > input, .browse-pw-pass { flex: 1 1 220px; min-width: 0; }
+.browse-pw-pass { display: flex; gap: 6px; }
+.browse-pw-pass input { flex: 1; min-width: 0; }
+.browse-pw-unlock > span { flex: 1 1 100%; color: var(--text-dim); }
+.browse-pw-editing { display: block !important; }
+.browse-pw-secret { font-family: var(--font-mono, ui-monospace, monospace); color: var(--text); user-select: all; word-break: break-all; }
+.browse-pw-suggest { background: var(--accent-dim); }
+.browse-settings-section .browse-list li { flex-wrap: wrap; }

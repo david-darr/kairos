@@ -6,7 +6,8 @@
 const { contextBridge } = require('electron');
 
 const calls = [];
-const handlers = { state: [], event: [], permission: [], shortcut: [], download: [], openRequest: [] };
+const handlers = { state: [], event: [], permission: [], shortcut: [], download: [], openRequest: [], passwordOffer: [], passwordSuggest: [] };
+let audioLabel = 'Desk Speakers (not here)';
 let tabs = [], activeId = null, nextId = 1;
 let pinned = [{ id: 1, url: 'https://github.com/', title: 'GitHub', position: 0, thumb: null },
   { id: 2, url: 'https://mail.example.com/', title: 'Mail', position: 1, thumb: null }];
@@ -76,6 +77,11 @@ contextBridge.exposeInMainWorld('jarvis', { ...desktop, browse: {
   downloads: call('downloads', () => [{ id: 'd1', url: 'https://example.com/report.pdf', filename: 'report.pdf', state: 'completed', received: 10, total: 10 }]),
   download: call('download', () => ({ ok: true })),
   onState: on('state'), onEvent: on('event'), onDownload: on('download'), onPermission: on('permission'), onShortcut: on('shortcut'),
+  // Password keeper and audio output (Kairos Browser feedback, 2026-11-06).
+  answerPassword: call('answerPassword', () => ({ ok: true })), fillPassword: call('fillPassword', () => ({ ok: true, filled: 2 })),
+  useStrongPassword: call('useStrongPassword', () => ({ ok: true, filled: 2 })), importPasswords: call('importPasswords', () => ({ ok: false, canceled: true })),
+  onPasswordOffer: on('passwordOffer'), onPasswordSuggest: on('passwordSuggest'),
+  audioOutput: call('audioOutput', () => ({ label: audioLabel })), setAudioOutput: call('setAudioOutput', (label) => { audioLabel = label; return { ok: true, label }; }),
 } });
 
 // The check's own handle: what was called, and a way to send main's events.

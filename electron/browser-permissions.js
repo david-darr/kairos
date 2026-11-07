@@ -42,7 +42,9 @@ function remember(store, url, setting, answer) {
 
 // `ask({ webContents, origin, setting })` resolves to { answer: 'allow' |
 // 'block', remember: boolean }. It is the UI's prompt; no answer means block.
-function createPermissions({ store, ask }) {
+// `speakerSelection()` says whether pages may pick an audio output, which
+// Browse's own audio routing needs while a device is chosen (browser-audio.js).
+function createPermissions({ store, ask, speakerSelection = () => false }) {
   function decide(webContents, permission, details = {}) {
     if (ALWAYS.has(permission)) return Promise.resolve(true);
     const setting = settingFor(permission, details);
@@ -66,6 +68,7 @@ function createPermissions({ store, ask }) {
   // already allowed, never a prompt.
   function check(webContents, permission, requestingOrigin, details = {}) {
     if (ALWAYS.has(permission)) return true;
+    if (permission === "speaker-selection") return !!speakerSelection();
     const setting = settingFor(permission, { ...details, mediaTypes: details.mediaType ? [details.mediaType] : [] });
     if (!setting || !webContents || webContents.isDestroyed()) return false;
     const pageUrl = webContents.getURL();

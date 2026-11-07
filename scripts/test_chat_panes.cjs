@@ -117,11 +117,15 @@ const esm = file => import('data:text/javascript;base64,' + Buffer.from(fs.readF
   class NativeView {
     constructor(options) { this.options = options; let destroyed = false, url = ''; this.webContents = { isDestroyed: () => destroyed,
       close: () => destroyed = true, loadURL: value => url = value, getURL: () => url, getTitle: () => '', isLoading: () => false,
-      on() {}, setWindowOpenHandler() {} }; }
+      on() {}, once() {}, setWindowOpenHandler() {} }; }
     setBackgroundColor() {} setVisible() {}
   }
   const electron = { WebContentsView: NativeView, session: { fromPartition: () => ({ setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, setDevicePermissionHandler() {}, on() {} }) }, shell: {} };
-  new Function('require', 'module', fs.readFileSync(path.join(__dirname, '../electron/browser.js'), 'utf8'))(name => { assert.equal(name, 'electron'); return electron; }, browserModule);
+  new Function('require', 'module', fs.readFileSync(path.join(__dirname, '../electron/browser.js'), 'utf8'))(name => {
+    // browser.js's own helpers (the address gate, sign-in pop-ups) are real; Electron is the stand-in.
+    if (name === './browser-gate' || name === './browser-popups') return require(path.join(__dirname, '../electron', name));
+    assert.equal(name, 'electron'); return electron;
+  }, browserModule);
   const mainBrowser = browserModule.exports, chatBrowser = mainBrowser.createBrowser();
   const nativeHost = () => ({ isDestroyed: () => false, webContents: { send() {} }, contentView: { addChildView() {}, removeChildView() {} } });
   mainBrowser.attach(nativeHost()); chatBrowser.attach(nativeHost());

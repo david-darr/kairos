@@ -22,28 +22,32 @@ function rect(v) {
   return Object.values(r).every((n) => n !== null && n > -100000 && n < 100000) ? r : null;
 }
 
-function installBrowseIpc({ ipcMain, fromAppWindow, getBrowse }) {
+function installBrowseIpc({ ipcMain, fromAppWindow, getBrowse, resolveBrowse = async () => getBrowse(), importPasswords = null }) {
   // handle(): request/answer. on(): fire and forget. Both no-op answers when
   // the sender is wrong, Browse isn't up, or an argument is malformed.
-  const handle = (channel, fn, fallback = { ok: false }) => ipcMain.handle(channel, (event, ...args) => {
-    const browse = getBrowse();
-    if (!fromAppWindow(event) || !browse) return fallback;
-    try { const out = fn(browse, ...args); return out === undefined ? fallback : out; } catch (err) { console.error(`[browse] ${channel}: ${err.message}`); return fallback; }
+  // `opening` channels first settle which account's Browse is open
+  // (browser-profiles.js); the rest act on the one already open.
+  const handle = (channel, fn, fallback = { ok: false }, opening = false) => ipcMain.handle(channel, async (event, ...args) => {
+    if (!fromAppWindow(event)) return fallback;
+    const browse = opening ? await resolveBrowse() : getBrowse();
+    if (!browse) return fallback;
+    try { const out = await fn(browse, ...args); return out === undefined ? fallback : out; } catch (err) { console.error(`[browse] ${channel}: ${err.message}`); return fallback; }
   });
-  const on = (channel, fn) => ipcMain.on(channel, (event, ...args) => {
-    const browse = getBrowse();
-    if (!fromAppWindow(event) || !browse) return;
-    try { fn(browse, ...args); } catch (err) { console.error(`[browse] ${channel}: ${err.message}`); }
+  const on = (channel, fn, opening = false) => ipcMain.on(channel, async (event, ...args) => {
+    if (!fromAppWindow(event)) return;
+    const browse = opening ? await resolveBrowse() : getBrowse();
+    if (!browse) return;
+    try { await fn(browse, ...args); } catch (err) { console.error(`[browse] ${channel}: ${err.message}`); }
   });
 
   // Tabs.
-  handle("browse:list", (b) => { b.ensureRestored(); return b.tabs.list(); }, { tabs: [], activeId: null });
+  handle("browse:list", (b) => { b.ensureRestored(); return b.tabs.list(); }, { tabs: [], activeId: null }, true);
   handle("browse:open", (b, url, opts = {}) => {
     if (url !== null && url !== undefined && !text(url, MAX_URL)) return undefined;
     const input = url ? b.gate.fromAddressBar(url, { allowLoopback: true }) : null;
     if (url && !input) return { ok: false, reason: "That address can't be opened here." };
     return b.tabs.open(input, { background: opts && opts.background === true });
-  });
+  }, { ok: false }, true);
   handle("browse:navigate", (b, id, input) => (isId(id) && text(input, MAX_URL) ? b.tabs.navigate(id, input) : undefined));
   handle("browse:find", (b, id, query, opts = {}) => (isId(id) && typeof query === "string" ? { requestId: b.tabs.find(id, query.slice(0, 500), { forward: opts.forward !== false, findNext: opts.findNext === true }) } : undefined));
   handle("browse:zoom", (b, id, direction) => (isId(id) && [-1, 0, 1].includes(direction) ? { zoom: b.tabs.zoom(id, direction) } : undefined));
@@ -58,7 +62,7 @@ function installBrowseIpc({ ipcMain, fromAppWindow, getBrowse }) {
   on("browse:mute", (b, id, muted) => { if (isId(id) && typeof muted === "boolean") b.tabs.setMuted(id, muted); });
   on("browse:reorder", (b, ids) => { if (Array.isArray(ids) && ids.length < 1000 && ids.every(isId)) b.tabs.reorder(ids); });
   on("browse:bounds", (b, r) => { const ok = rect(r); if (ok) b.tabs.setBounds(ok); });
-  on("browse:visible", (b, visible) => { if (typeof visible === "boolean") { if (visible) b.ensureRestored(); b.tabs.setVisible(visible); } });
+  on("browse:visible", (b, visible) => { if (typeof visible === "boolean") { if (visible) b.ensureRestored(); b.tabs.setVisible(visible); } }, true);
   on("browse:shortcut", (b, name, id) => { if (text(name, 40) && (id === undefined || isId(id))) b.tabs.handleShortcut(name, id); });
 
   // History, suggestions, pinned sites.
@@ -88,6 +92,18 @@ function installBrowseIpc({ ipcMain, fromAppWindow, getBrowse }) {
   on("browse:permission-answer", (b, requestId, answer, remember) => {
     if (isId(requestId) && (answer === "allow" || answer === "block")) b.answerPermission(requestId, answer, remember === true);
   });
+
+  // The password keeper (browser-passwords.js). Saved passwords never come
+  // back over these channels: fill and the generator write into the page in
+  // main, and the answer to a save offer is only its id and the choice.
+  handle("browse:password-answer", (b, offerId, action) => (isId(offerId) && ["save", "never", "dismiss"].includes(action) ? b.passwords.answer(offerId, action) : undefined));
+  handle("browse:password-fill", (b, tabId, loginId) => (isId(tabId) && text(loginId, 40) ? b.passwords.fill(tabId, loginId) : undefined));
+  handle("browse:password-generate", (b, tabId) => (isId(tabId) ? b.passwords.useGenerated(tabId) : undefined));
+  if (importPasswords) handle("browse:passwords-import", () => importPasswords());
+
+  // Audio output for every Browse page (browser-audio.js): a device's name, or "" for the system default.
+  handle("browse:audio", (b) => ({ label: b.audio.get() }));
+  handle("browse:audio-set", (b, label) => (typeof label === "string" && label.length <= 300 ? b.audio.set(label) : undefined));
 
   // Downloads.
   handle("browse:downloads", (b) => b.downloads.list(), []);

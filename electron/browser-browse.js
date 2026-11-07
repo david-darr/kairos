@@ -17,6 +17,8 @@ const { createAdblock, createListUpdater } = require("./browser-adblock");
 const { createPermissions } = require("./browser-permissions");
 const { createDownloads } = require("./browser-downloads");
 const { createTabs } = require("./browser-tabs");
+const { createPasswords } = require("./browser-passwords");
+const { createAudio } = require("./browser-audio");
 
 const PERMISSION_TIMEOUT_MS = 60000;
 const LIST_CHECK_MS = 6 * 60 * 60 * 1000;
@@ -42,8 +44,20 @@ function cleanHome(value) {
   return out;
 }
 
-function createBrowse({ host, partition, folder, downloadsFolder, reservedPorts, backendOrigin, send, shell, log = console }) {
+// The user agent sites see: Chrome's, without the "Electron/43.8.3" (and any
+// app name) token Electron adds. Some sites refuse or break sign-in for an
+// "embedded" Electron browser (David, 2026-11-06: X/Twitter); the engine is
+// the same Chromium, so this is what Chrome of that version sends.
+function cleanUserAgent(ua) {
+  return String(ua || "").replace(/\s(?:Electron|Kairos|jarvis-app|JARVIS)\/\S+/gi, "").replace(/\s{2,}/g, " ").trim();
+}
+
+// `passwordBackend(route, body)` reaches the backend's desktop password
+// routes for the signed-in account (main.js); without it the password
+// keeper is off and pages behave as before.
+function createBrowse({ host, partition, folder, downloadsFolder, reservedPorts, backendOrigin, send, shell, log = console, passwordBackend = null }) {
   const partitionSession = session.fromPartition(partition);
+  partitionSession.setUserAgent(cleanUserAgent(partitionSession.getUserAgent()));
   const store = openStore(path.join(folder, "browser.db"));
   const gate = createGate({ backendOrigin, reservedPorts, searchEngine: store.getMeta("searchEngine") || undefined });
   const adblock = createAdblock();
@@ -77,17 +91,24 @@ function createBrowse({ host, partition, folder, downloadsFolder, reservedPorts,
     });
   }
 
-  createPermissions({ store, ask }).attach(partitionSession);
+  // The audio output chosen in Browse settings (browser-audio.js).
+  const audio = createAudio({ store });
+  createPermissions({ store, ask, speakerSelection: () => audio.allowSpeakerSelection() }).attach(partitionSession);
   const downloads = createDownloads({ store, folder: downloadsFolder, shell, notify: (d) => send("browse:download", d) });
   downloads.attach(partitionSession);
   adblock.attach(partitionSession, {
     enabledFor: (url) => store.getSite(url, "adblock") !== "off",
     onBlocked: (id) => tabs && tabs.countBlocked(id),
   });
+  const passwords = createPasswords({
+    backend: passwordBackend || (async () => { throw new Error("unavailable"); }),
+    send, log,
+  });
   tabs = createTabs({
     host, session: partitionSession, gate, store, adblock,
     notify: (payload) => send(payload.event ? "browse:event" : "browse:state", payload),
     onShortcut: (name, tabId) => send("browse:shortcut", { name, tabId }),
+    onTabContents: (tab, wc) => { audio.attach(wc); if (passwordBackend) passwords.attach(tab, wc); },
   });
 
   function ensureRestored() {
@@ -122,10 +143,11 @@ function createBrowse({ host, partition, folder, downloadsFolder, reservedPorts,
     searchEngines: () => ({ current: gate.searchEngine(), options: Object.keys(SEARCH) }),
     adblockStats: () => adblock.stats(),
     refreshLists: () => lists.refresh({ force: true }),
-    downloads,
+    downloads, passwords, audio,
     setReservedPorts: (ports) => gate.setReservedPorts(ports),
     close() {
       clearInterval(listTimer); clearTimeout(firstRefresh);
+      passwords.close();
       for (const resolve of pending.values()) resolve({ answer: "block", remember: false });
       tabs.closeAll();
       try { store.close(); } catch { /* already closed */ }
@@ -141,10 +163,28 @@ function kairosPorts({ instancePort, remotePort }) {
   return [...new Set([8420, 8421, 8422, 8430, 8431, 8888, 8889, instancePort, instancePort + 1, remotePort || 8422].filter(Boolean))];
 }
 
-function browseFolder(userData) {
-  const dir = path.join(userData, "browser", "default");
+// Multi-account: one Browse profile per Kairos account. The backend names
+// it (GET /api/browse/profile): "default" for the first admin, who keeps the
+// profile Browse had before accounts (persist:jarvis-browser and
+// browser/default), else the account's folder id. Each profile has its own
+// partition (cookies, site storage, cache) and its own browser.db (history,
+// pinned sites, site settings, downloads, session), so one account's
+// browsing never shows in another's. Cookie values are encrypted by
+// Chromium's own key (the cookie fuse), shared by the install; saved
+// passwords are the backend's, under the account's own key.
+const PROFILE = /^(default|[a-z0-9]{1,32})$/;
+function validProfile(profile) { return typeof profile === "string" && PROFILE.test(profile) ? profile : null; }
+function partitionFor(profile) {
+  const p = validProfile(profile);
+  if (!p) throw new Error("not a Browse profile");
+  return p === "default" ? "persist:jarvis-browser" : `persist:jarvis-browser-${p}`;
+}
+function browseFolder(userData, profile = "default") {
+  const p = validProfile(profile);
+  if (!p) throw new Error("not a Browse profile");
+  const dir = path.join(userData, "browser", p === "default" ? "default" : `account-${p}`);
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
 
-module.exports = { createBrowse, kairosPorts, browseFolder, _SITE_KEYS: SITE_KEYS, _cleanHome: cleanHome };
+module.exports = { createBrowse, kairosPorts, browseFolder, partitionFor, validProfile, cleanUserAgent, _SITE_KEYS: SITE_KEYS, _cleanHome: cleanHome };

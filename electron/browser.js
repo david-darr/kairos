@@ -37,6 +37,7 @@
 
 const { WebContentsView, session, shell } = require("electron");
 const { createGate, isLoopback } = require("./browser-gate");
+const { createPopups } = require("./browser-popups");
 
 // Browse (browser-browse.js) shares this partition so the person's sign-ins
 // carry over, and installs its own handlers on it: per-site permission
@@ -44,8 +45,15 @@ const { createGate, isLoopback } = require("./browser-gate");
 // the ad blocker. Once it has, the pane must not overwrite them with its
 // deny-all set. Shared by every pane instance (main window and detached
 // chats), so it lives outside createBrowser.
-let sessionOwnedByBrowse = false;
-function shareSession() { sessionOwnedByBrowse = true; }
+// Multi-account: each Kairos account has its own profile partition (the
+// first admin keeps persist:jarvis-browser, so existing sign-ins stay), and
+// main.js points every pane at the signed-in account's with setPartition().
+// Browse owns the handlers of each partition it has taken over.
+const DEFAULT_PARTITION = "persist:jarvis-browser";
+let activePartition = DEFAULT_PARTITION;
+const ownedByBrowse = new Set();
+function shareSession(name = activePartition) { ownedByBrowse.add(name); }
+function setPartition(name) { if (typeof name === "string" && name.startsWith("persist:jarvis-browser")) activePartition = name; return activePartition; }
 // Sessions that already have the pane's download hand-off. Adding it on
 // every create() stacked one listener per opening, so a single download was
 // handed to the system browser once per time the pane had been opened.
@@ -58,7 +66,9 @@ function createBrowser() {
 // persist: so a signed-in site survives closing the pane, matching what a
 // browser does. Deliberately NOT the app's default session — that separation
 // is the cookie-isolation guarantee above, not an implementation detail.
-const PARTITION = "persist:jarvis-browser";
+// PARTITION is the default (first admin's) profile; the live one is
+// activePartition above.
+const PARTITION = DEFAULT_PARTITION;
 
 let view = null;
 let host = null;
@@ -123,8 +133,9 @@ function denyPermissionCheck() { return false; }
 function denyDevicePermission() { return false; }
 
 function buildSession() {
-  const partition = session.fromPartition(PARTITION);
-  if (sessionOwnedByBrowse) return partition;
+  const name = activePartition;
+  const partition = session.fromPartition(name);
+  if (ownedByBrowse.has(name)) return partition;
   partition.setPermissionRequestHandler(denyPermissionRequest);
   partition.setPermissionCheckHandler(denyPermissionCheck);
   // Device pickers are a separate path from the permission handlers above.
@@ -156,11 +167,20 @@ function create() {
   // ordinary web links, and are refused otherwise. Never a real new window:
   // that would be a chrome-less Electron window with no address bar, which
   // is precisely the shape a phishing page wants.
-  wc.setWindowOpenHandler(({ url }) => {
+  //
+  // The exception is a sign-in pop-up (a sized window.open, as OAuth uses):
+  // it opens as a real child window on this profile with window.opener kept,
+  // so it can hand its result back and close (browser-popups.js). It shows
+  // the site's address in its title bar.
+  const popups = createPopups({ host: () => host, session: browserSession, safe: safeUrl, openTab: (url) => wc.loadURL(url) });
+  wc.setWindowOpenHandler(({ url, disposition }) => {
     const safe = safeUrl(url);
+    if (safe && disposition === "new-window") return popups.allow();
     if (safe) wc.loadURL(safe);
     return { action: "deny" };
   });
+  wc.on("did-create-window", (child) => popups.wire(child, null));
+  wc.once("destroyed", () => popups.closeAll());
 
   // Covers redirects and in-page navigation, not just what the user typed.
   wc.on("will-navigate", (event, url) => {
@@ -176,11 +196,12 @@ function create() {
   // A download inside a sandboxed pane would write to disk with the app's
   // privileges. Hand the URL to the real browser instead, where the user's
   // normal download UI and safe-browsing checks apply.
-  if (!sessionOwnedByBrowse && !handedOff.has(browserSession)) {
+  const partitionName = activePartition;
+  if (!ownedByBrowse.has(partitionName) && !handedOff.has(browserSession)) {
     handedOff.add(browserSession);
     browserSession.on("will-download", (event, item) => {
       // Browse may have taken the session over since this was added.
-      if (sessionOwnedByBrowse) return;
+      if (ownedByBrowse.has(partitionName)) return;
       event.preventDefault();
       const safe = safeUrl(item.getURL());
       if (safe) shell.openExternal(safe).catch(() => {});
@@ -336,4 +357,4 @@ return {
   _webContents: () => (view && !view.webContents.isDestroyed() ? view.webContents : null),
 };
 }
-module.exports = Object.assign(createBrowser(), { createBrowser, shareSession });
+module.exports = Object.assign(createBrowser(), { createBrowser, shareSession, setPartition, partition: () => activePartition });

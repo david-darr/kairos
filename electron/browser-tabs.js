@@ -15,9 +15,13 @@
 // never leaves the view.
 
 const { WebContentsView } = require("electron");
+const { createPopups } = require("./browser-popups");
 
 const LIVE_LIMIT = 12;           // views kept alive besides the active tab
-const GESTURE_MS = 1500;         // how long a click or key counts as "the person asked"
+// How long a click or key counts as "the person asked": Chrome's transient
+// user activation lasts 5 s, and sign-in buttons often fetch before they open
+// their window (David, 2026-11-06: "apps that open a new tab to signin").
+const GESTURE_MS = 5000;
 const CLOSED_LIMIT = 25;
 const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5];
 const FAVICON_MAX = 64 * 1024;
@@ -63,7 +67,7 @@ function hexColor(value) {
   return null;
 }
 
-function createTabs({ host, session: partitionSession, gate, store, adblock, notify = () => {}, onShortcut = () => {} }) {
+function createTabs({ host, session: partitionSession, gate, store, adblock, notify = () => {}, onShortcut = () => {}, onTabContents = () => {} }) {
   const tabs = new Map();
   let order = [];
   let activeId = null;
@@ -76,6 +80,10 @@ function createTabs({ host, session: partitionSession, gate, store, adblock, not
 
   const allow = { allowLoopback: true };
   const safe = (url) => gate.safeUrl(url, allow);
+  // Sign-in pop-ups (window.open with a size, as OAuth uses) open as real
+  // child windows on this same profile, with window.opener kept, and close
+  // back to the page that opened them (browser-popups.js).
+  const popups = createPopups({ host, session: partitionSession, safe, openTab: (url, opener) => open(url, { opener }) });
 
   function meta(tab) {
     const wc = tab.view && !tab.view.webContents.isDestroyed() ? tab.view.webContents : null;
@@ -179,13 +187,20 @@ function createTabs({ host, session: partitionSession, gate, store, adblock, not
     const wc = tab.view.webContents;
     // Pop-ups and target=_blank: a new tab, only if the person just acted
     // or the site is allowed pop-ups. Never a real window.
+    // Pop-ups and target=_blank, only if the person just acted or the site is
+    // allowed pop-ups. A sized window.open (a sign-in pop-up) becomes a real
+    // child window; anything else becomes a Browse tab. Both keep the page's
+    // window.opener (unless the page itself asked for noopener), so a sign-in
+    // can postMessage its result back and close itself, as in Chrome.
     wc.setWindowOpenHandler(({ url, disposition }) => {
       const target = safe(url);
       const asked = Date.now() - tab.lastGesture < GESTURE_MS || store.getSite(wc.getURL(), "popups") === "allow";
-      if (target && asked) open(target, { background: disposition === "background-tab", opener: tab.id });
-      else if (target) notify({ event: "popup-blocked", tabId: tab.id, url: target });
-      return { action: "deny" };
+      if (!target) return { action: "deny" };
+      if (!asked) { notify({ event: "popup-blocked", tabId: tab.id, url: target }); return { action: "deny" }; }
+      if (disposition === "new-window") return popups.allow();
+      return { action: "allow", createWindow: (options) => adopt(options, target, { background: disposition === "background-tab", opener: tab.id }) };
     });
+    wc.on("did-create-window", (child) => popups.wire(child, tab.id));
     wc.on("will-navigate", (event, url) => { if (!safe(url)) { event.preventDefault(); emit(); } });
     wc.on("will-redirect", (event, url) => { if (!safe(url)) event.preventDefault(); });
     wc.on("input-event", (_e, input) => {
@@ -217,8 +232,8 @@ function createTabs({ host, session: partitionSession, gate, store, adblock, not
     wc.on("render-process-gone", (_e, details) => notify({ event: "crashed", tabId: tab.id, reason: details.reason }));
   }
 
-  function makeView(tab) {
-    tab.view = new WebContentsView({
+  function makeView(tab, adopted = null) {
+    tab.view = new WebContentsView(adopted ? { webContents: adopted.webContents, webPreferences: adopted.webPreferences } : {
       webPreferences: {
         session: partitionSession,
         // No preload: there is deliberately no bridge for a page to find.
@@ -230,10 +245,30 @@ function createTabs({ host, session: partitionSession, gate, store, adblock, not
     });
     tab.view.setBackgroundColor("#ffffff");
     tab.view.setVisible(false);
-    tab.view.webContents.setAudioMuted(tab.muted);
+    const wc = tab.view.webContents;
+    wc.setAudioMuted(tab.muted);
     wire(tab);
     host().contentView.addChildView(tab.view);
-    if (tab.url) tab.view.webContents.loadURL(tab.url);
+    // A page closing a window it opened (window.close() after a sign-in)
+    // closes that tab. Kairos's own closing clears tab.view first.
+    const view = tab.view;
+    wc.once("destroyed", () => { if (tab.view === view && tabs.get(tab.id) === tab) { tab.view = null; close(tab.id); } });
+    try { onTabContents(tab, wc); } catch { /* extras are best-effort */ }
+    // An adopted window is already navigating to its address.
+    if (tab.url && !adopted) wc.loadURL(tab.url);
+  }
+
+  // A window the page opened (target=_blank, or window.open without a size)
+  // becomes a tab that keeps the page's window.opener: Electron hands over
+  // the new contents, and the tab takes them instead of loading the address.
+  function adopt(options, url, { background, opener }) {
+    const tab = { id: nextId++, url, title: "", pinned: false, muted: false, favicon: null, view: null, lastGesture: 0, lastActive: Date.now(), fullscreen: false };
+    tabs.set(tab.id, tab);
+    const at = opener && order.includes(opener) ? order.indexOf(opener) + 1 : order.length;
+    order.splice(at, 0, tab.id);
+    makeView(tab, options);
+    if (!background || activeId === null) activate(tab.id); else emit();
+    return tab.view.webContents;
   }
 
   function destroyView(tab) {
@@ -434,7 +469,8 @@ function createTabs({ host, session: partitionSession, gate, store, adblock, not
     setVisible(on) { visible = !!on; layout(); },
     list: () => ({ tabs: order.map((id) => meta(tabs.get(id))), activeId }),
     webContentsOf: wcOf,
-    closeAll() { for (const id of [...order]) destroyView(tabs.get(id)); tabs.clear(); order = []; activeId = null; clearTimeout(saveTimer); },
+    closeAll() { popups.closeAll(); for (const id of [...order]) destroyView(tabs.get(id)); tabs.clear(); order = []; activeId = null; clearTimeout(saveTimer); },
+    popups,
     _shortcutFor: shortcutFor, _nextZoom: nextZoom,
   };
 }

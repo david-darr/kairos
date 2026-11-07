@@ -359,6 +359,10 @@
    specs/frontend-style.md. */
 :root {
   color-scheme: light;
+  /* Text and shade over a person's own picture (Browse's home screen): the same in every theme. */
+  --on-image: #fff;
+  --on-image-shade: 0, 0, 0;
+  --google-blue: #4285f4;
   --bg: var(--k-parchment);
   --bg-panel: rgba(251, 246, 238, .86);
   --bg-panel-solid: var(--k-surface);

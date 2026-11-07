@@ -19,6 +19,7 @@ import { mountHome } from "../browseHome.js";
 import { loadLook, saveLook, applyLook, clearLook, LOOKS, COLOURS } from "../browseLook.js";
 import { GLASS_WALLPAPERS } from "../appearance.js";
 import { ART_CATALOG } from "../artCatalog.js";
+import { mountPasswords } from "../browsePasswords.js";
 
 // Line icons in Kairos's style (24-unit grid, 1.8 stroke, currentColor), set
 // as fixed markup on Kairos's own buttons, never page content.
@@ -36,6 +37,8 @@ const ICON = Object.fromEntries(Object.entries({
   look: '<path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.8 1.3-1.7-.4-1.1.3-2.3 1.5-2.3H17a4 4 0 0 0 4-4c0-5.5-4-10-9-10z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7" r="1"/><circle cx="15" cy="7.5" r="1"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   site: '<path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="M10.8 12.2 20 3"/><path d="M16 7l3 3"/><path d="M14 9l2 2"/>',
 }).map(([k, v]) => [k, `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${v}</svg>`]));
 function iconButton(name, label, onClick, { disabled = false, className = "" } = {}) {
   const button = el("button", { type: "button", class: "browse-icon-btn " + className, "aria-label": label, title: label, disabled, onclick: onClick });
@@ -72,6 +75,13 @@ export async function render(container) {
   let siteOpen = false, site = null, siteHost = "", findOpen = false, findCount = "", page = null;
   let prompts = [], notice = null, overlaid = false, destroyed = false, sideHidden = false, innerKey = "";
   let askOpen = false, asking = false;
+  // The password keeper (electron/browser-passwords.js): the latest offer to
+  // save a sign-in, and saved sign-ins suggested for the page on screen. Main
+  // sends sites and usernames only, never a password.
+  let pwOffer = null, pwSuggest = new Map(), pwStatus = "";
+  const pwDismissed = new Set();
+  // Browser settings' password manager and the audio output list.
+  let settingsHandle = null, outputs = [], outputLabel = "";
   // The home screen (browseHome.js) while a tab has no page, and the tab whose
   // right-click menu is open.
   let home = null, tabMenuId = null;
@@ -294,6 +304,15 @@ export async function render(container) {
   cleanups.push(b.onPermission((request) => { prompts.push(request); draw(); }));
   cleanups.push(b.onShortcut(({ name }) => shortcut(name)));
   cleanups.push(b.onDownload(() => { if (page === "downloads") drawDownloads(); }));
+  if (b.onPasswordOffer) cleanups.push(b.onPasswordOffer((offer) => { pwOffer = offer; pwStatus = ""; draw(); }));
+  if (b.onPasswordSuggest) cleanups.push(b.onPasswordSuggest((s) => {
+    if (s.origin) pwSuggest.set(s.tabId, s); else pwSuggest.delete(s.tabId);
+    draw();
+  }));
+  // Speakers plugged in or out: the list in Browser settings follows.
+  const onDevices = () => { if (page === "settings") drawAudio(); };
+  navigator.mediaDevices?.addEventListener?.("devicechange", onDevices);
+  cleanups.push(() => navigator.mediaDevices?.removeEventListener?.("devicechange", onDevices));
 
   // -- drawing
   function topRow() {
@@ -431,6 +450,7 @@ export async function render(container) {
       el("span", { class: "browse-profile-dot", title: "Personal profile", "aria-label": "Personal profile" }),
       el("span", { class: "browse-spacer" }),
       expanded(iconButton("look", "Customize the browser", () => { lookOpen = !lookOpen; siteOpen = false; draw(); }, { className: "browse-look-btn" }), lookOpen),
+      iconButton("settings", "Browser settings", () => openPage("settings"), { className: "browse-settings-btn" }),
       iconButton("history", "History", () => openPage("history")),
       iconButton("download", "Downloads", () => openPage("downloads")),
     ]);
@@ -510,6 +530,40 @@ export async function render(container) {
         el("button", { type: "button", class: "btn primary", text: "Allow", onclick: () => answer("allow") }),
       ]));
     }
+    // Save a sign-in: only on the person's click.
+    if (pwOffer && pwOffer.tabId === activeId) {
+      const o = pwOffer;
+      const reply = async (action) => {
+        pwOffer = null;
+        const result = action === "dismiss" ? { ok: true } : await b.answerPassword(o.offerId, action);
+        pwStatus = action === "save" ? (result && result.ok ? `Saved for ${hostOf(o.origin)}.` : "That password couldn't be saved.") : "";
+        draw();
+      };
+      parts.push(el("div", { class: "browse-strip browse-prompt browse-pw-offer", role: "alertdialog", "aria-label": "Save password" }, [
+        el("span", { text: `${o.update ? "Update the saved password" : "Save the password"} for ${o.username || "this sign-in"} on ${hostOf(o.origin) || o.origin}?` }),
+        el("button", { type: "button", class: "btn quiet", text: "Never for this site", onclick: () => reply("never") }),
+        el("button", { type: "button", class: "btn", text: "Not now", onclick: () => reply("dismiss") }),
+        el("button", { type: "button", class: "btn primary", text: o.update ? "Update" : "Save", onclick: () => reply("save") }),
+      ]));
+    } else if (pwStatus) {
+      parts.push(el("div", { class: "browse-strip browse-notice", role: "status" }, [el("span", { text: pwStatus }),
+        el("button", { type: "button", class: "browse-icon-btn", "aria-label": "Dismiss", text: "×", onclick: () => { pwStatus = ""; draw(); } })]));
+    }
+    // Saved sign-ins for exactly this site, or a strong password for a sign-up form.
+    const sg = activeId !== null ? pwSuggest.get(activeId) : null;
+    const t = active();
+    if (sg && t && !page && !pwOffer && !pwDismissed.has(`${sg.tabId}|${sg.origin}|${sg.kind}`) && t.url && (() => { try { return new URL(t.url).origin === sg.origin; } catch { return false; } })()) {
+      const done = (ok, what) => { if (ok) pwDismissed.add(`${sg.tabId}|${sg.origin}|${sg.kind}`); else pwStatus = what; draw(); };
+      const items = [el("span", { text: sg.logins.length ? `Saved sign-in for ${hostOf(sg.origin)}` : `Sign up on ${hostOf(sg.origin)}` })];
+      for (const login of sg.logins.slice(0, 3)) {
+        items.push(el("button", { type: "button", class: "btn primary", text: `Fill ${login.username || "password"}`,
+          onclick: async () => { const r = await b.fillPassword(sg.tabId, login.id); done(r && r.ok, "There was no sign-in field to fill."); } }));
+      }
+      if (sg.generate) items.push(el("button", { type: "button", class: "btn", text: "Use a strong password",
+        onclick: async () => { const r = await b.useStrongPassword(sg.tabId); done(r && r.ok, "There was no new-password field to fill."); } }));
+      items.push(el("button", { type: "button", class: "browse-icon-btn", "aria-label": "Dismiss", text: "×", onclick: () => done(true) }));
+      parts.push(el("div", { class: "browse-strip browse-pw-suggest", role: "region", "aria-label": "Saved passwords for this site" }, items));
+    }
     if (notice) {
       const actions = [];
       if (notice.kind === "popup") actions.push(el("button", { type: "button", class: "btn quiet", text: "Open it", onclick: () => { b.open(notice.url); notice = null; draw(); } }));
@@ -526,6 +580,7 @@ export async function render(container) {
     const t = active();
     // One home screen at a time, gone whenever another page takes its place.
     home?.destroy(); home = null;
+    settingsHandle?.destroy(); settingsHandle = null;
     if (page === "history") return drawHistory();
     if (page === "downloads") return drawDownloads();
     if (page === "settings") return drawSettings();
@@ -574,19 +629,56 @@ export async function render(container) {
     ]));
   }
 
+  // Sound: where every Browse page plays (electron/browser-audio.js). Kept
+  // by name, per account; the list is this computer's outputs, as the app
+  // window sees them.
+  const audioBox = el("div");
+  async function drawAudio() {
+    let list = [];
+    try {
+      list = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audiooutput" && d.deviceId !== "default" && d.deviceId !== "communications" && d.label);
+    } catch { list = []; }
+    const current = await b.audioOutput().catch(() => ({ label: "" }));
+    if (destroyed || page !== "settings") return;
+    outputs = [...new Set(list.map((d) => d.label))];
+    outputLabel = (current && current.label) || "";
+    const missing = outputLabel && !outputs.includes(outputLabel);
+    const select = el("select", { "aria-label": "Audio output", onchange: async (e) => { await b.setAudioOutput(e.target.value); drawAudio(); } }, [
+      el("option", { value: "", text: "System default", selected: !outputLabel }),
+      ...outputs.map((label) => el("option", { value: label, text: label, selected: label === outputLabel })),
+      missing ? el("option", { value: outputLabel, text: `${outputLabel} (not connected)`, selected: true }) : null,
+    ].filter(Boolean));
+    audioBox.replaceChildren(el("section", { class: "browse-settings-section", "aria-label": "Sound" }, [
+      el("h3", { class: "browse-settings-title", text: "Sound" }),
+      el("label", { class: "browse-site-row" }, [el("span", { text: "Play Browse pages through" }), select]),
+      el("p", { class: "browse-list-meta", role: "status", text: missing
+        ? "That output isn't connected. Pages play on the system default until it's back."
+        : outputLabel ? "Every Browse page plays here. While an output is chosen, sites can see the names of your audio outputs." : "Pages play wherever Windows sends sound." }),
+    ]));
+  }
+
   async function drawSettings() {
     const [engines, stats] = await Promise.all([b.searchEngines(), b.adblockStats()]);
     if (page !== "settings" || destroyed) return;
     const names = { duckduckgo: "DuckDuckGo", google: "Google", bing: "Bing", brave: "Brave Search" };
     const engine = el("select", { "aria-label": "Search engine", onchange: (e) => b.setSearchEngine(e.target.value) },
       (engines.options || []).map((id) => el("option", { value: id, text: names[id] || id, selected: id === engines.current })));
+    const passwordsBox = el("div");
     inner.replaceChildren(el("div", { class: "browse-internal" }, [
       el("div", { class: "browse-internal-head" }, [el("h2", { text: "Browser settings" }),
         el("button", { type: "button", class: "browse-icon-btn", "aria-label": "Close settings", text: "×", onclick: () => { page = null; draw(); } })]),
       el("label", { class: "browse-site-row" }, [el("span", { text: "Search engine" }), engine]),
-      el("p", { class: "browse-list-meta", text: stats.lists ? `Ad blocking: ${stats.network.toLocaleString()} blocking rules and ${stats.cosmetic.toLocaleString()} hiding rules from ${stats.lists} lists; ${stats.skipped.toLocaleString()} rules this blocker can't apply are skipped.` : "Ad blocking lists download shortly after Kairos starts." }),
-      el("p", { class: "browse-list-meta", text: "Per-site permissions, ad blocking and pop-ups are in each site's info panel, next to the address." }),
+      audioBox,
+      passwordsBox,
+      el("section", { class: "browse-settings-section", "aria-label": "Ad blocking" }, [
+        el("h3", { class: "browse-settings-title", text: "Ad blocking" }),
+        el("p", { class: "browse-list-meta", text: stats.lists ? `${stats.network.toLocaleString()} blocking rules and ${stats.cosmetic.toLocaleString()} hiding rules from ${stats.lists} lists; ${stats.skipped.toLocaleString()} rules this blocker can't apply are skipped.` : "Ad blocking lists download shortly after Kairos starts." }),
+        el("p", { class: "browse-list-meta", text: "Per-site permissions, ad blocking and pop-ups are in each site's info panel, next to the address." }),
+      ]),
     ]));
+    drawAudio();
+    settingsHandle?.destroy();
+    settingsHandle = mountPasswords(passwordsBox, { b });
   }
 
   function draw() {
@@ -618,6 +710,7 @@ export async function render(container) {
   return () => {
     destroyed = true;
     home?.destroy();
+    settingsHandle?.destroy();
     clearLook();
     b.setVisible(false);
     for (const fn of cleanups) { try { fn(); } catch { /* best effort */ } }
