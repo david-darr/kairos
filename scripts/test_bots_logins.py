@@ -70,7 +70,9 @@ class LoginStore(unittest.TestCase):
         text = json.dumps(web.get("/api/bots/logins").json())
         self.assertNotIn(PASSWORD, text)
         self.assertNotIn(SEED, text)
-        self.assertEqual(bot_logins.prompt_lines(BOT_A), ["example.com (dana)"], "a bot is told the site and username only")
+        login_id = bot_logins.list_logins()[0]["id"]
+        self.assertEqual(bot_logins.prompt_lines(BOT_A), [f"example.com (dana), login_id {login_id}"],
+                         "a bot is told the site, the username and the id fill_login takes, nothing else")
 
     def test_blank_password_keeps_the_saved_one_and_a_new_one_replaces_it(self):
         login = bot_logins.create("example.com", "dana", PASSWORD)

@@ -69,8 +69,9 @@ process.on('unhandledRejection', (error) => {
   finish(1, 'FAIL (unhandled rejection): ' + ((error && error.stack) || error));
 });
 // Live page loads are slower and depend on someone else's server, so the
-// watchdog is given real room when --live is on.
-setTimeout(() => finish(1, 'FAIL: timed out before finishing.'), process.argv.includes('--live') ? 180000 : 90000).unref();
+// watchdog is given real room when --live is on. (150 s: the bot checks start
+// a Python process, slow when other work shares the machine.)
+setTimeout(() => finish(1, 'FAIL: timed out before finishing.'), process.argv.includes('--live') ? 240000 : 150000).unref();
 
 // Pages for the Browse checks, on their own port.
 const BROWSE_PORT = 8478;
@@ -268,6 +269,7 @@ async function browseChecks(win) {
 
   const keeper = require('./browse-keeper-checks.cjs');
   await keeper.passwordChecks({ check, win, partition, gate, store, adblock, base, otherBase: `http://other.test:${BROWSE_PORT}`, loaded, until, wait });
+  await keeper.botPasswordChecks({ check, win, partition, gate, store, base, otherBase: `http://other.test:${BROWSE_PORT}`, until });
   // localhost: media devices exist only in secure contexts (https, or localhost).
   await keeper.audioChecks({ check, win, gate, store, base: `http://localhost:${BROWSE_PORT}`, until });
   await keeper.profileChecks({ check });
@@ -739,5 +741,5 @@ app.whenReady().then(async () => {
   }
 
   if (failures.length) finish(1, 'FAIL\n' + failures.map(f => ' - ' + f).join('\n'));
-  else finish(0, (process.argv.includes('--live') ? 'PASS (with live web check): ' : 'PASS: ') + `${checksRun} checks. ` + 'side-browser isolation — scheme and loopback blocking, backend origin refused, separate session partition with unshared cookies, no bridge/node/IPC in the page, permissions denied, view destroyed on close. Browse — gate policies, tabs and history, pop-ups only after a click, sign-in pop-ups and tabs keeping their opener, Chrome user agent, password offers and exact-origin fill, audio output routing, remembered permissions, ad blocking with off switch, marked downloads, zoom per site, reopen and pin, session restore, cookie re-save.');
+  else finish(0, (process.argv.includes('--live') ? 'PASS (with live web check): ' : 'PASS: ') + `${checksRun} checks. ` + 'side-browser isolation — scheme and loopback blocking, backend origin refused, separate session partition with unshared cookies, no bridge/node/IPC in the page, permissions denied, view destroyed on close. Browse — gate policies, tabs and history, pop-ups only after a click, sign-in pop-ups and tabs keeping their opener, Chrome user agent, password offers and exact-origin fill, bots filling saved passwords (switch, exact site, no value to the model, per account, use list), audio output routing, remembered permissions, ad blocking with off switch, marked downloads, zoom per site, reopen and pin, session restore, cookie re-save.');
 });

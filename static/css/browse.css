@@ -260,4 +260,6 @@ html[data-app-mode="browse"] #view-content { padding: 0; }
 .browse-pw-editing { display: block !important; }
 .browse-pw-secret { font-family: var(--font-mono, ui-monospace, monospace); color: var(--text); user-select: all; word-break: break-all; }
 .browse-pw-suggest { background: var(--accent-dim); }
+.browse-pw-bot-use { padding: 6px 0 10px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+.browse-pw-bots { font-weight: 600; }
 .browse-settings-section .browse-list li { flex-wrap: wrap; }

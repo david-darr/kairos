@@ -2072,7 +2072,8 @@ def register_connection_tools() -> list[str]:
         ("query_tool_result", "Query the full result of an earlier tool call in this conversation.",
          _object({"result_id": _str(), "query": _str(), "max_chars": {"type": "integer"}}, ("result_id", "query")), READ, query),
         ("fill_login", "Fill a saved login this bot may use into its open browser. Secrets stay out of the conversation.",
-         _object({"login_id": _str()}, ("login_id",)), WRITE, fill),
+         _object({"login_id": _str("a saved login's id, or \"browse\" for the person's Browse password for this exact site")},
+                 ("login_id",)), WRITE, fill),
     ]
     from services import bot_highlevel, bot_x_research
     import re

@@ -172,12 +172,14 @@ module.exports = async function browseChecks({ js, base, output, fs }) {
     await run(`
       const real = window.fetch;
       const rows = [{ id: 'a1', origin: 'https://example.com', username: 'dave', created: 1, updated: 1, last_used: null, times_used: 0 }];
-      window.__pwState = { unlocked: null, reveals: 0, unlocks: [] };
+      window.__pwState = { unlocked: null, reveals: 0, unlocks: [], bots: true, botSets: [] };
+      const uses = [{ bot_id: '0123456789', bot: 'Scout', origin: 'https://example.com', username: 'dave', at: Date.now() / 1000 - 60 }];
       const reply = (body, status = 200) => Promise.resolve(new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }));
       window.fetch = (url, options = {}) => {
         const path = String(url);
         if (!path.startsWith('/api/browse/passwords')) return real(url, options);
-        if (path.startsWith('/api/browse/passwords?')) return reply({ logins: rows, never: [], unlocked_until: window.__pwState.unlocked, needs_password: true, max: 5000 });
+        if (path.startsWith('/api/browse/passwords?')) return reply({ logins: rows, never: [], unlocked_until: window.__pwState.unlocked, needs_password: true, max: 5000, bots_may_use: window.__pwState.bots, bot_uses: uses });
+        if (path === '/api/browse/passwords/bots') { const body = JSON.parse(options.body); window.__pwState.botSets.push(body.allowed); window.__pwState.bots = body.allowed; return reply({ bots_may_use: body.allowed }); }
         if (path === '/api/browse/passwords/unlock') { const body = JSON.parse(options.body); window.__pwState.unlocks.push(body.password); if (body.password !== 'kairos-pass') return reply({ detail: "That password isn't right." }, 403); window.__pwState.unlocked = Date.now() / 1000 + 300; return reply({ unlocked_until: window.__pwState.unlocked }); }
         if (path === '/api/browse/passwords/a1/reveal') { window.__pwState.reveals++; return window.__pwState.unlocked ? reply({ password: 'fixture-secret-9' }) : reply({ detail: 'Confirm it is you first.' }, 403); }
         return reply({ detail: 'unexpected' }, 404);
@@ -190,6 +192,21 @@ module.exports = async function browseChecks({ js, base, output, fs }) {
     await run("const s = document.querySelector('[aria-label=\"Audio output\"]'); s.value = ''; s.dispatchEvent(new Event('change'));");
     await until("window.__browseStub.calls().some(c => c.name === 'setAudioOutput' && c.args[0] === '')");
     assert.match(await run("return document.querySelector('[aria-label=\"Saved passwords\"]').textContent;"), /example\.com.*dave/);
+    // Let bots use saved passwords (David, 2026-11-07): on by default, one plain line, and the bots' uses listed.
+    const botBox = "document.querySelector('.browse-pw-bots input[type=checkbox]')";
+    assert.equal(await run(`return ${botBox}.checked;`), true, 'on by default');
+    assert.match(await run("return document.querySelector('.browse-pw-bots').textContent;"), /^Let bots use saved passwords$/);
+    assert.match(await run("return document.querySelector('[aria-label=\"Bots and saved passwords\"]').textContent;"), /exact site.*never see a password/);
+    assert.match(await run("return document.querySelector('[aria-label=\"Used by bots\"]').textContent;"), /Scout signed in on example\.com as dave/);
+    assert.equal(await run("return /\\u2014/.test(document.querySelector('[aria-label=Passwords]').textContent);"), false, 'no em-dashes in the copy');
+    await run(`${botBox}.click();`);
+    await until("window.__pwState.botSets.length === 1");
+    assert.deepEqual(await run("return window.__pwState.botSets;"), [false]);
+    assert.equal(await run(`return ${botBox}.checked;`), false, 'off after the click');
+    await shot('passwords-bots-off');
+    await run(`${botBox}.click();`);
+    await until("window.__pwState.botSets.length === 2");
+    assert.equal(await run(`return ${botBox}.checked;`), true);
     assert.equal(await run("return document.body.textContent.includes('fixture-secret-9');"), false, 'no password on screen before the re-entry');
     await run("document.querySelector('[aria-label=\"Show the password for example.com\"]').click();");
     await until("document.querySelector('.browse-pw-unlock input[type=password]')");

@@ -832,6 +832,22 @@ class ComputerManager:
         if not scan.get("fields"):
             return {"text": f"Not filled: no sign-in fields are on this page. URL: {url}", "images": []}
         frames = scan.get("frames") or []
+        from services import browse_passwords
+        from core import accounts
+        is_browse, choice = browse_passwords.bot_choice(login_id)
+        if is_browse:
+            # The person's Browse passwords (David, 2026-11-07), when their switch is on: the exact origin only,
+            # every field's frame of that same origin (an unknown frame counts as another site), no confirmation
+            # that could widen it. bot_fill() records the use and holds the value for scrub().
+            field_frames = [frames[f["frame"]] if isinstance(f.get("frame"), int) and 0 <= f["frame"] < len(frames) else ""
+                            for f in scan["fields"]]
+            try:
+                found = browse_passwords.bot_fill(choice, bot_id, url, field_frames)
+            except (browse_passwords.PasswordError, accounts.NoAccount) as refused:
+                return {"text": f"Not filled: {held.scrub(str(refused))} URL: {url}", "images": []}
+            same_site = [i for i, frame in enumerate(frames) if browse_passwords.origin_of(frame) == found["origin"]]
+            return await self._fill(c, owner, url, frames, {"username": found["username"], "password": found["password"], "code": None},
+                                    f"the Browse password saved for {found['origin']}", only_frames=same_site)
         frame_hosts = sorted({(urlsplit(frames[f["frame"]]).hostname or "").lower() for f in scan["fields"] if f["frame"] < len(frames)} - {""})
         confirmed = False
         while True:
@@ -854,9 +870,18 @@ class ComputerManager:
                 if self._computers.get(owner) is not c or c.taken_over:
                     return {"text": "Not filled: the computer changed while waiting.", "images": []}
                 confirmed = True
+        return await self._fill(c, owner, url, frames, {"username": grant["username"], "password": grant["password"], "code": grant["code"]},
+                                f"the saved login at {grant['site']}")
+
+    async def _fill(self, c: Computer, owner: str, url: str, frames: list, values: dict, what: str,
+                    only_frames: list | None = None) -> dict:
+        """Hand the values to the driver, which types them into the page it still checks is `url` with `frames`
+        (and, given `only_frames`, into fields of those frames only). The answer names what was filled, never a
+        value; an error is scrubbed."""
+        from core.bot_held_secrets import held
+        extra = {} if only_frames is None else {"only_frames": only_frames}
         try:
-            reply = await self._command(c, "fill_login", expected_url=url, expected_frames=frames,
-                                        values={"username": grant["username"], "password": grant["password"], "code": grant["code"]})
+            reply = await self._command(c, "fill_login", expected_url=url, expected_frames=frames, values=values, **extra)
         except sandbox.SandboxUnavailable:
             await self.stop(owner)
             raise
@@ -865,7 +890,7 @@ class ComputerManager:
         c.last_action = self.clock()
         c.last_action_at = time.time()
         filled = ", ".join(reply.get("filled") or []) or "nothing"
-        return {"text": f"URL: {url} | Filled {filled} for the saved login at {grant['site']}. Nothing was submitted.", "images": []}
+        return {"text": f"URL: {url} | Filled {filled} for {what}. Nothing was submitted.", "images": []}
 
     async def _desktop_act(self, c: Computer, action: str, args: dict, ctx) -> dict:
         if action == "launch" and args.get("app") not in computer_image.DESKTOP_APPS:

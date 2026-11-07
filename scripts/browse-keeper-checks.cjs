@@ -129,6 +129,122 @@ async function passwordChecks({ check, win, partition, gate, store, adblock, bas
   passwords.close();
 }
 
+// Bots and the person's Browse passwords (David, 2026-11-07: "yes bots can
+// use your saved passwords, but that can be turned off"). Bots browse in
+// their contained computer, so the fill is the harness's
+// (core/computer.py fill_login, login_id "browse"). Here a real Chromium
+// page is scanned with the driver's own field script (LOGIN_ROWS in
+// core/computer_driver.py), the real harness and store decide in Python
+// (scripts/fixtures/bot_browse_fill.py), and what reached the driver is typed
+// into the real page the way the driver types it. Not run: the driver itself
+// (Playwright in Docker).
+async function botPasswordChecks({ check, win, partition, gate, store, base, otherBase, until }) {
+  const fs = require('node:fs');
+  const { spawn } = require('node:child_process');
+  const { createTabs } = require(path.join(root, 'electron', 'browser-tabs.js'));
+  const driverSource = fs.readFileSync(path.join(root, 'core', 'computer_driver.py'), 'utf8');
+  const LOGIN_ROWS = /LOGIN_ROWS = """([\s\S]*?)"""/.exec(driverSource)[1];
+  const tabs = createTabs({ host: () => win, session: partition, gate, store });
+  tabs.setBounds({ x: 300, y: 0, width: 900, height: 800 });
+  const PASSWORD = 'Bot-fill-pw-7731';
+  const open = async (url) => {
+    const r = tabs.open(url);
+    const wc = tabs.webContentsOf(r.id);
+    await until(() => wc.getURL() === url && !wc.isLoading());
+    await until(async () => (url.endsWith('/framed') ? wc.mainFrame.framesInSubtree.length > 1 : true));
+    await new Promise(res => setTimeout(res, 300));
+    return { id: r.id, wc };
+  };
+  // What the driver's login_candidates() does, in this page's frames.
+  const scan = async (wc) => {
+    const all = [wc.mainFrame, ...wc.mainFrame.framesInSubtree.filter(f => f !== wc.mainFrame)];
+    const frames = [], fields = [], refs = [];
+    for (const frame of all) {
+      if (frame !== wc.mainFrame && /^(about|data|blob):/.test(frame.url)) continue;
+      const rows = await frame.executeJavaScript(`(${LOGIN_ROWS})()`);
+      frames.push(frame.url); refs.push(frame);
+      for (const row of rows) fields.push({ ...row, frame: frames.length - 1 });
+    }
+    return { scan: { url: wc.getURL(), frames, fields }, refs };
+  };
+  const pages = {};
+  let result = null;
+
+  await check('bots: real sign-in pages scanned with the driver\'s own field script', async () => {
+    for (const [name, url] of [['login', `${base}/login`], ['other', `${otherBase}/login`], ['framed', `${base}/framed`]]) {
+      const { id, wc } = await open(url);
+      pages[name] = { id, wc, ...(await scan(wc)) };
+    }
+    assert.deepEqual(pages.login.scan.fields.map(f => [f.kind, f.frame]), [['username', 0], ['password', 0]]);
+    assert.equal(pages.framed.scan.frames.length, 2, 'the frame of another site is seen');
+    assert.ok(pages.framed.scan.fields.length && pages.framed.scan.fields.every(f => f.frame === 1), 'its fields are in that frame');
+    const python = [path.join(root, '.venv', 'Scripts', 'python.exe'), path.join(root, '.venv', 'bin', 'python')].find(p => fs.existsSync(p)) || 'python';
+    const job = { site: base, username: 'al', password: PASSWORD, scans: Object.fromEntries(Object.entries(pages).map(([k, v]) => [k, v.scan])) };
+    const output = await new Promise((resolve, reject) => {
+      const child = spawn(python, [path.join(root, 'scripts', 'fixtures', 'bot_browse_fill.py')], { cwd: root, windowsHide: true });
+      let out = '', err = '';
+      const timer = setTimeout(() => { child.kill(); reject(new Error('the Python side took over 60 s')); }, 60000);
+      child.stdout.on('data', d => { out += d; });
+      child.stderr.on('data', d => { err += d; });
+      child.on('error', reject);
+      child.on('close', (code) => { clearTimeout(timer); code === 0 ? resolve(out) : reject(new Error(`exit ${code}: ${err.slice(-800)}`)); });
+      child.stdin.end(JSON.stringify(job));
+    });
+    result = JSON.parse(output.trim().split('\n').at(-1));
+  });
+
+  await check('bots: on, the exact site is filled by the browser layer and the model is told no value', async () => {
+    assert.ok(result, 'the Python side ran');
+    const done = result.cases['exact site'];
+    assert.match(done.text, /^URL: .* \| Filled username, password for the Browse password saved for http:\/\/fixture\.test:\d+\. Nothing was submitted\.$/);
+    assert.deepEqual(done.values, { username: 'al', password: PASSWORD, code: null }, 'the values went to the driver');
+    // Typed into the real page the way the driver types (querySelectorAll('input')[index] in its frame).
+    const { wc, refs, scan: seen } = pages.login;
+    for (const field of seen.fields) {
+      const value = done.values[field.kind];
+      await refs[field.frame].executeJavaScript(`(() => { const i = document.querySelectorAll('input')[${field.index}]; i.value = ${JSON.stringify(value)}; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    }
+    assert.deepEqual(await wc.executeJavaScript("[document.getElementById('u').value, document.getElementById('p').value]"), ['al', PASSWORD]);
+  });
+
+  await check('bots: off, another site, a frame of another site, and another account fill nothing', () => {
+    assert.ok(result, 'the Python side ran');
+    const expect = {
+      'switched off': /turned off bots using their Browse passwords/,
+      'another site': /No Browse password is saved for http:\/\/other\.test:\d+/,
+      'a frame of another site': /frame from another site/,
+      "another account's bot": /No Browse password is saved for/,
+      'a bot of another account': /available to this bot/,
+    };
+    for (const [name, pattern] of Object.entries(expect)) {
+      const got = result.cases[name];
+      assert.equal(got.values, null, `${name}: nothing reached the driver`);
+      assert.match(got.text, /^Not filled: /, name);
+      assert.match(got.text, pattern, name);
+    }
+    assert.equal(result.prompt_off, null, 'off: bots are told nothing');
+    assert.equal(result.prompt_bob, null, 'the other account has nothing saved, so its bots are told nothing');
+  });
+
+  await check('bots: each use is listed (bot, site, time), per account', () => {
+    assert.ok(result, 'the Python side ran');
+    assert.equal(result.uses.length, 1, 'one fill, one use');
+    assert.deepEqual([result.uses[0].bot, result.uses[0].origin, result.uses[0].username], ['Scout', base, 'al']);
+    assert.ok(Math.abs(result.uses[0].at - Date.now() / 1000) < 300, 'with the time');
+    assert.deepEqual(result.bob_uses, [], 'nothing in the other account\'s list');
+    assert.equal(result.listed[0].last_bot_use, result.uses[0].at);
+  });
+
+  await check('bots: the password is in no model text, prompt, use list or log line', () => {
+    assert.ok(result, 'the Python side ran');
+    const { cases, ...rest } = result;
+    const told = Object.values(cases).map(c => c.text);
+    assert.ok(!JSON.stringify([told, rest]).includes(PASSWORD));
+    assert.ok(!/\bal\b|fixture\.test/.test(result.prompt_on) && /login_id "browse"/.test(result.prompt_on), 'the prompt names no site or username');
+  });
+  tabs.closeAll();
+}
+
 // Audio output (electron/browser-audio.js): the routing script, and the
 // permission it needs only while a device is chosen.
 async function audioChecks({ check, win, gate, store, base, until }) {
@@ -227,4 +343,4 @@ async function profileChecks({ check }) {
   });
 }
 
-module.exports = { passwordChecks, audioChecks, profileChecks };
+module.exports = { passwordChecks, botPasswordChecks, audioChecks, profileChecks };

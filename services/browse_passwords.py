@@ -1,7 +1,21 @@
 """Browse's password keeper (Kairos Browser, David's feedback 2026-11-06: "it needs a proper password keeper").
 
 The person's own saved sign-ins for sites they open in Browse. Separate from bots' saved logins
-(services/bot_logins.py): nothing here is ever offered to a bot or a model.
+(services/bot_logins.py). Nothing here ever reaches a model.
+
+Bots (David, 2026-11-07: "yes bots can use your saved passwords, but that can be turned off"): with the
+account's "Let bots use saved passwords" on (the default), a bot of this account browsing in its contained
+computer may have a password filled for it by the harness (core/computer.py fill_login, login_id "browse" or
+"browse:<id>"), through `bot_fill()` only:
+- only on the exact origin the password was saved for, and never when a sign-in field sits in a frame of
+  another origin (no confirmation can widen this);
+- only for a bot of the account whose store it is (the account set for the turn; another account's store is
+  never opened);
+- every release is recorded (bot, site, username, time) in the same encrypted file and listed in the password
+  manager; the value is held (core/bot_held_secrets.py) so it is scrubbed from anything a model, transcript
+  or log sees;
+- off means bot_fill() refuses and bots are told nothing, exactly as before. Bots can't list, read, reveal,
+  export, edit, delete or save: no tool or route lets them (the routes need the person's sign-in cookie).
 
 - One file per account, accounts/<id>/bot-secrets/browse-logins.enc: the account's secrets folder, which no
   backup, export or restore carries or replaces (core/backup.py). The whole file (sites, usernames, passwords,
@@ -9,8 +23,8 @@ The person's own saved sign-ins for sites they open in Browse. Separate from bot
   3b), so another account's key can't open it and an admin can't read it through any route.
 - Rows go to the UI without passwords. A password leaves this module three ways only: `fill()` for the exact
   origin it was saved for (asked by the desktop app's main process, which fills it into that origin's page),
-  `reveal()` after the person re-entered their Kairos password (`unlock()`), and nowhere else. Values are
-  never logged.
+  `bot_fill()` for the harness filling a bot's page of that exact origin (above), and `reveal()` after the
+  person re-entered their Kairos password (`unlock()`). Values are never logged.
 - A site is its exact origin (scheme, host and port): https://x.com and https://mobile.x.com are different.
 - A corrupt or unreadable file fails closed: it is never overwritten or treated as empty.
 """
@@ -29,7 +43,7 @@ from urllib.parse import urlsplit
 
 from cryptography.fernet import InvalidToken
 
-from core.bot_held_secrets import SECRET_FOLDER
+from core.bot_held_secrets import SECRET_FOLDER, held
 
 FILE = "browse-logins.enc"
 MAX_LOGINS = 5000
@@ -38,6 +52,8 @@ MAX_FIELD = 1000
 MAX_PASSWORD = 1000
 MAX_IMPORT_BYTES = 5 * 1024 * 1024
 UNLOCK_SECONDS = 5 * 60
+MAX_BOT_USES = 500
+BOT_PREFIX = "browse"
 
 
 class PasswordError(ValueError):
@@ -80,7 +96,7 @@ def origin_of(url: str) -> Optional[str]:
 
 
 def _empty() -> dict:
-    return {"version": 1, "logins": {}, "never": []}
+    return {"version": 1, "logins": {}, "never": [], "bots_may_use": True, "bot_uses": []}
 
 
 def _load(account_id: str) -> dict:
@@ -97,6 +113,9 @@ def _load(account_id: str) -> dict:
     if not isinstance(data, dict) or not isinstance(data.get("logins"), dict) or not isinstance(data.get("never", []), list):
         raise PasswordError("Saved passwords can't be read. Nothing was changed.", 503)
     data.setdefault("never", [])
+    if not isinstance(data.get("bot_uses"), list):
+        data["bot_uses"] = []
+    data["bots_may_use"] = data.get("bots_may_use", True) is not False  # files from before the setting: on
     return data
 
 
@@ -128,7 +147,7 @@ def _text(value, name: str, limit: int = MAX_FIELD, allow_empty: bool = True) ->
 def _row(login_id: str, record: dict) -> dict:
     return {"id": login_id, "origin": record["origin"], "username": record.get("username", ""),
             "created": record.get("created"), "updated": record.get("updated"), "last_used": record.get("last_used"),
-            "times_used": record.get("times_used", 0)}
+            "times_used": record.get("times_used", 0), "last_bot_use": record.get("last_bot_use")}
 
 
 def _find(data: dict, origin: str, username: str) -> Optional[str]:
@@ -266,6 +285,136 @@ def set_never(url: str, never: bool) -> dict:
 def never_list() -> list[str]:
     with _lock:
         return sorted(_load(_account())["never"])
+
+
+# -- Bots of this account (David, 2026-11-07: "yes bots can use your saved passwords, but that can be turned off") --
+
+BOT_ID_LENGTH = 10
+
+
+def bots_allowed() -> bool:
+    with _lock:
+        return _load(_account())["bots_may_use"]
+
+
+def set_bots_allowed(allowed: bool) -> bool:
+    """The person's switch (Browser settings > Passwords). Only the routes the app window calls set it."""
+    account_id = _account()
+    with _lock:
+        data = _load(account_id)
+        data["bots_may_use"] = bool(allowed)
+        _save(account_id, data)
+    return bool(allowed)
+
+
+def bot_uses(limit: int = 100) -> list[dict]:
+    """The most recent bot uses, newest first: which bot, which site and username, when. Never a password."""
+    with _lock:
+        uses = _load(_account())["bot_uses"]
+    return [{key: use.get(key) for key in ("bot_id", "bot", "origin", "username", "at")} for use in reversed(uses[-limit:])]
+
+
+def bot_prompt_line() -> Optional[str]:
+    """What a bot of the current account is told, or None (off, nothing saved, or unreadable). Names no site,
+    username or password: the harness finds the password for the exact page when the bot asks."""
+    from core import accounts
+    try:
+        with _lock:
+            data = _load(_account())
+    except (PasswordError, accounts.NoAccount):
+        return None
+    if not data["bots_may_use"] or not data["logins"]:
+        return None
+    return ("Browse passwords: the person lets you sign in with the passwords they saved in Browse. On a sign-in page "
+            f"in your browser, call fill_login with login_id \"{BOT_PREFIX}\" to fill the password saved for that exact "
+            "site, if there is one. You never see the password, and nothing is submitted.")
+
+
+def bot_choice(login_id) -> tuple[bool, Optional[str]]:
+    """(is a Browse password, which one): "browse" picks the page's own, "browse:<id>" one of several."""
+    text = str(login_id or "")
+    if text == BOT_PREFIX:
+        return True, None
+    if text.startswith(BOT_PREFIX + ":"):
+        return True, text[len(BOT_PREFIX) + 1:][:40] or None
+    return False, None
+
+
+def _bot_name(bot_id: str) -> Optional[str]:
+    """The bot's name when it is a bot of the current account (agent_service is per account), else None."""
+    from services.agent_service import agent_service
+    bot = agent_service.get(bot_id)
+    return str(bot.get("name") or "A bot")[:100] if bot else None
+
+
+def bot_fill(choice: Optional[str], bot_id: str, page_url: str, field_frame_urls=()) -> dict:
+    """The username and password for the harness to type, at the moment of filling, for a bot of this account.
+
+    Refused unless the person's switch is on, the bot belongs to this account, the page's exact origin has the
+    password, and every frame holding a sign-in field has that same origin. Records the use and holds the value
+    so scrub() removes it from anything a model sees. The caller must never return the values."""
+    if not isinstance(bot_id, str) or len(bot_id) != BOT_ID_LENGTH or not bot_id.isalnum():
+        raise PasswordError("No Browse password is available to this bot.", 403)
+    origin = origin_of(page_url)
+    if not origin:
+        raise PasswordError("The bot's browser is not on a web page.", 403)
+    frames = list(field_frame_urls or ())
+    name = _bot_name(bot_id)
+    if not name:
+        raise PasswordError("No Browse password is available to this bot.", 403)
+    account_id = _account()
+    with _lock:
+        data = _load(account_id)
+        if not data["bots_may_use"]:
+            raise PasswordError("The person has turned off bots using their Browse passwords.", 403)
+        if any(origin_of(frame) != origin for frame in frames):
+            raise PasswordError("A sign-in field on this page is in a frame from another site. Browse passwords are "
+                                "filled only on the exact site they were saved for.", 403)
+        rows = sorted(((i, r) for i, r in data["logins"].items()
+                       if r["origin"] == origin and (choice is None or i == choice)), key=lambda x: x[1].get("username", ""))
+        if not rows:
+            raise PasswordError(f"No Browse password {'like that ' if choice else ''}is saved for {origin}.", 404)
+        if len(rows) > 1:
+            listed = ", ".join(f"\"{BOT_PREFIX}:{i}\" ({r.get('username') or 'no username'})" for i, r in rows)
+            raise PasswordError(f"Several Browse passwords are saved for {origin}: {listed}. Call fill_login again "
+                                "with one of those login ids.", 409)
+        login_id, record = rows[0]
+        now = time.time()
+        record["bot_used"] = True
+        record["last_bot_use"] = now
+        data["bot_uses"].append({"bot_id": bot_id, "bot": name, "origin": origin,
+                                 "username": record.get("username", ""), "at": now})
+        del data["bot_uses"][:-MAX_BOT_USES]
+        _save(account_id, data)
+    held.hold(record["password"])
+    return {"id": login_id, "origin": origin, "username": record.get("username", ""), "password": record["password"]}
+
+
+_scrub_cache: dict = {"key": None, "values": ()}
+
+
+def _bot_used_passwords():
+    """For scrub(): the current account's passwords a bot has had filled, even after a restart. Read only when
+    the file changed; nothing when no account is set or the file can't be read."""
+    from core import accounts
+    try:
+        account_id = _account()
+        path = os.path.join(accounts.account_dir(account_id, create=False), SECRET_FOLDER, FILE)
+        stat = os.stat(path)
+    except (accounts.NoAccount, OSError, ValueError):
+        return
+    key = (path, stat.st_mtime_ns, stat.st_size)
+    if _scrub_cache["key"] != key:
+        try:
+            with _lock:
+                data = _load(account_id)
+        except PasswordError:
+            return
+        _scrub_cache.update(key=key, values=tuple(r["password"] for r in data["logins"].values() if r.get("bot_used")))
+    yield from _scrub_cache["values"]
+
+
+held.add_source(_bot_used_passwords)
 
 
 # -- Reveal: only after the person proves it is them (their Kairos password), for five minutes. --

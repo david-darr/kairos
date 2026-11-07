@@ -13,7 +13,8 @@ window, never a paired terminal.
   app's main process (electron/browser-profiles.js): "default" for the first
   admin (the profile Browse had before accounts), else the account's folder
   id. Each account browses in its own profile.
-- /passwords: the password keeper (services/browse_passwords.py), below.
+- /passwords: the password keeper (services/browse_passwords.py), below, including the person's
+  "Let bots use saved passwords" switch and the list of bot uses (bots themselves never call these).
 """
 import secrets
 import time
@@ -119,6 +120,11 @@ class UnlockBody(BaseModel):
     password: Annotated[str, Field(max_length=1000)] = ""
 
 
+class BotsBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    allowed: bool
+
+
 class ImportBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     csv: Annotated[str, Field(max_length=passwords.MAX_IMPORT_BYTES)]
@@ -135,7 +141,8 @@ def _run(fn, *args, **kwargs):
 async def list_passwords(q: Annotated[str, Query(max_length=200)] = "", user: str = Depends(require_user)) -> dict:
     return {"logins": _run(passwords.list_logins, q), "never": _run(passwords.never_list),
             "unlocked_until": passwords.unlocked_until(_account(user)), "max": passwords.MAX_LOGINS,
-            "needs_password": auth_enabled()}
+            "needs_password": auth_enabled(), "bots_may_use": _run(passwords.bots_allowed),
+            "bot_uses": _run(passwords.bot_uses)}
 
 
 @router.post("/passwords")
@@ -166,6 +173,15 @@ async def unlock_passwords(body: UnlockBody, user: str = Depends(require_user)) 
 async def lock_passwords(user: str = Depends(require_user)) -> dict:
     passwords.lock(_account(user))
     return {"locked": True}
+
+
+@router.post("/passwords/bots")
+async def bots_may_use(body: BotsBody, request: Request, user: str = Depends(require_user)) -> dict:
+    """The person's "Let bots use saved passwords" switch (David, 2026-11-07). Only the app window's sign-in
+    sets it; a model's tool access never can, even alongside a cookie."""
+    if request.headers.get("X-JARVIS-Tool-Token"):
+        raise HTTPException(403, "A model's tool access cannot do this.")
+    return {"bots_may_use": _run(passwords.set_bots_allowed, body.allowed)}
 
 
 @router.post("/passwords/import")

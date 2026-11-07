@@ -1015,6 +1015,9 @@ async def main():
             if opaque or frames != list(cmd.get('expected_frames') or []):
                 raise ValueError('the page changed; check it again before filling')
             values = cmd.get('values') or {}
+            # A Browse password: only frames of its exact site, even if another frame gained a field since the scan.
+            if cmd.get('only_frames') is not None:
+                found = [r for r in found if r['frame'] in cmd['only_frames']]
             order = {'username': 0, 'password': 1, 'code': 2}
             password = next((r for r in found if r['kind'] == 'password'), None)
             chosen = {}

@@ -465,6 +465,10 @@ def build_resources(scope: dict, *, kind: str = "chat", now: Optional[float] = N
     logins = bot_logins.prompt_lines(scope["bot_id"])
     if logins:
         sections.append("Saved logins available to you:\n" + "\n".join(logins))
+    from services import browse_passwords
+    browse = browse_passwords.bot_prompt_line()  # None when the person's switch is off or nothing is saved
+    if browse:
+        sections.append(browse)
     if flags["memory"] and kind == "chat":
         try:
             recent = agent_service.recent_work(scope["bot_id"], scope.get("session_id"), owner_user=scope.get("owner"))

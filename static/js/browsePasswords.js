@@ -9,15 +9,21 @@
 // another browser's CSV export (through the desktop app, which offers to
 // move the file to the Recycle Bin after), and a strong-password generator.
 // Every value from a site is set as text, never as HTML.
+//
+// "Let bots use saved passwords" (David, 2026-11-07), on by default, per
+// account: the account's bots may have a password filled on the exact site
+// it was saved for, never seeing it; every use is listed here.
 
 import { api, el, toast, confirmDialog } from "./api.js";
 
 const hostOf = (origin) => { try { return new URL(origin).host; } catch { return origin; } };
 const when = (s) => (s ? new Date(s * 1000).toLocaleDateString([], { dateStyle: "medium" }) : "Never");
+const whenExactly = (s) => new Date(s * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 
 export function mountPasswords(box, { b }) {
   let rows = [], never = [], unlockedUntil = null, needsPassword = true, query = "", max = 5000;
   let editing = null, adding = false, error = "", destroyed = false;
+  let botsMayUse = true, botUses = [];
   const shown = new Map(); // login id -> password, while unlocked
   let lockTimer = null;
 
@@ -36,6 +42,7 @@ export function mountPasswords(box, { b }) {
     try {
       const data = await api(`/api/browse/passwords?q=${encodeURIComponent(query)}`, { toast: false });
       rows = data.logins || []; never = data.never || []; unlockedUntil = data.unlocked_until; needsPassword = !!data.needs_password; max = data.max || max;
+      botsMayUse = data.bots_may_use !== false; botUses = data.bot_uses || [];
       error = "";
     } catch (e) {
       error = String(e.message || "").replace(/^\d+: /, "") || "Saved passwords couldn't be read.";
@@ -76,6 +83,32 @@ export function mountPasswords(box, { b }) {
   function askUnlock(then) {
     if (!needsPassword) { unlock("").then((ok) => { if (ok) then(); else draw(); }); return; }
     unlockFor = then; draw();
+  }
+
+  async function setBots(on) {
+    try {
+      const data = await api("/api/browse/passwords/bots", { method: "POST", body: JSON.stringify({ allowed: !!on }), toast: false });
+      botsMayUse = !!data.bots_may_use;
+    } catch (e) { toast(String(e.message || "").replace(/^\d+: /, "") || "That didn't change.", "error"); }
+    draw();
+  }
+
+  function botSection() {
+    const items = [
+      el("label", { class: "browse-look-choice browse-pw-bots" }, [
+        el("input", { type: "checkbox", checked: botsMayUse, onchange: (e) => setBots(e.target.checked) }),
+        el("span", { text: "Let bots use saved passwords" })]),
+      el("p", { class: "browse-list-meta", text: "Your bots can sign in with these on the exact site each was saved for. They never see a password, and every use is listed here." }),
+    ];
+    if (botUses.length) {
+      items.push(el("ul", { class: "browse-list", "aria-label": "Used by bots" }, botUses.slice(0, 50).map((use) => el("li", {}, [
+        el("div", { class: "browse-list-main static" }, [
+          el("span", { class: "browse-list-title", text: `${use.bot || "A bot"} signed in on ${hostOf(use.origin)}${use.username ? " as " + use.username : ""}` }),
+          el("span", { class: "browse-list-meta", text: whenExactly(use.at) }),
+        ]),
+      ]))));
+    } else if (botsMayUse) items.push(el("p", { class: "browse-list-meta", text: "No bot has used a saved password yet." }));
+    return el("div", { class: "browse-pw-bot-use", role: "group", "aria-label": "Bots and saved passwords" }, items);
   }
 
   async function remove(row) {
@@ -166,6 +199,7 @@ export function mountPasswords(box, { b }) {
     const parts = [head,
       el("p", { class: "browse-list-meta", text: "Saved for your Kairos account only, encrypted with your account's key. Browse offers to save a sign-in and fills it only on the exact site it was saved for." })];
     if (error) parts.push(el("p", { class: "browse-notice error", role: "alert", text: error }));
+    else parts.push(botSection());
     if (unlockFor) parts.push(unlockForm());
     if (adding) parts.push(editForm(null));
     parts.push(rows.length ? el("ul", { class: "browse-list", "aria-label": "Saved passwords" }, rows.map(rowItem))

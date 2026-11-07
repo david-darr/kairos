@@ -362,8 +362,9 @@ def usable_for(host: str, bot_id: str) -> list[dict]:
 
 
 def prompt_lines(bot_id: str) -> list[str]:
-    """What a bot is told it can sign in with: site and username, nothing else."""
-    return [f"{r['site']} ({r['username']})" for r in list_logins()
+    """What a bot is told it can sign in with: site, username and the id fill_login takes, nothing else.
+    (The id was missing until 2026-11-07, so a bot had no way to name a login to fill_login.)"""
+    return [f"{r['site']} ({r['username']}), login_id {r['id']}" for r in list_logins()
             if r["bots"] == "all" or bot_id in r["bots"]]
 
 
