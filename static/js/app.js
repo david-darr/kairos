@@ -650,6 +650,8 @@ async function startApp() {
   setupMobileMenu();
   // A bot ringing you: an incoming-call sheet in any window but a single-chat popup (ringHost.js).
   if (!chatWindow) import('./ringHost.js').then(module => module.mountRingHost()).catch(() => {});
+  // A bot phoning someone else for you: the live transcript, its questions and Hang up (outboundCallHost.js).
+  if (!chatWindow) import('./outboundCallHost.js').then(module => module.mountOutboundCallHost()).catch(() => {});
   document.addEventListener("jarvis:navigate", async (event) => {
     const { tab, ...options } = event.detail;
     if (tab === "settings") { openSettings(options); return; }

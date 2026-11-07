@@ -32,6 +32,8 @@ class PhoneBody(BaseModel):
     enabled: Optional[bool] = None
     pin: Optional[str] = Field(default=None, max_length=12)
     require_pin: Optional[bool] = None
+    others_enabled: Optional[bool] = None
+    caller_name: Optional[str] = Field(default=None, max_length=60)
 
 
 @router.get("")
@@ -51,6 +53,76 @@ async def save_connection(body: PhoneBody, user: str = Depends(require_user)) ->
 @router.delete("")
 async def delete_connection(user: str = Depends(require_user)) -> dict:
     return {"removed": connection.delete()}
+
+
+# -- calls to other people (build spec step 9, services/outbound_calls.py) --------------------------------------
+
+class AnswerBody(BaseModel):
+    question_id: str = Field(min_length=1, max_length=40)
+    answer: str = Field(min_length=1, max_length=500)
+
+
+class BlockBody(BaseModel):
+    number: str = Field(min_length=1, max_length=40)
+    blocked: bool = True
+
+
+def _refused(error: Exception) -> HTTPException:
+    return HTTPException(status_code=409, detail=str(error))
+
+
+@router.get("/outbound")
+async def outbound_list(user: str = Depends(require_user)) -> dict:
+    from core import accounts
+    from services import outbound_calls
+    return outbound_calls.listing(accounts.effective_account())
+
+
+@router.get("/outbound/active")
+async def outbound_active(user: str = Depends(require_user)) -> dict:
+    from core import accounts
+    from services import outbound_calls
+    return {"calls": outbound_calls.active(accounts.effective_account())}
+
+
+@router.get("/outbound/{call_id}")
+async def outbound_get(call_id: str, user: str = Depends(require_user)) -> dict:
+    from core import accounts
+    from services import outbound_calls
+    call = outbound_calls.get(accounts.effective_account(), call_id)
+    if call is None:
+        raise HTTPException(status_code=404, detail="Call not found")
+    return outbound_calls.view(call)
+
+
+@router.post("/outbound/{call_id}/answer")
+async def outbound_answer(call_id: str, body: AnswerBody, user: str = Depends(require_user)) -> dict:
+    from core import accounts
+    from services import outbound_calls
+    try:
+        return outbound_calls.answer(accounts.effective_account(), call_id, body.question_id, body.answer)
+    except outbound_calls.CallRefused as error:
+        raise _refused(error)
+
+
+@router.post("/outbound/{call_id}/hangup")
+async def outbound_hangup(call_id: str, user: str = Depends(require_user)) -> dict:
+    from core import accounts
+    from services import outbound_calls
+    try:
+        return await outbound_calls.hang_up(accounts.effective_account(), call_id)
+    except outbound_calls.CallRefused as error:
+        raise HTTPException(status_code=404, detail=str(error))
+
+
+@router.post("/blocked")
+async def set_blocked(body: BlockBody, user: str = Depends(require_user)) -> dict:
+    from core import accounts
+    from services import outbound_calls
+    try:
+        return {"blocked": outbound_calls.set_blocked(accounts.effective_account(), body.number, body.blocked)}
+    except outbound_calls.CallRefused as error:
+        raise HTTPException(status_code=422, detail=str(error))
 
 
 def _response(result) -> Response:

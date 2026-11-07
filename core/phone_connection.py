@@ -175,8 +175,13 @@ def save(values: dict, account: Optional[str] = None) -> dict:
             "enabled": bool(values["enabled"]) if "enabled" in values else bool(existing.get("enabled", True)),
             "require_pin": bool(values["require_pin"]) if "require_pin" in values else existing.get("require_pin", True) is not False,
             "pin_hash": existing.get("pin_hash"),
+            # Calls to other people (step 9): off until the person turns them on, and they need the name a call is for.
+            "others_enabled": bool(values["others_enabled"]) if "others_enabled" in values else bool(existing.get("others_enabled", False)),
+            "caller_name": " ".join(str(values["caller_name"] if "caller_name" in values else existing.get("caller_name") or "").split())[:60],
         }
         pin = str(values.get("pin") or "").strip()
+        if record["others_enabled"] and not record["caller_name"]:
+            raise PhoneError("Enter your name for calls to other people, so a call can say who it is for.")
         if pin:
             if not re.fullmatch(r"\d{4,8}", pin):
                 raise PhoneError("The PIN must be 4 to 8 digits.")

@@ -194,6 +194,29 @@ async def set_realtime(endpoint_id: str, body: RealtimeRequest, user: str = Depe
         raise HTTPException(400, str(error))
 
 
+class FreeVoiceRequest(BaseModel):
+    api_key: str
+
+
+@router.get("/free-voice")
+async def free_voice_status(user: str = Depends(require_user)) -> dict:
+    """Is a free Gemini key connected for realtime voice (core/free_voice.py)? Never the key."""
+    from core import free_voice
+    return free_voice.status()
+
+
+@router.post("/free-voice")
+async def free_voice_connect(body: FreeVoiceRequest, user: str = Depends(require_user)) -> dict:
+    """Check a pasted Gemini API key with Google, then save it as this account's free realtime voice connection."""
+    from core import free_voice
+    if len(body.api_key or "") > 400:
+        raise HTTPException(status_code=400, detail="That key is too long.")
+    try:
+        return await free_voice.connect(body.api_key)
+    except free_voice.FreeVoiceError as error:
+        raise HTTPException(status_code=422, detail=str(error))
+
+
 @router.post("/{endpoint_id}/test")
 async def test_endpoint(endpoint_id: str, user: str = Depends(require_user)) -> dict:
     """Real reachability probe (David's ask 2026-08-31, matching Odysseus's

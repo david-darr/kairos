@@ -112,7 +112,12 @@ export function agentCall(agent, controller) {
   const liveEndpoint=el('select',{'aria-label':'Cloud voice API connection'});
   const liveVoiceChoice=el('select',{'aria-label':'Cloud voice'},['marin','cedar','coral','sage','ash'].map(name=>el('option',{value:name,text:name})));
   const paid=el('input',{type:'checkbox','aria-label':'Use paid cloud voice for this call'});
-  const cloudSetup=el('div',{hidden:true,class:'agent-call-cloud-setup'},[el('label',{},[el('span',{text:'Voice API connection'}),liveEndpoint]),el('label',{},[el('span',{text:'Live voice'}),liveVoiceChoice]),el('label',{class:'agent-call-consent'},[paid,el('span',{text:'Use paid cloud voice for this call. Audio is sent to OpenAI; voice and backend model usage are billed to your API account.'})])]);
+  const consentText=el('span',{text:'Use paid cloud voice for this call. Audio is sent to OpenAI; voice and backend model usage are billed to your API account.'});
+  const realtimeChoice=()=>callMode.value==='realtime'?(liveChoicesByMode.realtime||[]).find(e=>e.id===liveEndpoint.value):null;
+  const cloudSetup=el('div',{hidden:true,class:'agent-call-cloud-setup'},[el('label',{},[el('span',{text:'Voice API connection'}),liveEndpoint]),el('label',{},[el('span',{text:'Live voice'}),liveVoiceChoice]),el('label',{class:'agent-call-consent'},[paid,consentText])]);
+  // No realtime connection yet: offer the free Gemini key setup right here (freeVoiceSetup.js).
+  const freeVoice=el('button',{type:'button',class:'btn agent-call-free-voice',text:'Set up free Gemini voice',hidden:true});
+  freeVoice.onclick=async()=>{const {openFreeVoiceSetup}=await import('./freeVoiceSetup.js');openFreeVoiceSetup({onConnected:async()=>{try{const found=await api('/api/agent-calls/realtime-choices',{toast:false});liveChoicesByMode.realtime=Array.isArray(found)?found:[];}catch{}fillLiveChoices();syncModel();}});};
   const liveCallbacks=[next=>{if(!active)return;if(next==='ended'){hangup();return;}setState(next,next==='speaking'?`${agent.name} is speaking. You can interrupt naturally.`:'Listening...');},(role,delta)=>{heard.textContent=(heard.dataset.speaker===role?heard.textContent:`${role}: `)+delta;heard.dataset.speaker=role;},level=>orb.style.setProperty('--word',String(level)),message=>{error.textContent=message;}];
   const gptLive=liveVoice(...liveCallbacks);
   let realtimeInfo=null;
@@ -125,7 +130,7 @@ export function agentCall(agent, controller) {
   function fillLiveVoices(){if(callMode.value!=='realtime'){liveVoiceChoice.replaceChildren(...['marin','cedar','coral','sage','ash'].map(name=>el('option',{value:name,text:name})));return;}const choice=liveChoicesByMode.realtime.find(e=>e.id===liveEndpoint.value);liveVoiceChoice.replaceChildren(...(choice?.voices||[]).map(name=>el('option',{value:name,text:name})));if(choice)liveVoiceChoice.value=choice.default_voice;}
   function announceRealtimeWork(work){transport.refresh();if(work.status!=='running'&&work.task_id)announceWork(work.task_id);}
   // The call screen shows who is speaking and a running cost estimate (the provider's own bill is the truth).
-  function drawRealtimeCost(seconds){if(callMode.value!=='realtime'||!realtimeInfo)return;const cost=seconds/60*realtimeInfo.price_per_minute;timing.textContent=`${realtimeInfo.label} (${realtimeInfo.model}): about $${cost.toFixed(2)} so far, an estimate at $${realtimeInfo.price_per_minute.toFixed(2)} a minute${realtimeInfo.verified?'':'; not yet checked against the live service'}`;}
+  function drawRealtimeCost(seconds){if(callMode.value!=='realtime'||!realtimeInfo)return;if(realtimeInfo.free_tier){timing.textContent=`${realtimeInfo.label} (${realtimeInfo.model}) on your free key: no charge, within Google's free-tier limits`;return;}const cost=seconds/60*realtimeInfo.price_per_minute;timing.textContent=`${realtimeInfo.label} (${realtimeInfo.model}): about $${cost.toFixed(2)} so far, an estimate at $${realtimeInfo.price_per_minute.toFixed(2)} a minute${realtimeInfo.verified?'':'; not yet checked against the live service'}`;}
   const modelKey = `kairos:call-model:v2:${agent.id}`;
   const modeKey = `kairos:call-input:${agent.id}`;
   const heard = el('p', { class: 'agent-call-heard', 'aria-live': 'polite' });
@@ -168,7 +173,7 @@ export function agentCall(agent, controller) {
   const modelBox = el('div', { class: 'agent-call-model', hidden: true }, [el('label', {}, [el('span', { text: 'Speech recognition' }), model])]);
   const download = el('button', { class: 'btn quiet', type: 'button', text: 'Download speech model', hidden: true, onclick: downloadModel });
   const start = el('button', { class: 'btn primary', type: 'submit', text: 'Start call', disabled: true });
-  const setup = el('form', { class: 'agent-call-setup' }, [readiness,
+  const setup = el('form', { class: 'agent-call-setup' }, [readiness, freeVoice,
     el('label', {}, [el('span', { text: 'Voice' }), voice]), modelBox,
     el('label', {}, [el('span', { text: 'Input' }), inputMode]),
     el('label', {}, [el('span', { text: 'Recognition processor' }), acceleration]), runtimeSetup, download, start]);
@@ -351,7 +356,10 @@ export function agentCall(agent, controller) {
   function syncModel() {
     const cloud=isCloud();
     const privacy=dialog.querySelector('.agent-call-privacy');
-    if(privacy)privacy.textContent=callMode.value==='realtime'?'Realtime voice sends your audio, through Kairos, to the provider you chose and incurs API charges on your key. Real work still goes to this agent. Dialogue stays out of chat; a summary is saved afterwards.':cloud?'Cloud voice sends audio to OpenAI and incurs API charges. Dialogue stays out of chat; a summary is saved afterwards.':`Recognition stays on this device. Dialogue goes to your selected conversation model. Only a summary is saved in ${savedIn} afterwards.`;
+    const free=realtimeChoice()?.free_tier;
+    freeVoice.hidden=!(callMode.value==='realtime'&&!liveEndpoint.value);
+    consentText.textContent=callMode.value!=='realtime'?'Use paid cloud voice for this call. Audio is sent to OpenAI; voice and backend model usage are billed to your API account.':free?'Use realtime voice for this call. Audio is sent to Google on your free Gemini key: no charge within Google's free-tier limits, and Google may use it to improve its products.':'Use realtime voice for this call. Audio is sent to the provider you chose and billed to your API account.';
+    if(privacy)privacy.textContent=callMode.value==='realtime'&&free?'Realtime voice sends your audio, through Kairos, to Google on your free Gemini key. Real work still goes to this agent. Dialogue stays out of chat; a summary is saved afterwards.':callMode.value==='realtime'?'Realtime voice sends your audio, through Kairos, to the provider you chose and incurs API charges on your key. Real work still goes to this agent. Dialogue stays out of chat; a summary is saved afterwards.':cloud?'Cloud voice sends audio to OpenAI and incurs API charges. Dialogue stays out of chat; a summary is saved afterwards.':`Recognition stays on this device. Dialogue goes to your selected conversation model. Only a summary is saved in ${savedIn} afterwards.`;
     neural.node.hidden=cloud;preview.hidden=cloud;
     inputMode.closest('label').hidden=cloud;acceleration.closest('label').hidden=cloud;
     modelBox.hidden=cloud||!speech?.engine_available;runtimeSetup.hidden=cloud||!speech?.acceleration?.supported;

@@ -17,10 +17,11 @@ const errorText = (error) => (error && error.message) || 'That could not be save
 export async function renderPhonePanel(content) {
   const root = el('section', { class: 'phone-panel' });
   content.append(root);
-  const [state, bots, choices] = await Promise.all([
+  const [state, bots, choices, outbound] = await Promise.all([
     api('/api/phone').catch(() => ({ connection: { configured: false } })),
     api('/api/agents').catch(() => []),
     api('/api/agent-calls/choices').catch(() => []),
+    api('/api/phone/outbound', { toast: false }).catch(() => ({ calls: [], blocked: [] })),
   ]);
   const saved = state.connection || { configured: false };
   const values = { provider: saved.provider || 'twilio' };
@@ -89,6 +90,31 @@ export async function renderPhonePanel(content) {
   const enabled = toggle({ checked: saved.configured ? saved.enabled !== false : true, label: 'Phone on',
     onChange: async (on) => { values.enabled = on; if (saved.configured) await api('/api/phone', { method: 'PUT', body: JSON.stringify({ enabled: on }) }); } });
 
+  // Calls to other people (build spec step 9, services/outbound_calls.py): off until turned on here.
+  const othersWarning = note('Rules for AI calls differ by place, and this is not legal advice. In the US, the FCC treats AI voices as artificial voices under the TCPA. Use it for your own errands, like a reservation or a call to a client you know, never for marketing.');
+  const others = toggle({ checked: !!saved.others_enabled, label: 'Let bots call other people',
+    onChange: async (on) => { values.others_enabled = on; if (saved.configured) {
+      try { await api('/api/phone', { method: 'PUT', toast: false, body: JSON.stringify({ others_enabled: on, caller_name: values.caller_name ?? saved.caller_name ?? '' }) }); }
+      catch (error) { others.checked = false; values.others_enabled = false; status.textContent = errorText(error); }
+    } } });
+  const statusWord = { dialing: 'Ringing', live: 'On the call', ended: 'Ended' };
+  const callRows = (outbound.calls || []).slice(0, 10).map(call => row({
+    title: `${call.bot_name} called ${call.who}`,
+    description: `${new Date(call.created_at * 1000).toLocaleString()} · ${call.to} · ${statusWord[call.status] || call.status}${call.end_reason && call.status === 'ended' ? ` · ${call.end_reason}` : ''}`,
+    control: el('button', { type: 'button', class: 'btn quiet', text: call.status === 'ended' ? 'Transcript' : 'Watch', onclick: async () => {
+      const { showOutboundCall } = await import('../outboundCallHost.js'); showOutboundCall(call.id).catch(() => toast('That call could not be opened.', 'error'));
+    } }) }));
+  const blockedRows = (outbound.blocked || []).map(number => row({ title: number, description: 'Bots will not call this number.',
+    control: el('button', { type: 'button', class: 'btn quiet', text: 'Unblock', onclick: async () => {
+      await api('/api/phone/blocked', { method: 'POST', body: JSON.stringify({ number, blocked: false }) });
+      content.replaceChildren(); await renderPhonePanel(content);
+    } }) }));
+  const blockInput = el('input', { type: 'text', placeholder: '+15551234567', 'aria-label': 'Number to block', autocomplete: 'off' });
+  const blockButton = el('button', { type: 'button', class: 'btn', text: 'Block', onclick: async () => {
+    try { await api('/api/phone/blocked', { method: 'POST', toast: false, body: JSON.stringify({ number: blockInput.value, blocked: true }) }); content.replaceChildren(); await renderPhonePanel(content); }
+    catch (error) { status.textContent = errorText(error); }
+  } });
+
   const paths = saved.webhook_paths;
   root.append(
     group({ title: 'Your phone number', description: 'Call a bot from your own mobile, and let your bots call or text you. It runs through your own Twilio or Telnyx account and number, so you pay them directly. Kairos never buys a number or signs up for anything.' }, [
@@ -115,7 +141,15 @@ export async function renderPhonePanel(content) {
       row({ title: 'Bot', description: 'Which bot picks up when you call.', control: botSelect }),
       row({ title: 'Conversation model', description: 'A fast API or local model, like the one used in app calls.', control: modelSelect }),
     ]),
-    note('Calls from a bot always start with "This is <bot>, an AI assistant from Kairos." and go only to your mobile. Calls to anyone else are not available.'),
+    note('Calls from a bot to you always start with "This is <bot>, an AI assistant from Kairos." and go only to your mobile.'),
+    group({ title: 'Calls to other people', description: 'A bot can phone someone for you, such as a restaurant or a client. You approve every call before it is placed, at every approval level. The call opens with "Hi, this is <bot>, an AI assistant calling on behalf of <your name>. This call is transcribed." While it runs you see a live transcript, answer the bot's questions and can hang up. A summary lands in the bot's conversation afterwards.' }, [
+      row({ title: 'Calls to other people', description: 'Off by default.', control: others }),
+      field('Your name for calls', input('caller_name', 'text', 'David Darr'), 'Said at the start of every call to someone else, so they know who it is for.'),
+      row({ title: 'Limits', description: 'One call at a time, a minute apart, between 8 am and 9 pm by this computer's clock. Each day: 3 per bot, 5 per account and 2 to any one number. Ten minutes at most. Never to your own numbers or premium-rate numbers. When someone asks not to be called again, their number is blocked.' }),
+      othersWarning,
+    ]),
+    group({ title: 'Recent calls to other people' }, callRows.length ? callRows : [row({ title: 'No calls yet.' })]),
+    group({ title: 'Do-not-call list' }, [...blockedRows, row({ title: 'Block a number', control: el('div', { class: 'free-voice-key' }, [blockInput, blockButton]) })]),
     el('div', { class: 'set-row-actions' }, [status, saved.configured ? remove : null, saveButton]),
   );
   if (saved.conversation_model) values.conversation_model = saved.conversation_model;

@@ -242,9 +242,24 @@ export async function renderSpeechPanel(content, status) {
     if (deviceSection && root.isConnected) parts.push(deviceSection);
     const voiceSection = await drawVoice();
     if (voiceSection && root.isConnected) parts.push(voiceSection);
+    const freeVoice = await drawFreeVoice();
+    if (freeVoice && root.isConnected) parts.push(freeVoice);
 
     parts.push(note('Larger models are more accurate and slower. Transcription runs on the processor, so a long recording on a modest machine takes a few seconds.'));
     root.replaceChildren(...parts);
+  }
+
+  // Free realtime voice (freeVoiceSetup.js): realtime speech-to-speech on a free Gemini key, set up in a few steps.
+  async function drawFreeVoice() {
+    const state = await api('/api/models/free-voice', { toast: false }).catch(() => null);
+    if (!state) return null;
+    const { freeVoiceSetup } = await import('../freeVoiceSetup.js');
+    const badge = state.configured ? pill('Connected', 'ok') : pill('Not set up', 'muted');
+    return group({ title: 'Free realtime voice', cls: 'speech-free-voice',
+      description: 'Realtime voice is the quickest, most natural way to talk with a bot. It needs a provider key; a free Gemini key from Google works. Realtime calls send your audio to Google, unlike dictation, which stays on this computer.' }, [
+      row({ title: 'Gemini free key', description: state.configured ? `Realtime voice can use Gemini (${state.model}) at no cost.` : 'Not set up yet.', control: badge }),
+      freeVoiceSetup({ configured: state.configured, onConnected: () => draw() }),
+    ]);
   }
 
   await draw();

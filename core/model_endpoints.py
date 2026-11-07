@@ -85,6 +85,7 @@ def _masked(ep: dict) -> dict:
         "supports_images": ep.get("kind") in ("claude_cli", "codex_cli", "antigravity_cli") or bool(ep.get("supports_images")),
         "realtime_provider": ep.get("realtime_provider"),
         "realtime_model": ep.get("realtime_model"),
+        "free_tier": bool(ep.get("free_tier")),
     }
 
 
@@ -235,6 +236,17 @@ def set_realtime(endpoint_id: str, provider: Optional[str], model: Optional[str]
         raise ValueError("A model id has no spaces and is at most 160 characters.")
     endpoint["realtime_provider"] = provider
     endpoint["realtime_model"] = model or None
+    write_json_atomic(endpoints_file(), data)
+    return _masked(endpoint)
+
+
+def set_free_tier(endpoint_id: str, free: bool) -> dict:
+    """Mark a connection as running on a provider's free tier (core/free_voice.py): calls then show no per-minute cost."""
+    data = _load()
+    endpoint = data.get(endpoint_id)
+    if endpoint is None:
+        raise KeyError(endpoint_id)
+    endpoint["free_tier"] = bool(free)
     write_json_atomic(endpoints_file(), data)
     return _masked(endpoint)
 

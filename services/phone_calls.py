@@ -6,7 +6,8 @@ What is and is not built:
   else hears a short refusal), and the call becomes a one-use stream token the provider's media stream presents.
 - Outbound, to the person ONLY: a bot may call or text the verified mobile number of the account it works for. The
   number is never an argument. Every call opens "This is <bot>, an AI assistant from Kairos." Calls and texts are
-  rate limited here and by the bot's own outbound allowance. Calls to anyone else are not built (spec section 5).
+  rate limited here and by the bot's own outbound allowance. Calls to anyone else (step 9, approved one by one) are
+  services/outbound_calls.py; they reach this module only as webhooks and a media stream.
 - Per account: the connection, its secrets and its numbers belong to one account; a webhook is routed by the number
   that was dialled; nothing runs for an account without a saved, enabled connection.
 
@@ -193,6 +194,9 @@ async def twilio_voice(headers: dict, query: str, body: bytes):
     if _replays.seen(("twilio", headers_get(headers, "X-Twilio-Signature"))):
         return _text(403, "replayed")
     if outbound:
+        if "other" in dict(parse_qsl(query)):
+            from services import outbound_calls     # a call to someone else (step 9), picked up
+            return _xml(outbound_calls.twilio_answered(account, provider, query, params))
         intent = redeem(dict(parse_qsl(query)).get("out", ""), "outbound")
         if not intent or intent["account"] != account or not connection.same_number(params.get("To"), record["user_number"]):
             return _xml(twiml_say(REFUSAL))
@@ -287,6 +291,9 @@ async def telnyx_event(headers: dict, body: bytes):
             elif state == "refuse" or state.startswith("say:"):
                 await provider.action(ccid, "speak", {"payload": state[4:] if state.startswith("say:") else REFUSAL,
                                                       "voice": "female", "language": "en-US", "client_state": _encode_state("hangup")})
+            elif state.startswith("other:") and outgoing:
+                from services import outbound_calls
+                await outbound_calls.telnyx_answered(account, provider, ccid, state[6:], payload.get("to"))
             elif state.startswith("out:"):
                 intent = redeem(state[4:], "outbound")
                 if intent and intent["account"] == account and connection.same_number(payload.get("to"), record["user_number"]):
@@ -368,6 +375,10 @@ async def serve_stream(provider_name: str, socket, pipeline_factory=None, bridge
     except SignatureError:
         await socket.close(1008)
         return "unsigned"
+    if session["mode"] == "other":
+        from services import outbound_calls     # a call to someone else (step 9)
+        with accounts.as_account(account):
+            return await outbound_calls.serve(account, record, provider, session, first, socket, pipeline_factory, bridge_options)
     with accounts.as_account(account):
         bot = bot_for(account, record)
         if not bot:

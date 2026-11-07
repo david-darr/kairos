@@ -13,3 +13,47 @@
 @media (prefers-reduced-motion: reduce) { .ring-sheet { animation: none; } }
 .agent-call-ring { max-width: 420px; margin: 0; text-align: center; font-size: 13px; color: var(--text-dim); overflow-wrap: anywhere; }
 .bots-attn-callback { flex: none; min-height: 36px; }
+
+/* A bot phoning someone else for you (static/js/outboundCallHost.js): the live call panel, bottom right on a computer,
+   full width on a phone. */
+.outcall-stack { position: fixed; z-index: 1990; right: 16px; bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+  display: flex; flex-direction: column; gap: 10px; width: min(400px, calc(100vw - 32px)); pointer-events: none; }
+.outcall-panel { pointer-events: auto; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; padding: 14px 16px;
+  max-height: min(70vh, 560px); background: var(--ui-surface, var(--bg-panel-solid, #fff)); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: 16px; box-shadow: 0 12px 40px rgba(0, 0, 0, .28); }
+.outcall-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.outcall-heading { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.outcall-title { font-size: 15px; overflow-wrap: anywhere; }
+.outcall-state { font-size: 12px; color: var(--text-dim); }
+.outcall-state[data-state="live"] { color: var(--ok, #1a7f37); }
+.outcall-meta { margin: 0; font-size: 12px; color: var(--text-dim); overflow-wrap: anywhere; }
+.outcall-transcript { list-style: none; margin: 0; padding: 0; overflow-y: auto; min-height: 48px; flex: 1 1 auto;
+  display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.outcall-line { display: flex; flex-direction: column; gap: 1px; }
+.outcall-who { font-size: 11px; color: var(--text-dim); }
+.outcall-text { overflow-wrap: anywhere; }
+.outcall-question .outcall-text, .outcall-line.outcall-question .outcall-text { font-weight: 600; }
+.outcall-line.outcall-note .outcall-text { color: var(--text-dim); font-style: italic; }
+.outcall-question { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 12px; background: var(--bg-subtle, rgba(127, 127, 127, .1)); }
+.outcall-question-text { font-size: 13px; overflow-wrap: anywhere; }
+.outcall-answer { display: flex; gap: 8px; }
+.outcall-answer-input { flex: 1; min-width: 0; min-height: 40px; }
+.outcall-answer-status { font-size: 12px; color: var(--danger, #c62828); }
+.outcall-answer-status:empty { display: none; }
+.outcall-summary { margin: 0; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow-y: auto; }
+.outcall-actions { display: flex; justify-content: flex-end; }
+.outcall-actions .btn, .outcall-answer .btn { min-height: 40px; }
+@media (max-width: 520px) { .outcall-stack { right: 16px; left: 16px; width: auto; } }
+.free-voice-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+.free-voice-key { display: flex; gap: 8px; flex-wrap: wrap; }
+.free-voice-key input { flex: 1 1 220px; min-width: 0; min-height: 40px; }
+.free-voice-limits { font-size: 12px; color: var(--text-dim); margin: 0; }
+.free-voice-status { font-size: 13px; }
+.free-voice-status[data-tone="error"] { color: var(--danger, #c62828); }
+.free-voice-status[data-tone="ok"] { color: var(--ok, #1a7f37); }
+.free-voice-dialog { width: min(520px, calc(100vw - 32px)); box-sizing: border-box; padding: 20px; border: 1px solid var(--border-strong);
+  border-radius: 16px; background: var(--ui-surface, var(--bg-panel-solid, #fff)); color: var(--text); box-shadow: 0 16px 48px rgba(0, 0, 0, .3); }
+.free-voice-dialog::backdrop { background: rgba(0, 0, 0, .45); }
+.free-voice-dialog h2 { margin: 0 0 6px; font-size: 18px; }
+.free-voice-dialog .free-voice-setup { display: flex; flex-direction: column; gap: 12px; margin: 12px 0; }
+.free-voice-setup { display: flex; flex-direction: column; gap: 12px; }

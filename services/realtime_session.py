@@ -50,6 +50,9 @@ class RealtimeSession:
         self.provider, self.model, self._key = model_endpoints.realtime_runtime(endpoint_id)
         self.adapter = realtime_voice.adapter(self.provider)
         self.voice = voice if voice in self.adapter.voices else self.adapter.default_voice
+        # A free key (core/free_voice.py) costs nothing per minute; the provider's free-tier limits apply instead.
+        self.free_tier = bool((model_endpoints.get_endpoint(endpoint_id) or {}).get("free_tier"))
+        self.price_per_minute = 0.0 if self.free_tier else self.adapter.price_per_minute
         self.socket = None
         self.account = accounts.current_account()
         self.tasks: set = set()
@@ -92,12 +95,12 @@ class RealtimeSession:
             raise
         self.ready_at = self.clock()
         self.call.update(mode="realtime", realtime={"provider": self.provider, "model": self.model, "voice": self.voice,
-                                                    "price_per_minute": self.adapter.price_per_minute,
+                                                    "price_per_minute": self.price_per_minute, "free_tier": self.free_tier,
                                                     "endpoint_id": self.endpoint_id})
         calls._save(self.call)
         self._spawn(self._watch_work())
         info = {"type": "ready", "provider": self.provider, "label": self.adapter.label, "model": self.model, "voice": self.voice,
-                "price_per_minute": self.adapter.price_per_minute, "rate_in": 16000, "rate_out": self.adapter.rate_out,
+                "price_per_minute": self.price_per_minute, "free_tier": self.free_tier, "rate_in": 16000, "rate_out": self.adapter.rate_out,
                 "verified": self.adapter.verified}
         await self.sink(info)
         return info
@@ -125,11 +128,11 @@ class RealtimeSession:
         if self.ready_at is not None:
             seconds = self.clock() - self.ready_at
             self.call["realtime"] = {**(self.call.get("realtime") or {}), "seconds": round(seconds, 1),
-                                     "cost_estimate": realtime_voice.cost_estimate(self.provider, seconds)}
+                                     "cost_estimate": 0.0 if self.free_tier else realtime_voice.cost_estimate(self.provider, seconds)}
             calls._save(self.call)
             try:
                 with accounts.as_account(self.account) if self.account else contextlib.nullcontext():
-                    realtime_usage.record(self.provider, seconds)
+                    realtime_usage.record(self.provider, seconds, free=self.free_tier)
             except Exception:
                 logger.warning("realtime usage could not be recorded call=%s", self.call["id"])
         with contextlib.suppress(Exception):
@@ -364,7 +367,8 @@ def choices() -> list:
             continue
         adapter = realtime_voice.adapter(provider)
         found.append({"id": listed["id"], "name": listed["name"], "shared": bool(listed.get("shared")), **adapter.describe(),
-                      "model": raw.get("realtime_model") or adapter.default_model})
+                      "model": raw.get("realtime_model") or adapter.default_model,
+                      **({"free_tier": True, "price_per_minute": 0.0} if raw.get("free_tier") else {"free_tier": False})})
     return found
 
 

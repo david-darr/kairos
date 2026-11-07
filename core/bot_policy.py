@@ -520,7 +520,7 @@ class Operation:
 
 
 SEND_TOKENS = frozenset("send reply forward post publish invite share pay transfer tweet broadcast notify ring "
-                        "announce dm sms".split())
+                        "announce dm sms dial".split())
 DESTRUCTIVE_TOKENS = frozenset("delete remove drop destroy purge wipe erase revoke trash kill uninstall reset clear "
                                "truncate".split())
 DRAFT_TOKENS = frozenset({"draft", "drafts"})

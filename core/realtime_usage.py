@@ -21,8 +21,9 @@ def _month(at=None) -> str:
     return time.strftime("%Y-%m", time.localtime(at or time.time()))
 
 
-def record(provider: str, seconds: float, calls: int = 1, at=None) -> dict:
-    """Add one finished session (or a slice of a long one) to this account's month. Returns that month's row."""
+def record(provider: str, seconds: float, calls: int = 1, at=None, free: bool = False) -> dict:
+    """Add one finished session (or a slice of a long one) to this account's month. Returns that month's row.
+    `free`: the session ran on a free key (core/free_voice.py), so it adds minutes but no cost."""
     from core import realtime_voice
     seconds = max(0.0, min(float(seconds or 0), 6 * 3600))
     data = read_json(usage_file(), {})
@@ -30,7 +31,7 @@ def record(provider: str, seconds: float, calls: int = 1, at=None) -> dict:
     row = month.setdefault(provider, {"seconds": 0.0, "calls": 0, "cost_estimate": 0.0})
     row["seconds"] = round(row["seconds"] + seconds, 2)
     row["calls"] += calls
-    row["cost_estimate"] = round(row["cost_estimate"] + realtime_voice.cost_estimate(provider, seconds), 4)
+    row["cost_estimate"] = round(row["cost_estimate"] + (0.0 if free else realtime_voice.cost_estimate(provider, seconds)), 4)
     for old in sorted(data)[:-KEEP_MONTHS]:
         data.pop(old, None)
     write_json_atomic(usage_file(), data)

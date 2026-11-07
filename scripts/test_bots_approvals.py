@@ -187,6 +187,32 @@ class Levels(ApprovalCase):
         self.assertEqual(denied.behavior, "deny")
         self.assertIn("cannot ask", denied.reason)
 
+    async def test_calling_someone_else_asks_every_time_even_at_full_and_shows_what_is_approved(self):
+        # Build spec step 9: a bot phoning someone else is approved one call at a time, at every level.
+        bot = make_bot("Dialer")
+        sid = make_thread(bot)
+        self.assertEqual(bot_policy.effective_policy(bot, sid).mode, "full")
+        self.assertIn("dial_someone", tool_registry._REGISTRY)
+        args = {"to": "+15551230000", "who": "Luigi's", "topic": "a dinner reservation", "goal": "Table for two, Friday 7pm."}
+        self.assertEqual(bot_policy.classify("dial_someone", args).kind, bot_policy.OUTBOUND)
+        ctx = ctx_for(bot, sid)
+        queue = permissions.open_channel(f"chat:{sid}")
+        for answer, expected in (("once", "allow"), ("reject", "deny"), ("once", "allow")):
+            task = asyncio.create_task(permissions.gate_bot_call(ctx, "dial_someone", args))
+            payload = await asyncio.wait_for(queue.get(), timeout=5)
+            self.assertIn("Luigi's", payload["title"])
+            self.assertIn("+15551230000", payload["title"])
+            self.assertIn("Table for two", payload["description"])
+            self.assertEqual([c["id"] for c in payload["choices"]], ["once", "reject"])     # never "always"
+            permissions.answer(payload["id"], answer, "local")
+            self.assertEqual((await task).behavior, expected)
+            while not queue.empty():
+                queue.get_nowait()
+        # With nobody to ask, it is not dialled.
+        permissions.close_channel(f"chat:{sid}")
+        denied = await permissions.gate_bot_call(ctx, "dial_someone", args)
+        self.assertEqual(denied.behavior, "deny")
+
     async def test_bots_remembered_answers_never_come_from_built_in_or_other_bots_rules(self):
         one, two = make_bot("Rules A"), make_bot("Rules B")
         sa, sb = make_thread(one), make_thread(two)

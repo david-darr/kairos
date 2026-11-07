@@ -359,7 +359,16 @@ def ceiling_denial(surface: str, tool: str, arguments: dict, agent_id: str | Non
 
 EXPLICIT_REVIEW_TOOLS = frozenset({"save_skill", "add_mcp_server", "forge_app_start", "model_setup_install",
                                    "forge_git_push", "forge_git_merge", "hand_to_agent", "coordinate_bots",
-                                   "post_to_room", "computer_local_app", "creative_tools", "folder_access"})
+                                   "post_to_room", "computer_local_app", "creative_tools", "folder_access",
+                                   "dial_someone"})
+
+# Tools the person approves at every call, at every level (Full included), with what exactly is approved in the
+# title and description. dial_someone: a bot phoning someone else (build spec step 9, services/outbound_calls.py).
+PER_CALL_REVIEW = {
+    "dial_someone": lambda a: (f"Let this bot phone {str(a.get('who') or 'someone')[:80]} at {str(a.get('to') or '')[:40]}",
+                               f"Opens: an AI assistant calling on your behalf about {str(a.get('topic') or '')[:120]}. "
+                               f"Brief: {str(a.get('goal') or '')[:1500]}"),
+}
 
 
 def _bot_log(outcome, decision: str, source: str, actor: str, scope: str | None = None,
@@ -592,9 +601,11 @@ async def gate_bot_call(ctx, name: str, args: dict | None, provider: str | None 
     arguments = args if isinstance(args, dict) else {}
     if bot_policy.classify(name, arguments).kind == bot_policy.READ:
         return Decision("allow", "")
+    per_call = PER_CALL_REVIEW.get(name)
+    title, description = per_call(arguments) if per_call else (f"Let this bot use {name}", "")
     return await decide(surface=ctx.permission_surface, tool=name, arguments=arguments,
-                        title=f"Let this bot use {name}", description="", is_admin=ctx.is_admin, agent_id=ctx.agent_id,
-                        force_prompt=bool(getattr(getattr(ctx, "turn_taint", None), "tainted", False)),
+                        title=title, description=description, is_admin=ctx.is_admin, agent_id=ctx.agent_id,
+                        force_prompt=bool(per_call) or bool(getattr(getattr(ctx, "turn_taint", None), "tainted", False)),
                         bot_context={"outer": True, "invocation_id": getattr(ctx, "invocation_id", None),
                                      "provider": provider})
 
