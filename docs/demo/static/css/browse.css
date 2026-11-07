@@ -145,7 +145,7 @@ html[data-app-mode="browse"] #view-content { padding: 0; }
 /* -- home screen (Speed Dial, browseHome.js) */
 .browse-home { position: relative; min-height: 100%; display: flex; justify-content: center; overflow: hidden; }
 .browse-home-backdrop { position: absolute; inset: 0; background-size: cover; background-position: center; }
-.browse-home-dim { position: absolute; inset: 0; background: #000; pointer-events: none; }
+.browse-home-dim { position: absolute; inset: 0; background: rgb(var(--on-image-shade)); pointer-events: none; }
 /* The Kairos background: the app's own ground shows through the page panel. */
 .browse-page:has(.browse-home[data-background="kairos"]:not([hidden])) { background: transparent; }
 .browse-home-body { position: relative; width: min(920px, 100%); padding: 56px 24px 40px; box-sizing: border-box; display: flex; flex-direction: column; gap: 22px; }
@@ -156,7 +156,7 @@ html[data-app-mode="browse"] #view-content { padding: 0; }
 .browse-home-search { display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 14px; border-radius: 12px;
   background: var(--bg-panel-solid); border: 1px solid var(--border-strong); max-width: 620px; width: 100%; margin: 0 auto; box-sizing: border-box; }
 .browse-home-search:focus-within { border-color: var(--accent); }
-.browse-home-g { width: 24px; height: 24px; border-radius: 6px; background: #fff; color: #4285f4; font: 700 14px/24px system-ui, sans-serif; text-align: center; }
+.browse-home-g { width: 24px; height: 24px; border-radius: 6px; background: var(--on-image); color: var(--google-blue); font: 700 14px/24px system-ui, sans-serif; text-align: center; }
 .browse-home-search-input { flex: 1; min-width: 0; font: inherit; color: var(--text); background: transparent !important; border: 0 !important; outline: none; padding: 0 !important; box-shadow: none !important; }
 
 .browse-dials { --tile: 150px; display: grid; grid-template-columns: repeat(auto-fill, var(--tile)); justify-content: center; gap: 16px; }
@@ -170,10 +170,10 @@ html[data-app-mode="browse"] #view-content { padding: 0; }
 .browse-dial-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .browse-dial-picture { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
 .browse-dial-letter { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 8px; box-sizing: border-box;
-  color: #fff; font: 600 15px/1.2 var(--k-font-sans, system-ui, sans-serif); text-align: center; overflow: hidden; word-break: break-word; }
+  color: var(--on-image); font: 600 15px/1.2 var(--k-font-sans, system-ui, sans-serif); text-align: center; overflow: hidden; word-break: break-word; }
 .browse-dial-add { font-size: 28px; color: var(--text-dim); background: var(--bg-panel); border-style: dashed; }
 .browse-dial-name { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 12.5px; color: var(--text); text-align: center;
-  overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-height: 18px; text-shadow: 0 1px 2px rgba(0, 0, 0, .25); }
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-height: 18px; text-shadow: 0 1px 2px rgba(var(--on-image-shade), .25); }
 .browse-dial-name > span { overflow: hidden; text-overflow: ellipsis; }
 .browse-dial-pin { border: 0; background: transparent; color: var(--accent); cursor: pointer; font-size: 15px; padding: 0 2px; }
 .browse-home-label { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--text-faint); }
@@ -181,7 +181,7 @@ html[data-app-mode="browse"] #view-content { padding: 0; }
 .browse-home-note { margin: 0; color: var(--text-dim); font-size: 13px; }
 
 .browse-home-menu { position: absolute; z-index: 3; min-width: 190px; display: flex; flex-direction: column; padding: 6px; border-radius: 10px;
-  background: var(--bg-panel-solid); border: 1px solid var(--border-strong); box-shadow: 0 12px 30px rgba(0, 0, 0, .25); }
+  background: var(--bg-panel-solid); border: 1px solid var(--border-strong); box-shadow: 0 12px 30px rgba(var(--on-image-shade), .25); }
 .browse-home-menu button { font: inherit; text-align: left; padding: 8px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--text); cursor: pointer; }
 .browse-home-menu button:hover, .browse-home-menu button:focus-visible { background: var(--accent-dim); }
 
@@ -193,7 +193,7 @@ html[data-app-mode="browse"] #view-content { padding: 0; }
 .browse-home-error:empty { display: none; }
 
 .browse-home-customize { position: absolute; top: 56px; right: 12px; z-index: 3; width: min(300px, calc(100% - 24px)); display: flex; flex-direction: column; gap: 10px;
-  padding: 14px; border-radius: 12px; background: var(--bg-panel-solid); border: 1px solid var(--border-strong); box-shadow: 0 12px 30px rgba(0, 0, 0, .25); font-size: 13px; }
+  padding: 14px; border-radius: 12px; background: var(--bg-panel-solid); border: 1px solid var(--border-strong); box-shadow: 0 12px 30px rgba(var(--on-image-shade), .25); font-size: 13px; }
 .browse-home-customize[hidden] { display: none; }
 .browse-home-customize-head { display: flex; justify-content: space-between; align-items: center; }
 .browse-home-choice { display: flex; align-items: center; gap: 8px; }
@@ -209,7 +209,7 @@ html[data-app-mode="browse"] #view-content { padding: 0; }
 /* On a colour or picture of the person's choosing, names and labels go light so they read on dark grounds. */
 .browse-home:not([data-background="kairos"]) .browse-dial-name,
 .browse-home:not([data-background="kairos"]) .browse-home-body > .browse-home-label,
-.browse-home:not([data-background="kairos"]) .browse-home-note { color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, .7); }
+.browse-home:not([data-background="kairos"]) .browse-home-note { color: var(--on-image); text-shadow: 0 1px 3px rgba(var(--on-image-shade), .7); }
 /* redesign.css restyles every input; the colour picker must stay a swatch. */
 .browse-home-row input[type="color"] { width: 44px !important; height: 28px !important; padding: 0 !important; border-radius: 6px !important; background: none !important; cursor: pointer; }
 
