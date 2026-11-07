@@ -27,6 +27,7 @@ from claude_agent_sdk import CLIJSONDecodeError
 
 from core import attachments, chat_files, cli_env, file_checkpoints, helpers, logs as log_files, mcp_oauth, model_catalog, model_endpoints, model_marks, permissions, runs, token_usage
 from core import brain as brain_module
+from core import voice_style
 from core.brain import Brain
 from core.codex_brain import CodexBrain
 from core.antigravity_brain import AntigravityBrain
@@ -462,13 +463,20 @@ def _vision_input(endpoint: dict, text: str, image_ids: list[str]) -> str | list
 # actual message for attention and eats the context window a spoken session
 # fills quickly anyway.
 OPEN_MIC_DISCIPLINE = (
-    "\n\n[This is a live spoken conversation. Your reply is read aloud and the "
-    "other person is waiting to answer. Keep it to a couple of sentences - say "
-    "the answer, not the reasoning, and stop. No markdown, no lists, no code "
-    "read aloud: describe it instead. Ask if they want the detail rather than "
-    "giving it unprompted. If a real answer genuinely needs length, say the "
-    "short version aloud and offer the rest.]"
+    "\n\n[This is a live spoken conversation. " + voice_style.VOICE_STYLE + " Keep it to a couple of sentences: "
+    "the answer, not the reasoning. If a real answer genuinely needs length, say the short version aloud and offer the rest.]"
 )
+
+
+# What a person actually heard of an Open Mic reply they talked over, per session, until the next turn uses it.
+_open_mic_heard: dict = {}
+
+
+def note_open_mic_heard(session_id: str, sentences: list) -> None:
+    """The sentences of the last spoken reply that began to play before the person interrupted (an empty list = none).
+    The next turn tells the model, so it continues from there instead of repeating or assuming the rest was heard."""
+    said = " ".join(str(item).strip() for item in (sentences or []) if str(item).strip())[:4000]
+    _open_mic_heard[session_id] = said
 
 
 def _apply_open_mic_discipline(session_id: str, full_text: str) -> str:
@@ -487,7 +495,13 @@ def _apply_open_mic_discipline(session_id: str, full_text: str) -> str:
     session = session_manager.get_session(session_id) or {}
     if not session.get("open_mic"):
         return full_text
-    return full_text + OPEN_MIC_DISCIPLINE
+    heard = _open_mic_heard.pop(session_id, None)
+    if heard is None:
+        return full_text + OPEN_MIC_DISCIPLINE
+    cut = (f'The person talked over your last spoken reply and heard only this of it: "{heard}" [interrupted]. '
+           "Carry on from there instead of repeating it, and do not assume the rest was heard." if heard else
+           "The person talked over your last spoken reply before they heard any of it. Do not assume any of it landed.")
+    return full_text + OPEN_MIC_DISCIPLINE[:-1] + " " + cut + "]"
 
 
 BOT_SETUP_INSTRUCTIONS = (

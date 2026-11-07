@@ -255,8 +255,9 @@ async def turn(call, text, request_id, work_update=False, opening=False):
             logger.warning('Voice conversation failed call=%s error=%s status=%s', ident,type(error).__name__,getattr(getattr(error,'response',None),'status_code',None))
             yield {'type':'error','message':'The conversation model failed. Check its connection or choose another model.'}
         finally:
+            heard = call.pop('heard_pending', None)   # an interruption that said what was actually heard (interrupt())
             if parts:
-                call['messages'].append({'role':'assistant','content':''.join(parts),'interrupted':not completed, **({'speaker': speaker} if speaker else {})})
+                call['messages'].append({'role':'assistant','content':heard or ''.join(parts),'interrupted':bool(heard) or not completed, **({'speaker': speaker} if speaker else {})})
             call['requests'][request_id]['text'] = ''.join(parts)
             _save(call)
             if _turns.get(ident) is asyncio.current_task(): _turns.pop(ident, None)
@@ -372,16 +373,32 @@ def stop_work(call, task_id):
     return {'stopping':stopped, 'jobs':view(call)['jobs']}
 
 
-def interrupt(call, spoken=False):
+INTERRUPTED = '[interrupted]'
+
+
+def interrupted_content(heard):
+    """What the history keeps of a reply the user talked over: the sentences that actually began playing, then a marker,
+    so the next reply carries on from what was heard instead of repeating it or assuming the rest landed."""
+    said = ' '.join(str(s).strip() for s in (heard or []) if str(s).strip())[:4000]
+    return f'{said} {INTERRUPTED}' if said else '[interrupted before any of this reply was heard]'
+
+
+def interrupt(call, spoken=False, heard=None):
     """Stop the running reply. `spoken` is a barge-in: the user talked over Kairos while it was being SAID. If the model
     had already finished, the saved reply was cut off in the user's ears all the same, so it is marked interrupted too
-    (the call summary then knows the end of it was not heard)."""
+    (the call summary then knows the end of it was not heard). `heard` is the list of sentences the speaker had begun to
+    play (None = not known): the saved reply is cut down to those plus an "[interrupted]" marker."""
     call['revision'] += 1
     task = _turns.get(call['id'])
-    if task and task is not asyncio.current_task(): task.cancel()
-    elif spoken and not task:
+    content = interrupted_content(heard) if heard is not None else None
+    if task and task is not asyncio.current_task():
+        if content: call['heard_pending'] = content   # the turn saves its partial reply as it unwinds, and uses this
+        task.cancel()
+    elif spoken or content:
         last = call['messages'][-1] if call['messages'] else None
-        if last and last.get('role') == 'assistant': last['interrupted'] = True
+        if last and last.get('role') == 'assistant':
+            last['interrupted'] = True
+            if content: last['content'] = content
     _save(call)
 
 

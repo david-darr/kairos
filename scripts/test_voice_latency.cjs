@@ -385,7 +385,9 @@ const load = async (file, prefix = '') => import('data:text/javascript;base64,' 
   {
     const pt = await load('static/js/partialTranscript.js', 'const encodeWav = pcm => pcm;\n');
     const vt = await load('static/js/voiceTrace.js');
-    const deps = { transcribe: async () => '', partial: async () => ({ text: '', segments: [] }), status: async () => ({}), api: async () => ({}) };
+    const vf = await load('static/js/voiceFiller.js');
+    const bc = await load('static/js/backchannel.js');
+    const deps = { filler: async () => null, transcribe: async () => '', partial: async () => ({ text: '', segments: [] }), status: async () => ({}), api: async () => ({}) };
     const calls = { transcribe: [], partial: [], api: [] };
     globalThis.__omDeps = {
       createRecorder: () => { throw new Error('the loudness recorder is not expected here'); },
@@ -396,18 +398,21 @@ const load = async (file, prefix = '') => import('data:text/javascript;base64,' 
       getSpeechStatus: () => deps.status(),
       api: async (path, options) => { calls.api.push({ path, body: JSON.parse(options?.body || '{}') }); return deps.api(path, options); },
       createPartialTranscriber: pt.createPartialTranscriber, createVoiceSpeaker: callVoice.createVoiceSpeaker, createVoiceTrace: vt.createVoiceTrace,
+      createFillerGate: vf.createFillerGate, fetchFillerClip: (...args) => deps.filler(...args), isBackchannel: bc.isBackchannel, endsInQuestion: bc.endsInQuestion,
     };
-    const om = await load('static/js/openMic.js', 'const {createRecorder,createCallRecorder,isCallRecordingSupported,isSpeechOutputSupported,transcribeBlob,transcribePartial,getSpeechStatus,api,createPartialTranscriber,createVoiceSpeaker,createVoiceTrace}=globalThis.__omDeps;\n');
-    const reset = () => { calls.transcribe.length = calls.partial.length = calls.api.length = 0; deps.transcribe = async () => ''; deps.partial = async () => ({ text: '', segments: [] }); deps.status = async () => ({}); deps.api = async () => ({}); };
+    const om = await load('static/js/openMic.js', 'const {createRecorder,createCallRecorder,isCallRecordingSupported,isSpeechOutputSupported,transcribeBlob,transcribePartial,getSpeechStatus,api,createPartialTranscriber,createVoiceSpeaker,createVoiceTrace,createFillerGate,fetchFillerClip,isBackchannel,endsInQuestion}=globalThis.__omDeps;\n');
+    const reset = () => { calls.transcribe.length = calls.partial.length = calls.api.length = 0; deps.transcribe = async () => ''; deps.partial = async () => ({ text: '', segments: [] }); deps.status = async () => ({}); deps.api = async () => ({}); deps.filler = async () => null; };
     const quiet = Float32Array.from({ length: 16000 }, () => .01);       // a clip: 1 s of 16 kHz samples
     const harness = (options = {}) => {
       const h = { sent: [], log: [], states: [], errors: [], enabled: [], closed: 0, speaker: null, finishTurn: null, turns: 0 };
       h.factory = opts => { h.cap = opts; return { async start() { if (options.startError) throw options.startError; }, setEnabled(on, barge) { h.enabled.push([on, barge]); }, close() { h.closed++; } }; };
-      h.makeSpeaker = opts => { h.speakerOptions = opts; h.speaker = { feeds: [], resets: 0, cancels: 0, finishes: 0,
+      h.noted = [];
+      h.makeSpeaker = opts => { h.speakerOptions = opts; h.speaker = { feeds: [], resets: 0, cancels: 0, finishes: 0, played: [], fillers: [], pauses: 0, resumes: 0,
+        heard() { return this.played.slice(); }, pause() { this.pauses++; }, resume() { this.resumes++; }, filler(clip) { this.fillers.push(clip); },
         feed(t) { this.feeds.push(t); }, finish() { this.finishes++; }, reset() { this.resets++; }, cancel() { this.cancels++; } }; return h.speaker; };
-      h.mic = om.createOpenMic({ sessionId: 's1', onState: s => h.states.push(s), onError: e => h.errors.push(e), stopTurn: id => h.log.push('stop:' + id),
+      h.mic = om.createOpenMic({ sessionId: 's1', onState: s => h.states.push(s), onError: e => h.errors.push(e), stopTurn: id => h.log.push('stop:' + id), noteHeard: (id, heard) => h.noted.push([id, heard]),
         createCapture: options.noCapture ? undefined : h.factory, createMic: options.createMic, makeSpeaker: options.realSpeaker ? undefined : h.makeSpeaker,
-        sendMessage: (text, handlers) => { h.sent.push(text); h.turns++; handlers.onChunk('Hello there. '); return new Promise(resolve => { h.finishTurn = () => { handlers.onDone(); resolve('done'); }; }); } });
+        sendMessage: (text, handlers) => { h.sent.push(text); h.turns++; h.emit = () => handlers.onChunk('Hello there. '); if (!options.slowStart) h.emit(); return new Promise(resolve => { h.finishTurn = () => { handlers.onDone(); resolve('done'); }; }); } });
       h.segment = (ms, endpoint = 900) => h.cap.onSegment({ wav: ms }, { endpoint_ms: endpoint, audio_ms: ms }, Float32Array.from({ length: 16 * ms + 2560 }, () => .01));
       h.say = (ms = 1000, endpoint = 900) => { h.cap.onSpeechStart(); h.cap.onChunk(Float32Array.from({ length: 16 * ms }, () => .01), false); h.segment(ms, endpoint); };
       return h;
@@ -448,6 +453,35 @@ const load = async (file, prefix = '') => import('data:text/javascript;base64,' 
       assert.equal(h.speaker.resets, 2, 'the speaker latch is cleared for the new reply');
       // A barge-in with nothing to interrupt (listening) is ignored.
       h.finishTurn(); h.speakerOptions.onEnd(); await tick(); const cancels = h.speaker.cancels; h.cap.onBargeIn(); assert.equal(h.speaker.cancels, cancels);
+      h.mic.stop();
+    }
+
+    // 2b. Interruption memory, nods and the pause: what was heard goes to the chat's model, a nod is not a turn, and the voice
+    //     is paused at the first sign of the user's voice and handed back if it was only a nod.
+    {
+      reset(); const h = harness(); let said = 'tell me a story'; deps.transcribe = async () => said;
+      await h.mic.start(); h.say(); await wait(5); h.speakerOptions.onStart(); h.speaker.played = ['Once upon a time.'];
+      h.cap.onBargeDuck(); assert.equal(h.speaker.pauses, 1, 'the voice pauses Kairos at once'); h.cap.onBargeClear(); assert.equal(h.speaker.resumes, 1, 'and a nod gives the voice back');
+      h.cap.onBargeIn(); h.cap.onSpeechStart();
+      assert.deepEqual(h.noted, [['s1', ['Once upon a time.']]], 'the sentences that had begun to play are reported when the user takes the floor');
+      said = 'yeah, right'; h.segment(700); await wait(5);
+      assert.deepEqual(h.sent, ['tell me a story'], 'a nod said over the reply is not sent as a turn'); assert.equal(h.mic.nods, 1); assert.equal(h.mic.state, 'listening');
+      said = 'actually stop'; h.cap.onSpeechStart(); h.segment(900); await wait(5);
+      assert.deepEqual(h.sent, ['tell me a story', 'actually stop'], 'anything else is a turn, even after a nod'); assert.equal(h.mic.nods, 1);
+      // "Yes" after Kairos asked a question is the answer, not a nod.
+      h.speaker.played = ['Do you want the detail?']; h.cap.onBargeIn(); h.cap.onSpeechStart(); said = 'yeah'; h.segment(500); await wait(5);
+      assert.deepEqual(h.sent.at(-1), 'yeah'); h.mic.stop();
+    }
+
+    // 2c. Instant acknowledgement: after half a second with no sentence ready a clip plays; a quick answer never hears one.
+    {
+      reset(); const h = harness({ slowStart: true }); deps.transcribe = async () => 'what is the capital of france'; const asked = [];
+      deps.filler = async ({ last, text }) => { asked.push([last, text]); return { id: 'okay', text: 'Okay.' }; };
+      await h.mic.start(); h.say(); await wait(5);
+      assert.equal(h.speaker.fillers.length, 0, 'nothing before the half second'); await wait(560);
+      assert.deepEqual(h.speaker.fillers, [{ id: 'okay', text: 'Okay.' }], 'a slow answer gets its acknowledgement'); assert.deepEqual(asked, [[null, 'what is the capital of france']]);
+      h.emit(); h.finishTurn(); h.speakerOptions.onEnd(); await tick(); h.say(); await wait(5); h.emit(); await wait(560);
+      assert.equal(h.speaker.fillers.length, 1, 'the second answer started within the half second: no acknowledgement'); assert.equal(asked.at(-1)[0], 'okay', 'the last phrase is passed so it is not repeated');
       h.mic.stop();
     }
 

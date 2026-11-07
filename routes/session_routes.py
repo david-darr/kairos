@@ -328,6 +328,20 @@ async def set_open_mic(session_id: str, body: SetOpenMicRequest, user: str = Dep
     result = await chat_service.summarise_open_mic(session_id)
     return {"open_mic": False, **result}
 
+class OpenMicHeardRequest(BaseModel):
+    heard: list[str] = Field(default_factory=list, max_length=60)
+
+
+@router.post("/{session_id}/open-mic/heard")
+async def set_open_mic_heard(session_id: str, body: OpenMicHeardRequest, user: str = Depends(require_user)) -> dict:
+    """What the person heard of an Open Mic reply they talked over. Not idle-guarded: it arrives mid-turn, and it only
+    sets a note the next turn reads."""
+    from services.chat_live import require_session
+    require_session(session_id, user)
+    chat_service.note_open_mic_heard(session_id, [item[:1600] for item in body.heard])
+    return {"ok": True}
+
+
 @router.post("/{session_id}/workspace")
 @idle_session
 async def set_session_workspace(session_id: str, body: SetWorkspaceRequest, user: str = Depends(require_admin)) -> dict:

@@ -4,7 +4,7 @@ import { getInputDevice, setInputDevice, encodeWav } from './voiceInput.js';
 export function isCallRecordingSupported() {
   return !!(navigator.mediaDevices?.getUserMedia && window.AudioContext && window.AudioWorkletNode);
 }
-export function createCallRecorder({ onLevel, onSpeechStart, onSegment, onChunk, onPause, onBargeIn, onError, mode = 'automatic', silenceMs = 0 } = {}) {
+export function createCallRecorder({ onLevel, onSpeechStart, onSegment, onChunk, onPause, onBargeIn, onBargeDuck, onBargeClear, onError, mode = 'automatic', silenceMs = 0 } = {}) {
   let stream = null, context = null, source = null, node = null, gain = null, closed = false, enabled = false, settleReady = null, readyTimer = null;
   const close = () => {
     closed = true; enabled = false;
@@ -40,6 +40,8 @@ export function createCallRecorder({ onLevel, onSpeechStart, onSegment, onChunk,
           if (data.type === 'chunk') onChunk?.(data.pcm, data.pause);
           if (data.type === 'pause') onPause?.(data.id, data.pcm);
           if (data.type === 'barge_in') onBargeIn?.();
+          if (data.type === 'barge_duck') onBargeDuck?.();
+          if (data.type === 'barge_clear') onBargeClear?.();
           // The raw samples ride along (third argument) so a rolling transcript can send just the tail.
           if (data.type === 'segment') onSegment?.(data.pcm.length ? encodeWav(data.pcm, 16000) : null, data.timing, data.pcm.length ? data.pcm : null);
         };

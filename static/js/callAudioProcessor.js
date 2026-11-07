@@ -17,11 +17,14 @@ class KairosCallProcessor extends AudioWorkletProcessor {
       onPause: (id, pcm) => this.port.postMessage({ type: 'pause', id, pcm }, [pcm.buffer]),
     });
     // While Kairos speaks the segmenter rests and this listens for the user over the echo (speechSegments.js).
-    this.bargeIn = new BargeIn({ rate: sampleRate, onBarge: ({ parts, voiced }) => {
-      this.barge = false;
-      this.port.postMessage({ type: 'barge_in' });
-      this.segmenter.begin(parts, voiced);
-    } });
+    this.bargeIn = new BargeIn({ rate: sampleRate,
+      onDuck: () => this.port.postMessage({ type: 'barge_duck' }),
+      onClear: () => this.port.postMessage({ type: 'barge_clear' }),
+      onBarge: ({ parts, voiced }) => {
+        this.barge = false;
+        this.port.postMessage({ type: 'barge_in' });
+        this.segmenter.begin(parts, voiced);
+      } });
     this.port.onmessage = ({ data }) => {
       if (data.type === 'enabled' && data.value !== this.enabled) {
         this.enabled = data.value; this.segmenter.reset(true);

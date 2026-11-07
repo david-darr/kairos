@@ -188,13 +188,15 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   await js('window.__callTest.level=.5');
   await waitFor("document.querySelector('.agent-call').dataset.bargeIns==='1'",3000);
   const bargeMs=await js(`performance.now()-${bargeAt}`);
-  assert.ok(bargeMs<1200,`Sustained voice interrupts within about a second of starting (${Math.round(bargeMs)} ms including test scheduling; the detector itself needs 250 ms)`);
+  assert.ok(bargeMs<1200,`Sustained voice interrupts within about a second of starting (${Math.round(bargeMs)} ms including test scheduling; the detector itself needs 320 ms)`);
   assert.ok(await js('window.__callTest.paused>'+echoPaused),'Barge-in stops the speech');
   const stopMs=Number(await js("document.querySelector('.agent-call').dataset.bargeStopMs"));
   console.log("barge stop ms", stopMs, "detect ms", Math.round(bargeMs));
   assert.ok(stopMs>=0&&stopMs<200,`Stopping playback takes well under 200 ms once the voice is recognised (${stopMs} ms)`);
   await waitFor('window.__callTest.callStops.length>'+echoStops,1500);
-  assert.equal(await js('window.__callTest.callStopBodies.at(-1)'),JSON.stringify({spoken:true}),'The server is told the reply was cut off by voice');
+  const stopBody=JSON.parse(await js('window.__callTest.callStopBodies.at(-1)'));
+  assert.equal(stopBody.spoken,true,'The server is told the reply was cut off by voice');
+  assert.ok(Array.isArray(stopBody.heard)&&stopBody.heard[0]==='First useful sentence.','and which sentences had begun to play, so the history keeps only those');
   assert.ok(await js("['listening','transcribing'].includes(document.querySelector('.agent-call').dataset.state)"),'The call is listening to the interruption, not paused');
   await delay(500); await js('window.__callTest.level=0');
   await waitFor('window.__callTest.callTurns.length>'+echoTurns,6000);

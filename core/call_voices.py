@@ -66,6 +66,11 @@ async def catalog():
     return {**config,'voices':result,'models':engines}
 
 async def pcm(text, model, voice):
+    # Whatever reaches a voice engine is plain words: markdown that slipped past the model is stripped here, once, for
+    # every caller (calls, bots, voice notes, fillers).
+    from core import voice_style
+    text = voice_style.strip_for_speech(text)
+    if not text: return
     config = configuration()
     if config.get('protocol') == 'kokoro':
         from core import kokoro_voice

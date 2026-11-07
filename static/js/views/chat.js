@@ -1982,6 +1982,8 @@ async function setOpenMic(active, button) {
       sessionId: activeSessionId,
       sendMessage: (text, handlers) => sendVoiceTurn(text, handlers),
       stopTurn: (id) => chatStream.stopTurn(id),
+      // What the user actually heard of a reply they talked over: the model's next reply continues from there.
+      noteHeard: (id, heard) => api(`/api/sessions/${id}/open-mic/heard`, { method: 'POST', toast: false, body: JSON.stringify({ heard }) }).catch(() => {}),
       onState: state => {
         button.dataset.micState = state;
         button.title = `Open Mic: ${state}`;

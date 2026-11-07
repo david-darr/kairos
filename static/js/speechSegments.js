@@ -162,10 +162,15 @@ export class HeldSpeech {
 // OS device voice can leak more than a neural voice that plays through Web Audio; the floor below learns the actual
 // leak during playback instead of assuming it is gone.
 //
-// Voice is energy that stays above a floor for BARGE_VOICE_MS. A backchannel ("mm-hm", a cough, a click) is shorter
-// and passes without interrupting.
-export const BARGE_VOICE_MS = 250;    // sustained voice needed to interrupt (spec: ~250 ms). "mm-hm" is ~150-200 ms.
+// Voice is energy that stays above a floor. It acts in two steps so a stop is fast AND a nod is not an interruption:
+//   after BARGE_DUCK_MS  `onDuck`: the owner pauses Kairos's voice at once (the user may be about to talk)
+//   after BARGE_VOICE_MS `onBarge`: it really is the user taking the floor; the owner cancels the reply for good
+// If the voice ends between the two (a backchannel: "mm-hm", "yeah", a cough) and stays quiet for BARGE_CLEAR_MS, `onClear`
+// fires and the voice carries on. Until then the pause holds, so the gaps between a person's words do not make it stutter.
+export const BARGE_DUCK_MS = 120;     // voice this long pauses Kairos (a stop well under 200 ms, audio buffer included)
+export const BARGE_VOICE_MS = 320;    // sustained voice needed to interrupt. A single "yeah" or "mm-hm" is ~150-300 ms.
 export const BARGE_GAP_MS = 100;      // a dip this short between syllables does not restart the count; a longer one does
+export const BARGE_CLEAR_MS = 350;    // once Kairos is paused, the user must stay quiet this long before the voice carries on (words have gaps)
 export const BARGE_WARMUP_MS = 150;   // learn Kairos's own leak first; nothing can interrupt in the first 150 ms of speech
 export const BARGE_MIN_LEVEL = .012;  // never a voice below this RMS, however quiet the learned floor is (noise, breathing)
 export const BARGE_RATIO = 3;         // a voice is at least this many times the learned leak floor (about +9.5 dB)
@@ -175,7 +180,8 @@ const FLOOR_DRIFT = .002;             // and loud blocks only slowly, so a user'
 
 export class BargeIn {
   constructor({ rate = 16000, voiceMs = BARGE_VOICE_MS, gapMs = BARGE_GAP_MS, warmupMs = BARGE_WARMUP_MS, minLevel = BARGE_MIN_LEVEL,
-    ratio = BARGE_RATIO, preRollMs = BARGE_PREROLL_MS, onBarge = () => {} } = {}) {
+    ratio = BARGE_RATIO, preRollMs = BARGE_PREROLL_MS, duckMs = BARGE_DUCK_MS, clearMs = BARGE_CLEAR_MS, onBarge = () => {}, onDuck = () => {}, onClear = () => {} } = {}) {
+    this.onDuck = onDuck; this.onClear = onClear; this.duck = Math.round(rate * duckMs / 1000); this.clearGap = Math.round(rate * clearMs / 1000); this.ducked = false;
     this.rate = rate; this.voice = Math.round(rate * voiceMs / 1000); this.gap = Math.round(rate * gapMs / 1000);
     this.warmup = Math.round(rate * warmupMs / 1000); this.minLevel = minLevel; this.ratio = ratio;
     this.preRoll = Math.round(rate * preRollMs / 1000); this.onBarge = onBarge;
@@ -183,7 +189,7 @@ export class BargeIn {
   }
   // Start of a stretch of Kairos speaking. `ambient` is the room noise the segmenter already measured.
   reset(ambient = .002) {
-    this.floor = Math.max(.0005, ambient); this.warmed = 0; this.voiced = 0; this.quiet = 0; this.run = false;
+    this.floor = Math.max(.0005, ambient); this.warmed = 0; this.voiced = 0; this.quiet = 0; this.run = false; this.ducked = false;
     this.buf = []; this.size = 0;
   }
   get threshold() { return Math.max(this.minLevel, this.floor * this.ratio); }
@@ -196,6 +202,7 @@ export class BargeIn {
     }
     if (rms > this.threshold) {
       this.run = true; this.voiced += samples.length; this.quiet = 0; this.floor += (rms - this.floor) * FLOOR_DRIFT;
+      if (!this.ducked && this.voiced >= this.duck && this.voiced < this.voice) { this.ducked = true; this.onDuck(); }
       if (this.voiced >= this.voice) {
         const parts = this.buf, voiced = this.voiced;
         this.reset(this.floor); this.warmed = this.warmup;   // armed again at once if the caller keeps feeding us
@@ -203,7 +210,10 @@ export class BargeIn {
       }
     } else {
       this.floor += (rms - this.floor) * FLOOR_TRACK;
-      if (this.run && (this.quiet += samples.length) > this.gap) { this.run = false; this.voiced = 0; this.quiet = 0; }
+      if (this.run && (this.quiet += samples.length) > (this.ducked ? this.clearGap : this.gap)) {
+        this.run = false; this.voiced = 0; this.quiet = 0;
+        if (this.ducked) { this.ducked = false; this.onClear(); }    // it was only a nod: Kairos carries on
+      }
       if (!this.run) this.trim();
     }
     if (this.size > this.rate * 3) this.trim(true);

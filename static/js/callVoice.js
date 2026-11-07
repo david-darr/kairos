@@ -12,8 +12,9 @@ import { readEvents } from './callTransport.js';
 export const PREFETCH_AHEAD = 3;
 export function neuralSpeaker(options, getSelection) {
   let context=null, analyser=null, frame=null, generation=0, cancelled=false, sources=new Set(), controllers=new Set();
-  let next=0, speaking=false, finished=false, chunker, jobs=[], head=0, count=0;
+  let next=0, speaking=false, finished=false, chunker, jobs=[], head=0, count=0, paused=false, lastHeard=[];
   const samples=new Float32Array(256);
+  const poke=method=>{try{context?.[method]?.()?.catch?.(()=>{});}catch{}};
   const measure=()=>{if(cancelled||!analyser||!speaking)return;analyser.getFloatTimeDomainData(samples);const level=Math.sqrt(samples.reduce((sum,n)=>sum+n*n,0)/samples.length);options.onLevel?.(Math.min(1,level*7));frame=requestAnimationFrame(measure);};
   const settle=()=>{if(head>=jobs.length&&!sources.size&&finished&&!cancelled){speaking=false;cancelAnimationFrame(frame);options.onLevel?.(0);options.onEnd?.();}};
   // Plays one decoded chunk at the end of the timeline. Only the head sentence ever calls this.
@@ -22,7 +23,7 @@ export function neuralSpeaker(options, getSelection) {
     const at=Math.max(context.currentTime+.025,next);next=at+buffer.duration;sources.add(node);
     node.onended=()=>{sources.delete(node);if(job.mine===generation)settle();};node.start(at);
     const wait=Math.max(0,(at-context.currentTime)*1000);
-    if(!job.began){job.began=true;setTimeout(()=>{if(!cancelled&&job.mine===generation)options.onSentenceStart?.(job.index);},wait);}
+    if(!job.began){job.began=true;job.startAt=at;setTimeout(()=>{if(!cancelled&&job.mine===generation)options.onSentenceStart?.(job.index);},wait);}
     if(!speaking){speaking=true;setTimeout(()=>{if(!cancelled&&job.mine===generation){options.onStart?.();measure();}},wait);}
   };
   const pump=()=> {
@@ -62,19 +63,36 @@ export function neuralSpeaker(options, getSelection) {
     }
   }
   const enqueue=text=> {
-    text=_forSpeech(text);if(!text||cancelled)return;
-    const job={text,selection:getSelection(),mine:generation,chunks:[],done:false,started:false,began:false,index:count++};
+    if(!_forSpeech(text)||cancelled)return;
+    const job={raw:text,text:_forSpeech(text),selection:getSelection(),mine:generation,chunks:[],done:false,started:false,began:false,index:count++};
     jobs.push(job);options.onSentenceReady?.(job.index);launch();
   };
   chunker=createChunker(enqueue);
+  // Sentences whose audio has reached the output clock. The clock stops while paused, so this is what was really heard.
+  const playedNow=()=>context?jobs.filter(job=>job.startAt!=null&&job.startAt<=context.currentTime+.001).map(job=>job.raw):[];
+  // An acknowledgement clip ({rate, samples}) goes onto the timeline ahead of the answer, which queues behind it.
+  const playClip=clip=>{
+    if(cancelled||!context||!clip?.samples?.length||!clip.rate)return;
+    const mine=generation, buffer=context.createBuffer(1,clip.samples.length,clip.rate);buffer.copyToChannel(clip.samples,0);
+    const node=context.createBufferSource();node.buffer=buffer;node.connect(analyser);
+    const at=Math.max(context.currentTime+.025,next);next=at+buffer.duration;sources.add(node);
+    node.onended=()=>{sources.delete(node);if(mine!==generation||cancelled)return;if(head>=jobs.length&&!sources.size&&!finished){speaking=false;cancelAnimationFrame(frame);options.onLevel?.(0);options.onEnd?.();}else settle();};
+    node.start(at);
+    if(!speaking){speaking=true;setTimeout(()=>{if(!cancelled&&mine===generation){options.onStart?.();measure();}},Math.max(0,(at-context.currentTime)*1000));}
+  };
   return {
     get speaking(){return speaking;},
+    get paused(){return paused;},
+    heard(){return jobs.length?playedNow():lastHeard.slice();},
+    pause(){if(context&&speaking&&!paused&&!cancelled){paused=true;poke('suspend');}},
+    resume(){if(paused){paused=false;poke('resume');}},
+    filler:playClip,
     async prepare(){if(!context){context=new AudioContext();analyser=context.createAnalyser();analyser.fftSize=256;analyser.connect(context.destination);}await context.resume();},
     feed(text){if(!cancelled)chunker.feed(text);},
     flushSentence(){if(!cancelled)chunker.flushSentence();},
     finish(){chunker.finish();finished=true;pump();},
-    reset(){this.cancel();cancelled=false;finished=false;next=context?.currentTime||0;},
-    cancel(){generation++;cancelled=true;jobs=[];head=0;count=0;finished=false;chunker.reset();cancelAnimationFrame(frame);options.onLevel?.(0);controllers.forEach(c=>c.abort());controllers.clear();sources.forEach(s=>{try{s.stop();}catch{}});sources.clear();speaking=false;},
+    reset(){this.cancel();cancelled=false;finished=false;lastHeard=[];next=context?.currentTime||0;},
+    cancel(){lastHeard=jobs.length?playedNow():lastHeard;const wasPaused=paused;paused=false;if(wasPaused)poke('resume');generation++;cancelled=true;jobs=[];head=0;count=0;finished=false;chunker.reset();cancelAnimationFrame(frame);options.onLevel?.(0);controllers.forEach(c=>c.abort());controllers.clear();sources.forEach(s=>{try{s.stop();}catch{}});sources.clear();speaking=false;},
     dispose(){this.cancel();context?.close();context=null;},
   };
 }
@@ -90,6 +108,10 @@ export function createVoiceSpeaker(options, getSelection = () => ({ provider: 'd
   return {
     get speaking() { return current.speaking; },
     get kind() { return current === neural ? 'neural' : 'device'; },
+    heard() { return current.heard(); },
+    pause() { current.pause(); },
+    resume() { current.resume(); },
+    filler(clip) { current.filler(clip); },
     // Creates (and resumes) the audio context a neural voice plays through; the OS voice needs nothing.
     async prepare() { if (pick() === neural) await neural.prepare(); },
     reset() { clearTimeout(timer); current = pick(); current.reset(); },

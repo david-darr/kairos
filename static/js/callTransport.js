@@ -55,7 +55,8 @@ export function callTransport(controller, onStatus, onPush) {
     async opening(onEvent) {abort=new AbortController();const current=abort;try{await readEvents(`/api/agent-calls/${record.id}/opening`,{},current.signal,onEvent);}finally{if(abort===current)abort=null;}},
     async update(taskId,onEvent) {abort=new AbortController();const current=abort;try{await readEvents(`/api/agent-calls/${record.id}/work/${taskId}/update`,{},current.signal,onEvent);}finally{if(abort===current)abort=null;}},
     // `spoken` = a barge-in: the user talked over the reply while it was being said, so the server marks it cut off.
-    interrupt(spoken=false){abort?.abort();if(record&&!record.ended)api(`/api/agent-calls/${record.id}/interrupt`,{method:'POST',toast:false,...(spoken?{body:JSON.stringify({spoken:true})}:{})}).catch(()=>{});},
+    // `heard` = the sentences that had begun to play: the server keeps only those (plus an [interrupted] marker) in the history.
+    interrupt(spoken=false,heard=null){abort?.abort();if(record&&!record.ended)api(`/api/agent-calls/${record.id}/interrupt`,{method:'POST',toast:false,...(spoken||heard?{body:JSON.stringify({spoken:!!spoken,...(Array.isArray(heard)?{heard}:{})})}:{})}).catch(()=>{});},
     stopWork(id){return api(`/api/agent-calls/${record.id}/work/${id}/stop`,{method:'POST'}).then(check);},
     // Look at the call record now (a pushed finish), instead of waiting out the poll.
     refresh(){clearTimeout(poll);return check();},

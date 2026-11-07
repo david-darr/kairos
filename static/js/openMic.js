@@ -34,6 +34,8 @@ import { createPartialTranscriber } from './partialTranscript.js';
 import { isSpeechOutputSupported } from './voiceOutput.js';
 import { createVoiceSpeaker } from './callVoice.js';
 import { createVoiceTrace } from './voiceTrace.js';
+import { createFillerGate, fetchFillerClip } from './voiceFiller.js';
+import { isBackchannel, endsInQuestion } from './backchannel.js';
 import { api } from './api.js';
 
 // Tuned against normal speech at a normal distance. The onset threshold sits
@@ -80,7 +82,7 @@ export function openMicVoiceSelection() {
 //                  original suites drive through _level); the default is that recorder, as the fallback.
 //   makeSpeaker    default: the call's sentence speaker, neural voice when chosen, OS voice otherwise.
 export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onError,
-                                createMic, createCapture, makeSpeaker }) {
+                                createMic, createCapture, makeSpeaker, noteHeard }) {
   const makeLevelMic = createMic || createRecorder;
   const makeCapture = createCapture || (!createMic && isCallRecordingSupported() ? createCallRecorder : null);
   let state = 'idle';
@@ -99,8 +101,14 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
   let backlog = [];
   let transcribing = false;
   let held = '';
+  let nods = 0;
   let heldTrace = null;
   let neuralFailed = false;
+  // A reply is on its way (sent, not yet finished streaming): a pause in the voice is not the end of the turn.
+  let replying = false;
+  // Did the user start talking over a reply, and had Kairos just asked something? A nod over the voice is not a turn.
+  let utterance = { during: false, asked: false };
+  let fillerOn = false;
   // Per-turn latency, kept in memory for this session and logged at debug (see voiceTrace.js).
   const voiceTrace = createVoiceTrace({ label: 'openmic' });
   let turnTrace = null;
@@ -109,6 +117,13 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
   let recognition = {};
   const partials = createPartialTranscriber({ send: (wav, signal) => transcribePartial(wav, { signal, model: recognition.model, backend: recognition.backend }) });
   partials.disable('cpu');
+
+  // Instant acknowledgement (voiceFiller.js): if no sentence of the reply is ready half a second after the turn was sent.
+  const filler = createFillerGate({
+    fetchClip: (last, text) => fetchFillerClip({ selection: neuralFailed ? { provider: 'device' } : openMicVoiceSelection(), last, text }),
+    blocked: () => stopped || capturing || state === 'listening' || state === 'idle',
+    play: clip => { fillerOn = true; speaker?.filler?.(clip); },
+  });
 
   const setState = (next) => {
     if (state === next) return;
@@ -132,6 +147,9 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
     // Cut both the voice and the in-flight turn: letting the reply finish
     // generating invisibly would make the next thing said land against
     // stale context.
+    // What had actually been heard goes to the chat's model so its next reply continues from there.
+    if (replying || state === 'thinking' || state === 'speaking') { try { const heard = speaker?.heard?.(); if (Array.isArray(heard)) noteHeard?.(sessionId, heard); } catch { /* best effort */ } }
+    filler.cancel(); fillerOn = false; replying = false;
     speaker?.cancel();
     stopTurn?.(sessionId);
   };
@@ -226,12 +244,14 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
   // -- worklet capture: the call recorder's callbacks -------------------------------------------------------------
   function speechStarted() {
     if (stopped) return;
+    if (!utterance.during) utterance = { during: state === 'speaking' || state === 'thinking' || replying, asked: false };
     capturing = true;
     partials.begin();
   }
 
   function bargedIn() {
     if (stopped || (state !== 'thinking' && state !== 'speaking')) return;
+    try { utterance = { during: true, asked: endsInQuestion(speaker?.heard?.()) }; } catch { utterance = { during: true, asked: false }; }
     interrupt();
     // The worklet already holds the start of the interruption and keeps recording it as the next utterance.
     capturing = true;
@@ -241,6 +261,7 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
   function segmentEnded(wav, timing, pcm) {
     if (stopped) return;
     capturing = false;
+    const spoke = utterance; utterance = { during: false, asked: false };   // whatever this utterance was said over, it is used up
     const session = partials.take();
     if (!wav) {
       // Too little voice to be speech (a click, a cough): nothing to recognize.
@@ -250,7 +271,7 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
     }
     const trace = voiceTrace.begin(performance.now() - (timing?.endpoint_ms || 0));
     voiceTrace.mark(trace, 'endpoint');
-    backlog.push({ wav, pcm, session, trace, decode: false });
+    backlog.push({ wav, pcm, session, trace, decode: false, during: spoke.during, asked: spoke.asked });
     drain();
   }
 
@@ -287,6 +308,8 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
           }
         }
         if (stopped || mine !== epoch) return;
+        // A nod over the reply ("mm-hm", "yeah") is not a turn: nothing is sent and nothing is interrupted by it.
+        if (text && item.during && isBackchannel(text, item.asked)) { nods++; continue; }
         if (text) { held = held ? `${held} ${text}` : text; heldTrace = item.trace; }
       }
     } finally {
@@ -313,13 +336,16 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
     // Clears the cancel latch from any previous interruption. Without it the
     // speaker stays permanently silenced after the first barge-in.
     speaker?.reset();
+    replying = true; fillerOn = false;
+    filler.arm({ text });
     const mine = epoch;
     try {
       await sendMessage(text, {
-        onChunk: (delta) => { voiceTrace.mark(trace, 'first_token'); speaker?.feed(delta); },
-        onDone: () => speaker?.finish(),
+        onChunk: (delta) => { voiceTrace.mark(trace, 'first_token'); filler.sentenceReady(); speaker?.feed(delta); },
+        onDone: () => { replying = false; speaker?.finish(); },
       });
     } catch (error) {
+      replying = false; filler.cancel();
       fail(error.message || 'That turn could not be sent.');
       if (!stopped && mine === epoch) setState('listening');
     }
@@ -358,6 +384,9 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
         mode: 'automatic', silenceMs: SILENCE_MS,
         onSpeechStart: speechStarted, onChunk: pcm => { if (!stopped && capturing) partials.push(pcm); },
         onBargeIn: bargedIn, onSegment: segmentEnded,
+        // The user's voice just started over Kairos: pause at once; a nod ends before it counts and the voice carries on.
+        onBargeDuck: () => { if (!stopped && state === 'speaking') speaker?.pause?.(); },
+        onBargeClear: () => { if (!stopped) speaker?.resume?.(); },
         onError: error => { fail(error?.message || 'Microphone capture stopped.'); stop(); },
       });
       try {
@@ -406,6 +435,8 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
     get recognition() { return { ...recognition, partials: partials.state.disabled || 'on' }; },
     // The in-memory latency trace of this session's voice turns.
     get latency() { return voiceTrace; },
+    // How many nods ("mm-hm") over a reply were heard and ignored.
+    get nods() { return nods; },
 
     // Exposed so a test can feed levels directly. The real path goes through
     // the recorder's analyser, which a headless suite has no way to drive.
@@ -425,13 +456,18 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
       neuralFailed = false;
       const options = {
         onStart: () => setState('speaking'),
-        onSentenceReady: () => voiceTrace.mark(turnTrace, 'first_sentence'),
-        onSentenceStart: () => voiceTrace.sentenceStart(turnTrace),
+        onSentenceReady: () => { filler.sentenceReady(); voiceTrace.mark(turnTrace, 'first_sentence'); },
+        onSentenceStart: () => { fillerOn = false; voiceTrace.sentenceStart(turnTrace); },
         // The device is already open; this only returns the state. It fires
         // once the whole queue has drained rather than per sentence, so the
         // pause between the assistant's own sentences is never mistaken for
         // the end of its turn.
-        onEnd: () => { voiceTrace.report(turnTrace); if (!stopped) listen(); },
+        onEnd: () => {
+          if (stopped) return;
+          // An acknowledgement that ended while the reply is still being written: keep waiting for it.
+          if (replying) { setState('thinking'); return; }
+          voiceTrace.report(turnTrace); listen();
+        },
         // A neural voice that fails (server stopped, engine error) hands the rest of the session to the OS voice.
         onError: message => {
           if (speaker?.kind !== 'neural') return;
@@ -475,6 +511,7 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
     try { recorder?.close(); } catch { /* already released */ }
     recorder = null;
     mode = '';
+    filler.cancel(); replying = false;
     speaker?.cancel();
     speaker?.dispose?.();
     speaker = null;

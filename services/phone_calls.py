@@ -423,9 +423,43 @@ class LivePipeline(phone_bridge.Pipeline):
             elif "audio" in item and rate:
                 yield rate, item["audio"]
 
+    def note_heard(self, sentences: list) -> None:
+        self._heard = list(sentences)
+
     def interrupt(self, spoken: bool) -> None:
         from services import agent_calls
-        agent_calls.interrupt(self.call, spoken=spoken)
+        heard, self._heard = getattr(self, "_heard", None), None
+        agent_calls.interrupt(self.call, spoken=spoken, heard=heard)
+
+    async def filler(self, user_text: str, last):
+        """A short acknowledgement in the bot's own voice, from the cache. Nothing is looked up or rendered while the
+        caller waits: the first time only starts that work in the background, so a filler is never itself a delay."""
+        from core import voice_fillers
+        chosen = getattr(self, "_voice", None)
+        if chosen is None:
+            async def prepare():
+                from services import bot_voice
+                try:
+                    self._voice = await bot_voice.selection(self.bot.get("voice_id"))
+                    await voice_fillers.warm(*self._voice)
+                except Exception:
+                    self._voice = ()
+            self._voice = ()
+            self._warming = asyncio.ensure_future(prepare())
+            return None
+        if not chosen:
+            return None
+        model, voice = chosen
+        ident, _text = voice_fillers.pick(last, user_text)
+        found = voice_fillers.cached(model, voice, ident)
+        if not found:
+            return None
+        rate, pcm = found
+
+        async def parts():
+            for at in range(0, len(pcm), 9600):
+                yield rate, pcm[at:at + 9600]
+        return ident, parts()
 
     def touch(self) -> None:
         self.call["last_seen"] = time.time()

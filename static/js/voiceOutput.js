@@ -17,21 +17,31 @@
 // sentence, so "v1.10.0" and "e.g. this" are not split mid-thought.
 const SENTENCE_END = /(?<=[.!?])\s+(?=[A-Z0-9"'])/;
 
-// Markdown is written to be read, not heard. Speaking the punctuation makes it
-// nearly unintelligible, so it is stripped rather than passed through.
+// Markdown is written to be read, not heard. Speaking the punctuation makes it nearly unintelligible, so it is
+// stripped rather than passed through: code becomes one spoken line, links their text, lists and headings sentences.
+// core/voice_style.py `strip_for_speech` is the same clean-up for the server's voices (phone, voice notes); both are
+// checked against scripts/fixtures/spoken-style-cases.json, so change them together.
+export const CODE_LINE = "I've put the code in the chat.";
+const CODE_REPEATS = /(?:\s*I've put the code in the chat\.){2,}/g;
 function forSpeech(text) {
-  return String(text || '')
-    .replace(/```[\s\S]*?```/g, ' (code block) ')
-    .replace(/`([^`]+)`/g, '$1')
+  let out = String(text || '')
+    .replace(/```[\s\S]*?(?:```|$)/g, '\n' + CODE_LINE + '\n')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/https?:\/\/\S+|www\.\S+/g, 'a link')
+    .replace(/<\/?[A-Za-z][^>]*>/g, ' ')
+    .replace(/^\s*(?:[-*_=]{3,}|\|?[\s:|-]{3,}\|?)\s*$/gm, '')
     .replace(/^\s{0,3}#{1,6}\s+/gm, '')
-    .replace(/(\*\*|__|\*|_|~~)/g, '')
-    .replace(/^\s*[-*+]\s+/gm, '')
     .replace(/^\s*>\s?/gm, '')
-    .replace(/\|/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+    .replace(/^\s*(?:[-*+•]|\d{1,3}[.)])\s+/gm, '')
+    .replace(/`([^`\n]+)`/g, '$1')
+    .replace(/(\*\*|__|~~|\*|(?<!\w)_|_(?!\w))/g, '')
+    .replace(/\|/g, ' ');
+  // One line per item: end it like a sentence so the voice pauses instead of running on.
+  let lines = out.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (lines.length > 1) lines = lines.map(line => /[.!?:;,…]['")\]]*$/.test(line) ? line : line + '.');
+  out = lines.join(' ');
+  return out.replace(CODE_REPEATS, ' ' + CODE_LINE).replace(/\s+/g, ' ').trim();
 }
 
 // Words before a first-sentence clause break (comma, semicolon, dash) may be spoken ahead of the full stop.
@@ -201,21 +211,24 @@ export function createSpeaker({ onStart, onEnd, onBoundary, onError, getVoice, o
   let queued = 0;
   let generation = 0;
   let sentences = 0;
+  let paused = false;
+  let heardSentences = [];   // the sentences that actually began to play, raw, in order (what a barge-in leaves in the history)
 
-  const enqueue = (text) => {
+  // `filler` is an acknowledgement ("Mm, let me think."): it plays like a sentence but is not part of the reply.
+  const enqueue = (text, filler = false) => {
     const clean = forSpeech(text);
     if (!clean || cancelled || !isSpeechOutputSupported()) return;
     queued += 1;
     const utterance = new SpeechSynthesisUtterance(clean);
     const mine = generation;
-    const index = sentences++;
-    onSentenceReady?.(index);
+    const index = filler ? -1 : sentences++;
+    if (!filler) onSentenceReady?.(index);
     const voice = getVoice ? getVoice() : pickVoice();
     if (voice) { utterance.voice = voice; utterance.lang = voice.lang; }
     utterance.rate = 1.02;
     utterance.addEventListener('start', () => {
       if (cancelled || mine !== generation) return;
-      onSentenceStart?.(index);
+      if (!filler) { heardSentences.push(text); onSentenceStart?.(index); }
       if (!speaking) { speaking = true; onStart?.(); }
     });
     utterance.addEventListener('boundary', event => { if (!cancelled && mine === generation) onBoundary?.(event); });
@@ -242,6 +255,13 @@ export function createSpeaker({ onStart, onEnd, onBoundary, onError, getVoice, o
 
   return {
     get speaking() { return speaking; },
+    // The sentences that began to play since the last reset(), still readable after cancel().
+    heard() { return heardSentences.slice(); },
+    // A pause that can be taken back at once (the user may be about to talk): speech holds mid-word and resumes.
+    pause() { if (!cancelled && speaking && !paused && isSpeechOutputSupported()) { paused = true; try { window.speechSynthesis.pause(); } catch { paused = false; } } },
+    resume() { if (paused) { paused = false; try { window.speechSynthesis.resume(); } catch { /* nothing to resume */ } } },
+    get paused() { return paused; },
+    filler(clip) { if (!cancelled && clip?.text) enqueue(clip.text, true); },
     feed(deltaText) { if (!cancelled) chunker.feed(deltaText); },
     flushSentence() { if (!cancelled) chunker.flushSentence(); },
     finish() {
@@ -262,6 +282,8 @@ export function createSpeaker({ onStart, onEnd, onBoundary, onError, getVoice, o
     reset() {
       generation++;
       cancelled = false;
+      paused = false;
+      heardSentences = [];
       chunker.reset();
       sentences = 0;
       queued = 0;
@@ -273,8 +295,9 @@ export function createSpeaker({ onStart, onEnd, onBoundary, onError, getVoice, o
       chunker.reset();
       queued = 0;
       if (isSpeechOutputSupported()) {
-        try { window.speechSynthesis.cancel(); } catch { /* nothing to stop */ }
+        try { window.speechSynthesis.cancel(); if (paused) window.speechSynthesis.resume(); } catch { /* nothing to stop */ }
       }
+      paused = false;
       if (speaking) { speaking = false; onEnd?.(); }
     },
   };

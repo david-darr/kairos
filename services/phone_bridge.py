@@ -19,7 +19,8 @@ from typing import AsyncIterator, Callable, Optional
 
 import numpy as np
 
-from core import phone_audio
+from core import phone_audio, voice_fillers, voice_style
+from core.voice_backchannel import is_backchannel
 from core.phone_providers import Provider
 
 logger = logging.getLogger(__name__)
@@ -154,7 +155,8 @@ def split_sentences(buffer: str) -> tuple[list[str], str]:
 
 
 def spoken_text(text: str) -> str:
-    return re.sub(r"[*_`#>]+", "", text or "").strip()
+    """What the voice reads: plain words, with markdown, links and code already turned into speech."""
+    return voice_style.strip_for_speech(text)
 
 
 class Pipeline:
@@ -167,6 +169,11 @@ class Pipeline:
     async def announce(self, text: str, request_id: str) -> None: ...
     def speak(self, text: str) -> AsyncIterator[tuple[int, bytes]]: ...
     def interrupt(self, spoken: bool) -> None: ...
+    def note_heard(self, sentences: list) -> None:
+        """Before an interrupt(): the sentences the caller had begun to hear (so the history keeps only those)."""
+    async def filler(self, user_text: str, last: Optional[str]):
+        """An acknowledgement to play while the answer is written: (id, async iterator of (rate, pcm16)) or None."""
+        return None
     def touch(self) -> None: ...
     async def close(self) -> None: ...
 
@@ -185,6 +192,10 @@ class PhoneBridge:
         self.background: set = set()
         self.play_end = 0.0
         self.backchannel = False
+        self.during = False                    # the caller started speaking while Kairos was thinking or speaking
+        self.played: list = []                 # (sentence, when it starts to play) of the reply being spoken
+        self.last_filler: Optional[str] = None
+        self.dropped_backchannels = 0
         self.sent_frames = 0
         self.heard: list[str] = []
         self.frames_in = 0
@@ -224,14 +235,41 @@ class PhoneBridge:
         for event in events:
             if event[0] == "start":
                 self.backchannel = self.phase == "speaking"
+                self.during = self.phase in ("speaking", "thinking")
             elif event[0] == "pause":
                 self._spawn(self._ask(event[1], event[2]))
             elif event[0] == "segment":
+                during, self.during = self.during, False
                 if self.backchannel:
                     self.backchannel = False    # a short "mm-hm" over the bot's voice is not a turn
                     continue
+                if during and self.turn and not self.turn.done():
+                    # Kairos is mid-reply: find out whether this is a real turn before cutting the reply off.
+                    self._spawn(self._interject(event[1]))
+                    continue
                 await self._cancel_turn(spoken=False)
-                self.turn = asyncio.create_task(self._respond(event[1]))
+                self.turn = asyncio.create_task(self._respond(event[1], during))
+
+    def _asked(self) -> bool:
+        """Did the last thing Kairos said end in a question? ("yeah" then answers it instead of nodding along.)"""
+        return bool(self.played) and self.played[-1][0].rstrip().endswith("?")
+
+    async def _interject(self, samples) -> None:
+        """Speech over a reply that was too short to be a barge-in: a nod is ignored, anything else takes the turn."""
+        try:
+            text = (await self.pipeline.transcribe(phone_audio.float_to_pcm16(samples))).strip()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("phone: could not hear an interjection")
+            return
+        if not text:
+            return
+        if is_backchannel(text, self._asked()):
+            self.dropped_backchannels += 1
+            return
+        await self._cancel_turn(spoken=False)
+        self.turn = asyncio.create_task(self._respond(samples, False, text))
 
     async def _ask(self, pause_id: int, samples) -> None:
         verdict = None
@@ -265,14 +303,19 @@ class PhoneBridge:
     async def _once(text: str):
         yield text
 
-    async def _respond(self, samples) -> None:
+    async def _respond(self, samples, during: bool = False, text: Optional[str] = None) -> None:
         self.phase = "thinking"
         try:
-            text = (await self.pipeline.transcribe(phone_audio.float_to_pcm16(samples))).strip()
+            if text is None:
+                text = (await self.pipeline.transcribe(phone_audio.float_to_pcm16(samples))).strip()
             if not text:
                 return
+            if during and is_backchannel(text, self._asked()):
+                self.dropped_backchannels += 1     # said over the bot's voice: a nod, not a turn
+                return
+            self.played = []
             self.heard.append(text)
-            await self._say(self.pipeline.converse(text, "phone:" + uuid.uuid4().hex))
+            await self._say(self.pipeline.converse(text, "phone:" + uuid.uuid4().hex), filler_for=text)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -280,52 +323,98 @@ class PhoneBridge:
         finally:
             self.phase = "idle"
 
-    async def _say(self, deltas) -> None:
-        """Speak a stream of text: each finished sentence is rendered while the one before it is still playing."""
+    async def _say(self, deltas, filler_for: Optional[str] = None) -> None:
+        """Speak a stream of text: each finished sentence is rendered while the one before it is still playing.
+        With `filler_for` (what the caller just said), a short acknowledgement plays if no sentence is ready within
+        half a second; `self.played` records when each sentence starts so a barge-in knows what was heard."""
         queue: asyncio.Queue = asyncio.Queue(maxsize=4)
+        first_sentence = asyncio.Event()
+        self.played = []
 
-        async def render(sentence: str) -> None:
+        async def render(number: int, sentence: str) -> None:
             converter = None
             async for rate, pcm in self.pipeline.speak(spoken_text(sentence)):
                 if converter is None or converter.resampler.source != rate:
                     converter = phone_audio.SpeechToPhone(rate)
                 frames = converter.frames(pcm)
                 if frames:
-                    await queue.put(frames)
+                    await queue.put((number, sentence, frames))
             if converter:
                 tail = converter.frames(b"", final=True)
                 if tail:
-                    await queue.put(tail)
+                    await queue.put((number, sentence, tail))
 
         async def produce() -> None:
-            buffer = ""
+            buffer, count = "", 0
             try:
                 async for delta in deltas:
                     buffer += delta
                     sentences, buffer = split_sentences(buffer)
                     for sentence in sentences:
-                        await self._guarded(render, sentence)
+                        count += 1
+                        first_sentence.set()
+                        await self._guarded(render, count, sentence)
                 if buffer.strip():
-                    await self._guarded(render, buffer)
+                    first_sentence.set()
+                    await self._guarded(render, count + 1, buffer)
             finally:
+                first_sentence.set()
                 await queue.put(None)
 
+        async def filler() -> None:
+            try:
+                await asyncio.wait_for(first_sentence.wait(), voice_fillers.FILLER_AFTER_MS / 1000)
+                return                            # the answer was quick: no acknowledgement
+            except asyncio.TimeoutError:
+                pass
+            try:
+                found = await self.pipeline.filler(filler_for, self.last_filler)
+                if not found or first_sentence.is_set():
+                    return
+                ident, parts = found
+                self.last_filler = ident
+                converter = None
+                async for rate, pcm in parts:
+                    if first_sentence.is_set():
+                        return                    # the answer got there first
+                    if converter is None or converter.resampler.source != rate:
+                        converter = phone_audio.SpeechToPhone(rate)
+                    frames = converter.frames(pcm)
+                    if frames:
+                        await queue.put((0, voice_fillers.text_of(ident) or "", frames))
+                tail = converter.frames(b"", final=True) if converter else None
+                if tail and not first_sentence.is_set():
+                    await queue.put((0, voice_fillers.text_of(ident) or "", tail))
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.info("phone: no acknowledgement this time")
+
         producer = asyncio.create_task(produce())
+        helper = asyncio.create_task(filler()) if filler_for else None
+        playing = None
         try:
-            while (frames := await queue.get()) is not None:
+            while (item := await queue.get()) is not None:
+                number, sentence, frames = item
                 self.phase = "speaking"
+                if number != playing:
+                    playing = number
+                    if number:                    # an acknowledgement is not part of the reply that gets remembered
+                        self.played.append((sentence, max(self.play_end, self.clock())))
                 await self._send_frames(frames)
             await producer
             if self.pace and self.phase == "speaking":
                 await self.sleep(max(0.0, self.play_end - self.clock()))
         finally:
-            producer.cancel()
-            await asyncio.gather(producer, return_exceptions=True)
+            for task in (producer, helper):
+                if task:
+                    task.cancel()
+            await asyncio.gather(producer, *( [helper] if helper else [] ), return_exceptions=True)
 
     @staticmethod
-    async def _guarded(render, sentence: str) -> None:
+    async def _guarded(render, number: int, sentence: str) -> None:
         try:
-            await render(sentence)
+            await render(number, sentence)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -351,6 +440,8 @@ class PhoneBridge:
     async def _cancel_turn(self, spoken: bool) -> None:
         task, self.turn = self.turn, None
         if task and not task.done():
+            now = self.clock()
+            self.pipeline.note_heard([sentence for sentence, starts in self.played if starts <= now])
             self.pipeline.interrupt(spoken)
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)

@@ -738,7 +738,7 @@ app.whenReady().then(async () => {
     // Markdown is written to be read, not heard.
     assert.equal(
       await js("import('/static/js/voiceOutput.js').then(m=>m._forSpeech(['## Title','','**bold** and `code` and [a link](http://x.test)','- item'].join(String.fromCharCode(10))))"),
-      'Title bold and code and a link item',
+      'Title. bold and code and a link. item.',
     );
 
     // Open Mic's loop, driven end to end with a fake microphone and a fake

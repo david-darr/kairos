@@ -1,0 +1,18 @@
+[
+  {"in": "Plain sentence, nothing to strip.", "out": "Plain sentence, nothing to strip."},
+  {"in": "## Summary\nThe build passed.", "out": "Summary. The build passed."},
+  {"in": "- apples\n- pears\n- plums", "out": "apples. pears. plums."},
+  {"in": "1. Open settings\n2. Pick a voice", "out": "Open settings. Pick a voice."},
+  {"in": "See [the docs](https://example.com/docs) for more.", "out": "See the docs for more."},
+  {"in": "Go to https://example.com/a/b?c=1 now.", "out": "Go to a link now."},
+  {"in": "Here you go:\n```python\nprint('hi')\nx = 1\n```\nThat prints a greeting.", "out": "Here you go: I've put the code in the chat. That prints a greeting."},
+  {"in": "```js\nunclosed code that keeps going", "out": "I've put the code in the chat."},
+  {"in": "Run `npm test` first.", "out": "Run npm test first."},
+  {"in": "This is **very** important and ~~wrong~~ _really_ so.", "out": "This is very important and wrong really so."},
+  {"in": "> quoted line", "out": "quoted line"},
+  {"in": "| a | b |\n|---|---|\n| 1 | 2 |", "out": "a b. 1 2."},
+  {"in": "![chart](x.png) The chart shows growth.", "out": "The chart shows growth."},
+  {"in": "snake_case_name stays", "out": "snake_case_name stays"},
+  {"in": "<b>bold</b> html", "out": "bold html"},
+  {"in": "", "out": ""}
+]
