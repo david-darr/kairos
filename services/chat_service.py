@@ -1254,7 +1254,16 @@ def _record_turn_telemetry(session_id: str, endpoint: dict, brain, turn_usage) -
             # this is a measured capacity rather than a curated guess —
             # flagged accordingly.
             capacity = {"effective": int(endpoint["num_ctx"]), "estimated": False, "source": "endpoint_num_ctx"}
-        session_manager.set_context_state(session_id, token_usage.build_context_state(usage, capacity, model_id))
+        state = token_usage.build_context_state(usage, capacity, model_id)
+        if state:
+            # What fills the window, by part (unit 5): local and API chats only, an estimate that sums to the
+            # measured total (core/context_breakdown.py).
+            from core import context_breakdown
+            live = brain.actual if isinstance(brain, _BotRecovery) else brain
+            parts = context_breakdown.for_brain(live, state.get("used_tokens"))
+            if parts:
+                state["parts"] = parts
+        session_manager.set_context_state(session_id, state)
     except Exception:
         logger.exception("context state update failed for session %s", session_id)
 

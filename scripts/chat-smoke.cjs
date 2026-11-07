@@ -477,6 +477,17 @@ app.whenReady().then(async () => {
     assert.ok(await js("(() => { const r=document.querySelector('#usage-meter').getBoundingClientRect(); return r.top >= 0 && r.left >= 0 && r.right <= innerWidth+1 && r.bottom <= innerHeight+1; })()"), 'meter stays on screen');
     await js("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))");
     await waitFor("!document.querySelector('#usage-meter')");
+    // A local/API chat's window split by part (unit 5): one bar, a row per part, estimates marked.
+    chats.s1.context_state = { ...chats.s1.context_state, parts: [
+      { key: 'system', label: 'System prompt', tokens: 2100, estimated: true }, { key: 'tools', label: 'Tool definitions', tokens: 3600, estimated: true },
+      { key: 'memory', label: 'Memory and skills', tokens: 900, estimated: true }, { key: 'conversation', label: 'Conversation', tokens: 38400, estimated: true }] };
+    await js("document.querySelector('#context-pill').click()");
+    await waitFor("document.querySelectorAll('#usage-meter .usage-context-segment').length===4");
+    assert.deepEqual(await js("[...document.querySelectorAll('#usage-meter .usage-context-part')].map(p => p.querySelector('.usage-context-label').textContent + ' ' + p.querySelector('.usage-context-tokens').textContent)"),
+      ['System prompt ~2.1K', 'Tool definitions ~3.6K', 'Memory and skills ~900', 'Conversation ~38K']);
+    await capture('chat-details-breakdown');
+    await js("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))");
+    await waitFor("!document.querySelector('#usage-meter')");
     // No context reading, but recorded runs: a reopened chat still shows its stored usage.
     chats.s1.context_state = null;
     await win.loadURL(base); await mount();

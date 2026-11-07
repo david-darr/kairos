@@ -7,6 +7,8 @@ import { el } from './api.js';
 import { costText, costSource } from './modelStats.js';
 
 export const NA = 'n/a';
+// Connections that build their own requests: Kairos cannot split their window by part.
+const SELF_BUILT = ['claude_cli', 'codex_cli', 'antigravity_cli'];
 
 export function formatCount(n) {
   return Number.isFinite(n) ? Math.round(n).toLocaleString('en-US') : NA;
@@ -109,7 +111,7 @@ function rowList(rows, kind) {
   return list;
 }
 
-function contextCard(context) {
+function contextCard(context, kind = null) {
   if (!context || !Number.isFinite(context.used_tokens)) {
     return card('Context', [el('p', { class: 'usage-meter-empty', text: 'No context reading for this chat yet.' })]);
   }
@@ -135,7 +137,10 @@ function contextCard(context) {
     el('span', { class: 'usage-context-label', text: label }),
     el('span', { class: 'usage-context-tokens', text: `${estimated ? '~' : ''}${formatShort(tokens)}` }),
   ])));
-  const basis = context.estimated_capacity ? 'Window size estimated.' : capacity ? 'Window size reported by the provider.' : '';
+  const split = parts.length > 1 ? 'Parts are estimated from what Kairos sends; the total is measured.'
+    : SELF_BUILT.includes(kind) ? 'This model builds its own requests, so only the total is known.' : '';
+  const basis = [context.estimated_capacity ? 'Window size estimated.' : capacity ? 'Window size reported by the provider.' : '', split]
+    .filter(Boolean).join(' ');
   return card('Context', [head, bar, list, ...(basis ? [el('p', { class: 'usage-meter-source', text: basis })] : [])]);
 }
 
@@ -143,7 +148,7 @@ function contextCard(context) {
 export function renderUsage(usage, { context = null, compact = null } = {}) {
   const body = el('div', { class: 'usage-meter-body' });
   const reading = context || usage?.context || null;
-  body.append(contextCard(reading));
+  body.append(contextCard(reading, usage?.model?.kind));
   body.append(card('Model', [rowList(modelRows(usage?.model, reading), 'model')]));
   const usageChildren = [];
   if (!usage) usageChildren.push(el('p', { class: 'usage-meter-empty', text: 'Usage could not be read for this chat.' }));

@@ -20,8 +20,9 @@ where state lives. Routes and services call into it; it never imports `tabs/`.
 - **Sessions and runs:** `session_manager.py` over `session_manager_store.py`
   (SQLite), `runs.py`, `chat_tasks.py`, `file_checkpoints.py`. Usage read from the runs:
   `session_usage.py` (one chat's sums, the context pill's meter), `model_stats.py` (each
-  model's speed and reliability over recent days)), `run_cost.py` (each run's cost and its status),
-  `model_prices.py` (the bundled dated price snapshot), `price_feeds.py` (public price lists, daily).
+  model's speed and reliability over recent days), `run_cost.py` (each run's cost and its status),
+  `model_prices.py` (the bundled dated price snapshot), `price_feeds.py` (public price lists, daily),
+  `context_breakdown.py` (what fills a local or API chat's window, by part).
 - **Integrations:** `integrations.py`, `mcp_client.py`, `mcp_bridge.py`,
   `mcp_oauth.py`, `connectors/`, `channels/`, `email_send.py`,
   `google_workspace.py`, `dav_client.py`.
