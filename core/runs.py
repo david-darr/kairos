@@ -137,6 +137,9 @@ class RunContext:
     deadline: Optional[float] = None
     budget_tokens: Optional[int] = None
     trigger: Optional[str] = None
+    # What a run that is not the chat's own turn was for (schema v10, Session Usage and Model Tracking
+    # unit 2): compact, open_mic_summary, chat_summary, model_test. None for a turn, task or helper.
+    purpose: Optional[str] = None
     reported_cost_usd: Optional[float] = None
     # Chosen by the trusted recovery adapter, never by a model argument.
     actual_model: dict = field(default_factory=dict, compare=False)
@@ -466,6 +469,8 @@ def record(context: RunContext, tally: Tally, outcome: str, stop: Optional[StopR
             "output_tokens": usage.output_tokens if usage else None,
             "cache_write_tokens": usage.cache_write_tokens if usage else None,
             "first_output_at": tally.first_output_at, "last_output_at": tally.last_output_at,
+            # Schema v10.
+            "purpose": context.purpose,
         }
         session_manager_store.record_run(row, timeline)
     except Exception:
@@ -523,3 +528,82 @@ async def complete(adapter: RunAdapter, prompt, context: RunContext, tally: Opti
                 outcome.tool_calls, spent if spent is not None else "unreported",
                 "" if outcome.usage_complete else " (usage incomplete)")
     return outcome
+
+
+# -- side calls (Session Usage and Model Tracking, unit 2, 2026-11-07) -----------------------------------
+# A model call that is not a chat's turn: a compaction or Open Mic summary, a chat Summary, the model Test
+# button. Each leaves one run labelled with its purpose, so a chat's totals and Home's include them, as
+# Hermes's `task` column does. Recording never fails the call.
+
+SIDE = "side"
+
+
+def side_context(purpose: str, *, session_id: Optional[str] = None, endpoint: Optional[dict] = None,
+                 model: Optional[str] = None) -> RunContext:
+    endpoint = endpoint or {}
+    return RunContext(SIDE, purpose=purpose, session_id=session_id, endpoint_id=endpoint.get("id"),
+                      model_kind=endpoint.get("kind"), model=model or endpoint.get("model") or None)
+
+
+def _count_on_home(context: RunContext, usage: Optional[Usage]) -> None:
+    if usage is None or not context.endpoint_id:
+        return
+    try:
+        from core import token_usage
+        token_usage.record_usage(context.endpoint_id, usage)
+    except Exception:
+        logger.exception("could not count side call %s on Home", context.run_id)
+
+
+async def side_call(brain, prompt, purpose: str, *, session_id: Optional[str] = None,
+                    endpoint: Optional[dict] = None, model: Optional[str] = None) -> str:
+    """brain.run_turn(prompt), recorded as a labelled side run: the reply, and the usage the brain kept
+    for its last provider call (a side call makes one; none reported stays null)."""
+    named = getattr(brain, "model", None)
+    with SideRun(purpose, session_id=session_id, endpoint=endpoint,
+                 model=model or (named if isinstance(named, str) else None)) as side:
+        reply = await brain.run_turn(prompt)
+        usage = getattr(brain, "last_usage", None)
+        if isinstance(usage, dict):
+            side.usage(usage)
+        side.text(reply if isinstance(reply, str) else "")
+    return reply
+
+
+class SideRun:
+    """A side call made without a brain (a raw CLI process, one plain request): feed it the reply's text
+    and the provider's usage as they come; leaving the block records the run, failed or stopped if the
+    block raised.
+
+        with runs.SideRun("chat_summary", session_id=sid, endpoint=endpoint, model=model) as side:
+            reply = await openai_compatible.run_turn(..., on_usage=side.usage)
+            side.text(reply)
+    """
+
+    def __init__(self, purpose: str, *, session_id: Optional[str] = None, endpoint: Optional[dict] = None,
+                 model: Optional[str] = None):
+        self.context = side_context(purpose, session_id=session_id, endpoint=endpoint, model=model)
+        self.tally = Tally()
+
+    def usage(self, raw) -> None:
+        item = usage_event(raw)
+        if item is not None:
+            self.tally.add(item)
+
+    def text(self, chunk: str) -> None:
+        if chunk:
+            self.tally.add(text(chunk))
+
+    def __enter__(self) -> "SideRun":
+        return self
+
+    def __exit__(self, kind, error, trace) -> bool:
+        if kind is None:
+            self.tally.add(result(bool(self.tally.usages)))
+            record(self.context, self.tally, "finished")
+            _count_on_home(self.context, self.tally.usage)
+        elif issubclass(kind, (asyncio.CancelledError, GeneratorExit)):
+            record(self.context, self.tally, "stopped")
+        else:
+            record(self.context, self.tally, "failed", detail=f"{kind.__name__}: {error}")
+        return False

@@ -63,7 +63,10 @@ def totals(rows: list[dict]) -> dict:
 
 
 def group(row: dict, chat_run_ids: set) -> str:
-    """Which part of the chat's spend a run is: its own turns, its helpers, or other work in it."""
+    """Which part of the chat's spend a run is: its own turns, its side calls (a compaction, a summary:
+    unit 2's `purpose`), its helpers, or other work in it."""
+    if row.get("purpose"):
+        return "side"
     if row.get("surface") == "chat":
         return "turns"
     if row.get("surface") == "helper" or (row.get("parent_id") and row["parent_id"] in chat_run_ids):
@@ -87,7 +90,7 @@ def last_reply(rows: list[dict]) -> Optional[dict]:
 def summarize(session: dict, rows: list[dict]) -> dict:
     """The chat's usage: `rows` are every run recorded for it (oldest first or any order)."""
     chat_ids = {r["id"] for r in rows if r.get("surface") == "chat"}
-    groups = {"turns": [], "helpers": [], "other": []}
+    groups = {"turns": [], "side": [], "helpers": [], "other": []}
     for row in rows:
         groups[group(row, chat_ids)].append(row)
     whole = totals(rows)
@@ -100,6 +103,9 @@ def summarize(session: dict, rows: list[dict]) -> dict:
         "runs": whole["runs"],
         "compactions": len(session.get("compactions") or []),
         "helper_runs": len(groups["helpers"]),
+        "side_runs": len(groups["side"]),
+        "side_purposes": {p: sum(1 for r in groups["side"] if r["purpose"] == p)
+                          for p in sorted({r["purpose"] for r in groups["side"]})},
         "parts": {name: totals(items) for name, items in groups.items()},
         "last_reply": last_reply(rows),
         "first_run_at": min((r["started_at"] for r in rows if r.get("started_at")), default=None),

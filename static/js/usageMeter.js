@@ -61,6 +61,15 @@ export function modelRows(model, context) {
   ];
 }
 
+// What each side call was for (unit 2's `purpose` labels), in words.
+export const PURPOSES = { compact: 'compaction', open_mic_summary: 'voice summary', chat_summary: 'chat summary', model_test: 'model test' };
+
+export function sideCalls(usage) {
+  if (!Number.isFinite(usage?.side_runs)) return NA;
+  const kinds = Object.entries(usage.side_purposes || {}).map(([purpose, n]) => `${n} ${PURPOSES[purpose] || purpose.replace(/_/g, ' ')}`);
+  return kinds.length ? `${usage.side_runs} (${kinds.join(', ')})` : String(usage.side_runs);
+}
+
 // The Usage card's rows, in order: [label, value, hint]. Pure, so a Node test can check it.
 export function usageRows(usage) {
   if (!usage) return [];
@@ -76,6 +85,8 @@ export function usageRows(usage) {
     ['Tool calls', formatCount(usage.tool_calls)],
     ['Compactions', formatCount(usage.compactions)],
     ['Helper runs', formatCount(usage.helper_runs)],
+    ['Side calls', sideCalls(usage), 'Model calls that were not a turn: compactions, summaries'],
+    ['Side call tokens', formatCount(usage.parts?.side?.total_tokens), 'Included in the totals above'],
     ['First output', last ? formatSeconds(last.ttft_seconds) : NA, 'Last reply: time from sending to the first visible text'],
     ['Speed', last ? formatRate(last.tokens_per_second) : NA, 'Last reply; n/a when it arrived in one piece'],
   ];

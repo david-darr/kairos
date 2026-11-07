@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "a61c669bc87c8df69116c5efd8bb26d1fbea6299028c865f65434d6778c7901a",
+  "app.js": "05b05d0f98ae47a8d914162ea1dddca01df963ff115c6721cce82b9c6d99fad4",
   "fixtures.js": "335d3c016b2ea0cac27692d6948523d3a25777d854995842ee917ed2c7c145fb",
   "index.html": "71859f6b44470817f89041395322c71ff6480ee480cf2303b4f3bc6b176f5554",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -1517,7 +1517,7 @@
   "static/js/taskActivity.js": "729ee06df10c02d967b311f6efad3fee7a9f58e9eed70a816484e35c29a52681",
   "static/js/turnEndpoint.js": "bda0823d8196632b1db02cac31be9427b9538a7cbaaf755e302721308879e6e6",
   "static/js/usage-overlay.js": "6a134ef6210778afb3c3a6c641a0676fe19a11840660edb4e4dc4fcf0c9cba2b",
-  "static/js/usageMeter.js": "a133fb63292212e86cb63ebc08a4df935447139009ac1147f2b11e7877ca6110",
+  "static/js/usageMeter.js": "d0bd2f0f79d2fb65066724bacd8ee5c2be7beb3bb40164a5eaa7d1581f533627",
   "static/js/vaultEditor.js": "9e1f3794db0e8e412cbe6e8ff21ddcda80fce20e58b9fd9e9875e68f8febf463",
   "static/js/vaultExplorer.js": "0bbc40cd6a229a6f75670355c40549551055ab455a6e96bbdb222e0bc29a2d75",
   "static/js/vaultGraph.js": "4a9e913285296b69bef61066b063a212449347aa301224124ab673436db87d0d",

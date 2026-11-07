@@ -7,8 +7,8 @@ const vm = require('node:vm');
 const context = { el: () => ({ append() {} }), Number, Math, console };
 vm.createContext(context);
 const load = file => fs.readFileSync(file, 'utf8').replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '');
-vm.runInContext(load('static/js/usageMeter.js') + '\nthis.api = { usageRows, coverageNote, formatCount, formatRate, formatSeconds, formatShort, contextParts, modelRows, NA };', context);
-const { usageRows, coverageNote, formatCount, formatRate, formatSeconds, formatShort, contextParts, modelRows, NA } = context.api;
+vm.runInContext(load('static/js/usageMeter.js') + '\nthis.api = { usageRows, coverageNote, formatCount, formatRate, formatSeconds, formatShort, contextParts, modelRows, sideCalls, NA };', context);
+const { usageRows, coverageNote, formatCount, formatRate, formatSeconds, formatShort, contextParts, modelRows, sideCalls, NA } = context.api;
 const value = (rows, label) => rows.find(r => r[0] === label)?.[1];
 
 // Known figures render; unknown ones say n/a.
@@ -50,4 +50,9 @@ model = Object.fromEntries(modelRows({ model: 'm', provider: null, context_windo
 assert.equal(model['Context window'], '500K (estimated)');
 assert.equal(model['Provider'], NA);
 assert.equal(value(usageRows(full), 'Calls'), '3');
+// Side calls (unit 2): counted by purpose, in words; an older backend without them says n/a.
+assert.equal(sideCalls({ side_runs: 3, side_purposes: { compact: 1, chat_summary: 2 } }), '3 (1 compaction, 2 chat summary)');
+assert.equal(sideCalls({ side_runs: 0, side_purposes: {} }), '0');
+assert.equal(sideCalls({}), NA);
+assert.equal(value(usageRows({ ...full, parts: { side: { total_tokens: null } } }), 'Side call tokens'), NA);
 console.log('usage meter: ok');

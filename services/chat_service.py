@@ -1320,7 +1320,8 @@ async def summarise_open_mic(session_id: str) -> dict:
     try:
         brain = _build_brain(endpoint, session_id=None, is_admin=False)
         await brain.connect()
-        summary = (await brain.run_turn(SUMMARY_PROMPT + transcript)).strip()
+        summary = (await runs.side_call(brain, SUMMARY_PROMPT + transcript, "open_mic_summary",
+                                        session_id=session_id, endpoint=endpoint)).strip()
     except Exception:
         logger.exception("open mic: summary failed for %s", session_id)
         session_manager.set_open_mic(session_id, False)
@@ -1452,7 +1453,7 @@ async def _compact_session(session_id: str, keep_tail: int = COMPACTION_TAIL_KEE
     brain = _build_brain(endpoint, session_id=None, is_admin=False)
     try:
         await brain.connect()
-        summary = (await brain.run_turn(prompt)).strip()
+        summary = (await runs.side_call(brain, prompt, "compact", session_id=session_id, endpoint=endpoint)).strip()
     finally:
         await brain.disconnect()
     if not summary:

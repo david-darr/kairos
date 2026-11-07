@@ -10,7 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from core import cli_env, model_catalog, model_discovery, model_endpoints, model_marks, quota_usage, token_usage
+from core import cli_env, model_catalog, model_discovery, model_endpoints, model_marks, quota_usage, runs, token_usage
 from core.middleware import require_admin, require_user
 from core.providers import openai_compatible
 
@@ -236,7 +236,8 @@ async def test_endpoint(endpoint_id: str, user: str = Depends(require_user)) -> 
         brain.cli_account = cli_env.account_for_endpoint(ep)
         try:
             await brain.connect()
-            await brain.run_turn("ping")
+            # Recorded as a labelled side run (Session Usage and Model Tracking unit 2).
+            await runs.side_call(brain, "ping", "model_test", endpoint=ep)
             return {"ok": True, "latency_ms": round((time.monotonic() - started) * 1000)}
         except Exception as e:
             return {"ok": False, "detail": str(e)[:300]}
@@ -258,7 +259,8 @@ async def test_endpoint(endpoint_id: str, user: str = Depends(require_user)) -> 
         brain.cli_account = cli_env.account_for_endpoint(ep)
         try:
             await brain.connect()
-            await brain.run_turn("ping")
+            # Recorded as a labelled side run (Session Usage and Model Tracking unit 2).
+            await runs.side_call(brain, "ping", "model_test", endpoint=ep)
             return {"ok": True, "latency_ms": round((time.monotonic() - started) * 1000)}
         except Exception as e:
             return {"ok": False, "detail": str(e)[:300]}
@@ -266,7 +268,9 @@ async def test_endpoint(endpoint_id: str, user: str = Depends(require_user)) -> 
             await brain.disconnect()
     base_url, model, api_key, num_ctx = model_endpoints.resolve_runtime(endpoint_id)
     try:
-        await openai_compatible.run_turn(base_url, model, api_key, [{"role": "user", "content": "ping"}], num_ctx=num_ctx)
+        with runs.SideRun("model_test", endpoint=ep, model=model) as side:
+            side.text(await openai_compatible.run_turn(base_url, model, api_key, [{"role": "user", "content": "ping"}],
+                                                       num_ctx=num_ctx, on_usage=side.usage))
         return {"ok": True, "latency_ms": round((time.monotonic() - started) * 1000)}
     except Exception as e:
         return {"ok": False, "detail": str(e)[:300]}

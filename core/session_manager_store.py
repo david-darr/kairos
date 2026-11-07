@@ -77,6 +77,13 @@ Run timelines (schema v7, roadmap phase 8, 2026-10-06)
 finished, quota readings, checkpoints and how it ended, at most
 runs.TIMELINE_LIMIT per run. They go when their run goes.
 
+Usage tracking (schema v10, 2026-11-07)
+---------------------------------------
+`runs` gains a side call's `purpose` (a compaction, Open Mic summary, chat Summary or model Test leaves a
+labelled run of its own), its error class and retries, tool-call quality, cost priced when recorded, and a
+compaction's record (RUN_V10_COLUMNS). Spec: the vault note "Session Usage and Model Tracking - Hermes Study
+(Build Spec)".
+
 Upgrades
 --------
 Before an older database is upgraded, it is copied whole with SQLite's backup
@@ -125,10 +132,17 @@ LEGACY_INDEX_FILE = os.path.join(DATA_DIR, "sessions_index.json")
 LEGACY_CHANNEL_FILE = os.path.join(DATA_DIR, "channel_sessions.json")
 LEGACY_BACKUP_DIR = os.path.join(DATA_DIR, "sessions.pre-sqlite-backup")
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 # Columns schema v8 added to `runs`, for upgrading an older database.
 RUN_V8_COLUMNS = (("input_tokens", "INTEGER"), ("output_tokens", "INTEGER"), ("cache_write_tokens", "INTEGER"),
                   ("first_output_at", "REAL"), ("last_output_at", "REAL"))
+# Columns schema v10 added to `runs` (Session Usage and Model Tracking, 2026-11-07), each null when unknown:
+# purpose (a side call's label, unit 2), error_class and retries (unit 3), tool_quality (unit 3, JSON counts),
+# cost_usd / cost_status / cost_source / priced_as_of (unit 4, priced when the run is recorded) and compaction
+# (unit 6, JSON: trigger, method, tokens before and after).
+RUN_V10_COLUMNS = (("purpose", "TEXT"), ("error_class", "TEXT"), ("retries", "INTEGER"), ("tool_quality", "TEXT"),
+                   ("cost_usd", "REAL"), ("cost_status", "TEXT"), ("cost_source", "TEXT"), ("priced_as_of", "TEXT"),
+                   ("compaction", "TEXT"))
 RUNS_KEPT = 5000
 
 # meta key written as the import's last step; see _legacy_import_done().
@@ -252,7 +266,17 @@ CREATE TABLE IF NOT EXISTS runs (
     output_tokens      INTEGER,
     cache_write_tokens INTEGER,
     first_output_at    REAL,
-    last_output_at     REAL
+    last_output_at     REAL,
+    -- Schema v10 (2026-11-07): see RUN_V10_COLUMNS.
+    purpose            TEXT,
+    error_class        TEXT,
+    retries            INTEGER,
+    tool_quality       TEXT,
+    cost_usd           REAL,
+    cost_status        TEXT,
+    cost_source        TEXT,
+    priced_as_of       TEXT,
+    compaction         TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_runs_session ON runs (session_id, started_at);
@@ -433,6 +457,15 @@ def _upgrade_schema(conn: sqlite3.Connection) -> None:
         columns = {r["name"] for r in conn.execute("PRAGMA table_info(runs)").fetchall()}
         with _atomic(conn):
             for name, kind in RUN_V8_COLUMNS:
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE runs ADD COLUMN {name} {kind}")
+
+    if version < 10:
+        # v10 labels side calls and keeps each run's error class, retries, tool-call quality, cost and
+        # compaction record (Session Usage and Model Tracking). Older runs keep null.
+        columns = {r["name"] for r in conn.execute("PRAGMA table_info(runs)").fetchall()}
+        with _atomic(conn):
+            for name, kind in RUN_V10_COLUMNS:
                 if name not in columns:
                     conn.execute(f"ALTER TABLE runs ADD COLUMN {name} {kind}")
 
@@ -1067,7 +1100,7 @@ def delete_all_sessions() -> None:
 _RUN_COLUMNS = ("id", "parent_id", "surface", "session_id", "agent_id", "task_id", "endpoint_id", "model",
                 "started_at", "ended_at", "outcome", "stop_confirmed", "tool_calls", "total_tokens",
                 "cache_read_tokens", "usage_complete", "detail", "input_tokens", "output_tokens",
-                "cache_write_tokens", "first_output_at", "last_output_at")
+                "cache_write_tokens", "first_output_at", "last_output_at", *(name for name, _ in RUN_V10_COLUMNS))
 
 
 def record_run(run: dict, timeline: Optional[list] = None) -> None:

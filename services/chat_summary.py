@@ -13,7 +13,7 @@ from claude_agent_sdk import (
 )
 from fastapi import HTTPException
 
-from core import cli_env, model_endpoints
+from core import cli_env, model_endpoints, runs
 from core.codex_brain import _kill_process_tree
 from core.codex_features import disabled_feature_args
 from core.providers import openai_compatible
@@ -96,7 +96,8 @@ async def _deny_tool(name, arguments, context):
     return PermissionResultDeny(message="Chat summaries cannot use tools", interrupt=True)
 
 
-async def _claude_summary(prompt: str, model: str | None, cli_account: str | None = None) -> str:
+async def _claude_summary(prompt: str, model: str | None, cli_account: str | None = None,
+                          side: runs.SideRun | None = None) -> str:
     with tempfile.TemporaryDirectory(prefix="jarvis-summary-") as cwd:
         options = ClaudeAgentOptions(
             cwd=cwd, model=model or None, tools=[], mcp_servers={}, allowed_tools=[],
@@ -113,6 +114,9 @@ async def _claude_summary(prompt: str, model: str | None, cli_account: str | Non
                 if isinstance(message, AssistantMessage):
                     parts.extend(block.text for block in message.content if isinstance(block, TextBlock))
                 if isinstance(message, ResultMessage):
+                    if side is not None:
+                        side.usage(getattr(message, "usage", None))
+                        side.text("\n".join(parts))
                     if message.is_error:
                         raise RuntimeError("Claude could not summarize this chat")
                     return "\n".join(parts).strip()
@@ -120,7 +124,8 @@ async def _claude_summary(prompt: str, model: str | None, cli_account: str | Non
             await client.disconnect()
 
 
-async def _codex_summary(prompt: str, model: str | None, cli_account: str | None = None) -> str:
+async def _codex_summary(prompt: str, model: str | None, cli_account: str | None = None,
+                         side: runs.SideRun | None = None) -> str:
     codex = shutil.which("codex")
     if not codex:
         raise RuntimeError("Codex CLI is unavailable")
@@ -152,32 +157,45 @@ async def _codex_summary(prompt: str, model: str | None, cli_account: str | None
                 continue
             if event.get("type") == "item.completed" and event.get("item", {}).get("type") == "agent_message":
                 parts.append(event["item"].get("text", ""))
+            if event.get("type") == "turn.completed" and side is not None:
+                side.usage(event.get("usage"))
             if event.get("type") in ("turn.failed", "error"):
                 failed = True
         if proc.returncode or failed:
             raise RuntimeError("Codex could not summarize this chat")
+        if side is not None:
+            side.text("\n\n".join(parts))
         return "\n\n".join(parts).strip()
 
 
-async def _model_summary(endpoint: dict, model: str | None, prompt: str) -> str:
-    if endpoint["kind"] == "claude_cli":
-        return await _claude_summary(prompt, model, cli_env.account_for_endpoint(endpoint))
+async def _model_summary(endpoint: dict, model: str | None, prompt: str, session_id: str | None = None) -> str:
+    """One summary call, recorded as a labelled side run of the chat (Session Usage and Model Tracking)."""
     if endpoint["kind"] == "antigravity_cli":
         from core.antigravity_brain import AntigravityBrain
         brain = AntigravityBrain(model=model, read_only=True)
         brain.cli_account = cli_env.account_for_endpoint(endpoint)
         try:
-            return (await brain.run_turn(prompt)).strip()
+            return (await runs.side_call(brain, prompt, "chat_summary", session_id=session_id, endpoint=endpoint,
+                                         model=model)).strip()
         finally:
             await brain.disconnect()
+    with runs.SideRun("chat_summary", session_id=session_id, endpoint=endpoint, model=model) as side:
+        return await _plain_summary(endpoint, model, prompt, side)
+
+
+async def _plain_summary(endpoint: dict, model: str | None, prompt: str, side: runs.SideRun) -> str:
+    if endpoint["kind"] == "claude_cli":
+        return await _claude_summary(prompt, model, cli_env.account_for_endpoint(endpoint), side)
     if endpoint["kind"] == "codex_cli":
-        return await _codex_summary(prompt, model, cli_env.account_for_endpoint(endpoint))
+        return await _codex_summary(prompt, model, cli_env.account_for_endpoint(endpoint), side)
     base_url, runtime_model, api_key, num_ctx = model_endpoints.resolve_runtime(endpoint["id"])
-    return (await openai_compatible.run_turn(
+    reply = await openai_compatible.run_turn(
         base_url, model if model is not None else runtime_model, api_key,
         [{"role": "system", "content": SUMMARY_INSTRUCTIONS}, {"role": "user", "content": prompt}],
-        tools=[], num_ctx=num_ctx,
-    )).strip()
+        tools=[], num_ctx=num_ctx, on_usage=side.usage,
+    )
+    side.text(reply)
+    return reply.strip()
 
 
 async def generate_summary(session_id: str, *, force: bool = False) -> dict:
@@ -198,7 +216,7 @@ async def generate_summary(session_id: str, *, force: bool = False) -> dict:
             for chunk in _transcript_chunks(session):
                 prompt = (SUMMARY_INSTRUCTIONS + "\n\n[Running summary]\n" +
                           (summary or "None yet.") + "\n\n[Next saved transcript segment]\n" + chunk)
-                summary = (await _model_summary(endpoint, model, prompt)).strip()[:4000]
+                summary = (await _model_summary(endpoint, model, prompt, session_id)).strip()[:4000]
                 if not summary:
                     raise RuntimeError("empty summary")
         except Exception as error:
