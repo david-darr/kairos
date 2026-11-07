@@ -32,11 +32,17 @@ Safety properties, because this touches a user's real memory:
     long as its line is in the vault.
   - An item deleted from the vault removes its imported note, because the
     vault is the source of truth for anything it owns. App-native notes
-    are unaffected.
+    are unaffected. But only when the vault really is the one the note came
+    from and was read properly: a missing, empty, unreadable or different
+    folder never deletes anything (2026-11-06: a profile pointed at an empty
+    folder, which the app seeds with a blank Active Priorities.md, lost 90
+    notes this way; v2.2.0 and v2.2.1 have the same hole). Such notes are only
+    marked `vault_source.unsynced` and come back to normal when their vault does.
 """
 import logging
 import os
 import re
+from typing import Optional
 
 from core.vault import resolve_vault_dir
 from services.notes_service import notes_service
@@ -77,13 +83,14 @@ def _display_text(raw: str) -> str:
     return (cut[:idx] if idx > 0 else cut).strip() + "…"
 
 
-def parse_task_file(path: str) -> list[dict]:
-    """[{heading, line, text, completed}] for every checkbox item."""
+def parse_task_file(path: str, strict: bool = False) -> Optional[list[dict]]:
+    """[{heading, line, text, completed}] for every checkbox item. An unreadable
+    file is [] (None when strict, so the caller can tell it from an empty one)."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             lines = f.read().splitlines()
-    except OSError:
-        return []
+    except (OSError, UnicodeDecodeError):
+        return None if strict else []
 
     items = []
     heading = "General"
@@ -107,10 +114,16 @@ def parse_task_file(path: str) -> list[dict]:
     return items
 
 
+def _vault_tag(vault_dir: str) -> str:
+    """Which vault a note was imported from, comparable across runs and spellings of the path."""
+    return os.path.normcase(os.path.abspath(vault_dir))
+
+
 def sync_from_vault() -> dict:
     """Import/refresh vault task items into Notes. Returns a summary dict."""
     vault_dir = resolve_vault_dir()
-    summary = {"imported": 0, "updated": 0, "removed": 0, "files": 0, "vault_dir": vault_dir}
+    tag = _vault_tag(vault_dir)
+    summary = {"imported": 0, "updated": 0, "removed": 0, "unsynced": 0, "files": 0, "vault_dir": vault_dir}
 
     # Existing vault notes by (file, heading, line with the box ignored). Hidden
     # (dismissed) notes are included so a deleted item is not imported again.
@@ -119,25 +132,44 @@ def sync_from_vault() -> dict:
         if note.get("vault_source"):
             index.setdefault(_note_key(note), []).append(note)
     matched: set[str] = set()
+    legacy_matched = False   # a note imported before notes carried their vault matched this vault
+    sources: dict[str, dict] = {}   # note id -> vault_source to store (tag, line, unsynced)
+    good_files: set[str] = set()    # read fine and not empty: only these may remove notes
     for filename in TASK_FILES:
         path = os.path.join(vault_dir, filename)
         if not os.path.isfile(path):
             continue
+        items = parse_task_file(path, strict=True)
+        if items is None:
+            logger.warning("vault_sync: %s is unreadable; leaving its notes alone", filename)
+            continue
         summary["files"] += 1
-        for item in parse_task_file(path):
+        if items:
+            good_files.add(filename)
+        for item in items:
             candidates = index.get((filename, item["heading"], _norm_line(item["line"])))
             existing = candidates.pop(0) if candidates else None
             if existing is None:
                 created = notes_service.create_note(
                     text=item["text"],
                     project=item["heading"],
-                    vault_source={"file": filename, "line": item["line"], "heading": item["heading"]},
+                    vault_source={"file": filename, "line": item["line"], "heading": item["heading"], "vault": tag},
                     completed=item["completed"],
                 )
                 matched.add(created["id"])
                 summary["imported"] += 1
             else:
                 matched.add(existing["id"])
+                source = existing["vault_source"]
+                if source.get("vault") is None:
+                    legacy_matched = True
+                # A tick made in the vault changes the line: keep the stored
+                # original in step so the app's write-back still matches. The
+                # vault tag follows the note to wherever its line was found.
+                new_source = {k: v for k, v in source.items() if k != "unsynced"}
+                new_source.update(line=item["line"], heading=item["heading"], vault=tag)
+                if new_source != source:
+                    sources[existing["id"]] = new_source
                 if existing.get("dismissed"):
                     continue
                 changed = {}
@@ -147,29 +179,39 @@ def sync_from_vault() -> dict:
                     changed["project"] = item["heading"]
                 if existing["completed"] != item["completed"]:
                     changed["completed"] = item["completed"]
-                source = existing["vault_source"]
-                if source.get("line") != item["line"] or source.get("heading") != item["heading"]:
-                    # A tick made in the vault changes the line: keep the stored
-                    # original in step so the app's write-back still matches.
-                    changed["vault_source"] = {**source, "line": item["line"], "heading": item["heading"]}
                 if changed:
                     # write_back=False: the vault already says this, echoing
                     # it back would be a redundant rewrite of the user's file.
                     notes_service.update_note(existing["id"], write_back=False, **changed)
-                    if changed.keys() - {"vault_source"}:
-                        summary["updated"] += 1
+                    summary["updated"] += 1
 
     # Anything previously imported that's no longer in the vault is gone from
-    # the source of truth, so it goes here too. App-native notes (no
-    # vault_source) are never considered.
+    # the source of truth, so it goes here too, but only with evidence that
+    # this is that vault and it was read properly. App-native notes (no
+    # vault_source) are never considered. A note from a missing, unreadable or
+    # empty file, from a different folder, or (older notes, which don't record
+    # their vault) with nothing else matching this vault, is kept and marked
+    # unsynced instead: a moved vault, or a setting pointing at an empty folder
+    # (which the app seeds with a blank Active Priorities.md), must not wipe
+    # them (2026-11-06; it did, in a rehearsal).
     for note in list(notes_service.list_notes(include_dismissed=True)):
-        if note.get("vault_source") and note["id"] not in matched:
+        source = note.get("vault_source")
+        if not source or note["id"] in matched:
+            continue
+        own = source.get("vault")
+        belongs = own == tag or (own is None and legacy_matched)
+        if source.get("file") in good_files and belongs:
             notes_service.delete_note(note["id"])
             summary["removed"] += 1
+        elif not source.get("unsynced"):
+            sources[note["id"]] = {**source, "unsynced": True}
+            summary["unsynced"] += 1
+    if sources:
+        notes_service.set_vault_sources(sources)
 
     logger.info(
-        "vault_sync: %d imported, %d updated, %d removed from %d file(s)",
-        summary["imported"], summary["updated"], summary["removed"], summary["files"],
+        "vault_sync: %d imported, %d updated, %d removed, %d unsynced from %d file(s)",
+        summary["imported"], summary["updated"], summary["removed"], summary["unsynced"], summary["files"],
     )
     return summary
 

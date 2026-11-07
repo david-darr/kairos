@@ -221,6 +221,121 @@ class VaultSyncTests(NotesBase):
         self.assertEqual(s["updated"], 0, "and the project label flips on every sync")
 
 
+class VaultSyncNeverLosesNotesTests(NotesBase):
+    """2026-11-06 upgrade rehearsal: a profile whose vault folder was empty lost 90 of 104 notes (the app seeds an empty
+    folder with a blank Active Priorities.md, and sync read "the file has no items" as "the user deleted them all")."""
+
+    def setUp(self):
+        super().setUp()
+        self.real_vault = self.vault
+        self.write_vault(NOTES_FILE_TEXT)
+        for i in range(30):
+            self.write_vault(self.read_vault() + f"- [ ] Extra item {i}\n")
+        self.native = self.notes.create_note("Native note")
+        vault_sync.sync_from_vault()
+        self.before = {n["id"]: n["text"] for n in self.notes.list_notes(include_dismissed=True)}
+        self.assertEqual(len(self.before), 34)
+
+    def go(self, folder):
+        self.vault = folder
+        return vault_sync.sync_from_vault()
+
+    def assertAllThere(self):
+        self.assertEqual({n["id"]: n["text"] for n in self.notes.list_notes(include_dismissed=True)}, self.before)
+        reloaded = notes_module.NotesService()
+        self.assertEqual(len(reloaded.list_notes(include_dismissed=True)), len(self.before), "and on disk")
+
+    def test_empty_folder_seeded_with_a_blank_active_priorities_loses_nothing(self):
+        from core import vault as vault_module
+        empty = Path(self.tmp.name) / "empty"
+        vault_module.seed_vault_if_empty(str(empty))   # exactly what resolve_vault_dir does to an empty folder
+        self.assertTrue((empty / "Active Priorities.md").is_file())
+        s = self.go(empty)
+        self.assertEqual(s["removed"], 0)
+        self.assertAllThere()
+        self.go(empty)
+        self.assertAllThere()
+
+    def test_empty_missing_unreadable_and_zero_byte_file_lose_nothing(self):
+        bare = Path(self.tmp.name) / "bare"; bare.mkdir()
+        self.assertEqual(self.go(bare)["removed"], 0); self.assertAllThere()          # exists, no files
+        self.assertEqual(self.go(Path(self.tmp.name) / "gone")["removed"], 0); self.assertAllThere()  # does not exist
+        zero = Path(self.tmp.name) / "zero"; zero.mkdir(); (zero / "Active Priorities.md").write_bytes(b"")
+        self.assertEqual(self.go(zero)["removed"], 0); self.assertAllThere()
+        bad = Path(self.tmp.name) / "bad"; bad.mkdir(); (bad / "Active Priorities.md").write_bytes(b"\xff\xfe\x00bad")
+        self.assertEqual(self.go(bad)["removed"], 0); self.assertAllThere()
+        locked = Path(self.tmp.name) / "locked"; locked.mkdir(); (locked / "Active Priorities.md").write_text("- [ ] x\n")
+        real_open = open
+        def deny(path, *a, **k):
+            if str(path).startswith(str(locked)):
+                raise PermissionError(13, "Access is denied")
+            return real_open(path, *a, **k)
+        with patch("builtins.open", deny):
+            self.assertEqual(self.go(locked)["removed"], 0)
+        self.assertAllThere()
+
+    def test_a_different_vault_with_its_own_items_removes_none_and_the_original_vault_comes_back_clean(self):
+        other = Path(self.tmp.name) / "other"; other.mkdir()
+        (other / "Active Priorities.md").write_text("## Elsewhere\n- [ ] Someone else's task\n", encoding="utf-8")
+        s = self.go(other)
+        self.assertEqual(s["removed"], 0)
+        gone = [n for n in self.notes.list_notes(include_dismissed=True) if n["id"] in self.before]
+        self.assertEqual(len(gone), 34, "all 34 original notes survive the other vault")
+        self.assertTrue(all(n["vault_source"].get("unsynced") for n in gone if n["vault_source"]), "marked unsynced, not deleted")
+        self.assertIsNone(next(n for n in gone if n["id"] == self.native["id"])["vault_source"])
+        self.go(other)                                   # a second run on the other vault is just as safe
+        self.assertEqual(len([n for n in self.notes.list_notes(include_dismissed=True) if n["id"] in self.before]), 34)
+        s = self.go(self.real_vault)                    # the original vault is back
+        self.assertEqual((s["imported"], s["removed"]), (0, 0))
+        back = [n for n in self.notes.list_notes(include_dismissed=True) if n["id"] in self.before]
+        self.assertEqual(len(back), 34)
+        self.assertFalse(any((n["vault_source"] or {}).get("unsynced") for n in back), "unsynced marks clear")
+
+    def test_notes_imported_before_they_recorded_their_vault_are_safe_too(self):
+        for n in self.notes._notes.values():
+            if n["vault_source"]:
+                n["vault_source"].pop("vault", None)
+        self.notes._save()
+        empty = Path(self.tmp.name) / "empty2"; empty.mkdir()
+        (empty / "Active Priorities.md").write_text("# Active Priorities\n\n## Personal\n\nNothing tracked yet.\n")
+        self.assertEqual(self.go(empty)["removed"], 0); self.assertAllThere()
+        other = Path(self.tmp.name) / "other2"; other.mkdir()
+        (other / "Active Priorities.md").write_text("## Elsewhere\n- [ ] Someone else's task\n", encoding="utf-8")
+        self.assertEqual(self.go(other)["removed"], 0)
+        self.assertEqual(len([i for i in self.before if self.notes.get_note(i) or i in self.notes._notes]), 34)
+        # Back in the real vault, with one item removed in Obsidian: the old note adopts the vault and the removal still works.
+        self.vault = self.real_vault
+        self.write_vault(self.read_vault().replace("- [ ] Extra item 3\n", ""))
+        s = self.go(self.real_vault)
+        self.assertEqual(s["removed"], 1)
+        self.assertEqual(len([i for i in self.before if i in self.notes._notes]), 33)
+        self.assertTrue(all((n["vault_source"] or {}).get("vault") for n in self.notes.list_notes() if n["vault_source"]))
+
+    def test_legitimate_deletes_still_work(self):
+        # An item removed in Obsidian leaves the app; a note the user hides in the app stays hidden; native notes stay.
+        self.write_vault(self.read_vault().replace("- [ ] Fix the sink\n", ""))
+        sink = next(i for i, t in self.before.items() if t == "Fix the sink")
+        done = next(i for i, t in self.before.items() if t == "Pay the invoice")
+        self.notes.dismiss_note(done)
+        s = self.go(self.real_vault)
+        self.assertEqual(s["removed"], 1)
+        ids = {n["id"] for n in self.notes.list_notes(include_dismissed=True)}
+        self.assertNotIn(sink, ids)
+        self.assertIn(done, ids)
+        self.assertIn(self.native["id"], ids)
+        self.assertNotIn(done, {n["id"] for n in self.notes.list_notes()}, "still hidden")
+        # A note the user deletes in Kairos (app-native) goes for real.
+        self.api.delete(f"/api/notes/{self.native['id']}")
+        self.assertNotIn(self.native["id"], {n["id"] for n in self.notes.list_notes(include_dismissed=True)})
+
+    def test_the_vault_moved_with_its_content_keeps_every_note(self):
+        moved = Path(self.tmp.name) / "moved"; moved.mkdir()
+        (moved / "Active Priorities.md").write_bytes((self.real_vault / "Active Priorities.md").read_bytes())
+        s = self.go(moved)
+        self.assertEqual((s["imported"], s["removed"]), (0, 0))
+        self.assertAllThere()
+
+
 class CalendarAgreementTests(NotesBase):
     def listing(self, start, end):
         cal = cal_module.CalendarService()
