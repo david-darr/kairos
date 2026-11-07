@@ -13,14 +13,20 @@ their files when imported), so nothing is open while it moves.
   leaves out a vault kept inside the data folder and saved logins, so a step that moves either names it in
   copy_first and gets its own copy beside the zip. Backups and restores leave .layout alone.
 - Once a run has worked, older before-layout-* backups are removed: the newest holds everything.
-- Moves are renames on the same disk. If any move fails, everything moved in this run goes back, layout.json
-  is left as it was, and the app starts on the old layout; the failure is logged and returned.
+- Moves are renames on the same disk. Windows can refuse a rename of a folder that Defender or the search
+  indexer still holds open (found rehearsing on a copy of David's profile: WinError 5 on a 5.5 GB folder
+  just copied), so a refused rename is retried with a short backoff for about 10 seconds, and if it still
+  fails that entry is copied, checked (every file's path and size) and only then deleted from the old place.
+  last-run.json says which way each entry went ("strategies"). If any move fails, everything moved in this
+  run goes back, layout.json is left as it was, and the app starts on the old layout; the failure is
+  logged and returned.
 - An entry already present in the account folder stops the run: two copies are never merged.
 
 Phase 2 adds one step per store group in the same change that makes that store read from account_dir(),
 so nothing moves before its code is ready. A data folder with none of a step's names (a new install) just
 records the version, with no backup.
 """
+import errno
 import fnmatch
 import json
 import logging
@@ -125,6 +131,119 @@ STEPS: list[Step] = [
 ]
 
 
+RENAME_RETRY_SECONDS = 10.0   # how long a refused rename is retried before the entry is copied instead
+_RENAME_WAIT = (0.05, 0.1, 0.2, 0.4, 0.8, 1.0)  # the pauses between tries; the last one repeats
+_BUSY = (5, 32, 33)           # WinError 5 access denied, 32 sharing violation, 33 lock violation
+
+
+def _refused(error: BaseException) -> bool:
+    """A rename Windows (or another disk) turned down for a reason that can pass or be worked around."""
+    return isinstance(error, PermissionError) or (
+        isinstance(error, OSError) and (getattr(error, "winerror", None) in _BUSY or error.errno == errno.EXDEV))
+
+
+def _sizes(path: str) -> dict:
+    """Relative path -> size for every file under path ("" for a single file), directories as -1, symlinks
+    as -2: what a copy has to match exactly."""
+    if os.path.islink(path) or not os.path.isdir(path):
+        return {"": -2 if os.path.islink(path) else os.path.getsize(path)}
+    found = {}
+    for folder, dirs, files in os.walk(path):
+        for name in dirs:
+            full = os.path.join(folder, name)
+            found[os.path.relpath(full, path)] = -2 if os.path.islink(full) else -1
+        for name in files:
+            full = os.path.join(folder, name)
+            found[os.path.relpath(full, path)] = -2 if os.path.islink(full) else os.path.getsize(full)
+    return found
+
+
+def _copy_tree(source: str, destination: str) -> None:
+    """Copy with a progress line every few seconds: a folder of several GB takes minutes."""
+    if not os.path.isdir(source) or os.path.islink(source):
+        shutil.copy2(source, destination, follow_symlinks=False)
+        return
+    state = {"files": 0, "at": time.monotonic()}
+
+    def copy(src, dst, **kwargs):
+        shutil.copy2(src, dst, **kwargs)
+        state["files"] += 1
+        if time.monotonic() - state["at"] >= 5:
+            state["at"] = time.monotonic()
+            log.info("Account layout: copying %s: %d files so far", os.path.basename(source), state["files"])
+    shutil.copytree(source, destination, symlinks=True, copy_function=copy)
+
+
+def _remove(path: str) -> None:
+    if os.path.isdir(path) and not os.path.islink(path):
+        for attempt in range(6):  # the same handles that refused the rename can hold a file here
+            try:
+                shutil.rmtree(path)
+                return
+            except OSError:
+                if attempt == 5:
+                    raise
+                time.sleep(0.2 * (attempt + 1))
+    else:
+        os.remove(path)
+
+
+def _restore_missing(copy: str, original: str) -> None:
+    """The delete after a copy failed halfway: put back whatever of the original is gone, so it is whole."""
+    if not os.path.isdir(copy) or os.path.islink(copy):
+        if not os.path.lexists(original):
+            shutil.copy2(copy, original, follow_symlinks=False)
+        return
+    for folder, dirs, files in os.walk(copy):
+        target = os.path.join(original, os.path.relpath(folder, copy))
+        os.makedirs(target, exist_ok=True)
+        for name in files:
+            if not os.path.lexists(os.path.join(target, name)):
+                shutil.copy2(os.path.join(folder, name), os.path.join(target, name), follow_symlinks=False)
+
+
+def _move(source: str, destination: str) -> str:
+    """Move one entry, which must not exist at the destination yet. Returns how it went: "rename",
+    "rename after N retries", or "copy" (copied, every path and size checked, then removed from the old
+    place; the old place is only touched once the copy is proven). Raises if neither way works, leaving
+    the entry whole at the source and nothing at the destination."""
+    deadline = time.monotonic() + RENAME_RETRY_SECONDS
+    tries = 0
+    while True:
+        try:
+            os.replace(source, destination)
+            return "rename" if not tries else f"rename after {tries} retries"
+        except OSError as error:
+            if not _refused(error):
+                raise
+            if time.monotonic() >= deadline:
+                log.warning("Account layout: renaming %s kept failing (%s); copying it instead",
+                            os.path.basename(source), error)
+                break
+            tries += 1
+            time.sleep(_RENAME_WAIT[min(tries, len(_RENAME_WAIT)) - 1])
+    try:
+        _copy_tree(source, destination)
+        if _sizes(source) != _sizes(destination):
+            raise OSError(f"the copy of {os.path.basename(source)} does not match the original")
+    except BaseException:
+        if os.path.lexists(destination):
+            try:
+                _remove(destination)
+            except OSError as undo_error:
+                log.error("Account layout: could not clear the partial copy %s: %s", destination, undo_error)
+        raise
+    try:
+        _remove(source)
+    except BaseException:
+        _restore_missing(destination, source)  # the copy is complete, so the original can be made whole
+        if _sizes(source) == _sizes(destination):
+            _remove(destination)
+        raise
+    log.info("Account layout: copied %s (rename was refused)", os.path.basename(source))
+    return "copy"
+
+
 def _expand(data_dir: str, entry: str) -> list:
     if not any(ch in entry for ch in "*?["):
         return [entry]
@@ -191,7 +310,7 @@ def _run(data_dir, steps, account, backup) -> Optional[dict]:
     from core.accounts import _checked
     target = os.path.join(data_dir, "accounts", _checked(account))
     result = {"ok": False, "from_version": current, "to_version": current, "account": account,
-              "steps": [s.name for s in pending], "moved": [], "backup": None, "error": None}
+              "steps": [s.name for s in pending], "moved": [], "backup": None, "error": None, "strategies": {}}
     kept = set()
     for step in pending:
         if step.keep:
@@ -237,7 +356,7 @@ def _run(data_dir, steps, account, backup) -> Optional[dict]:
             if os.path.lexists(destination):
                 raise FileExistsError(f"{name} is already in the account folder")
             os.makedirs(os.path.dirname(destination), exist_ok=True)
-            os.replace(source, destination)
+            result["strategies"][name] = _move(source, destination)
             moved.append((source, destination))
         write_json_atomic(os.path.join(data_dir, "layout.json"),
                           {"version": pending[-1].version, "account": account, "updated_at": time.time()})
@@ -247,7 +366,7 @@ def _run(data_dir, steps, account, backup) -> Optional[dict]:
         undone = True
         for source, destination in reversed(moved):
             try:
-                os.replace(destination, source)
+                _move(destination, source)
             except Exception as undo_error:  # left where it is; the backup holds it
                 undone = False
                 log.error("Account layout: could not move %s back: %s", destination, undo_error)

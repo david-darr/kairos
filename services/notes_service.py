@@ -118,6 +118,18 @@ class NotesService:
 
         return note
 
+    def set_vault_sources(self, sources: dict) -> None:
+        """Store vault_source bookkeeping (vault tag, matched line, unsynced mark) for many notes at once,
+        hidden ones included, with one save. Not a user edit: updated_at stays."""
+        changed = False
+        for note_id, source in sources.items():
+            note = self._notes.get(note_id)
+            if note is not None and note.get("vault_source") is not None and note["vault_source"] != source:
+                note["vault_source"] = source
+                changed = True
+        if changed:
+            self._save()
+
     def delete_note(self, note_id: str) -> None:
         if note_id in self._notes:
             del self._notes[note_id]

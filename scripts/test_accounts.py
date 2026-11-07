@@ -10,6 +10,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import shutil
 import unittest
 import zipfile
@@ -325,6 +326,90 @@ class Migration(unittest.TestCase):
         record = json.loads((self.data / ".layout" / "last-run.json").read_text(encoding="utf-8"))
         self.assertFalse(record["ok"])
         self.assertIn("already in the account folder", record["error"], "the failure is kept where it can be read")
+
+    def refusing(self, names, times=None):
+        """os.replace that Windows (Defender holding handles) turns down for these names: forever, or `times` times."""
+        real, left = os.replace, {"n": times}
+
+        def replace(source, destination, *args, **kwargs):
+            if os.path.basename(source) in names:
+                if left["n"] is None or left["n"] > 0:
+                    if left["n"] is not None:
+                        left["n"] -= 1
+                    raise PermissionError(13, "Access is denied", source)
+            return real(source, destination, *args, **kwargs)
+        return patch.object(os, "replace", replace)
+
+    def test_a_refused_rename_is_retried_and_goes_through(self):
+        with patch.object(account_migration, "RENAME_RETRY_SECONDS", 5.0), self.refusing({"chats"}, times=2):
+            result = self.run_steps()
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["strategies"]["chats"], "rename after 2 retries")
+        self.assertEqual(result["strategies"]["notes.json"], "rename")
+        self.assertTrue((self.data / "accounts" / "abc123" / "chats" / "one.json").exists())
+        self.assertFalse((self.data / "chats").exists())
+        record = json.loads((self.data / ".layout" / "last-run.json").read_text(encoding="utf-8"))
+        self.assertEqual(record["strategies"]["chats"], "rename after 2 retries", "last-run.json says which way each entry went")
+
+    def test_a_rename_that_stays_refused_is_copied_checked_then_removed(self):
+        (self.data / "chats" / "sub").mkdir()
+        (self.data / "chats" / "sub" / "big.bin").write_bytes(b"x" * 100000)
+        before = account_migration._sizes(str(self.data / "chats"))
+        with patch.object(account_migration, "RENAME_RETRY_SECONDS", 0.3), self.refusing({"chats"}):
+            result = self.run_steps()
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["strategies"], {"chats": "copy", "notes.json": "rename"})
+        moved = self.data / "accounts" / "abc123" / "chats"
+        self.assertEqual(account_migration._sizes(str(moved)), before, "every file and size identical")
+        self.assertFalse((self.data / "chats").exists(), "the old place is cleared only after the copy checked out")
+        self.assertEqual(account_migration.layout_version(str(self.data)), 2)
+
+    def test_a_failed_copy_rolls_back_cleanly(self):
+        # chats moves by rename, then notes.json is refused and its copy fails: chats goes back, nothing is left behind.
+        with patch.object(account_migration, "RENAME_RETRY_SECONDS", 0.3), self.refusing({"notes.json"}), \
+                patch.object(shutil, "copy2", side_effect=OSError("disk full")):
+            result = self.run_steps()
+        self.assertFalse(result["ok"])
+        self.assertIn("disk full", result["error"])
+        self.assertTrue((self.data / "chats" / "one.json").exists(), "chats moved back")
+        self.assertEqual((self.data / "notes.json").read_text(encoding="utf-8"), "[]", "the refused entry is untouched")
+        account = self.data / "accounts" / "abc123"
+        self.assertFalse((account / "chats").exists() or (account / "notes.json").exists(), "no partial copy left")
+        self.assertEqual(account_migration.layout_version(str(self.data)), 0)
+        self.assertFalse(json.loads((self.data / ".layout" / "last-run.json").read_text(encoding="utf-8"))["ok"])
+
+    def test_a_copy_that_does_not_match_is_not_trusted(self):
+        real = shutil.copy2
+
+        def short(src, dst, **kwargs):
+            real(src, dst, **kwargs)
+            if os.path.basename(src) == "one.json":
+                Path(dst).write_text("truncated!!", encoding="utf-8")
+        with patch.object(account_migration, "RENAME_RETRY_SECONDS", 0.3), self.refusing({"chats"}), \
+                patch.object(shutil, "copy2", short):
+            result = self.run_steps()
+        self.assertFalse(result["ok"])
+        self.assertIn("does not match", result["error"])
+        self.assertEqual((self.data / "chats" / "one.json").read_text(encoding="utf-8"), "{}", "the original is never deleted")
+        self.assertFalse((self.data / "accounts" / "abc123" / "chats").exists())
+
+    def test_a_delete_that_fails_after_the_copy_leaves_the_original_whole(self):
+        (self.data / "chats" / "two.json").write_text("{\"a\": 1}", encoding="utf-8")
+        real = shutil.rmtree
+
+        def partial(path, *args, **kwargs):
+            if os.path.basename(path) == "chats" and os.path.dirname(path) == str(self.data):
+                os.path.exists(os.path.join(path, "one.json")) and os.remove(os.path.join(path, "one.json"))  # the old place half deleted, then the handle holds
+                raise PermissionError(13, "Access is denied", path)
+            return real(path, *args, **kwargs)
+        with patch.object(account_migration, "RENAME_RETRY_SECONDS", 0.3), self.refusing({"chats"}), \
+                patch.object(shutil, "rmtree", partial), patch.object(time, "sleep", lambda s: None):
+            result = self.run_steps()
+        self.assertFalse(result["ok"])
+        self.assertEqual(sorted(os.listdir(self.data / "chats")), ["one.json", "two.json"], "whole again")
+        self.assertEqual((self.data / "chats" / "one.json").read_text(encoding="utf-8"), "{}")
+        self.assertFalse((self.data / "accounts" / "abc123" / "chats").exists())
+        self.assertEqual(account_migration.layout_version(str(self.data)), 0)
 
     def test_no_backup_no_move(self):
         def broken(path):
