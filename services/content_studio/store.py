@@ -29,8 +29,14 @@ DEFAULT_SETTINGS = {
     "team_bot_ids": [],          # the Studio team's bots, for the spend line of the report
     "team_roles": {},            # bot id -> role (producer, researcher, ...), filled in when the team template is imported
     "notified": {},              # delivery keys already sent to the Inbox, so a watch does not repeat itself
+    "batch_approval": False,     # spec section 2: a per-post OK first; the person turns on one-tap batch approval later
 }
 TEAM_ROLES = ("producer", "researcher", "evaluator", "script_writer", "editor", "publisher", "executor")
+ASPECTS = ("9:16", "16:9", "1:1")
+# Columns added after the first release; a store made before them gains them when it opens.
+LATER_COLUMNS = {"snapshots": {"source": "TEXT NOT NULL DEFAULT 'manual'"},
+                 "channels": {"look": "TEXT", "aspect": "TEXT", "notes": "TEXT NOT NULL DEFAULT ''"},
+                 "posts": {"pick_reason": "TEXT NOT NULL DEFAULT ''", "tags": "TEXT NOT NULL DEFAULT ''"}}
 
 
 class StudioError(Exception):
@@ -55,7 +61,7 @@ CREATE TABLE IF NOT EXISTS niches (
 CREATE TABLE IF NOT EXISTS channels (
   id INTEGER PRIMARY KEY, niche_id INTEGER NOT NULL REFERENCES niches(id), platform TEXT NOT NULL,
   handle TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'live', paused INTEGER NOT NULL DEFAULT 0,
-  created_at REAL NOT NULL, archived_at REAL, archive_reason TEXT);
+  created_at REAL NOT NULL, archived_at REAL, archive_reason TEXT, look TEXT, aspect TEXT, notes TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS channel_warnings (
   id INTEGER PRIMARY KEY, channel_id INTEGER NOT NULL REFERENCES channels(id), text TEXT NOT NULL,
   at REAL NOT NULL, cleared_at REAL);
@@ -73,7 +79,7 @@ CREATE TABLE IF NOT EXISTS posts (
   script_ref TEXT, render_ref TEXT, render_status TEXT NOT NULL DEFAULT 'pending',
   state TEXT NOT NULL DEFAULT 'drafted', rejection_count INTEGER NOT NULL DEFAULT 0, reject_reason TEXT,
   approved_by TEXT, approved_at REAL, posted_url TEXT, posted_at REAL,
-  created_at REAL NOT NULL, step_since REAL NOT NULL);
+  created_at REAL NOT NULL, step_since REAL NOT NULL, pick_reason TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS snapshots (
   id INTEGER PRIMARY KEY, post_id INTEGER NOT NULL REFERENCES posts(id), taken_at REAL NOT NULL,
   views INTEGER NOT NULL, avg_view_duration_s REAL NOT NULL, video_length_s REAL NOT NULL,
@@ -119,8 +125,11 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.executescript(SCHEMA)
-        if "source" not in {row["name"] for row in self.db.execute("PRAGMA table_info(snapshots)")}:
-            self.db.execute("ALTER TABLE snapshots ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")  # stores made before connectors
+        for table, columns in LATER_COLUMNS.items():
+            have = {row["name"] for row in self.db.execute(f"PRAGMA table_info({table})")}
+            for name, kind in columns.items():
+                if name not in have:
+                    self.db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
         self.db.commit()
 
     def close(self):
@@ -200,6 +209,9 @@ class Store:
                 if not isinstance(value, dict) or any(not isinstance(k, str) for k in value):
                     raise StudioError("notified must be an object")
                 value = dict(sorted(value.items(), key=lambda kv: kv[1])[-500:])
+            elif key == "batch_approval":
+                if not isinstance(value, bool):
+                    raise StudioError("batch_approval is true or false")
             elif key in ("min_weeks", "min_posts", "behind_reviews", "start_niches", "score_after_days", "review_gap_days"):
                 value = _num(value, key, True, 0 if key == "review_gap_days" else 1)
             else:
@@ -293,6 +305,26 @@ class Store:
         clause = f"WHERE {' AND '.join(where)}" if where else ""
         return self._rows(f"SELECT c.*, n.name AS niche_name FROM channels c JOIN niches n ON n.id = c.niche_id {clause} "
                           "ORDER BY c.id", tuple(args))
+
+    def edit_channel(self, channel_id, look=None, aspect=None, notes=None):
+        """The channel's own look (a Studio video look id), aspect and voice notes, so the Editor and Script
+        Writer make each channel's posts in its own style. None leaves a field as it is; "" clears it."""
+        self.get_channel(channel_id)
+        changes = {}
+        if look is not None:
+            look = _clean_text(look, "look", 80, False)
+            if look and not all(ch.isalnum() or ch in "-_" for ch in look):
+                raise StudioError("a look id uses letters, digits, - and _")
+            changes["look"] = look or None
+        if aspect is not None:
+            if aspect not in ("",) + ASPECTS:
+                raise StudioError(f"aspect must be one of {', '.join(ASPECTS)}")
+            changes["aspect"] = aspect or None
+        if notes is not None:
+            changes["notes"] = _clean_text(notes, "notes", 1000, False)
+        if changes:
+            self._update("channels", channel_id, **changes)
+        return self.get_channel(channel_id)
 
     def archive_channel(self, channel_id, reason="", now=None):
         now = time.time() if now is None else now
@@ -413,7 +445,7 @@ class Store:
                 "JOIN channels c ON c.id = p.channel_id JOIN niches n ON n.id = c.niche_id")
 
     def create_post(self, channel_id, title, topic_id=None, script_strategy_id=None, evaluator_strategy_id=None,
-                    script_ref=None, caption="", format=None, now=None):
+                    script_ref=None, caption="", format=None, pick_reason="", now=None):
         now = time.time() if now is None else now
         channel = self.get_channel(channel_id)
         if channel["status"] != "live":
@@ -424,15 +456,20 @@ class Store:
             raise StudioError("that topic belongs to another niche")
         for sid, role in ((script_strategy_id, "script_writer"), (evaluator_strategy_id, "evaluator")):
             if sid is not None:
-                strategy = self.get_strategy(sid)
-                if strategy["owner_role"] != role or strategy["status"] != "active":
-                    raise StudioError(f"strategy {sid} is not an active {role} strategy")
+                self._active_strategy(sid, role)
         post_id = self._insert(
             "posts", channel_id=channel_id, topic_id=topic_id, title=_clean_text(title, "title", 200),
             caption=_clean_text(caption, "caption", 5000, False), format=_clean_text(format, "format", 80, False) or None,
             script_strategy_id=script_strategy_id, evaluator_strategy_id=evaluator_strategy_id,
-            script_ref=script_ref, created_at=now, step_since=now)
+            script_ref=_clean_text(script_ref, "script", self.EDITABLE["script_ref"], False) or None,
+            pick_reason=_clean_text(pick_reason, "pick reason", 500, False), created_at=now, step_since=now)
         return self.get_post(post_id)
+
+    def _active_strategy(self, strategy_id, role):
+        strategy = self.get_strategy(strategy_id)
+        if strategy["owner_role"] != role or strategy["status"] != "active":
+            raise StudioError(f"strategy {strategy_id} is not an active {role} strategy")
+        return strategy
 
     def get_post(self, post_id):
         row = self._row(f"{self.POST_SQL} WHERE p.id = ?", (post_id,))
@@ -449,7 +486,9 @@ class Store:
         clause = f"WHERE {' AND '.join(where)}" if where else ""
         return self._rows(f"{self.POST_SQL} {clause} ORDER BY p.id", tuple(args))
 
-    EDITABLE = {"title": 200, "caption": 5000, "script_ref": 500, "render_ref": 500, "format": 80}
+    EDITABLE = {"title": 200, "caption": 5000, "script_ref": 20000, "render_ref": 500, "format": 80, "tags": 500,
+                "pick_reason": 500}
+    TEXT_FIELDS = ("title", "caption", "tags", "pick_reason")  # stay text when cleared; the others become None
 
     def edit_post(self, post_id, now=None, **fields):
         """Content edits (by the user at approval, or by a bot while drafting). Not allowed once approved."""
@@ -465,7 +504,13 @@ class Store:
                 changes[key] = value
             elif key in self.EDITABLE:
                 text = _clean_text(value, key, self.EDITABLE[key], key == "title")
-                changes[key] = text if key in ("title", "caption") else (text or None)
+                changes[key] = text if key in self.TEXT_FIELDS else (text or None)
+            elif key in ("script_strategy_id", "evaluator_strategy_id"):
+                if post["state"] != "drafted":
+                    raise conflict("a strategy is recorded while the post is drafted")
+                if value is not None:
+                    self._active_strategy(value, "script_writer" if key == "script_strategy_id" else "evaluator")
+                changes[key] = value
             else:
                 raise StudioError(f"cannot edit {key}")
         if "render_status" in changes or "render_ref" in changes:
@@ -506,6 +551,23 @@ class Store:
         """A rejected post goes back to the drafting steps (the rejection count stays, for the Producer's watch)."""
         now = time.time() if now is None else now
         return self._move(post_id, ("rejected",), "drafted", now, render_status="pending")
+
+    def approve_batch(self, post_ids, by, now=None):
+        """One tap approves the batch the person was shown (spec section 2), once they turned batch approval on.
+        Each post is approved on its own terms; one that cannot be (moved on, or its channel paused) is skipped."""
+        now = time.time() if now is None else now
+        if not self.settings()["batch_approval"]:
+            raise conflict("batch approval is off; approve each post, or turn it on in the team settings")
+        if not isinstance(post_ids, list) or not post_ids or len(post_ids) > 200:
+            raise StudioError("send between 1 and 200 post ids")
+        approved, skipped = [], []
+        with self.lock:
+            for post_id in dict.fromkeys(post_ids):
+                try:
+                    approved.append(self.approve(post_id, by, now))
+                except StudioError as exc:
+                    skipped.append({"post_id": post_id, "reason": exc.detail})
+        return {"approved": approved, "skipped": skipped}
 
     def mark_posted(self, post_id, url, posted_at=None, now=None):
         now = time.time() if now is None else now

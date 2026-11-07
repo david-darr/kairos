@@ -3,6 +3,7 @@ metrics into snapshots, quota backoff, token refresh reuse, account isolation an
 
 Google is a mock transport: no network, no sign-in, no real project. Two real accounts on a throwaway data folder."""
 import asyncio
+import json
 import os
 import sys
 import tempfile
@@ -32,7 +33,7 @@ from core import accounts  # noqa: E402
 from core import google_workspace as google  # noqa: E402
 from core.auth import auth_manager  # noqa: E402
 from core.secret_storage import encrypt  # noqa: E402
-from services.content_studio import close_all, studio, youtube  # noqa: E402
+from services.content_studio import close_all, studio, youtube, youtube_publish  # noqa: E402
 
 atexit.register(close_all)
 
@@ -58,6 +59,10 @@ class FakeGoogle:
         self.quota_failures = []         # statuses/reasons to answer the next analytics calls with before succeeding
         self.reject_bearer = None        # one bearer token answered with 401, once
         self.refreshes = 0
+        self.uploads = []                # (metadata, video bytes) of each upload
+        self.upload_privacy = None       # what YouTube says it set; None echoes the request
+        self.upload_channel = "UCalpha0000000000000000"
+        self.popular = []                # the most-popular chart
 
     def handle(self, req):
         self.log.append(req)
@@ -81,6 +86,18 @@ class FakeGoogle:
         if host == "www.googleapis.com" and path == "/youtube/v3/channels":
             assert q.get("mine") == "true"
             return httpx.Response(200, json={"items": self.channels})
+        if host == "www.googleapis.com" and path == "/youtube/v3/videos" and q.get("chart"):
+            assert q["chart"] == "mostPopular" and len(q["regionCode"]) == 2 and int(q["maxResults"]) <= 50
+            return httpx.Response(200, json={"items": self.popular[:int(q["maxResults"])]})
+        if host == "www.googleapis.com" and path == "/upload/youtube/v3/videos":
+            assert req.method == "POST" and q == {"part": "snippet,status", "uploadType": "multipart"}
+            boundary = req.headers["content-type"].split("boundary=")[1]
+            parts = req.content.split(f"--{boundary}".encode())
+            meta = json.loads(parts[1].split(b"\r\n\r\n", 1)[1].strip())
+            video = parts[2].split(b"\r\n\r\n", 1)[1][:-2]
+            self.uploads.append((meta, video))
+            return httpx.Response(200, json={"id": "NEWvideo_01", "snippet": {"channelId": self.upload_channel, **meta["snippet"]},
+                                             "status": {**meta["status"], "privacyStatus": self.upload_privacy or meta["status"]["privacyStatus"]}})
         if host == "www.googleapis.com" and path == "/youtube/v3/videos":
             items = [{"id": v, "contentDetails": {"duration": self.videos[v][0]}, "snippet": {"channelId": self.videos[v][1]}}
                      for v in q["id"].split(",") if v in self.videos]
@@ -150,9 +167,11 @@ class YouTubeAnalytics(unittest.TestCase):
             with accounts.as_account(acct):
                 google._save({**google._load(), "accounts": {}, "default_account": None})
                 youtube.disconnect()
+                youtube_publish.disconnect()
                 for snap in studio.snapshots():
                     studio._write("DELETE FROM snapshots WHERE id = ?", (snap["id"],))
                 studio._write("DELETE FROM posts")
+                studio._write("DELETE FROM channel_warnings")
                 studio._write("DELETE FROM channels")
                 studio._write("DELETE FROM niches")
 
@@ -215,10 +234,11 @@ class YouTubeAnalytics(unittest.TestCase):
         self.assertIn("never posts", status["notice"])
         self.assertIn("private-only", status["notice"])
         self.assertNotIn("refresh", str(status).lower().replace("needs_reconnect", ""))
-        # Only the YouTube read-only pair can be added this way.
+        # Only the YouTube read-only pair and the posting pair can be added this way; never full YouTube management.
         with self.assertRaises(google.GoogleError):
             google.start_sign_in("http://127.0.0.1:8420/api/google/oauth/callback", "david",
-                                 extra_scopes=("https://www.googleapis.com/auth/youtube.upload",))
+                                 extra_scopes=("https://www.googleapis.com/auth/youtube",))
+        self.assertNotIn("https://www.googleapis.com/auth/youtube.upload", scopes, "analytics never asks to post")
 
     def test_declining_the_extra_grant_leaves_it_unconnected(self):
         self.sign_in_google(self.d)
@@ -454,6 +474,144 @@ class YouTubeAnalytics(unittest.TestCase):
         store = Store(path)
         self.assertEqual(store.snapshots()[0]["source"], "manual")
         store.close()
+
+
+class YouTubePostingAndTrends(YouTubeAnalytics):
+    """Direct posting through the person's own Google project (D1) and the most-popular list for the Researcher.
+    Runs on the same mock Google and accounts; the analytics tests are not repeated here."""
+
+    def connect_posting(self, client, email="owner@example.com"):
+        self.sign_in_google(client, email)
+        r = client.post(f"{P}/posting/youtube/connect", json={})
+        self.assertEqual(r.status_code, 200, r.text)
+        return self.finish_sign_in(client, r.json()["url"])
+
+    def approved_post(self, acct, channel_id, video=b"\x00\x00\x00\x18ftypmp42 fake video", tags="space, Black holes, #space"):
+        from core import image_gen
+        with accounts.as_account(acct):
+            folder = image_gen.generated_files_dir()
+            os.makedirs(folder, exist_ok=True)
+            with open(os.path.join(folder, "abc123_black-holes.mp4"), "wb") as f:
+                f.write(video)
+            post = studio.create_post(channel_id, "Black <holes> explained", script_ref="beats", caption="Why light cannot escape.")
+            studio.edit_post(post["id"], render_ref="/generated-files/abc123_black-holes.mp4", render_status="ok", tags=tags)
+            studio.submit_for_approval(post["id"])
+            return post["id"]
+
+    def test_posting_grant_is_its_own_and_asked_only_when_connecting_posting(self):
+        self.sign_in_google(self.d)
+        self.assertFalse(self.d.get(f"{P}/posting/youtube/status").json()["connected"])
+        query = self.connect_posting(self.d)
+        scopes = query["scope"][0].split()
+        self.assertTrue(set(youtube_publish.SCOPES) <= set(scopes))
+        self.assertNotIn("https://www.googleapis.com/auth/yt-analytics.readonly", scopes)
+        status = self.d.get(f"{P}/posting/youtube/status").json()
+        self.assertTrue(status["connected"])
+        self.assertEqual(status["privacy"], "private", "private until the person chooses otherwise")
+        self.assertIn("API audit", status["notice"])
+        self.assertIn("Prepare post", status["notice"])
+        self.assertFalse(self.d.get(f"{P}/analytics/youtube/status").json()["connected"], "posting does not turn on analytics")
+        self.assertEqual(self.d.put(f"{P}/posting/youtube/privacy", json={"privacy": "everyone"}).status_code, 400)
+        self.assertEqual(self.d.put(f"{P}/posting/youtube/privacy", json={"privacy": "unlisted"}).json()["privacy"], "unlisted")
+        self.assertFalse(self.d.delete(f"{P}/posting/youtube").json()["connected"])
+
+    def test_publish_sends_only_an_approved_post_exactly_as_approved_with_the_ai_label(self):
+        ids, _ = self.studio_setup(self.david_id)
+        post_id = self.approved_post(self.david_id, ids["@alpha"])
+        r = self.d.post(f"{P}/posts/{post_id}/publish-youtube")
+        self.assertEqual(r.status_code, 409, "not approved yet")
+        self.assertIn("approved", r.json()["detail"])
+        self.d.post(f"{P}/posts/{post_id}/approve")
+        r = self.d.post(f"{P}/posts/{post_id}/publish-youtube")
+        self.assertEqual(r.status_code, 409, "posting not connected")
+        self.assertIn("Connect YouTube posting", r.json()["detail"])
+        self.assertEqual(self.d.get(f"{P}/posts/{post_id}").json()["direct_post_blocker"], "Connect YouTube posting first.")
+        self.connect_posting(self.d)
+        self.assertIsNone(self.d.get(f"{P}/posts/{post_id}").json()["direct_post_blocker"])
+        r = self.d.post(f"{P}/posts/{post_id}/publish-youtube")
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual((body["video_id"], body["privacy"], body["kept_private"]), ("NEWvideo_01", "private", False))
+        self.assertEqual(len(self.fake.uploads), 1)
+        meta, video = self.fake.uploads[0]
+        self.assertEqual(meta["snippet"]["title"], "Black holes explained", "YouTube refuses < and >")
+        self.assertEqual(meta["snippet"]["description"], "Why light cannot escape.")
+        self.assertEqual(meta["snippet"]["tags"], ["space", "Black holes"])
+        self.assertEqual(meta["status"], {"privacyStatus": "private", "selfDeclaredMadeForKids": False, "containsSyntheticMedia": True})
+        self.assertEqual(video, b"\x00\x00\x00\x18ftypmp42 fake video")
+        post = self.d.get(f"{P}/posts/{post_id}").json()
+        self.assertEqual((post["state"], post["posted_url"]), ("posted", "https://www.youtube.com/watch?v=NEWvideo_01"))
+        self.assertEqual(youtube.video_id(post["posted_url"]), "NEWvideo_01", "the analytics sync can read it")
+        again = self.d.post(f"{P}/posts/{post_id}/publish-youtube")
+        self.assertEqual(again.status_code, 409)
+        self.assertEqual(len(self.fake.uploads), 1, "never uploaded twice")
+        self.assertEqual(self.d.get(f"{P}/posting/youtube/status").json()["last_upload"]["video_id"], "NEWvideo_01")
+
+    def test_youtube_keeping_an_upload_private_is_said_plainly(self):
+        ids, _ = self.studio_setup(self.david_id)
+        post_id = self.approved_post(self.david_id, ids["@alpha"])
+        self.d.post(f"{P}/posts/{post_id}/approve")
+        self.connect_posting(self.d)
+        self.d.put(f"{P}/posting/youtube/privacy", json={"privacy": "public"})
+        self.fake.upload_privacy = "private"
+        body = self.d.post(f"{P}/posts/{post_id}/publish-youtube").json()
+        self.assertEqual((body["asked_privacy"], body["privacy"], body["kept_private"]), ("public", "private", True))
+        self.assertIn("API audit", body["note"])
+        self.assertEqual(self.fake.uploads[0][0]["status"]["privacyStatus"], "public")
+
+    def test_publish_refuses_what_it_cannot_send_safely(self):
+        ids, _ = self.studio_setup(self.david_id, handles=("@alpha", "@stranger"))
+        self.connect_posting(self.d)
+        # A channel the connected Google account does not own.
+        post_id = self.approved_post(self.david_id, ids["@stranger"])
+        self.d.post(f"{P}/posts/{post_id}/approve")
+        r = self.d.post(f"{P}/posts/{post_id}/publish-youtube")
+        self.assertEqual(r.status_code, 409)
+        self.assertIn("does not own", r.json()["detail"])
+        # A paused channel, a missing file, and a render that is not an uploadable MP4.
+        mine = self.approved_post(self.david_id, ids["@alpha"])
+        self.d.post(f"{P}/posts/{mine}/approve")
+        with accounts.as_account(self.david_id):
+            studio.record_warning(ids["@alpha"], "Strike")
+        self.assertIn("paused", self.d.post(f"{P}/posts/{mine}/publish-youtube").json()["detail"])
+        with accounts.as_account(self.david_id):
+            studio.resume_channel(ids["@alpha"])
+            from core import image_gen
+            os.remove(os.path.join(image_gen.generated_files_dir(), "abc123_black-holes.mp4"))
+        self.assertIn("missing", self.d.post(f"{P}/posts/{mine}/publish-youtube").json()["detail"])
+        for ref in ("r.mp4", "/generated-files/..%2F..%2Fsecret.mp4", "/generated-files/notes.txt", "https://cdn.example.test/v.mp4"):
+            with self.subTest(ref=ref):
+                with self.assertRaises(youtube_publish.PostingError):
+                    with accounts.as_account(self.david_id):
+                        youtube_publish.render_file(ref)
+        self.assertEqual(self.fake.uploads, [], "nothing was uploaded")
+        # Another account's post is out of reach.
+        self.assertEqual(self.b.post(f"{P}/posts/{mine}/publish-youtube").status_code, 404)
+
+    def test_most_popular_needs_the_read_grant_and_keeps_source_and_date(self):
+        with accounts.as_account(self.david_id):
+            with self.assertRaises(youtube.YouTubeError):
+                asyncio.run(youtube.trending("US"))
+        self.connect(self.d)
+        self.fake.popular = [{"id": "dQw4w9WgXcQ", "snippet": {"title": "Big video", "channelTitle": "Someone", "publishedAt": "2026-11-01T00:00:00Z"},
+                              "statistics": {"viewCount": "1200", "likeCount": "30"}, "contentDetails": {"duration": "PT45S"}}]
+        with accounts.as_account(self.david_id):
+            found = asyncio.run(youtube.trending("gb", "28", 5, now=1_790_000_000.0))
+            for bad in (("USA", None), ("U1", None), ("US", "film")):
+                with self.assertRaises(youtube.YouTubeError):
+                    asyncio.run(youtube.trending(*bad))
+        self.assertEqual(found["region"], "GB")
+        video = found["videos"][0]
+        self.assertEqual((video["views"], video["length_s"], video["source"]), (1200, 45.0, "https://www.youtube.com/watch?v=dQw4w9WgXcQ"))
+        self.assertEqual(video["read_on"], found["read_on"])
+        self.assertIn("most-popular", found["source"])
+        chart = [r for r in self.fake.log if dict(r.url.params).get("chart")]
+        self.assertEqual(dict(chart[0].url.params)["videoCategoryId"], "28")
+
+    # The analytics tests run once, in YouTubeAnalytics.
+    for _name in [n for n in dir(YouTubeAnalytics) if n.startswith("test_")]:
+        locals()[_name] = None
+    del _name
 
 
 class Helpers(unittest.TestCase):

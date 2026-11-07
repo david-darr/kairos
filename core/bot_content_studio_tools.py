@@ -2,15 +2,21 @@
 
 Each tool acts in the calling bot's own account, on that account's studio store (services/content_studio),
 and only for the role the store records for that bot (services/content_studio/team.py): a bot that is not on
-the team, or is on it in another role, is refused. Reads are fenced as data. No tool approves a post, posts
-one, creates a channel or retires a channel without the person: a Producer confirm of a channel retirement
-goes to `awaiting_user`, and approval stays with the person (/api/content-studio/posts/{id}/approve).
+the team, or is on it in another role, is refused. Reads are fenced as data. No tool approves a post, creates a
+channel, adds a niche or retires a channel without the person: a Producer confirm of a channel retirement or a new
+niche goes to `awaiting_user`, and approval stays with the person (/api/content-studio/posts/{id}/approve). The
+Publisher's direct YouTube upload only ever sends a post the person approved, through their own Google project.
+
+The daily cycle, one tool per step: Researcher add_topic (and propose_niche, youtube_trending), Evaluator
+pick_topic, Script Writer save_script, Editor record_render then submit_post, the person approves, Publisher
+publish_youtube or mark_posted, Executor record_metrics and run_review, Producer watch, confirm and send_report.
 """
 import json
+from urllib.parse import urlsplit
 
 from core.tool_registry import READ, WRITE, register
 from core.untrusted import wrap_untrusted
-from services.content_studio import StudioError, delivery, pipeline, review, studio, team
+from services.content_studio import StudioError, delivery, pipeline, review, studio, team, youtube, youtube_publish
 
 
 def _obj(properties, required=()):
@@ -53,7 +59,8 @@ def _guarded(roles, fn):
     async def handler(args, ctx):
         try:
             bot, role = _bot(ctx, roles)
-            return fn(args, ctx, bot, role)
+            result = fn(args, ctx, bot, role)
+            return await result if hasattr(result, "__await__") else result
         except Refused as error:
             return f"Not run: {error}"
         except StudioError as error:
@@ -69,7 +76,96 @@ ANY = None
 
 
 def _pipeline(args, ctx, bot, role):
-    return _data(ctx, "content studio pipeline", {"items": pipeline.pipeline(studio), "approvals_waiting": len(pipeline.approval_queue(studio))})
+    """The board plus what each step needs: the live channels with their look, aspect and voice notes, the
+    active strategies (the default first) and any open request for a replacement niche."""
+    channels = [{"id": c["id"], "niche_id": c["niche_id"], "niche": c["niche_name"], "platform": c["platform"], "handle": c["handle"],
+                 "paused": bool(c["paused"]), "look": c["look"], "aspect": c["aspect"] or "9:16",
+                 "notes": c["notes"]} for c in studio.list_channels(status="live")]
+    strategies = {r: [{"id": s["id"], "name": s["name"], "default": bool(s["is_default"])}
+                      for s in sorted(studio.list_strategies(r, "active"), key=lambda s: not s["is_default"])]
+                  for r in ("script_writer", "evaluator")}
+    wanted = [{"decision_id": d["id"], "replaces": d["subject_name"]} for d in studio.list_decisions(status="open", kind="replace")
+              if d["subject_type"] == "niche"]
+    return _data(ctx, "content studio pipeline", {
+        "you_are": role, "items": pipeline.pipeline(studio), "approvals_waiting": len(pipeline.approval_queue(studio)),
+        "niches": [{"id": n["id"], "name": n["name"], "slots": n["slots"]} for n in studio.list_niches("live")],
+        "channels": channels, "strategies": strategies, "niches_wanted": wanted})
+
+
+def _drafted(post_id):
+    post = studio.get_post(post_id)
+    if post["state"] != "drafted":
+        raise StudioError(f"post {post_id} is {post['state'].replace('_', ' ')}, not drafted")
+    return post
+
+
+def _pick(args, ctx, bot, role):
+    topic = studio.get_topic(args["topic_id"])
+    strategy = team.strategy_by_name(studio, "evaluator", args.get("strategy"))
+    if any(p["topic_id"] == topic["id"] and p["channel_id"] == args["channel_id"] for p in studio.list_posts()):
+        raise StudioError("that topic is already picked for this channel")
+    post = studio.create_post(args["channel_id"], args.get("title") or topic["title"], topic_id=topic["id"],
+                              evaluator_strategy_id=strategy["id"] if strategy else None, format=args.get("format"),
+                              pick_reason=args["reason"])
+    return _data(ctx, "content studio post", post) + " The Script Writer writes it next."
+
+
+def _script(args, ctx, bot, role):
+    _drafted(args["post_id"])
+    strategy = team.strategy_by_name(studio, "script_writer", args.get("strategy"))
+    fields = {"script_ref": args["script"], "script_strategy_id": strategy["id"] if strategy else None}
+    for key in ("title", "caption"):
+        if args.get(key):
+            fields[key] = args[key]
+    post = studio.edit_post(args["post_id"], **fields)
+    return _data(ctx, "content studio post", post) + " The Editor renders it next."
+
+
+def _render(args, ctx, bot, role):
+    post = _drafted(args["post_id"])
+    if not post["script_ref"]:
+        raise StudioError("the post has no script yet; the Script Writer writes it first")
+    fields = {"render_status": args["status"]}
+    if args.get("render_ref"):
+        fields["render_ref"] = args["render_ref"]
+    elif args["status"] == "ok":
+        raise StudioError("a finished render needs its render_ref (the Studio render or file link)")
+    for key in ("tags", "caption"):
+        if args.get(key) is not None:
+            fields[key] = args[key]
+    post = studio.edit_post(args["post_id"], **fields)
+    tail = " Put it in the approval queue with content_studio_submit_post." if args["status"] == "ok" else " The Producer's watch sees the failure."
+    return _data(ctx, "content studio post", post) + tail
+
+
+PLATFORM_HOSTS = {"youtube": ("youtube.com", "youtu.be"), "tiktok": ("tiktok.com",), "instagram": ("instagram.com",)}
+
+
+def _posted(args, ctx, bot, role):
+    post = studio.get_post(args["post_id"])
+    url = (args.get("url") or "").strip()
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    allowed = PLATFORM_HOSTS.get(post["platform"], ())
+    if parts.scheme != "https" or not any(host == h or host.endswith("." + h) for h in allowed):
+        raise StudioError(f"the link must be the https link of the live post on {post['platform']}")
+    return _data(ctx, "content studio post", studio.mark_posted(args["post_id"], url)) + " Its numbers can be recorded now."
+
+
+async def _publish(args, ctx, bot, role):
+    result = await youtube_publish.publish(studio, args["post_id"], bot["name"])
+    note = (" " + result["note"]) if result["note"] else ""
+    return _data(ctx, "content studio upload", {k: result[k] for k in ("video_id", "url", "privacy", "asked_privacy")}) + note
+
+
+def _propose_niche(args, ctx, bot, role):
+    decision = review.propose_niche(studio, args["name"], args["source"], args.get("signal", ""), args.get("reason", ""),
+                                    proposed_by=bot["name"])
+    return _data(ctx, "content studio decision", decision) + " The Producer confirms it, then the person decides and creates its channels."
+
+
+async def _trending(args, ctx, bot, role):
+    return _data(ctx, "youtube most popular", await youtube.trending(args.get("region") or "US", args.get("category_id"), args.get("count") or 20))
 
 
 def _add_topic(args, ctx, bot, role):
@@ -124,6 +220,35 @@ def _warning(args, ctx, bot, role):
 
 _add("content_studio_pipeline", "Read the Content Studio pipeline: each idea's step, owner, age and status, and how many posts wait for approval.",
      _obj({}), READ, ANY, _pipeline)
+_add("content_studio_pick_topic", "Evaluator: pick a topic candidate for one channel, with a short reason. It becomes a post the Script Writer writes. "
+     "strategy is your pick strategy's name (the default when left out); it is recorded on the post.",
+     _obj({"channel_id": _int("A live channel in the topic's niche"), "topic_id": _int(), "reason": _str(500, "Why this topic, in a sentence"),
+           "strategy": _str(80), "title": _str(200, "Working title; the topic's title when left out"),
+           "format": _str(80, "The format, for example 'list' or 'explainer'")}, ("channel_id", "topic_id", "reason")),
+     WRITE, ("evaluator",), _pick)
+_add("content_studio_save_script", "Script Writer: save the script with its beat outline for a drafted post, and optionally its title and caption draft. "
+     "strategy is your script strategy's name (the default when left out); it is recorded on the post.",
+     _obj({"post_id": _int(), "script": _str(20000), "strategy": _str(80), "title": _str(200), "caption": _str(5000)}, ("post_id", "script")),
+     WRITE, ("script_writer",), _script)
+_add("content_studio_record_render", "Editor: record the render of a scripted post: status ok with render_ref (the link video_render returned, "
+     "or the Studio video id), or failed. Optionally the tags (comma separated) and the final caption.",
+     _obj({"post_id": _int(), "status": {"type": "string", "enum": ["ok", "failed"]}, "render_ref": _str(500), "tags": _str(500),
+           "caption": _str(5000)}, ("post_id", "status")),
+     WRITE, ("editor",), _render)
+_add("content_studio_mark_posted", "Publisher: record the live link of an approved post the person posted (Prepare post), so its numbers can be tracked. "
+     "The link must be the https link on the post's own platform.",
+     _obj({"post_id": _int(), "url": _str(500)}, ("post_id", "url")), WRITE, ("publisher",), _posted)
+_add("content_studio_publish_youtube", "Publisher: upload an approved YouTube post exactly as approved, with the AI label, through the person's own "
+     "connected Google project, and record its link. Only works when the person connected YouTube posting. YouTube may keep it private.",
+     _obj({"post_id": _int()}, ("post_id",)), WRITE, ("publisher",), _publish)
+_add("content_studio_propose_niche", "Researcher: propose a candidate new niche (for example to replace a retired one), with its source and signal. "
+     "The Producer confirms it and the person decides; nothing is created until they do.",
+     _obj({"name": _str(80), "source": _str(300, "Where the evidence is"), "signal": _str(300, "What is rising and by how much"),
+           "reason": _str(300)}, ("name", "source")), WRITE, ("researcher",), _propose_niche)
+_add("content_studio_youtube_trending", "Researcher: read YouTube's most-popular list for a region (and optionally a category), each video with its "
+     "source link and the date read. Needs the person's YouTube analytics connection.",
+     _obj({"region": _str(2, "Two-letter country code, default US"), "category_id": _str(4, "YouTube video category number"),
+           "count": {"type": "integer", "minimum": 1, "maximum": 50}}), READ, ("researcher",), _trending)
 _add("content_studio_add_topic", "Researcher: add a sourced topic candidate to a live niche. A topic needs its source and the date you saw it.",
      _obj({"niche_id": _int("The live niche"), "title": _str(200), "source": _str(300, "Where you saw it"),
            "evidence_date": {"type": "number", "description": "Unix time you saw it; defaults to now"},

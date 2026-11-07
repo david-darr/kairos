@@ -49,12 +49,16 @@ HOSTS = {
     "gmail": "https://gmail.googleapis.com/gmail/v1",
     "youtube": "https://www.googleapis.com/youtube/v3",
     "youtube_analytics": "https://youtubeanalytics.googleapis.com/v2",
+    "youtube_upload": "https://www.googleapis.com/upload/youtube/v3",
 }
 GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
 CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar"
 # Content Studio's read-only YouTube analytics. Never part of SCOPES: an account gets them only when its user
 # asks for them (start_sign_in(extra_scopes=...)), as an incremental grant on top of the sign-in it already has.
 YOUTUBE_SCOPES = ("https://www.googleapis.com/auth/youtube.readonly", "https://www.googleapis.com/auth/yt-analytics.readonly")
+# Content Studio's direct YouTube posting through the person's own Google project (spec D1). Asked for only when
+# they connect posting; readonly lets Kairos check the upload goes to the channel they registered.
+YOUTUBE_UPLOAD_SCOPES = ("https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/youtube.readonly")
 SCOPES = (
     "openid", "email",
     "https://www.googleapis.com/auth/drive",
@@ -333,7 +337,7 @@ def start_sign_in(redirect_uri: str, owner: str | None = None, add: bool = False
     user may use (a shared account too) and must sign in as the same email.
     `extra_scopes` is an optional added grant (YouTube analytics): Google is told to keep what the account
     already granted, and only a sign-in that asks for them ever carries them."""
-    if extra_scopes and not set(extra_scopes) <= set(YOUTUBE_SCOPES):
+    if extra_scopes and not set(extra_scopes) <= set(YOUTUBE_SCOPES) | set(YOUTUBE_UPLOAD_SCOPES):
         raise GoogleError("Unknown Google permission requested")
     if account_id is not None:
         account_id = resolve_account(owner, account_id)
@@ -489,7 +493,8 @@ async def _token(account_id: str | None = None, force: bool = False) -> str:
 
 async def request(api: str, method: str, path: str, *, params: dict | None = None,
                   body: dict | None = None, content: bytes | None = None,
-                  content_type: str | None = None, raw: bool = False, account: str | None = None) -> dict | bytes:
+                  content_type: str | None = None, raw: bool = False, account: str | None = None,
+                  timeout: float = 45) -> dict | bytes:
     decoded = path
     for _ in range(3):
         decoded = unquote(decoded)
@@ -504,7 +509,7 @@ async def request(api: str, method: str, path: str, *, params: dict | None = Non
         headers = {"Authorization": f"Bearer {token}"}
         if content_type:
             headers["Content-Type"] = content_type
-        async with httpx.AsyncClient(timeout=45) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.request(method, url, params=params, json=body if content is None else None,
                                             content=content, headers=headers)
         if response.status_code == 401 and retry == 0:

@@ -1,6 +1,8 @@
 """Content Studio: pipeline view, scoring record, selection review and the approval queue (build spec
 "Content Studio Team", steps 2 and 4). Every route needs a signed-in user and works in that account's own
 store only (services/content_studio). Numbers come in by manual entry or import, or from YouTube's read-only analytics.
+These routes are the person's: a confirm here is the person's OK. The Producer's own confirm step is its role-gated
+tool (core/bot_content_studio_tools.py), never this API.
 """
 from typing import Optional
 
@@ -9,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from core.middleware import require_user
 from core.middleware import local_api_base
-from services.content_studio import StudioError, delivery, pipeline, report, review, studio, youtube
+from services.content_studio import StudioError, delivery, pipeline, report, review, studio, youtube, youtube_publish
 
 router = APIRouter(prefix="/api/content-studio", tags=["content-studio"])
 
@@ -26,6 +28,16 @@ class ChannelBody(Body):
     niche_id: int
     platform: str = Field(max_length=20)
     handle: str = Field(max_length=100)
+
+
+class ChannelEditBody(Body):
+    look: Optional[str] = Field(None, max_length=80)
+    aspect: Optional[str] = Field(None, max_length=5)
+    notes: Optional[str] = Field(None, max_length=1000)
+
+
+class BatchBody(Body):
+    post_ids: list[int] = Field(min_length=1, max_length=200)
 
 
 class ReasonBody(Body):
@@ -57,18 +69,20 @@ class PostBody(Body):
     topic_id: Optional[int] = None
     script_strategy_id: Optional[int] = None
     evaluator_strategy_id: Optional[int] = None
-    script_ref: Optional[str] = Field(None, max_length=500)
+    script_ref: Optional[str] = Field(None, max_length=20000)
     caption: str = Field("", max_length=5000)
     format: Optional[str] = Field(None, max_length=80)
+    pick_reason: str = Field("", max_length=500)
 
 
 class EditBody(Body):
     title: Optional[str] = Field(None, max_length=200)
     caption: Optional[str] = Field(None, max_length=5000)
-    script_ref: Optional[str] = Field(None, max_length=500)
+    script_ref: Optional[str] = Field(None, max_length=20000)
     render_ref: Optional[str] = Field(None, max_length=500)
     render_status: Optional[str] = Field(None, max_length=10)
     format: Optional[str] = Field(None, max_length=80)
+    tags: Optional[str] = Field(None, max_length=500)
 
 
 class PostedBody(Body):
@@ -100,7 +114,7 @@ class ReviewBody(Body):
 
 
 class ConfirmBody(Body):
-    actor: str = Field("user", max_length=10)  # "user", or "producer" for the lead bot's step
+    actor: str = Field("user", max_length=10)  # always "user": the Producer confirms only through its own tool
     reason: str = Field("", max_length=300)
 
 
@@ -117,6 +131,7 @@ class SettingsBody(Body):
     step_windows_h: Optional[dict[str, float]] = None
     team_bot_ids: Optional[list[str]] = None
     team_roles: Optional[dict[str, str]] = None
+    batch_approval: Optional[bool] = None
 
 
 def _run(fn, *args, **kwargs):
@@ -156,6 +171,12 @@ def add_channel(body: ChannelBody, user: str = Depends(require_user)):
 @router.post("/channels/{channel_id}/archive")
 def archive_channel(channel_id: int, body: ReasonBody = ReasonBody(), user: str = Depends(require_user)):
     return _run(review.user_archives_channel, studio, channel_id, user, body.reason)
+
+
+@router.post("/channels/{channel_id}/edit")
+def edit_channel(channel_id: int, body: ChannelEditBody, user: str = Depends(require_user)):
+    """The channel's look, aspect and voice notes, which the Script Writer and Editor follow."""
+    return _run(studio.edit_channel, channel_id, **_given(body))
 
 
 @router.post("/channels/{channel_id}/restore")
@@ -213,12 +234,14 @@ def posts(state: Optional[str] = None, channel_id: Optional[int] = None, niche_i
 @router.post("/posts")
 def add_post(body: PostBody, user: str = Depends(require_user)):
     return _run(studio.create_post, body.channel_id, body.title, body.topic_id, body.script_strategy_id,
-                body.evaluator_strategy_id, body.script_ref, body.caption, body.format)
+                body.evaluator_strategy_id, body.script_ref, body.caption, body.format, body.pick_reason)
 
 
 @router.get("/posts/{post_id}")
 def get_post(post_id: int, user: str = Depends(require_user)):
-    return {**_run(studio.get_post, post_id), "metrics": studio.snapshots(post_id)}
+    post = _run(studio.get_post, post_id)
+    direct = youtube_publish.check(studio, post_id) if post["state"] == "approved" and post["platform"] == "youtube" else None
+    return {**post, "metrics": studio.snapshots(post_id), "direct_post_blocker": direct}
 
 
 @router.post("/posts/{post_id}/edit")
@@ -240,6 +263,12 @@ def approvals(user: str = Depends(require_user)):
 def approve_post(post_id: int, user: str = Depends(require_user)):
     """Marks the post approved. Preparing or sending it to the platform is the Publisher step, built later."""
     return _run(studio.approve, post_id, user)
+
+
+@router.post("/approvals/approve-batch")
+def approve_batch(body: BatchBody, user: str = Depends(require_user)):
+    """One tap approves the posts the person was shown, once batch approval is on in the team settings."""
+    return _run(studio.approve_batch, body.post_ids, user)
 
 
 @router.post("/posts/{post_id}/reject")
@@ -295,7 +324,10 @@ def decisions(status: Optional[str] = None, kind: Optional[str] = None, user: st
 
 @router.post("/decisions/{decision_id}/confirm")
 def confirm_decision(decision_id: int, body: ConfirmBody = ConfirmBody(), user: str = Depends(require_user)):
-    return _run(review.confirm, studio, decision_id, body.actor, user)
+    """The person's OK. Nobody confirms as the Producer here: that step is the Producer bot's own tool."""
+    if body.actor != "user":
+        raise HTTPException(403, "Only the Producer bot confirms as the Producer, with its own tool.")
+    return _run(review.confirm, studio, decision_id, "user", user)
 
 
 @router.post("/decisions/{decision_id}/reject")
@@ -368,3 +400,40 @@ async def youtube_sync(user: str = Depends(require_user)):
 @router.delete("/analytics/youtube")
 def youtube_disconnect(user: str = Depends(require_user)):
     return youtube.disconnect()
+
+
+# -- YouTube posting through the person's own Google project (D1) --------------------------------------
+
+class PrivacyBody(Body):
+    privacy: str = Field(max_length=10)
+
+
+@router.get("/posting/youtube/status")
+def youtube_posting_status(user: str = Depends(require_user)):
+    return youtube_publish.status()
+
+
+@router.post("/posting/youtube/connect")
+def youtube_posting_connect(body: YouTubeConnectBody = YouTubeConnectBody(), user: str = Depends(require_user)):
+    """The consent URL that adds YouTube upload to a Google sign-in. Open it in the browser."""
+    from routes.google_routes import CALLBACK
+    return {"url": _run(youtube_publish.connect_url, local_api_base() + CALLBACK, user, body.account)}
+
+
+@router.put("/posting/youtube/privacy")
+def youtube_posting_privacy(body: PrivacyBody, user: str = Depends(require_user)):
+    return _run(youtube_publish.set_privacy, body.privacy)
+
+
+@router.delete("/posting/youtube")
+def youtube_posting_disconnect(user: str = Depends(require_user)):
+    return youtube_publish.disconnect()
+
+
+@router.post("/posts/{post_id}/publish-youtube")
+async def publish_youtube(post_id: int, user: str = Depends(require_user)):
+    """Uploads an approved YouTube post exactly as approved, with the AI label, and records its link."""
+    try:
+        return await youtube_publish.publish(studio, post_id, user)
+    except StudioError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc

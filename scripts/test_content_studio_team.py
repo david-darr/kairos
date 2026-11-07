@@ -168,8 +168,8 @@ def wipe_studio():
     shutil.rmtree(Path(accounts.account_dir(create=False)) / "content_studio", ignore_errors=True)
 
 
-def call(name, bot_id, **args):
-    spec = tool_registry._REGISTRY[name]
+def call(tool, bot_id, /, **args):
+    spec = tool_registry._REGISTRY[tool]
     return asyncio.run(spec.handler(args, ToolContext(agent_id=bot_id)))
 
 
@@ -223,11 +223,99 @@ class StudioToolTests(unittest.TestCase):
 
     def test_tools_are_registered_agent_only_and_none_approves_or_posts(self):
         names = sorted(n for n in tool_registry._REGISTRY if n.startswith("content_studio_"))
-        self.assertEqual(names, ["content_studio_add_topic", "content_studio_confirm_decision", "content_studio_pipeline",
-                                 "content_studio_record_metrics", "content_studio_record_warning", "content_studio_reject_decision", "content_studio_run_review",
-                                 "content_studio_send_report", "content_studio_submit_post", "content_studio_watch"])
+        self.assertEqual(names, ["content_studio_add_topic", "content_studio_confirm_decision", "content_studio_mark_posted",
+                                 "content_studio_pick_topic", "content_studio_pipeline", "content_studio_propose_niche",
+                                 "content_studio_publish_youtube", "content_studio_record_metrics", "content_studio_record_render",
+                                 "content_studio_record_warning", "content_studio_reject_decision", "content_studio_run_review",
+                                 "content_studio_save_script", "content_studio_send_report", "content_studio_submit_post",
+                                 "content_studio_watch", "content_studio_youtube_trending"])
         for name in names:
             self.assertTrue(tool_registry._REGISTRY[name].agent_only)
+        self.assertFalse(any("approve" in n for n in names), "no tool approves a post")
+
+    def test_import_seeds_the_starting_strategies_once(self):
+        active = {(s["owner_role"], s["name"]): bool(s["is_default"]) for s in studio.list_strategies()}
+        self.assertEqual(active, {("script_writer", "hook-first"): True, ("script_writer", "story-first"): False,
+                                  ("evaluator", "trend-weighted"): True, ("evaluator", "track-record-weighted"): False})
+        self.assertEqual(studio_roles.seed_strategies(studio), [], "a second import adds none")
+        studio.drop_strategy(next(s["id"] for s in studio.list_strategies() if s["name"] == "story-first"))
+        self.assertEqual(studio_roles.seed_strategies(studio), [], "a dropped strategy is never brought back")
+
+    def test_the_daily_cycle_runs_step_by_step_through_the_tools(self):
+        bots = self.bots
+        studio.edit_channel(self.channel["id"], look="neon-grid", aspect="9:16", notes="Calm, curious, no hype.")
+        board = call("content_studio_pipeline", bots["Editor"])
+        for text in ('"look": "neon-grid"', '"aspect": "9:16"', "Calm, curious", '"hook-first"', '"you_are": "editor"'):
+            self.assertIn(text, board)
+        topic = studio.add_topic(self.niche["id"], "Black holes", "https://t.example.test")
+        pick = dict(channel_id=self.channel["id"], topic_id=topic["id"], reason="Rising this week.", strategy="track-record-weighted")
+        self.assertIn("Only the Evaluator", call("content_studio_pick_topic", bots["Researcher"], **pick))
+        self.assertIn("no active evaluator strategy", call("content_studio_pick_topic", bots["Evaluator"], **{**pick, "strategy": "vibes"}))
+        self.assertIn("Script Writer writes it next", call("content_studio_pick_topic", bots["Evaluator"], **pick))
+        self.assertIn("already picked", call("content_studio_pick_topic", bots["Evaluator"], **pick))
+        post = studio.list_posts()[0]
+        strategy = {s["name"]: s["id"] for s in studio.list_strategies()}
+        self.assertEqual((post["title"], post["pick_reason"], post["evaluator_strategy_id"]),
+                         ("Black holes", "Rising this week.", strategy["track-record-weighted"]))
+        self.assertIn("has no script yet", call("content_studio_record_render", bots["Editor"], post_id=post["id"], status="ok", render_ref="/x.mp4"))
+        long_script = "Beat 1: open on the event horizon.\n" * 400
+        self.assertIn("Only the Script Writer", call("content_studio_save_script", bots["Editor"], post_id=post["id"], script="x"))
+        self.assertIn("Editor renders it next", call("content_studio_save_script", bots["Script Writer"], post_id=post["id"], script=long_script,
+                                                     caption="Light cannot escape.", title="What a black hole hides"))
+        post = studio.get_post(post["id"])
+        self.assertEqual((post["script_ref"], post["script_strategy_id"], post["title"]), (long_script.strip(), strategy["hook-first"], "What a black hole hides"),
+                         "no strategy named: the default is recorded")
+        self.assertIn("needs its render_ref", call("content_studio_record_render", bots["Editor"], post_id=post["id"], status="ok"))
+        self.assertIn("watch sees the failure", call("content_studio_record_render", bots["Editor"], post_id=post["id"], status="failed"))
+        self.assertEqual(pipeline.pipeline(studio)[0]["status"], "failed")
+        out = call("content_studio_record_render", bots["Editor"], post_id=post["id"], status="ok", render_ref="/generated-files/a_b.mp4", tags="space, physics")
+        self.assertIn("content_studio_submit_post", out)
+        call("content_studio_submit_post", bots["Editor"], post_id=post["id"])
+        self.assertIn("not drafted", call("content_studio_save_script", bots["Script Writer"], post_id=post["id"], script="late"))
+        self.assertIn("cannot become posted", call("content_studio_mark_posted", bots["Publisher"], post_id=post["id"], url="https://www.youtube.com/watch?v=dQw4w9WgXcQ"))
+        studio.approve(post["id"], "david")
+        for bad in ("http://www.youtube.com/watch?v=dQw4w9WgXcQ", "https://www.tiktok.com/@space/video/1", "https://youtube.com.evil.test/x"):
+            self.assertIn("https link of the live post", call("content_studio_mark_posted", bots["Publisher"], post_id=post["id"], url=bad), bad)
+        self.assertIn("Only the Publisher", call("content_studio_mark_posted", bots["Producer"], post_id=post["id"], url="https://youtu.be/dQw4w9WgXcQ"))
+        self.assertIn("can be recorded now", call("content_studio_mark_posted", bots["Publisher"], post_id=post["id"], url="https://youtu.be/dQw4w9WgXcQ"))
+        post = studio.get_post(post["id"])
+        self.assertEqual((post["state"], post["tags"], post["render_ref"]), ("posted", "space, physics", "/generated-files/a_b.mp4"))
+
+    def test_publisher_uploads_only_through_the_posting_connection(self):
+        bots = self.bots
+        post = self.rendered_post()
+        studio.submit_for_approval(post["id"])
+        self.assertIn("Only the Publisher", call("content_studio_publish_youtube", bots["Editor"], post_id=post["id"]))
+        self.assertIn("Only a post you approved", call("content_studio_publish_youtube", bots["Publisher"], post_id=post["id"]))
+        studio.approve(post["id"], "david")
+        self.assertIn("Connect YouTube posting first", call("content_studio_publish_youtube", bots["Publisher"], post_id=post["id"]))
+        from services.content_studio import youtube_publish
+
+        async def fake_publish(store, post_id, by, now=None):
+            return {"video_id": "NEWvideo_01", "url": "https://www.youtube.com/watch?v=NEWvideo_01", "privacy": "private",
+                    "asked_privacy": "public", "note": "YouTube kept it private."}
+        with patch.object(youtube_publish, "publish", fake_publish):
+            out = call("content_studio_publish_youtube", bots["Publisher"], post_id=post["id"])
+        self.assertIn("NEWvideo_01", out)
+        self.assertIn("kept it private", out)
+        self.assertIn("Only the Researcher", call("content_studio_youtube_trending", bots["Publisher"]))
+        self.assertIn("Connect YouTube analytics first", call("content_studio_youtube_trending", bots["Researcher"]))
+
+    def test_a_new_niche_is_proposed_confirmed_then_the_persons_call(self):
+        bots = self.bots
+        ask = dict(name="Deep sea", source="https://trends.example.test/deep-sea", signal="up 40% in 30 days")
+        self.assertIn("Only the Researcher", call("content_studio_propose_niche", bots["Producer"], **ask))
+        self.assertIn("already has that name", call("content_studio_propose_niche", bots["Researcher"], **{**ask, "name": "space"}))
+        self.assertIn("The Producer confirms it", call("content_studio_propose_niche", bots["Researcher"], **ask))
+        self.assertIn("already proposed", call("content_studio_propose_niche", bots["Researcher"], **ask))
+        decision = studio.list_decisions(kind="add")[0]
+        self.assertEqual((decision["status"], decision["payload"]["source"]), ("proposed", ask["source"]))
+        self.assertIn("waits for the person's OK", call("content_studio_confirm_decision", bots["Producer"], decision_id=decision["id"]))
+        self.assertEqual([n["name"] for n in studio.list_niches()], ["Space"], "nothing created by a bot")
+        done = review.confirm(studio, decision["id"], "user", "david")
+        self.assertEqual(done["status"], "confirmed")
+        created = studio.get_niche(done["payload"]["created_niche"])
+        self.assertEqual((created["name"], done["subject_id"]), ("Deep sea", created["id"]))
 
     def test_role_gating(self):
         bots = self.bots

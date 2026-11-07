@@ -348,3 +348,44 @@ async def sync_all_due(now=None, store_for=None):
             except Exception as exc:  # noqa: BLE001 - recorded, never raised into the scheduler
                 done[account_id] = f"failed: {exc}"
     return done
+
+
+# -- trends: YouTube's most-popular list (spec section 7) ---------------------------------------------
+
+_REGION = re.compile(r"^[A-Z]{2}$")
+
+
+async def trending(region="US", category_id=None, count=20, now=None):
+    """YouTube's most-popular chart for a region (and optionally a video category), through the same
+    read-only grant as the analytics. One quota unit per call. Each row keeps its source link and the date it
+    was read, so a trend claim made from it carries both. Raises YouTubeError when not connected."""
+    now = time.time() if now is None else now
+    region = (region or "US").strip().upper()
+    if not _REGION.match(region):
+        raise YouTubeError("region is a two-letter country code, such as US or GB")
+    if category_id is not None and not re.fullmatch(r"\d{1,4}", str(category_id)):
+        raise YouTubeError("category_id is a YouTube video category number")
+    count = max(1, min(int(count or 20), 50))
+    state, info, granted = _link()
+    if not state.get("google_account") or not granted:
+        raise YouTubeError("Connect YouTube analytics first; the most-popular list uses the same read-only permission.", 409)
+    params = {"part": "snippet,statistics,contentDetails", "chart": "mostPopular", "regionCode": region, "maxResults": count}
+    if category_id is not None:
+        params["videoCategoryId"] = str(category_id)
+    try:
+        data = await _call(state["google_account"], "youtube", "/videos", params)
+    except _Quota as exc:
+        raise YouTubeError("YouTube's quota ran out; try the most-popular list again later.", 429) from exc
+    read_on = _day(now)
+    rows = []
+    for item in data.get("items") or []:
+        snippet, stats = item.get("snippet") or {}, item.get("statistics") or {}
+        if not item.get("id"):
+            continue
+        rows.append({"title": str(snippet.get("title") or "")[:200], "channel": str(snippet.get("channelTitle") or "")[:100],
+                     "published_at": snippet.get("publishedAt"), "views": _count(stats.get("viewCount")),
+                     "likes": _count(stats.get("likeCount")), "comments": _count(stats.get("commentCount")),
+                     "length_s": iso_seconds((item.get("contentDetails") or {}).get("duration")),
+                     "source": f"https://www.youtube.com/watch?v={item['id']}", "read_on": read_on})
+    return {"region": region, "category_id": category_id, "read_on": read_on,
+            "source": f"YouTube Data API most-popular chart, {region}, read {read_on}", "videos": rows}

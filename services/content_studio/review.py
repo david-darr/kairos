@@ -7,7 +7,7 @@ ever creates an account or deletes anything: retired means out of the rotation, 
 import time
 
 from . import scoring
-from .store import DAY, StudioError, conflict
+from .store import DAY, HARD_MAX_NICHES, StudioError, conflict
 
 OPEN = ("proposed", "awaiting_user")
 
@@ -166,8 +166,37 @@ def run_review(store, now=None, dry_run=True, proposed_by="executor"):
 
 # -- confirming a proposal -----------------------------------------------------------------------
 
+def propose_niche(store, name, source, signal="", reason="", proposed_by="researcher", now=None):
+    """The Researcher's candidate new niche (spec sections 3 and 5), with its evidence. It is only a proposal:
+    the Producer confirms, then the person OKs it, because a new niche means channels only they can create."""
+    now = time.time() if now is None else now
+    name = (name or "").strip()
+    if not name or len(name) > 80:
+        raise StudioError("a niche name is 1 to 80 characters")
+    source = (source or "").strip()
+    if not source or len(source) > 300:
+        raise StudioError("a niche proposal needs its source (up to 300 characters)")
+    with store.lock:
+        live = store.list_niches("live")
+        if any(n["name"].lower() == name.lower() for n in live):
+            raise conflict("a live niche already has that name")
+        if any(d["payload"].get("name", "").lower() == name.lower()
+               for d in store.list_decisions(kind="add") if d["status"] in OPEN):
+            raise conflict("that niche is already proposed")
+        wanted = next((d for d in store.list_decisions(kind="replace") if d["subject_type"] == "niche" and d["status"] == "open"), None)
+        return store.add_decision(
+            "add", "niche", 0, name, "proposed", proposed_by, now=now,
+            reason=(reason or "").strip()[:300] or (f"A replacement for {wanted['subject_name']}." if wanted else "A candidate new niche."),
+            numbers={"live_niches": len(live), "cap": min(store.settings()["max_niches"], HARD_MAX_NICHES)},
+            payload={"name": name, "source": source, "signal": (signal or "").strip()[:300], "evidence_date": now,
+                     **({"replaces_request": wanted["id"]} if wanted else {})})
+
+
 def needs_user(store, decision):
-    """A retirement that archives channels needs the user's OK as well as the Producer's."""
+    """A retirement that archives channels needs the user's OK as well as the Producer's, and so does a new
+    niche: its channels are ones only the person can create."""
+    if decision["kind"] == "add":
+        return True
     if decision["kind"] != "retire":
         return False
     if decision["subject_type"] == "channel":
@@ -209,6 +238,10 @@ def reject(store, decision_id, name, reason="", now=None):
 
 
 def _apply(store, decision, name, now):
+    if decision["kind"] == "add" and decision["subject_type"] == "niche":
+        niche = store.create_niche(decision["payload"].get("name") or decision["subject_name"], now)
+        store.update_decision(decision["id"], subject_id=niche["id"])
+        return {"created_niche": niche["id"]}
     if decision["kind"] == "retire" and decision["subject_type"] == "niche":
         return _apply_retire_niche(store, decision, name, now)
     if decision["kind"] == "retire" and decision["subject_type"] == "channel":

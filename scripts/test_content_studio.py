@@ -473,6 +473,104 @@ class Settings(unittest.TestCase):
             store.update_settings(nonsense=1)
 
 
+class ChannelProfileBatchAndStrategies(unittest.TestCase):
+    def setUp(self):
+        self.store = make_store()
+        niche = self.store.create_niche("Space")
+        self.channel = self.store.create_channel(niche["id"], "youtube", "@space")
+
+    def rendered(self, title):
+        post = self.store.create_post(self.channel["id"], title, script_ref="beats")
+        self.store.edit_post(post["id"], render_ref="r.mp4", render_status="ok")
+        return self.store.submit_for_approval(post["id"])
+
+    def test_channel_look_aspect_and_notes(self):
+        s = self.store
+        got = s.edit_channel(self.channel["id"], look="neon-grid", aspect="16:9", notes="Dry humour.")
+        self.assertEqual((got["look"], got["aspect"], got["notes"]), ("neon-grid", "16:9", "Dry humour."))
+        self.assertEqual(s.edit_channel(self.channel["id"], notes="Warmer.")["look"], "neon-grid", "None leaves a field alone")
+        self.assertIsNone(s.edit_channel(self.channel["id"], look="", aspect="")["look"])
+        for bad in ({"aspect": "4:3"}, {"look": "bad look!"}, {"notes": "x" * 1001}):
+            with self.assertRaises(StudioError):
+                s.edit_channel(self.channel["id"], **bad)
+
+    def test_batch_approval_is_off_until_turned_on_and_skips_what_cannot_be_approved(self):
+        s = self.store
+        a, b, c = self.rendered("A"), self.rendered("B"), self.rendered("C")
+        with self.assertRaises(StudioError) as off:
+            s.approve_batch([a["id"], b["id"]], "david")
+        self.assertEqual(off.exception.status, 409)
+        self.assertEqual(s.get_post(a["id"])["state"], "awaiting_approval")
+        s.update_settings(batch_approval=True)
+        with self.assertRaises(StudioError):
+            s.update_settings(batch_approval="yes")
+        s.reject(c["id"], "no")
+        result = s.approve_batch([a["id"], b["id"], c["id"], a["id"], 999], "david")
+        self.assertEqual([p["id"] for p in result["approved"]], [a["id"], b["id"]])
+        self.assertEqual([x["post_id"] for x in result["skipped"]], [c["id"], 999])
+        self.assertEqual({s.get_post(i)["approved_by"] for i in (a["id"], b["id"])}, {"david"})
+        with self.assertRaises(StudioError):
+            s.approve_batch([], "david")
+
+    def test_strategies_are_recorded_while_drafting_and_scripts_can_be_long(self):
+        s = self.store
+        hook = s.create_strategy("script_writer", "hook-first")
+        pick = s.create_strategy("evaluator", "trend-weighted")
+        post = s.create_post(self.channel["id"], "Long one", pick_reason="Rising.")
+        script = "beat\n" * 3000
+        post = s.edit_post(post["id"], script_ref=script, script_strategy_id=hook["id"], evaluator_strategy_id=pick["id"], tags="a, b")
+        self.assertEqual((post["script_strategy_id"], post["evaluator_strategy_id"], post["pick_reason"], post["tags"]),
+                         (hook["id"], pick["id"], "Rising.", "a, b"))
+        self.assertEqual(len(post["script_ref"]), len(script.strip()))
+        with self.assertRaises(StudioError):
+            s.edit_post(post["id"], script_strategy_id=pick["id"])  # an evaluator strategy is not a script strategy
+        with self.assertRaises(StudioError):
+            s.edit_post(post["id"], script_ref="x" * 20001)
+
+    def test_a_niche_proposal_needs_the_producer_and_then_the_person(self):
+        s = self.store
+        with self.assertRaises(StudioError):
+            review.propose_niche(s, "Deep sea", "")
+        decision = review.propose_niche(s, "Deep sea", "https://trends.example.test", "up 40%")
+        self.assertTrue(review.needs_user(s, decision))
+        waiting = review.confirm(s, decision["id"], "producer", "Producer")
+        self.assertEqual(waiting["status"], "awaiting_user")
+        self.assertEqual(len(s.list_niches()), 1)
+        done = review.confirm(s, decision["id"], "user", "david")
+        self.assertEqual((done["status"], s.get_niche(done["subject_id"])["name"]), ("confirmed", "Deep sea"))
+        other = review.propose_niche(s, "Bees", "https://trends.example.test/bees")
+        self.assertEqual(review.reject(s, other["id"], "Producer", "thin")["status"], "rejected")
+        self.assertEqual(len(s.list_niches()), 2, "a rejected proposal creates nothing")
+
+    def test_a_niche_proposal_answers_an_open_replacement_request(self):
+        s = self.store
+        s.add_decision("replace", "niche", self.channel["niche_id"], "Old niche", "open", "executor")
+        decision = review.propose_niche(s, "Deep sea", "https://trends.example.test")
+        self.assertIn("replacement for Old niche", decision["reason"])
+        review.confirm(s, decision["id"], "user", "david")
+        ask = s.list_decisions(kind="replace")[0]
+        self.assertEqual((ask["status"], ask["payload"]["replaced_by_name"]), ("confirmed", "Deep sea"))
+
+    def test_older_stores_gain_the_new_columns(self):
+        import sqlite3
+        folder = tempfile.mkdtemp(prefix="studio-old-", dir=_DATA.name)
+        path = os.path.join(folder, "studio.db")
+        old = sqlite3.connect(path)
+        old.executescript(
+            "CREATE TABLE niches (id INTEGER PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'live', slots INTEGER NOT NULL DEFAULT 1, "
+            "created_at REAL NOT NULL, retired_at REAL, retire_reason TEXT);"
+            "CREATE TABLE channels (id INTEGER PRIMARY KEY, niche_id INTEGER NOT NULL, platform TEXT NOT NULL, handle TEXT NOT NULL, "
+            "status TEXT NOT NULL DEFAULT 'live', paused INTEGER NOT NULL DEFAULT 0, created_at REAL NOT NULL, archived_at REAL, archive_reason TEXT);"
+            "INSERT INTO niches (id, name, created_at) VALUES (1, 'Old', 1); INSERT INTO channels (id, niche_id, platform, handle, created_at) VALUES (1, 1, 'youtube', '@old', 1);")
+        old.commit(); old.close()
+        store = Store(path)
+        _STORES.append(store)
+        channel = store.get_channel(1)
+        self.assertEqual((channel["look"], channel["aspect"], channel["notes"]), (None, None, ""))
+        post = store.create_post(1, "New", pick_reason="why")
+        self.assertEqual((post["pick_reason"], post["tags"]), ("why", ""))
+
+
 class Api(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -553,6 +651,8 @@ class Api(unittest.TestCase):
         self.assertEqual(d.post(f"{P}/review/run", json={"dry_run": False}).status_code, 200)
         self.assertEqual(d.post(f"{P}/review/run", json={"dry_run": False}).status_code, 409)
         self.assertEqual(d.post(f"{P}/decisions/1/confirm").status_code, 404)
+        # The API is the person's: nobody confirms "as the Producer" through it.
+        self.assertEqual(d.post(f"{P}/decisions/1/confirm", json={"actor": "producer"}).status_code, 403)
         self.assertIn("Content Studio weekly report", d.get(f"{P}/report").json()["text"])
         self.assertIn("findings", d.get(f"{P}/watch").json())
         self.assertEqual(d.put(f"{P}/settings", json={"max_niches": 9}).status_code, 400)
@@ -567,6 +667,22 @@ class Api(unittest.TestCase):
         self.assertEqual([x["kind"] for x in d.get(f"{P}/decisions").json()["decisions"]], ["retire"])
         self.assertEqual(d.post(f"{P}/channels/{channel['id']}/restore").json()["status"], "live")
         self.assertEqual(b.get(f"{P}/decisions").json()["decisions"], [])
+
+        # The channel's look, and one-tap batch approval once it is turned on.
+        edited = d.post(f"{P}/channels/{channel['id']}/edit", json={"look": "neon-grid", "aspect": "9:16", "notes": "Calm."}).json()
+        self.assertEqual((edited["look"], edited["aspect"], edited["notes"]), ("neon-grid", "9:16", "Calm."))
+        self.assertEqual(d.post(f"{P}/channels/{channel['id']}/edit", json={"aspect": "4:3"}).status_code, 400)
+        self.assertEqual(b.post(f"{P}/channels/{channel['id']}/edit", json={"look": "x"}).status_code, 404)
+        batch = d.post(f"{P}/posts", json={"channel_id": channel["id"], "title": "Batch one", "script_ref": "beats", "pick_reason": "why"}).json()
+        d.post(f"{P}/posts/{batch['id']}/edit", json={"render_ref": "r.mp4", "render_status": "ok", "tags": "a, b"})
+        d.post(f"{P}/posts/{batch['id']}/submit")
+        self.assertEqual(d.post(f"{P}/approvals/approve-batch", json={"post_ids": [batch["id"]]}).status_code, 409)
+        self.assertTrue(d.put(f"{P}/settings", json={"batch_approval": True}).json()["batch_approval"])
+        out = d.post(f"{P}/approvals/approve-batch", json={"post_ids": [batch["id"]]}).json()
+        self.assertEqual(([p["id"] for p in out["approved"]], out["skipped"]), ([batch["id"]], []))
+        self.assertEqual(b.post(f"{P}/approvals/approve-batch", json={"post_ids": [batch["id"]]}).status_code, 409, "bea's own setting is off")
+        got = d.get(f"{P}/posts/{batch['id']}").json()
+        self.assertEqual((got["pick_reason"], got["tags"], got["direct_post_blocker"]), ("why", "a, b", "Connect YouTube posting first."))
 
     def test_delivery_routes_reach_the_inbox_only_for_the_accounts_own_producer(self):
         d, b = self.clients["cy"], self.clients["bea"]
