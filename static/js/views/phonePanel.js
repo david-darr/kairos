@@ -142,10 +142,10 @@ export async function renderPhonePanel(content) {
       row({ title: 'Conversation model', description: 'A fast API or local model, like the one used in app calls.', control: modelSelect }),
     ]),
     note('Calls from a bot to you always start with "This is <bot>, an AI assistant from Kairos." and go only to your mobile.'),
-    group({ title: 'Calls to other people', description: 'A bot can phone someone for you, such as a restaurant or a client. You approve every call before it is placed, at every approval level. The call opens with "Hi, this is <bot>, an AI assistant calling on behalf of <your name>. This call is transcribed." While it runs you see a live transcript, answer the bot's questions and can hang up. A summary lands in the bot's conversation afterwards.' }, [
+    group({ title: 'Calls to other people', description: 'A bot can phone someone for you, such as a restaurant or a client. You approve every call before it is placed, at every approval level. The call opens with "Hi, this is <bot>, an AI assistant calling on behalf of <your name>. This call is transcribed." While it runs you see a live transcript, answer the bot\'s questions and can hang up. A summary lands in the bot\'s conversation afterwards.' }, [
       row({ title: 'Calls to other people', description: 'Off by default.', control: others }),
       field('Your name for calls', input('caller_name', 'text', 'David Darr'), 'Said at the start of every call to someone else, so they know who it is for.'),
-      row({ title: 'Limits', description: 'One call at a time, a minute apart, between 8 am and 9 pm by this computer's clock. Each day: 3 per bot, 5 per account and 2 to any one number. Ten minutes at most. Never to your own numbers or premium-rate numbers. When someone asks not to be called again, their number is blocked.' }),
+      row({ title: 'Limits', description: 'One call at a time, a minute apart, between 8 am and 9 pm by this computer\'s clock. Each day: 3 per bot, 5 per account and 2 to any one number. Ten minutes at most. Never to your own numbers or premium-rate numbers. When someone asks not to be called again, their number is blocked.' }),
       othersWarning,
     ]),
     group({ title: 'Recent calls to other people' }, callRows.length ? callRows : [row({ title: 'No calls yet.' })]),
