@@ -261,9 +261,6 @@ async def retry_with_model(session_id: str, body: FallbackRequest, user: str = D
         raise HTTPException(409, "This failed response has partial text or tool activity. Switch models and continue instead.")
     if endpoint["id"] == failed.get("failure_model_endpoint_id"):
         raise HTTPException(400, "Choose a different model for fallback")
-    floor = (session.get("compactions") or [{}])[-1].get("through_index", 0)
-    if index - 1 < floor:
-        raise HTTPException(409, "This message is inside a compacted part of the chat")
     saved_attachments = original.get("attachments") or []
     if not saved_attachments and "[Attached file(s)" in (original.get("sent") or ""):
         raise HTTPException(409, "The original attachments cannot be restored. Reattach them before sending again.")

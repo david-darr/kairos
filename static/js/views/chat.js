@@ -147,11 +147,12 @@ function messageCard(role, text, ts, status = 'complete', imageSources = [], fai
 // with everything after it removed. The model then gets the trimmed chat
 // replayed as text, which costs one full cache miss and, for Claude and
 // Codex, keeps earlier tool calls only as what the replies said about them.
-// Only messages after the latest compaction can be cut back to. Forking
-// keeps the source intact and can begin at any saved message.
+// Any message can be cut back to, a compacted one too (2026-11-07: compaction
+// is invisible, so it must not take Edit away; the server drops a fold the cut
+// reaches into). Forking keeps the source intact and can begin at any saved
+// message.
 function addRewindActions(messages, session) {
   const history = session.messages || [];
-  const floor = (session.compactions || []).at(-1)?.through_index || 0;
   const cards = [...messages.querySelectorAll(':scope > .msg')];
   if (cards.length !== history.length) return; // not a plain rendering of this history
   const lastAssistant = history.map((m) => m.role).lastIndexOf('assistant');
@@ -164,12 +165,12 @@ function addRewindActions(messages, session) {
     row.prepend(el('button', { type: 'button', class: 'msg-action-btn msg-fork',
       title: 'Fork chat from this message', text: 'Fork',
       onclick: () => forkFrom(session, index) }));
-    if (index < floor) return;
+    if (msg.display_only) return;
     if (msg.role === 'user' && msg.content) {
       row.prepend(el('button', { type: 'button', class: 'msg-action-btn msg-edit', title: 'Edit and resend', text: 'Edit',
         onclick: () => rewindTo(session, index, msg, { edit: true }) }));
     }
-    if (index === lastAssistant && index > floor && history[index - 1]?.role === 'user') {
+    if (index === lastAssistant && index > 0 && history[index - 1]?.role === 'user') {
       if (msg.status === 'failed' && ['model_error', 'rate_limited'].includes(msg.failure_kind)) {
         row.prepend(el('button', { type: 'button', class: 'msg-action-btn msg-fallback',
           title: 'Choose another model after this failure',

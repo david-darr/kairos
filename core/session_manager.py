@@ -649,14 +649,30 @@ class SessionManager:
         forgotten - the Claude CLI session, the Codex thread - so the next
         turn replays the trimmed transcript as text (a full cache miss, and
         earlier tool calls survive only as the replies' text; David accepted
-        that). The caller also closes the live brain. A compacted stretch
-        cannot be cut into: its messages are what the summary stands for."""
+        that). The caller also closes the live brain.
+
+        A cut into a compacted stretch is allowed (2026-11-07, seamless
+        compaction: the person never sees where a fold was, so every message
+        keeps its Edit). A fold that reaches past the cut summarised messages
+        that are now gone, so it is dropped, and the kept messages it covered
+        are sent word for word again; an earlier fold still applies."""
         session = self._require(session_id)
         messages = session.get("messages", [])
+        if not 0 <= keep < len(messages):
+            raise ValueError(f"can only rewind to between message 0 and {len(messages) - 1}")
+        rebuild_from = keep
         compactions = session.get("compactions") or []
-        floor = compactions[-1]["through_index"] if compactions else 0
-        if not floor <= keep < len(messages):
-            raise ValueError(f"can only rewind to between message {floor} and {len(messages) - 1}")
+        kept_folds = [c for c in compactions if c.get("through_index", 0) <= keep]
+        if len(kept_folds) != len(compactions):
+            floor = kept_folds[-1]["through_index"] if kept_folds else 0
+            for message in messages[floor:keep]:
+                message.pop("archived", None)
+            session["compactions"] = kept_folds
+            rebuild_from = floor
+        prune_before = session.get("tool_prune_before_ts")
+        if prune_before and (not keep or (messages[keep - 1].get("ts") or 0) < prune_before):
+            # The no-model prune must never reach the kept chat's last exchange.
+            session.pop("tool_prune_before_ts", None)
         session["messages"] = messages[:keep]
         _clear_claude_session(session)
         session["codex_thread_id"] = None
@@ -665,7 +681,7 @@ class SessionManager:
         if session.get("open_mic_started_at", 0) > keep:
             session.pop("open_mic_started_at", None)
         session["updated_at"] = time.time()
-        return store.save_session(session, rebuild_messages_from=keep)
+        return store.save_session(session, rebuild_messages_from=rebuild_from)
 
     def set_project(self, session_id: str, project_id: Optional[str]) -> dict:
         """Assigns a session to a project (core/projects.py), or clears it

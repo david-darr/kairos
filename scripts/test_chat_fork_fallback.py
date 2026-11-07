@@ -220,16 +220,15 @@ class FallbackTests(unittest.TestCase):
             accepted, _ = self.post(3, "vision")
         self.assertEqual(accepted.status_code, 200, accepted.text)
 
-    def test_a_compacted_message_is_never_cut_by_fallback(self):
+    def test_a_fallback_into_a_compacted_stretch_drops_the_fold_it_reaches(self):
+        # Seamless compaction (2026-11-07): a fold the person never saw must not block a retry.
         failed_turn(self.sid)
-        session_manager.get_session(self.sid)
-        with patch.object(session_manager, "get_session", wraps=session_manager.get_session) as getter:
-            real = session_manager.get_session(self.sid)
-            real["compactions"] = [{"through_index": 3}]
-            getter.side_effect = lambda sid: real if sid == self.sid else None
-            response, _ = self.post(3, "b")
-        self.assertEqual(response.status_code, 409)
-        self.assertIn("compacted", response.json()["detail"])
+        session_manager.compact_session(self.sid, 3, "the earlier exchange and the question")
+        response, _ = self.post(3, "b")
+        self.assertEqual(response.status_code, 200, response.text)
+        session = session_manager.get_session(self.sid)
+        self.assertEqual([m["content"] for m in session["messages"]], ["earlier", "earlier answer"])
+        self.assertEqual(session.get("compactions") or [], [])
 
 
 class ConcurrentChatIsolation(unittest.TestCase):

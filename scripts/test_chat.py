@@ -2528,14 +2528,27 @@ class RewindTests(unittest.TestCase):
         history = session_manager.effective_messages(self.sid, exclude_last=True)
         self.assertEqual([m["content"] for m in history], ["first question", "first answer"], "what local models are seeded with")
 
-    def test_it_refuses_to_cut_into_a_compacted_stretch_or_past_the_end(self):
+    def test_it_refuses_to_cut_past_the_end(self):
         session_manager.compact_session(self.sid, 2, "the first exchange")
-        for keep in (1, 4, 99, -1):
+        for keep in (4, 99, -1):
             with self.assertRaises(ValueError, msg=keep):
                 session_manager.rewind(self.sid, keep)
         self.assertEqual(len(session_manager.get_session(self.sid)["messages"]), 4, "nothing changed")
         session_manager.rewind(self.sid, 2)
-        self.assertEqual(len(session_manager.get_session(self.sid)["messages"]), 2)
+        session = session_manager.get_session(self.sid)
+        self.assertEqual(len(session["messages"]), 2)
+        self.assertEqual(len(session["compactions"]), 1, "a fold that ends at the cut still applies")
+
+    def test_a_cut_into_a_compacted_stretch_drops_the_fold_it_reaches(self):
+        # Seamless compaction (2026-11-07): compaction is invisible, so it must not take Edit away.
+        session_manager.compact_session(self.sid, 2, "the first exchange")
+        session_manager.rewind(self.sid, 1)
+        session = session_manager.get_session(self.sid)
+        self.assertEqual([m["content"] for m in session["messages"]], ["first question"])
+        self.assertEqual(session.get("compactions") or [], [], "the fold summarised a message that is gone")
+        self.assertFalse(session["messages"][0].get("archived"))
+        self.assertEqual([m["content"] for m in session_manager.effective_messages(self.sid)], ["first question"],
+                         "the kept message is sent word for word again")
 
     def test_the_route_closes_the_connection_and_refuses_while_a_reply_runs(self):
         with patch.object(chat_service, "close_session_brain", AsyncMock()) as closed:
