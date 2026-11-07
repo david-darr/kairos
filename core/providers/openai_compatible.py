@@ -85,6 +85,30 @@ def _parse_tool_arguments(raw) -> dict:
         return {}
 
 
+def call_quality(fn: dict, tools: Optional[list[dict]], repaired: bool = False) -> str:
+    """How well-formed one tool call was (Session Usage and Model Tracking, unit 3): repaired (rescued from
+    the reply's text), invalid_json (arguments that are not JSON), unknown_tool (a name this turn did not
+    offer), missing_arguments (none given where the tool requires some) or clean. Counted per run, so the
+    local and API models most likely to emit broken calls can be compared."""
+    if repaired:
+        return "repaired"
+    raw = fn.get("arguments")
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return "invalid_json"
+        if not isinstance(parsed, dict):
+            return "invalid_json"
+    offered = {t["function"]["name"]: t["function"] for t in tools or [] if t.get("type") == "function"}
+    if offered and fn.get("name") not in offered:
+        return "unknown_tool"
+    required = ((offered.get(fn.get("name")) or {}).get("parameters") or {}).get("required") or []
+    if required and not _parse_tool_arguments(raw):
+        return "missing_arguments"
+    return "clean"
+
+
 def _extract_fake_tool_call(content: Optional[str], tools: Optional[list[dict]]) -> Optional[dict]:
     """See module docstring. Returns an OpenAI-shaped tool_calls entry if
     `content` is a JSON object naming one of this turn's real tools, else
@@ -504,9 +528,11 @@ async def turn_events(base_url: str, model: str, api_key: Optional[str], message
                 yield usage
             message = data["choices"][0]["message"]
             tool_calls = message.get("tool_calls")
+            repaired = False
             if not tool_calls and tool_executor:
                 rescued, prose = _rescue_tool_call(message.get("content"), tools)
                 if rescued:
+                    repaired = True
                     tool_calls = [rescued]
                     message = {"role": "assistant", "content": prose, "tool_calls": tool_calls}
             if not tool_calls or not tool_executor:
@@ -523,7 +549,7 @@ async def turn_events(base_url: str, model: str, api_key: Optional[str], message
                     fn = call["function"]
                     args = _parse_tool_arguments(fn.get("arguments"))
                     call_id = call.get("id") or f"call-{round_num}-{answered}"
-                    yield runs.tool_started(call_id, fn["name"], args)
+                    yield runs.tool_started(call_id, fn["name"], args, quality=call_quality(fn, tools, repaired))
                     running = True
                     result = await tool_executor(fn["name"], args)
                     running = False

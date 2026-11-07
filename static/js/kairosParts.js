@@ -1,6 +1,7 @@
 import { api, el, modelMark } from './api.js';
 import { createMascot } from './mascot.js';
 import { SIGN_IN, toneOf, pctText, resetCopy, staleOf, ago, usedCopy, modelGroups, tokensCopy, TOKENS_TITLE } from './quotaReadings.js';
+import { speedLine, statsTitle } from './modelStats.js';
 
 export function segmented({ label, options, value, onChange }) {
   const track = el('div', { class: 'rd-segmented', role: 'radiogroup', 'aria-label': label });
@@ -97,6 +98,8 @@ export function usageCard({ models = [] }) {
       section.append(el('p', { class: 'rd-usage-tokens', title: TOKENS_TITLE, text: tokensCopy(group.recorded) }));
       if (group.status === 'unavailable') section.append(el('p', { class: 'rd-usage-note', text: snap?.note || 'Usage could not be read right now.' }));
     }
+    const speed = speedLine(group.stats);
+    if (speed) section.append(el('p', { class: 'rd-usage-note rd-usage-speed', title: statsTitle(group.stats), text: speed }));
     card.append(section);
   }
   return card;

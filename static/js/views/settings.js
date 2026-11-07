@@ -11,6 +11,7 @@ import { renderAppearancePanel } from './appearancePanel.js';
 import { renderLayoutPanel } from './layoutPanel.js';
 import { renderChannelsPanel } from "./settingsChannels.js";
 import { runSummary, surfaceLabel, toggleRunTimeline } from "../runTimeline.js";
+import { speedLine, statsTitle } from "../modelStats.js";
 import { renderHooksPanel } from "./settingsHooks.js";
 import { pageHeader, group, row, field, toggle, pill, note, empty, badge, hueFor, staggerEntrance } from "../settingsKit.js";
 import { addReaIntegration } from "../reaSetup.js";
@@ -873,6 +874,8 @@ async function renderAddedModelsPanel(body, status, page) {
   // A member may not read the full list; the picker's list (name and model only) still shows what they can use.
   const endpoints = await api("/api/models").catch((error) => (status?.is_admin ? Promise.reject(error) : api("/api/models/choices")));
   const tests = [];
+  // Each connection's measured speed and reliability over the last 7 days (Session Usage and Model Tracking).
+  const measured = (await api("/api/models/stats").catch(() => null))?.endpoints || {};
   // Admins can share each of their own connections with chosen people (core/model_endpoints.py set_shares).
   const canShare = !!(status?.is_admin && status?.auth_enabled);
   const people = canShare ? (await api("/api/auth/users").catch(() => [])).filter((u) => u.username !== status.username) : [];
@@ -935,6 +938,8 @@ async function renderAddedModelsPanel(body, status, page) {
     }
     controls.push(el("button", { class: "btn", text: "Test", onclick: runTest }));
     if (!ep.shared) controls.push(remove);
+    const speed = speedLine(measured[ep.id]);
+    if (speed) below = [el("div", { class: "set-row-description model-stats-line", text: speed, title: statsTitle(measured[ep.id]) }), below];
     return row({ title: [modelMark(ep.mark, ep.name), el("span", { text: ep.name })].filter(Boolean), description: meta, control: controls, below,
       cls: "model-row", attrs: { "data-endpoint": ep.id } });
   }

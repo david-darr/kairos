@@ -4,16 +4,18 @@ API key happens here, at the boundary, same as Discord's token in
 settings_routes.py — core/model_endpoints.py itself never sees a plaintext
 key from a caller that didn't already go through encrypt().
 """
+import logging
 import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from core import cli_env, model_catalog, model_discovery, model_endpoints, model_marks, quota_usage, runs, token_usage
+from core import cli_env, model_catalog, model_discovery, model_endpoints, model_marks, model_stats, quota_usage, runs, token_usage
 from core.middleware import require_admin, require_user
 from core.providers import openai_compatible
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/models", tags=["models"])
 
 
@@ -92,8 +94,26 @@ async def get_usage(user: str = Depends(require_user)) -> dict:
 @router.get("/quotas")
 async def get_quotas(user: str = Depends(require_user)) -> dict:
     """Account quota windows (`providers`) and every connected model with its
-    quota or JARVIS-recorded tokens (`models`); see core/quota_usage.py."""
-    return await quota_usage.get_usage_overlay_async()
+    quota or JARVIS-recorded tokens (`models`); see core/quota_usage.py. Each
+    model also carries its measured speed and reliability over the last 7 days
+    (`stats`, core/model_stats.py; null when it has no runs)."""
+    overlay = await quota_usage.get_usage_overlay_async()
+    try:
+        measured = model_stats.stats()["endpoints"]
+    except Exception:
+        logger.exception("model stats could not be read")
+        measured = {}
+    return {**overlay, "models": [{**m, "stats": measured.get(m.get("id"))} for m in overlay.get("models") or []]}
+
+
+@router.get("/stats")
+async def get_model_stats(days: int = model_stats.DEFAULT_DAYS, user: str = Depends(require_user)) -> dict:
+    """Each connection's and model's measured speed and reliability from this account's own runs
+    (Session Usage and Model Tracking, unit 3): runs, median and p90 time to first output, median tok/s,
+    failure and stop rates by error class, tool-call quality and tokens. 7 days by default, up to 90."""
+    if not 1 <= days <= model_stats.MAX_DAYS:
+        raise HTTPException(status_code=400, detail=f"days is 1 to {model_stats.MAX_DAYS}")
+    return model_stats.stats(days)
 
 
 class RefreshQuotaRequest(BaseModel):

@@ -1172,6 +1172,14 @@ def session_runs(session_id: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def runs_since(since: float, limit: int = RUNS_KEPT) -> list[dict]:
+    """Every run started at or after `since`, newest first (core/model_stats.py)."""
+    with _LOCK:
+        rows = _connect().execute("SELECT * FROM runs WHERE started_at >= ? ORDER BY started_at DESC LIMIT ?",
+                                  (since, limit)).fetchall()
+    return [dict(r) for r in rows]
+
+
 def get_run(run_id: str) -> Optional[dict]:
     with _LOCK:
         row = _connect().execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()

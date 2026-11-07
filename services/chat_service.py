@@ -1030,9 +1030,13 @@ def _forge_tool_summary(detail: str) -> str:
 
 def _run_context(session_id: str, endpoint: dict, is_admin: bool) -> runs.RunContext:
     session = session_manager.get_session(session_id) or {}
-    return runs.RunContext("chat", session_id=session_id, endpoint_id=endpoint["id"], model_kind=endpoint.get("kind"),
-                           model=session.get("model_override") or endpoint.get("model"),
-                           is_admin=is_admin, agent_id=session.get("agent_id"))
+    context = runs.RunContext("chat", session_id=session_id, endpoint_id=endpoint["id"], model_kind=endpoint.get("kind"),
+                              model=session.get("model_override") or endpoint.get("model"),
+                              is_admin=is_admin, agent_id=session.get("agent_id"))
+    # Retries Kairos itself makes (a bot's backup model, _BotRecovery): none unless one is tried. A CLI's own
+    # internal retries are not visible here.
+    context.counters["retries"] = 0
+    return context
 
 
 def _recovery_extra(brain):
@@ -1091,6 +1095,8 @@ class _BotRecovery:
 
         async def attempt(selection):
             backup = selection is not primary
+            if backup:
+                self.context.counters["retries"] = self.context.counters.get("retries", 0) + 1
             endpoint = model_endpoints.get_endpoint(selection["endpoint_id"]) if backup else self.primary
             self.endpoint = endpoint
             self.recovered = backup

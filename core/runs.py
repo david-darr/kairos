@@ -29,6 +29,7 @@ import contextlib
 import contextvars
 import json
 import logging
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -103,8 +104,13 @@ def text(chunk: str) -> RunEvent:
     return RunEvent(EventKind.TEXT, {"text": chunk})
 
 
-def tool_started(call_id: str, name: str, arguments) -> RunEvent:
-    return RunEvent(EventKind.TOOL_STARTED, {"id": call_id, "name": name, "input": clip(arguments)})
+def tool_started(call_id: str, name: str, arguments, quality: Optional[str] = None) -> RunEvent:
+    """quality (unit 3): how well-formed the model's call was, for local and API models whose calls Kairos
+    parses itself: clean, repaired, invalid_json, unknown_tool or missing_arguments. None when not judged."""
+    data = {"id": call_id, "name": name, "input": clip(arguments)}
+    if quality:
+        data["quality"] = quality
+    return RunEvent(EventKind.TOOL_STARTED, data)
 
 
 def tool_finished(call_id: str, ok: bool, output) -> RunEvent:
@@ -143,6 +149,8 @@ class RunContext:
     reported_cost_usd: Optional[float] = None
     # Chosen by the trusted recovery adapter, never by a model argument.
     actual_model: dict = field(default_factory=dict, compare=False)
+    # Counted while the run goes (unit 3): "retries", backup attempts after a provider failed to start.
+    counters: dict = field(default_factory=dict, compare=False)
     computer_events: list = field(default_factory=list, compare=False)
     computer_queue: asyncio.Queue = field(default_factory=asyncio.Queue, compare=False)
 
@@ -379,6 +387,8 @@ class Tally:
     # tok/s. Visible text only: a run that shows none keeps both None.
     first_output_at: Optional[float] = None
     last_output_at: Optional[float] = None
+    # Tool-call quality counts (unit 3), only from adapters that judge their calls.
+    tool_quality: dict = field(default_factory=dict)
 
     def step(self, kind: str, name: Optional[str] = None, ok: Optional[bool] = None, detail="",
              seconds: Optional[float] = None) -> None:
@@ -411,6 +421,8 @@ class Tally:
                 "cache_read": usage.cache_read_tokens, "cache_write": usage.cache_write_tokens,
             }))
         elif item.kind is EventKind.TOOL_STARTED:
+            if item.data.get("quality"):
+                self.tool_quality[item.data["quality"]] = self.tool_quality.get(item.data["quality"], 0) + 1
             self._tools[item.data.get("id")] = (item.data.get("name"), time.time())
             self.step("tool_started", item.data.get("name"), detail=item.data.get("input") or "")
         elif item.kind is EventKind.TOOL_FINISHED:
@@ -432,6 +444,29 @@ class Tally:
     @property
     def usage_complete(self) -> bool:
         return self.finished is not None and self.finished.data.get("usage_complete") is True
+
+
+# A failed run's error, by kind (unit 3), read from its recorded detail ("Type: message"), so reliability can
+# be measured by cause. Overflow is checked first: it often arrives as a plain 400.
+_ERROR_PATTERNS = (
+    ("overflow", r"context[ _-]?length|context window|maximum context|too many tokens|prompt is too long|"
+                 r"exceeds? the (?:context|maximum)|input is too long|reduce the length"),
+    ("auth", r"\b40[13]\b|unauthori[sz]ed|forbidden|invalid[ _-]?api[ _-]?key|authenticat|not (?:logged|signed) in|"
+             r"permission denied|credential"),
+    ("rate_limit", r"\b429\b|rate[ _-]?limit|too many requests|quota|usage limit|insufficient_quota"),
+    ("overload", r"\b5(?:00|02|03|04|29)\b|overloaded|server error|service unavailable|bad gateway|capacity"),
+    ("network", r"connecterror|connecttimeout|readtimeout|timeouterror|timed? ?out|connection (?:refused|reset|"
+                r"aborted|error)|network|getaddrinfo|name resolution|remoteprotocolerror|unreachable"),
+)
+
+
+def error_class(detail: str) -> str:
+    """rate_limit, overload, overflow, auth, network or other."""
+    text = (detail or "").lower()
+    for name, pattern in _ERROR_PATTERNS:
+        if re.search(pattern, text):
+            return name
+    return "other"
 
 
 def record(context: RunContext, tally: Tally, outcome: str, stop: Optional[StopResult] = None,
@@ -471,6 +506,9 @@ def record(context: RunContext, tally: Tally, outcome: str, stop: Optional[StopR
             "first_output_at": tally.first_output_at, "last_output_at": tally.last_output_at,
             # Schema v10.
             "purpose": context.purpose,
+            "error_class": error_class(detail) if outcome == "failed" else None,
+            "retries": context.counters.get("retries"),
+            "tool_quality": json.dumps(tally.tool_quality, sort_keys=True) if tally.tool_quality else None,
         }
         session_manager_store.record_run(row, timeline)
     except Exception:

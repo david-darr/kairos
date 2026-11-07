@@ -1418,6 +1418,15 @@
       m3: { fresh_tokens: 842000, cache_read_tokens: 0, unsplit_tokens: 0, total_tokens: 842000 },
     };
     // Account limits for Home's "Your models" and the overlay (quotaReadings.js);
+    // Each connection's speed and reliability over 7 days (Session Usage and Model Tracking): Claude has enough runs,
+    // the local model too few to say.
+    if (route === "/api/models/stats") return { days: 7, min_samples: 5, source: "runs", models: [], endpoints: {
+      m1: { endpoint_id: "m1", kind: "claude_cli", runs: 24, enough_data: true, finished: 23, failed: 1, stopped: 0, failures_by_class: { overload: 1 },
+        ttft_median_s: 1.4, ttft_p90_s: 3.1, tokens_per_second_median: 58.2, tool_quality: null, recent_outcomes: ["finished", "finished", "failed"],
+        cost: { total_usd: null, statuses: { included: 24 }, sources: [] }, not_reported: ["tool-call quality (Claude Code runs its own tools)"] },
+      m3: { endpoint_id: "m3", kind: "local", runs: 3, enough_data: false, finished: 3, failed: 0, stopped: 0, failures_by_class: {},
+        ttft_median_s: null, ttft_p90_s: null, tokens_per_second_median: null, recent_outcomes: ["finished", "finished", "finished"],
+        cost: { total_usd: null, statuses: { included: 3 }, sources: [] }, not_reported: [] } } };
     // state.quotas lets ui-smoke try a signed-out or stale reading.
     if (route === "/api/models/quotas") {
       const reading = state.quotas || { providers: [

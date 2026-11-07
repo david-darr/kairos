@@ -20,7 +20,7 @@ const context = {
 };
 vm.createContext(context);
 const load = file => fs.readFileSync(file, 'utf8').replace(/^import .*;\r?\n/gm, '').replace(/export /g, '');
-vm.runInContext(load('static/js/quotaReadings.js') + '\n' + load('static/js/kairosParts.js') + '\nthis.render = usageCard;', context);
+vm.runInContext(load('static/js/quotaReadings.js') + '\n' + load('static/js/modelStats.js') + '\n' + load('static/js/kairosParts.js') + '\nthis.render = usageCard;', context);
 // The quotas route's `models`: one entry per endpoint, subscriptions first.
 const sub = (id, provider, quota, extra = {}) => ({ id, name: provider, kind: provider + '_cli', provider, status: 'connected', quota, ...extra });
 const one = quota => context.render({ models: [sub('c1', quota.provider, quota)] });
@@ -72,4 +72,13 @@ const unavailable = context.render({ models: [sub('c1', 'claude', { provider: 'c
 assert.equal(unavailable.all(n => n.attrs.role === 'meter').length, 0, 'No fabricated readings for unavailable providers');
 assert.ok(unavailable.textContent.includes('Usage could not be read right now.') && unavailable.textContent.includes('No usage yet'), 'An unreadable quota is still listed, and says so');
 assert.equal(context.render({ models: [] }).all(n => n.attrs['data-provider'] || n.attrs['data-model']).length, 0);
+// Measured speed (Session Usage and Model Tracking, unit 3): the busiest connection's line; too few runs says so.
+const enough = { runs: 24, enough_data: true, failed: 1, stopped: 0, failures_by_class: { rate_limit: 1 }, ttft_median_s: 0.64, ttft_p90_s: 1.9, tokens_per_second_median: 61.2, not_reported: [] };
+const speedCard = context.render({ models: [{ id: 'l1', name: 'qwen3', kind: 'local', model: 'qwen3:8b', status: 'connected', quota: null, recorded: { today_tokens: 0, week_tokens: 1, total_tokens: 1 }, stats: enough }] });
+const speed = speedCard.all(n => (n.attrs.class || '').includes('rd-usage-speed'))[0];
+assert.equal(speed.textContent, 'Last 7 days: first output 0.6 s (p90 1.9 s) · 61 tok/s · 1 failed of 24 (mostly rate limit)');
+const thin = context.render({ models: [{ id: 'l1', name: 'qwen3', kind: 'local', status: 'connected', quota: null, recorded: {}, stats: { runs: 3, enough_data: false } }] });
+assert.ok(thin.textContent.includes('Not enough data yet: 3 runs in the last 7 days'));
+assert.equal(context.render({ models: [{ id: 'l1', name: 'q', kind: 'local', status: 'connected', quota: null, recorded: {}, stats: null }] })
+  .all(n => (n.attrs.class || '').includes('rd-usage-speed')).length, 0, 'no runs, no line');
 console.log('PASS: every connected model listed, shared account windows, real meters, 50/80% boundaries, reset copy, tiny usage, stale age, sign-in diagnostics, logos and recorded tokens.');

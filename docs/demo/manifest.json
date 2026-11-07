@@ -1,7 +1,7 @@
 {
  "built": {
-  "app.js": "05b05d0f98ae47a8d914162ea1dddca01df963ff115c6721cce82b9c6d99fad4",
-  "fixtures.js": "335d3c016b2ea0cac27692d6948523d3a25777d854995842ee917ed2c7c145fb",
+  "app.js": "80b06d3bbae3271f9ab46f72e96de24ce578c9d86781fda96535ed3a05531f84",
+  "fixtures.js": "750c73f825518b76c381209db63221d27248f2685a6edf3dcfa592d99bd42637",
   "index.html": "71859f6b44470817f89041395322c71ff6480ee480cf2303b4f3bc6b176f5554",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
   "static/css/agent-ecosystem.css": "b40994f8cd2083cc7dbbce7b6ef625dfaef1013079488f5ca9caafb6d80ebad4",
@@ -1080,7 +1080,7 @@
   "tabs/studio/view.css": "63a9b5f0cdcd469c37fa0ef88080198d3fceb57e2a582e931ceb07109e451adb"
  },
  "sources": {
-  "demo/fixtures.js": "335d3c016b2ea0cac27692d6948523d3a25777d854995842ee917ed2c7c145fb",
+  "demo/fixtures.js": "750c73f825518b76c381209db63221d27248f2685a6edf3dcfa592d99bd42637",
   "demo/shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
   "scripts/build_site_demo.py": "62293abd875c0ee4ec573ea4a9c2c6539e6950af04230804345d6d5576183e0e",
   "static/css/agent-ecosystem.css": "b40994f8cd2083cc7dbbce7b6ef625dfaef1013079488f5ca9caafb6d80ebad4",
@@ -1425,7 +1425,7 @@
   "static/js/googleWorkspace.js": "de627439d52ae5b8ddd41edda012b18594c0b8832e1305ed003b1f0ab8198561",
   "static/js/icons.js": "77006d0352c51ff85acc0acd55ae25146e5b35a63b7e7882054efdd1f1afce27",
   "static/js/imageConnection.js": "a166430aff635c259b2bdaa27aedb2a586ede8761048945f3a2a4ccca9a3a2ed",
-  "static/js/kairosParts.js": "06cb1ffdddebccc6ecb85b127ee2797b7a485a9f2691c6d37fd7f6748b039470",
+  "static/js/kairosParts.js": "bbdd2c0711331efe90f81ceb6999d0d8cd9fcd36e35f986a7c738e8526a6a899",
   "static/js/kip.js": "c5fd93993d7b600fac8bfe81a3f9524d22e876ba966f48a7a488f932db979556",
   "static/js/kipPicker.js": "f022ea123fcf6c290b32592b6f438cc8e46276be159382357c3e8d5fc91fea9a",
   "static/js/kipStyle.js": "0a5a0c53cd9754e04dbe3fe7d9e55c0ca6a06c4d05c2e0b194ab8631267d5408",
@@ -1459,6 +1459,7 @@
   "static/js/mobileTabSheet.js": "f5859c20a334c37adc6ee4c6df7178ef76b0470a4ff5831ef64e9e382858a58f",
   "static/js/mobileVoiceRow.js": "7d9af569ad51e07f6829492688569977d567f3c6a73720900f5efb85459ed9ea",
   "static/js/modelSetup.js": "75b1810b2b4ccf92fe96da428764985020bb321a16ca32afb2609d0a1ce9b0cb",
+  "static/js/modelStats.js": "dde863dcf94cff113a9aa140e5a03c5ea8cb2cfc9b260f74840efe82d67472ed",
   "static/js/notchComposer.js": "d192d263a9b47eac630c433907d5d4f400c3e9ef3098ab55b280108c1ed4e8eb",
   "static/js/notchDrop.js": "76f8b73f1e2f189e7ceebedaf4956310b88ede8c0747cbc17dacebcd0a350556",
   "static/js/notchGlow.js": "f64ab289b7070d364762703c9a21ad0d0cf92b73af1765bd1b8a3eb693106f81",
@@ -1480,7 +1481,7 @@
   "static/js/phoneRowDetails.js": "8032c053a6574cddeb6888446cefe817b7a9892a9f1017ca0cd44c59b3ac5ff6",
   "static/js/questionDraft.js": "26ba2ea9e446c0ae1320125326f8b36a971fdf3c0eb80f1e91607fec710b7bbe",
   "static/js/questionPrompt.js": "29b7ff5c120dc9bf7524e935aeae1708a150da368e3a4d0e3b9fa3841e3a8eb8",
-  "static/js/quotaReadings.js": "2a02b8bf60d37ff0791353dd32363c46193202acbda71c5bc4ac4f63cf472ef0",
+  "static/js/quotaReadings.js": "bad85ecf6dfd80c59be251dce453aacb14cdaa6788cfb8387a4a71585eafc081",
   "static/js/reaSetup.js": "ff5f36ef0a4308d4378e5e979ab8aed0070e509fbe13b7d0e4072bbefd3eb5f1",
   "static/js/realtimeCapture.js": "e018345762bad8854357dcf31c6e7efbfe4974b642b9b9d9eaea1f7ea24b3a2b",
   "static/js/realtimeVoice.js": "d409975019f5e25c3e41938712b4506d9b50a0df6696b5cfd371c5524eb9392c",
@@ -1750,7 +1751,7 @@
   "static/js/views/mobileLaunch.js": "a5872b9d87e27c219b140095c39655e1b3622c3a03cd1c945ffc7c57c85c5c16",
   "static/js/views/notes.js": "6691d323ca3aa03b0d8422ab4b368cc70076dc57b217e53f420283361d2642be",
   "static/js/views/phonePanel.js": "40afd1a8816988ed6fee7c2ea584e751a40312c778b40ce7f140ebef1d9492ea",
-  "static/js/views/settings.js": "d184c8950ddd10dfbeca0d1e6f989f9775b155c06d7ea9d658d0f6de6e711b17",
+  "static/js/views/settings.js": "3b306a6e7347b959cb76c0ad0178950304e5fe2fb0ec2f1586f7f5fde5145f77",
   "static/js/views/settingsChannels.js": "4d46a6d3410dbcedce491f69a266e526a7f4ff171ac6bf2b1ec3f625512e6155",
   "static/js/views/settingsHooks.js": "aff3d447199c55e266cbc4f20dbe734c6cf526d9dc3bd750ef5e60da645293a8",
   "static/js/views/settingsNotifications.js": "18df61204a29010921e1f528c18af53b669f3b0fb102cfb6aecfb1415806d1a4",

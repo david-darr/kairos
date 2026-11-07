@@ -49,9 +49,12 @@ export function modelGroups(models = []) {
     if (!group) {
       group = { id, provider: provider?.id || null, name: provider?.name || m.name, mark: provider?.mark || m.mark,
         kind: m.kind, detail: KIND_WORD[m.kind] ? [KIND_WORD[m.kind], m.model].filter(Boolean).join(' · ') : '',
-        status: m.status, snap: m.quota ? toSnap(m.quota) : null, recorded: { today: 0, week: 0, total: 0 } };
+        status: m.status, snap: m.quota ? toSnap(m.quota) : null, recorded: { today: 0, week: 0, total: 0 }, stats: null };
       groups.push(group);
     }
+    // Measured speed (Session Usage and Model Tracking): a group of several connections shows its busiest one's,
+    // since medians cannot be merged.
+    if (m.stats?.runs && (!group.stats || m.stats.runs > group.stats.runs)) group.stats = m.stats;
     group.recorded.today += m.recorded?.today_tokens || 0;
     group.recorded.week += m.recorded?.week_tokens || 0;
     group.recorded.total += m.recorded?.total_tokens || 0;
