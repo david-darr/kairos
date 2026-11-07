@@ -1172,6 +1172,18 @@ def session_runs(session_id: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def annotate_run(run_id: str, **fields) -> None:
+    """Set v10 fields on a run already recorded (a compaction's record once its result is known)."""
+    allowed = {name for name, _ in RUN_V10_COLUMNS}
+    fields = {k: v for k, v in fields.items() if k in allowed}
+    if not fields:
+        return
+    with _LOCK:
+        conn = _connect()
+        with _atomic(conn):
+            conn.execute(f"UPDATE runs SET {', '.join(f'{k} = ?' for k in fields)} WHERE id = ?", (*fields.values(), run_id))
+
+
 def runs_since(since: float, limit: int = RUNS_KEPT) -> list[dict]:
     """Every run started at or after `since`, newest first (core/model_stats.py)."""
     with _LOCK:

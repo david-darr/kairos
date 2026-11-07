@@ -509,6 +509,7 @@ def record(context: RunContext, tally: Tally, outcome: str, stop: Optional[StopR
             "error_class": error_class(detail) if outcome == "failed" else None,
             "retries": context.counters.get("retries"),
             "tool_quality": json.dumps(tally.tool_quality, sort_keys=True) if tally.tool_quality else None,
+            "compaction": json.dumps(context.counters["compaction"]) if context.counters.get("compaction") else None,
         }
         # Unit 4: priced now, so a later price change does not rewrite history.
         from core import run_cost
@@ -597,12 +598,13 @@ def _count_on_home(context: RunContext, usage: Optional[Usage]) -> None:
 
 
 async def side_call(brain, prompt, purpose: str, *, session_id: Optional[str] = None,
-                    endpoint: Optional[dict] = None, model: Optional[str] = None) -> str:
+                    endpoint: Optional[dict] = None, model: Optional[str] = None,
+                    context: Optional[RunContext] = None) -> str:
     """brain.run_turn(prompt), recorded as a labelled side run: the reply, and the usage the brain kept
     for its last provider call (a side call makes one; none reported stays null)."""
     named = getattr(brain, "model", None)
     with SideRun(purpose, session_id=session_id, endpoint=endpoint,
-                 model=model or (named if isinstance(named, str) else None)) as side:
+                 model=model or (named if isinstance(named, str) else None), context=context) as side:
         reply = await brain.run_turn(prompt)
         usage = getattr(brain, "last_usage", None)
         if isinstance(usage, dict):
@@ -622,8 +624,8 @@ class SideRun:
     """
 
     def __init__(self, purpose: str, *, session_id: Optional[str] = None, endpoint: Optional[dict] = None,
-                 model: Optional[str] = None):
-        self.context = side_context(purpose, session_id=session_id, endpoint=endpoint, model=model)
+                 model: Optional[str] = None, context: Optional[RunContext] = None):
+        self.context = context or side_context(purpose, session_id=session_id, endpoint=endpoint, model=model)
         self.tally = Tally()
 
     def usage(self, raw) -> None:

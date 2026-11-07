@@ -58,6 +58,8 @@ def cost(run: dict, kind: Optional[str], base_url: Optional[str] = None, reporte
     if model_prices.number(reported):
         return {"cost_usd": float(reported), "cost_status": "actual", "cost_source": "reported by the provider",
                 "priced_as_of": None}
+    if not run.get("endpoint_id") and not run.get("model") and run.get("input_tokens") is None:
+        return {"cost_usd": 0.0, "cost_status": "actual", "cost_source": "no model call", "priced_as_of": None}
     if kind in SUBSCRIPTION_KINDS:
         return {"cost_usd": None, "cost_status": "included", "cost_source": "subscription", "priced_as_of": None}
     if kind == "local":

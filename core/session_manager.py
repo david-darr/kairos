@@ -15,6 +15,7 @@ right there on disk. The sibling's docstring has the full account. Public
 method signatures here did not change as part of that move.
 """
 import copy
+import json
 import time
 import uuid
 from typing import Optional
@@ -37,6 +38,30 @@ def _clear_claude_session(session: dict) -> None:
     working folder in a way the CLI's own copy cannot follow."""
     session["claude_session_id"] = None
     session["claude_synced_through"] = 0
+
+
+
+# The no-model prune (Session Usage and Model Tracking, unit 6, after Hermes's context_compressor_prune): a tool
+# result longer than this, outside the kept tail, is replayed as a one-line stub naming the tool and its size.
+TOOL_STUB_OVER = 200
+
+
+def pruned_message(message: dict) -> dict:
+    """The message with its saved tool results over TOOL_STUB_OVER characters stubbed; the same dict when none
+    are. The stored message is never changed."""
+    rounds = message.get("tool_rounds") or {}
+    items = rounds.get("messages") or []
+    names = {call.get("id"): (call.get("function") or {}).get("name")
+             for item in items for call in item.get("tool_calls") or [] if isinstance(call, dict)}
+    changed, kept = False, []
+    for item in items:
+        content = item.get("content")
+        if item.get("role") == "tool" and isinstance(content, str) and len(content) > TOOL_STUB_OVER:
+            item = {**item, "content": (f"[Older tool result cleared to save context: {names.get(item.get('tool_call_id')) or 'a tool'}, "
+                                        f"{len(content):,} characters. Run the tool again if you need it.]")}
+            changed = True
+        kept.append(item)
+    return {**message, "tool_rounds": {**rounds, "messages": kept}} if changed else message
 
 
 class SessionManager:
@@ -524,9 +549,30 @@ class SessionManager:
         # The stored "Conversation compacted" notice is for the person reading
         # the chat; the checkpoint above already carries its summary.
         result = [m for m in result if not m.get("display_only")]
+        # Older tool results stubbed by the no-model prune (unit 6): only what is sent changes, never what is stored.
+        prune_before = session.get("tool_prune_before_ts")
+        if prune_before:
+            result = [pruned_message(m) if (m.get("ts") or prune_before) < prune_before else m for m in result]
         if exclude_last and result:
             result = result[:-1]
         return [m for m in result if m.get("type") != "handoff"]
+
+    def tool_prune_savings(self, session_id: str, before_ts: Optional[float]) -> int:
+        """How many characters the no-model prune would take out of what is sent: the replayed tool results
+        over TOOL_STUB_OVER characters in messages before `before_ts` (the kept tail's first message)."""
+        if not before_ts:
+            return 0
+        return sum(len(json.dumps((m.get("tool_rounds") or {}).get("messages") or [], ensure_ascii=False))
+                   - len(json.dumps((pruned_message(m).get("tool_rounds") or {}).get("messages") or [], ensure_ascii=False))
+                   for m in self.effective_messages(session_id) if m.get("tool_rounds") and (m.get("ts") or before_ts) < before_ts)
+
+    def prune_tool_results(self, session_id: str, before_ts: float) -> None:
+        """Stub old tool results before `before_ts` from now on (Session Usage and Model Tracking, unit 6): a
+        cheaper first step than a summary, no model call. Nothing stored is changed or deleted; only the
+        replay to the model (effective_messages) shows the one-line stub. Only ever moves forward."""
+        session = self._require(session_id)
+        session["tool_prune_before_ts"] = max(float(session.get("tool_prune_before_ts") or 0), float(before_ts))
+        store.save_session(session, rebuild_messages_from=store.MESSAGES_UNCHANGED)
 
     def compact_session(self, session_id: str, through_index: int, summary: str) -> dict:
         """Records a compaction checkpoint without deleting or rewriting any

@@ -102,7 +102,9 @@ def summarize(session: dict, rows: list[dict]) -> dict:
         **{k: whole[k] for k in (*TOKEN_FIELDS, "total_tokens", "tool_calls", "cache_hit_percent",
                                   "reported_runs", "failed", "stopped", "cost")},
         "runs": whole["runs"],
-        "compactions": len(session.get("compactions") or []),
+        # Summaries the chat keeps, plus prunes that made no model call (unit 6), each recorded on a run.
+        "compactions": len(session.get("compactions") or []) + sum(
+            1 for r in groups["side"] if r.get("purpose") == "compact" and '"method": "prune"' in (r.get("compaction") or "")),
         "helper_runs": len(groups["helpers"]),
         "side_runs": len(groups["side"]),
         "side_purposes": {p: sum(1 for r in groups["side"] if r["purpose"] == p)

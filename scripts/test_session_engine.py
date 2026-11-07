@@ -218,7 +218,7 @@ class AutoCompactTests(ChatCase):
         self.addCleanup(lambda: settings_store.update_settings(auto_compact=True))
         self.compacted = []
 
-        async def compact(session_id, keep_tail=chat_service.COMPACTION_TAIL_KEEP):
+        async def compact(session_id, keep_tail=chat_service.COMPACTION_TAIL_KEEP, **record):  # trigger, pruned (unit 6)
             self.compacted.append(len(session_manager.get_session(session_id)["messages"]))
             self.kept = keep_tail
             return {"archived": 4}

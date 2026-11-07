@@ -1190,7 +1190,13 @@ async def _compact_if_nearly_full(session_id: str) -> bool:
     goes in (Settings > Added Models; on by default). The same Compact as the
     button: a summary, the last messages kept word for word, nothing deleted.
     A compaction that fails or has nothing new to fold never blocks the
-    message."""
+    message.
+
+    First the cheaper step (Session Usage and Model Tracking, unit 6): old
+    tool results outside the kept tail are replayed as one-line stubs, with
+    no model call. Only if that alone does not bring the chat back under the
+    line is a summary written. Either way the compaction is recorded on a run
+    (trigger, method, tokens before and after)."""
     from core import settings as settings_store
     if not settings_store.get_setting("auto_compact"):
         return False
@@ -1201,9 +1207,24 @@ async def _compact_if_nearly_full(session_id: str) -> bool:
         return False
     messages = [m for m in (session_manager.get_session(session_id) or {}).get("messages", [])
                 if not m.get("display_only")]
-    keep = _auto_tail(messages, int(state.get("capacity_tokens") or 0), _fixed_prompt_chars(session_id))
+    capacity = int(state.get("capacity_tokens") or 0)
+    keep = _auto_tail(messages, capacity, _fixed_prompt_chars(session_id))
+    before = state.get("used_tokens")
+    tail_start = messages[-keep].get("ts") if keep and len(messages) > keep else None
+    saved = session_manager.tool_prune_savings(session_id, tail_start)
+    if saved:
+        session_manager.prune_tool_results(session_id, tail_start)
+        after = max(0, int(before or 0) - saved // CHARS_PER_TOKEN)
+        if capacity and after * 100 / capacity < AUTO_COMPACT_PERCENT:
+            _record_compaction(session_id, {"trigger": "auto", "method": "prune", "tokens_before": before,
+                                            "tokens_after": after, "tokens_after_estimated": True,
+                                            "chars_pruned": saved, "percent_before": state["percent"]})
+            await close_session_brain(session_id)
+            logger.info("auto-compacted chat %s at %s%% by stubbing old tool results (%s characters), no summary",
+                        session_id, state["percent"], saved)
+            return True
     try:
-        result = await _compact_session(session_id, keep_tail=keep)
+        result = await _compact_session(session_id, keep_tail=keep, trigger="auto", pruned=saved)
     except HTTPException as e:
         logger.info("auto-compact of chat %s skipped: %s", session_id, e.detail)
         return False
@@ -1416,7 +1437,30 @@ async def compact_session(session_id: str) -> dict:
         return await _compact_session(session_id)
 
 
-async def _compact_session(session_id: str, keep_tail: int = COMPACTION_TAIL_KEEP) -> dict:
+def _record_compaction(session_id: str, record: dict, run_id: Optional[str] = None) -> None:
+    """A compaction's record on its run (unit 6): on the summary's own run, or, for a prune that made no model
+    call, on a run of its own that names no model and costs nothing. Never fails the compaction."""
+    try:
+        if run_id:
+            from core import session_manager_store
+            session_manager_store.annotate_run(run_id, compaction=json.dumps(record))
+            return
+        context = runs.RunContext(runs.SIDE, purpose="compact", session_id=session_id)
+        context.counters["compaction"] = record
+        runs.record(context, runs.Tally(), "finished")
+    except Exception:
+        logger.exception("could not record the compaction of chat %s", session_id)
+
+
+def _estimated_tokens_sent(session_id: str, endpoint: dict, fixed_chars: int) -> int:
+    """About how many tokens the next request carries before the new message: what is replayed plus the
+    fixed system prompt and tools, characters over four. An estimate, and recorded as one."""
+    replayed = ExternalBrain._seed(session_manager.effective_messages(session_id), endpoint.get("id"))
+    return (len(json.dumps(replayed, ensure_ascii=False)) + fixed_chars) // CHARS_PER_TOKEN
+
+
+async def _compact_session(session_id: str, keep_tail: int = COMPACTION_TAIL_KEEP, trigger: str = "manual",
+                           pruned: int = 0) -> dict:
     session = session_manager.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
@@ -1468,13 +1512,28 @@ async def _compact_session(session_id: str, keep_tail: int = COMPACTION_TAIL_KEE
     brain = _build_brain(endpoint, session_id=None, is_admin=False)
     try:
         await brain.connect()
-        summary = (await runs.side_call(brain, prompt, "compact", session_id=session_id, endpoint=endpoint)).strip()
+        side = runs.side_context("compact", session_id=session_id, endpoint=endpoint,
+                                 model=getattr(brain, "model", None) if isinstance(getattr(brain, "model", None), str) else None)
+        summary = (await runs.side_call(brain, prompt, "compact", session_id=session_id, endpoint=endpoint,
+                                        context=side)).strip()
     finally:
         await brain.disconnect()
     if not summary:
         raise HTTPException(status_code=502, detail="the summary came back empty")
 
+    before = ((session_manager.get_session(session_id) or {}).get("context_state") or {}).get("used_tokens")
+    fixed = _fixed_prompt_chars(session_id)
     session_manager.compact_session(session_id, through_index, summary)
+    record = {"trigger": trigger, "method": "prune+summary" if pruned else "summary", "tokens_before": before,
+              "messages_folded": through_index - prior_through}
+    if pruned:
+        record["chars_pruned"] = pruned
+    if endpoint["kind"] in AUTO_COMPACT_KINDS:
+        try:
+            record.update(tokens_after=_estimated_tokens_sent(session_id, endpoint, fixed), tokens_after_estimated=True)
+        except Exception:
+            logger.exception("could not estimate chat %s after compaction", session_id)
+    _record_compaction(session_id, record, run_id=side.run_id)
     if endpoint["kind"] == "antigravity_cli":
         session_manager.set_antigravity_conversation_id(session_id, None)
     if endpoint["kind"] == "codex_cli":
