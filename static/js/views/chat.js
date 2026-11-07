@@ -10,7 +10,7 @@ import { ICONS } from "../icons.js";
 import { ICON as KAIROS_MARK } from '../brand.js';
 import { runSlashCommand, mountSlashSuggestions } from "../slashCommands.js";
 import { isComposingKey, shouldSendOnEnter } from '../composerKeyboard.js';
-import { registerMobileDrawer, isMainDrawerZone } from '../mobileDrawers.js';
+import { registerMobileDrawer } from '../mobileDrawers.js';
 import * as chatStream from "../chatStream.js";
 import { renderMessageBody, copyText, hideArtifact, mountArtifactPane, setArtifactContext, showArtifactPane, openDesignTab } from "../chatContent.js";
 import { openBrowser, closeBrowser, suppressBrowser, releaseBrowser } from "../browserPane.js";
@@ -737,11 +737,12 @@ export async function render(container, tabId, options = {}) {
   ]);
   historyHeading.append(historyCloseBtn);
   sessionsPanel.insertBefore(historyHeading, projectPickerWrap);
-  mobileHeader.title = 'Swipe right across this header or the right half of the conversation to open chat history';
+  // No swipe opens the old Conversations panel (2026-11-06, David): on a phone a
+  // swipe right goes back, then opens the app's sidebar, whose Chats lists the
+  // chats. Once open by its button, a swipe left still closes it.
   const releaseDrawer = registerMobileDrawer({ panel: sessionsPanel, backdrop: sessionsBackdrop,
     isOpen: () => sessionsPanel.classList.contains('open'),
-    canOpen: (target, touch) => touch.clientX >= 16 && (mobileHeader.contains(target) ||
-      (!isMainDrawerZone(touch) && !!target.closest('#chat-messages'))),
+    canOpen: () => false,
     open: openSessionsDrawer, close: () => closeSessionsDrawer(true),
   });
   sessionsBackdrop.addEventListener('click', () => closeSessionsDrawer(true));
@@ -972,6 +973,8 @@ export async function render(container, tabId, options = {}) {
   const permissionControl = el('label', { class: 'chat-permission-control', 'data-mode': 'base' }, [
     el('span', { text: 'Mode' }), permissionMode,
   ]);
+  // A menu row like its neighbours: the same shield the desktop pill uses.
+  permissionControl.insertAdjacentHTML('afterbegin', '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6z"/></svg>');
   // Desktop: a pill in the prompt with its own menu, driving the select above.
   const permissionPill = el('button', { type: 'button', id: 'chat-permission-pill', class: 'chat-permission-pill', 'data-mode': 'base',
     'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-controls': 'chat-permission-menu', 'aria-label': 'Permissions: Supervised' }, [

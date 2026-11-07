@@ -17,6 +17,8 @@ export function mountMobileChrome() {
   document.body.append(frost);
   mountSidebar();
   mountPhoneMotion();
+  fitScreen();
+  lockZoom();
   const sync = () => { frost.hidden = !mobileOn(); refreshActivity(); };
   // Identity and mode can rebuild the desktop sidebar independently of
   // navigation; focus that was inside it lands on the menu button.
@@ -29,4 +31,31 @@ export function mountMobileChrome() {
     }
   });
   phone.addEventListener('change', sync); document.addEventListener('kairos:appearance', sync); sync();
+}
+
+// The iOS home-screen app's page is exactly the screen (2026-11-06, David on
+// device: the sidebar's New chat, the dock and the composer were cut off at
+// the bottom). style.css sizes it max(100dvh, 100lvh) for iOS 26's short
+// layout viewport, and on his iPhone that came out taller than the screen.
+// There, the screen's own height is the truth (iOS reports it in portrait).
+function fitScreen() {
+  if (navigator.standalone !== true) return;
+  const root = document.documentElement, landscape = matchMedia('(orientation: landscape)');
+  const apply = () => {
+    if (!mobileOn()) { root.style.removeProperty('--ms-page-height'); return; }
+    const long = Math.max(screen.width, screen.height), short = Math.min(screen.width, screen.height);
+    root.style.setProperty('--ms-page-height', `${landscape.matches ? short : long}px`);
+  };
+  apply();
+  landscape.addEventListener('change', apply); phone.addEventListener('change', apply); addEventListener('resize', apply);
+}
+
+// No pinch or double-tap zoom, as in a native app (2026-11-06, David). The
+// viewport tag stops it on Android and on iOS input focus, and touch-action
+// (style.css) stops double-tap; iOS ignores user-scalable for pinch, so its
+// gesture events are cancelled.
+function lockZoom() {
+  for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
+    document.addEventListener(type, event => { if (mobileOn()) event.preventDefault(); }, { passive: false });
+  }
 }
