@@ -1351,6 +1351,9 @@
       ["calendar", "Calendar", "needs_setup", "integrations"], ["notifications", "Notifications", "not_checked", "notifications"], ["voice", "Voice engine", "needs_setup", "speech"],
     ].map(([id, title, status, fix]) => ({ id, title, status, fix })) };
     if (route === "/api/bot-voice/live-settings") return { voice: "marin", read_typed: false, idle_minutes: 5 };
+    // Realtime speech-to-speech (Track A): no realtime connection in the demo, so calls and bots offer Local only.
+    if (route === "/api/agent-calls/realtime-choices") return [];
+    if (route === "/api/agent-calls/realtime-settings") return { endpoint_id: null, voice: null, bots: {} };
     if (route === "/api/bot-voice/voices") return { voices: [], models: [] };
     if (route === "/api/agents/inbox") return state.empty || state.homeClear ? { items: [], reviews: [], count: 0 } :
       { items: agentInbox, reviews: state.agentReview ? agentDetail('a1').cards : [], count: agentInbox.length + (state.agentReview ? 1 : 0) };

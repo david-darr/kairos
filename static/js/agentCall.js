@@ -1,6 +1,7 @@
 // Native Kairos calls: call-owned dialogue, streamed speech and delegated agent work.
 import { api, el, toast } from './api.js';
 import { liveVoice } from './callLive.js';
+import { realtimeVoice } from './realtimeVoice.js';
 import { callTransport } from './callTransport.js';
 import { voiceSettings, neuralSpeaker } from './callVoice.js';
 import { transcribeBlob, transcribePartial, refreshSpeechStatus, encodeWav } from './voiceInput.js';
@@ -107,12 +108,24 @@ export function agentCall(agent, controller) {
     if(record.ended&&active)hangup();
     if(record.ended) { summaryStatus.textContent = record.summary_state==='saved'?`Call summary saved in ${savedIn}.`:record.summary_state==='failed'?record.summary_error:'Saving call summary?'; }
   }, event => { if (event.type === 'work' && event.task_id) { announceWork(event.task_id); transport.refresh(); } });
-  const callMode=el('select',{'aria-label':'Call mode'},[el('option',{value:'local',text:'Local recognition + conversation model'}),...(room?[]:[el('option',{value:'cloud',text:'GPT-Live (paid cloud voice)'})])]);
+  const callMode=el('select',{'aria-label':'Call mode'},[el('option',{value:'local',text:'Local recognition + conversation model'}),...(room?[]:[el('option',{value:'cloud',text:'GPT-Live (paid cloud voice)'}),el('option',{value:'realtime',text:'Realtime speech-to-speech (your OpenAI, Grok or Gemini key)'})])]);
   const liveEndpoint=el('select',{'aria-label':'Cloud voice API connection'});
   const liveVoiceChoice=el('select',{'aria-label':'Cloud voice'},['marin','cedar','coral','sage','ash'].map(name=>el('option',{value:name,text:name})));
   const paid=el('input',{type:'checkbox','aria-label':'Use paid cloud voice for this call'});
-  const cloudSetup=el('div',{hidden:true,class:'agent-call-cloud-setup'},[el('label',{},[el('span',{text:'OpenAI API connection'}),liveEndpoint]),el('label',{},[el('span',{text:'Live voice'}),liveVoiceChoice]),el('label',{class:'agent-call-consent'},[paid,el('span',{text:'Use paid cloud voice for this call. Audio is sent to OpenAI; voice and backend model usage are billed to your API account.'})])]);
-  const live=liveVoice(next=>{if(!active)return;if(next==='ended'){hangup();return;}setState(next,next==='speaking'?`${agent.name} is speaking. You can interrupt naturally.`:'Listening...');},(role,delta)=>{heard.textContent=(heard.dataset.speaker===role?heard.textContent:`${role}: `)+delta;heard.dataset.speaker=role;},level=>orb.style.setProperty('--word',String(level)),message=>{error.textContent=message;});
+  const cloudSetup=el('div',{hidden:true,class:'agent-call-cloud-setup'},[el('label',{},[el('span',{text:'Voice API connection'}),liveEndpoint]),el('label',{},[el('span',{text:'Live voice'}),liveVoiceChoice]),el('label',{class:'agent-call-consent'},[paid,el('span',{text:'Use paid cloud voice for this call. Audio is sent to OpenAI; voice and backend model usage are billed to your API account.'})])]);
+  const liveCallbacks=[next=>{if(!active)return;if(next==='ended'){hangup();return;}setState(next,next==='speaking'?`${agent.name} is speaking. You can interrupt naturally.`:'Listening...');},(role,delta)=>{heard.textContent=(heard.dataset.speaker===role?heard.textContent:`${role}: `)+delta;heard.dataset.speaker=role;},level=>orb.style.setProperty('--word',String(level)),message=>{error.textContent=message;}];
+  const gptLive=liveVoice(...liveCallbacks);
+  let realtimeInfo=null;
+  const realtimeLive=realtimeVoice(...liveCallbacks,info=>{if(info.work){announceRealtimeWork(info.work);return;}realtimeInfo=info;});
+  let liveImpl=gptLive;
+  const live={start(...args){liveImpl=callMode.value==='realtime'?realtimeLive:gptLive;realtimeInfo=null;return liveImpl.start(...args);},muteMicrophone:value=>liveImpl.muteMicrophone(value),muteAssistant:value=>liveImpl.muteAssistant(value),stop(){gptLive.stop();realtimeLive.stop();}};
+  const isCloud=()=>callMode.value==='cloud'||callMode.value==='realtime';
+  let liveChoicesByMode={cloud:[],realtime:[]};
+  function fillLiveChoices(){const choices=liveChoicesByMode[callMode.value]||[];liveEndpoint.replaceChildren(...choices.map(e=>el('option',{value:e.id,text:e.provider?`${e.name} (${e.label})`:e.name})));fillLiveVoices();}
+  function fillLiveVoices(){if(callMode.value!=='realtime'){liveVoiceChoice.replaceChildren(...['marin','cedar','coral','sage','ash'].map(name=>el('option',{value:name,text:name})));return;}const choice=liveChoicesByMode.realtime.find(e=>e.id===liveEndpoint.value);liveVoiceChoice.replaceChildren(...(choice?.voices||[]).map(name=>el('option',{value:name,text:name})));if(choice)liveVoiceChoice.value=choice.default_voice;}
+  function announceRealtimeWork(work){transport.refresh();if(work.status!=='running'&&work.task_id)announceWork(work.task_id);}
+  // The call screen shows who is speaking and a running cost estimate (the provider's own bill is the truth).
+  function drawRealtimeCost(seconds){if(callMode.value!=='realtime'||!realtimeInfo)return;const cost=seconds/60*realtimeInfo.price_per_minute;timing.textContent=`${realtimeInfo.label} (${realtimeInfo.model}): about $${cost.toFixed(2)} so far, an estimate at $${realtimeInfo.price_per_minute.toFixed(2)} a minute${realtimeInfo.verified?'':'; not yet checked against the live service'}`;}
   const modelKey = `kairos:call-model:v2:${agent.id}`;
   const modeKey = `kairos:call-input:${agent.id}`;
   const heard = el('p', { class: 'agent-call-heard', 'aria-live': 'polite' });
@@ -162,7 +175,7 @@ export function agentCall(agent, controller) {
   const neural = voiceSettings(agent, voice, {changed:()=>{if(speech)syncModel();}});
   setup.prepend(el('label',{},[el('span',{text:'Conversation model'}),conversation]),el('label',{},[el('span',{text:'Model version'}),conversationModel]),el('p',{text:'Choose a fast API or local model for conversation. Your agent keeps its existing work model.'}),neural.node);
   setup.prepend(el('label',{},[el('span',{text:'Call mode'}),callMode]),cloudSetup);
-  callMode.onchange=()=>{cloudSetup.hidden=callMode.value!=='cloud';syncModel();};paid.onchange=syncModel;liveEndpoint.onchange=syncModel;
+  callMode.onchange=()=>{cloudSetup.hidden=!isCloud();fillLiveChoices();syncModel();};paid.onchange=syncModel;liveEndpoint.onchange=()=>{fillLiveVoices();syncModel();};
   conversation.onchange = () => { conversationModel.value=endpoints.find(e=>e.id===conversation.value)?.model||''; saveConversation();loadConversationModels(); };
   setup.append(modelSuggestions);
   async function loadConversationModels(){const ident=conversation.value;modelSuggestions.replaceChildren();if(!ident)return;try{const models=await api(`/api/models/${encodeURIComponent(ident)}/catalog`);if(conversation.value===ident)modelSuggestions.replaceChildren(...models.map(m=>el('option',{value:m.id,label:m.label||m.id})));}catch{}}
@@ -172,7 +185,7 @@ export function agentCall(agent, controller) {
   const assistant = action('Mute assistant', () => {
     assistantMuted = !assistantMuted; assistant.setAttribute('aria-pressed', String(assistantMuted));
     assistant.textContent = assistantMuted ? 'Unmute assistant' : 'Mute assistant';
-    if(callMode.value==='cloud')live.muteAssistant(assistantMuted);
+    if(isCloud())live.muteAssistant(assistantMuted);
     if (assistantMuted && state === 'speaking') { stopPlayback(); listen(); }
   });
   const microphone = action('Mute microphone', () => setMicrophoneMuted(!microphoneMuted));
@@ -180,7 +193,7 @@ export function agentCall(agent, controller) {
   const controls = el('div', { class: 'agent-call-controls', hidden: true }, [assistant, microphone,
     action('End call', () => hangup(), 'is-end'), action('Interrupt', interrupt)]);
   function interrupt() {
-      if(callMode.value==='cloud'){toast('Speak to interrupt the live conversation. Delegated work keeps running.');return;}
+      if(isCloud()){toast('Speak to interrupt the live conversation. Delegated work keeps running.');return;}
       transport.interrupt(false, state === 'speaking' || voiceBusy ? speaker.heard() : null); voiceBusy=false; partials.cancel();
       revision++; pending?.abort(); audioQueue = []; texts = []; deferredReply = null; speechActive = false;
       cancelHold(); recorder?.setEnabled(false); stopPlayback(); listen(); scheduleFlush();
@@ -250,7 +263,7 @@ export function agentCall(agent, controller) {
       return voices[(base + at) % voices.length];
     },
     onStart: () => { if (active) { setState('speaking', `${who()} is speaking. Interrupt to speak.`); if (fillerOn) { if (response && response.filler_ms == null) { response.filler_ms = Math.round(performance.now() - response.submitted); drawTiming(); } } else if (response && response.first_audio_ms == null) { response.first_audio_ms=Math.round(performance.now()-response.submitted); response.end_to_audio_ms=utteranceEnded?Math.round(performance.now()-utteranceEnded):null; drawTiming();if(transport.record&&response.end_to_audio_ms!=null)api(`/api/agent-calls/${transport.record.id}/timing`,{method:'POST',toast:false,body:JSON.stringify({end_to_audio_ms:response.end_to_audio_ms,first_audio_ms:response.first_audio_ms,trace:voiceTrace.offsets(currentTrace)})}).catch(()=>{}); } } },
-    onEnd: () => { voiceTrace.report(currentTrace); if (readingTyped) { readingTyped = false; if (callMode.value === 'cloud') live.muteMicrophone(microphoneMuted); } if (active && state === 'speaking') { if(voiceBusy)setState('thinking',`${who()} is finishing the reply...`);else listen(); scheduleFlush(); } },
+    onEnd: () => { voiceTrace.report(currentTrace); if (readingTyped) { readingTyped = false; if (isCloud()) live.muteMicrophone(microphoneMuted); } if (active && state === 'speaking') { if(voiceBusy)setState('thinking',`${who()} is finishing the reply...`);else listen(); scheduleFlush(); } },
     onBoundary: () => {
       // OS speech exposes word timing, not its PCM amplitude. This pulse
       // follows real word events; microphone energy is measured separately.
@@ -291,11 +304,19 @@ export function agentCall(agent, controller) {
   async function loadSetup() {
     const token = epoch; start.disabled = true;
     try {
-      const [nextSpeech, available, choices, _, liveChoices, prefs] = await Promise.all([api('/api/speech/status'), whenVoicesReady(), api('/api/agent-calls/choices'), neural.load(), api('/api/agent-calls/live-choices'), api('/api/bot-voice/live-settings', { toast: false }).catch(() => null)]);
+      const [nextSpeech, available, choices, _, liveChoices, prefs, realtimeChoices, realtimePrefs] = await Promise.all([api('/api/speech/status'), whenVoicesReady(), api('/api/agent-calls/choices'), neural.load(), api('/api/agent-calls/live-choices'), api('/api/bot-voice/live-settings', { toast: false }).catch(() => null), api('/api/agent-calls/realtime-choices', { toast: false }).catch(() => []), api('/api/agent-calls/realtime-settings', { toast: false }).catch(() => null)]);
       if (disposed || epoch !== token || active || !dialog.open) return;
-      liveEndpoint.replaceChildren(...liveChoices.map(e=>el('option',{value:e.id,text:e.name})));
+      const asList = value => Array.isArray(value) ? value : [];
+      liveChoicesByMode = { cloud: asList(liveChoices), realtime: asList(realtimeChoices) };
+      fillLiveChoices();
       if (prefs) { livePrefs = prefs; liveVoiceChoice.value = prefs.voice; }
-      if (agent.call_mode === 'live' && liveChoices.length) { callMode.value = 'cloud'; cloudSetup.hidden = false; }
+      if (agent.call_mode === 'realtime' && liveChoicesByMode.realtime.length) {
+        callMode.value = 'realtime'; cloudSetup.hidden = false; fillLiveChoices();
+        const mine = (realtimePrefs && typeof realtimePrefs === 'object' && (realtimePrefs.bots?.[agent.id] || realtimePrefs)) || {};
+        if (mine.endpoint_id && liveChoicesByMode.realtime.some(e => e.id === mine.endpoint_id)) { liveEndpoint.value = mine.endpoint_id; fillLiveVoices(); }
+        if (mine.voice && [...liveVoiceChoice.options].some(o => o.value === mine.voice)) liveVoiceChoice.value = mine.voice;
+      }
+      else if (agent.call_mode === 'live' && liveChoicesByMode.cloud.length) { callMode.value = 'cloud'; cloudSetup.hidden = false; }
       else if (agent.call_mode === 'turns') { callMode.value = 'local'; cloudSetup.hidden = true; }
       if (agent.voice_id) {
         const profile = neural.node.querySelector('[aria-label="Neural voice profile"]');
@@ -328,9 +349,9 @@ export function agentCall(agent, controller) {
     }
   }
   function syncModel() {
-    const cloud=callMode.value==='cloud';
+    const cloud=isCloud();
     const privacy=dialog.querySelector('.agent-call-privacy');
-    if(privacy)privacy.textContent=cloud?'Cloud voice sends audio to OpenAI and incurs API charges. Dialogue stays out of chat; a summary is saved afterwards.':`Recognition stays on this device. Dialogue goes to your selected conversation model. Only a summary is saved in ${savedIn} afterwards.`;
+    if(privacy)privacy.textContent=callMode.value==='realtime'?'Realtime voice sends your audio, through Kairos, to the provider you chose and incurs API charges on your key. Real work still goes to this agent. Dialogue stays out of chat; a summary is saved afterwards.':cloud?'Cloud voice sends audio to OpenAI and incurs API charges. Dialogue stays out of chat; a summary is saved afterwards.':`Recognition stays on this device. Dialogue goes to your selected conversation model. Only a summary is saved in ${savedIn} afterwards.`;
     neural.node.hidden=cloud;preview.hidden=cloud;
     inputMode.closest('label').hidden=cloud;acceleration.closest('label').hidden=cloud;
     modelBox.hidden=cloud||!speech?.engine_available;runtimeSetup.hidden=cloud||!speech?.acceleration?.supported;
@@ -342,7 +363,7 @@ export function agentCall(agent, controller) {
     if(cloud){
       download.hidden=true;
       start.disabled=!liveEndpoint.value||!paid.checked||!conversation.value||!conversationModel.value.trim();
-      readiness.textContent=!liveEndpoint.value?'Add an official OpenAI API connection with an API key in Settings > Models.':!conversation.value?'Choose a conversation model below for post-call summaries.':'Cloud voice uses its own recognition and voice. Your selected conversation model generates the summary.';return;
+      readiness.textContent=!liveEndpoint.value?(callMode.value==='realtime'?'Add an API connection with a key for OpenAI, xAI or Google in Settings > Models (mark it for realtime voice if its address is custom).':'Add an official OpenAI API connection with an API key in Settings > Models.'):!conversation.value?'Choose a conversation model below for post-call summaries.':'Cloud voice uses its own recognition and voice. Your selected conversation model generates the summary.';return;
     }
     if (!isCallRecordingSupported()) readiness.textContent = 'Calls need microphone access and AudioWorklet support. Use the Kairos desktop app or an up-to-date secure browser.';
     else if (!speech?.engine_available) readiness.textContent = 'Speech recognition is unavailable in this build. Install the latest Kairos runtime to enable calls.';
@@ -379,12 +400,12 @@ export function agentCall(agent, controller) {
     // Change state first so the speaker's cancel callback cannot resume capture.
     if (state === 'speaking') state = 'paused';
     speaker.cancel();
-    if (readingTyped) { readingTyped = false; if (callMode.value === 'cloud') live.muteMicrophone(microphoneMuted); }
+    if (readingTyped) { readingTyped = false; if (isCloud()) live.muteMicrophone(microphoneMuted); }
   }
   async function setMicrophoneMuted(value) {
     microphoneMuted = value;
     emitState();
-    if(callMode.value==='cloud'){live.muteMicrophone(value);microphone.setAttribute('aria-pressed',String(value));microphone.textContent=value?'Unmute microphone':'Mute microphone';return;}
+    if(isCloud()){live.muteMicrophone(value);microphone.setAttribute('aria-pressed',String(value));microphone.textContent=value?'Unmute microphone':'Mute microphone';return;}
     microphone.setAttribute('aria-pressed', String(value)); microphone.textContent = value ? 'Unmute microphone' : 'Mute microphone';
     if (value) { cancelHold(); partials.cancel(); recorder?.close(); recorder = null; speechActive = false; orb.style.setProperty('--level', '0'); if (state === 'listening') status.textContent = 'Microphone muted'; scheduleFlush(); }
     else if (active) {
@@ -575,7 +596,7 @@ export function agentCall(agent, controller) {
     workUpdates=[];announcedWork=new Set();
     try {
       if (callMode.value==='local'&&!isCallRecordingSupported()) throw new Error('Microphone access is unavailable. Check your device permissions.');
-      if(callMode.value==='cloud'&&(!navigator.mediaDevices?.getUserMedia||!window.RTCPeerConnection))throw new Error('Cloud voice requires a secure browser with WebRTC and microphone access.');
+      if(isCloud()&&(!navigator.mediaDevices?.getUserMedia||(callMode.value==='cloud'&&!window.RTCPeerConnection)||(callMode.value==='realtime'&&!window.AudioWorkletNode)))throw new Error('Cloud voice requires a secure browser with microphone access'+(callMode.value==='cloud'?' and WebRTC.':' and AudioWorklet.'));
       await localSpeaker.prepare(); stopPlayback();
       await transport.start(agent,conversation.value,conversationModel.value.trim(),ringOpening);
       if(disposed||epoch!==token||!dialog.open){transport.end();return;}
@@ -584,7 +605,7 @@ export function agentCall(agent, controller) {
       setState('preparing','Preparing the conversation model...');
       await api(`/api/agent-calls/${transport.record.id}/prepare`,{method:'POST',toast:false});
       if(disposed||epoch!==token||!dialog.open){transport.end();return;}
-      if(callMode.value==='cloud'){
+      if(isCloud()){
         setState('preparing','Connecting cloud voice...');active=true;microphoneMuted=false;assistantMuted=false;
         await live.start(transport.record.id,liveEndpoint.value,liveVoiceChoice.value,paid.checked);
         if(!active||epoch!==token){live.stop();transport.end();return;}
@@ -601,9 +622,9 @@ export function agentCall(agent, controller) {
       await openMicrophone();
       if (!active || epoch !== token) return;
       }
-      setup.hidden = true; controls.hidden = false; hold.hidden = holdHint.hidden = callMode.value==='cloud'||inputMode.value !== 'hold'; button.classList.add('is-call-active'); startedAt = lastActivity = Date.now(); ongoingCall = { isActive: () => active, restore }; listen();
+      setup.hidden = true; controls.hidden = false; hold.hidden = holdHint.hidden = isCloud()||inputMode.value !== 'hold'; button.classList.add('is-call-active'); startedAt = lastActivity = Date.now(); ongoingCall = { isActive: () => active, restore }; listen();
       if (ringOpening && callMode.value === 'local') { ringOpening = null; workUpdates.push('ring-opening'); scheduleFlush(); }
-      timer = setInterval(() => { const seconds = Math.floor((Date.now() - startedAt) / 1000); clock.textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`; if (Date.now() - lastActivity > livePrefs.idle_minutes * 60000 && !voiceBusy && !speechActive) hangup(); }, 1000);
+      timer = setInterval(() => { const seconds = Math.floor((Date.now() - startedAt) / 1000); clock.textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`; drawRealtimeCost(seconds); if (Date.now() - lastActivity > livePrefs.idle_minutes * 60000 && !voiceBusy && !speechActive) hangup(); }, 1000);
     } catch (problem) { if (epoch === token) { active = false; live.stop();transport.end();recorder?.close(); recorder = null; setState('setup','Call could not start');error.textContent = problem.message; } }
     finally { starting = false; start.disabled = false; }
   });
@@ -639,7 +660,7 @@ export function agentCall(agent, controller) {
       if (!active || epoch !== mine || assistantMuted || voiceBusy || state === 'speaking' || !livePrefs.read_typed || prepared.withheld) return;
       const text = prepared.blocks.slice(0, 3).join(' ') + (prepared.blocks.length > 3 ? ' The full answer is in the chat.' : '');
       if (!text) return;
-      readingTyped = true; if (callMode.value === 'cloud') live.muteMicrophone(true); say(text);
+      readingTyped = true; if (isCloud()) live.muteMicrophone(true); say(text);
     } catch { if (active && epoch === mine) error.textContent = 'Typed reply speech could not load. The reply is in chat.'; }
   };
   document.addEventListener('kairos:bots-live-settings', settingsChanged);

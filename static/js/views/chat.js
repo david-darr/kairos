@@ -19,6 +19,7 @@ import { openChatComputer, closeChatComputer, updateChatComputer } from "../chat
 import { mountComputerHistory, computerDetail } from '../runTimeline.js';
 import { createRecorder, transcribeBlob, getSpeechStatus, isRecordingSupported } from "../voiceInput.js";
 import { createOpenMic } from "../openMic.js";
+import { createRealtimeOpenMic } from "../openMicRealtime.js";
 import { createChatActivity } from '../chatActivity.js';
 import { showPermissionPrompt, dismissPermissionPrompt } from '../permissionPrompt.js';
 import { mountSideChat, openSideChat, closeSideChat, mainOpened, sideChatSessionId, canSplit, SESSION_MIME } from '../sideChat.js';
@@ -1955,6 +1956,16 @@ function sendVoiceTurn(text, { onChunk, onDone }) {
 
 async function setOpenMic(active, button) {
   if (active) {
+    // A bot set to Realtime holds Open Mic as a realtime call on this chat (speech-to-speech, your own key).
+    const realtimeMic = activeSessionId ? await createRealtimeOpenMic(activeSessionId, {
+      onState: state => { button.dataset.micState = state; button.title = `Open Mic: ${state}`; },
+      onError: message => toast(message, 'error') }) : null;
+    if (realtimeMic) {
+      openMic = realtimeMic;
+      button.classList.add('active');
+      document.getElementById('chat-main')?.classList.add('open-mic');
+      if (await openMic.start()) return;
+    } else {
     const status = await getSpeechStatus();
     if (!status?.engine_available || !status?.active_model) {
       toast(status?.engine_available
@@ -1994,6 +2005,7 @@ async function setOpenMic(active, button) {
     document.getElementById('chat-main')?.classList.add('open-mic');
     // A denied or missing microphone makes start() report false: fall through to the normal end path.
     if (await openMic.start()) return;
+    }
   }
 
   const controller = openMic;
@@ -2003,6 +2015,7 @@ async function setOpenMic(active, button) {
   button.removeAttribute('data-mic-state');
   button.title = 'Open Mic';
   document.getElementById('chat-main')?.classList.remove('open-mic');
+  if (controller?.realtime) { toast('The call summary will be saved in this chat.', 'success'); return; }
   const sessionId = activeSessionId;
   if (!sessionId) return;
   toast('Ending Open Mic and summarising…', 'success');

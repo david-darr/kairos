@@ -1,16 +1,19 @@
 """Native calls use their own transcript; only their summary enters chat."""
 import asyncio
+import contextlib
 import json
 import time
 import base64
 from typing import Literal
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, WebSocket
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from core.middleware import require_admin, require_user
+from core.middleware import get_current_user, require_admin, require_user
 from services import agent_calls as calls
 from core import call_voices, voice_fillers
 from services import call_live
+from services import realtime_session
+from core import realtime_settings, realtime_usage
 
 router = APIRouter(prefix='/api/agent-calls', tags=['agent calls'])
 
@@ -65,6 +68,77 @@ async def live(ident: str, body: Live, user: str = Depends(require_user)):
     try:return await call_live.start(call,body.endpoint_id,body.sdp,body.voice,body.paid_consent)
     except ValueError as error:raise HTTPException(422,str(error)) from error
     except Exception:raise HTTPException(502,'Cloud voice could not connect. Check API access, billing and the selected connection.')
+
+@router.get('/realtime-choices')
+async def realtime_choices(user: str = Depends(require_user)):
+    return realtime_session.choices()
+
+class RealtimeSettings(BaseModel):
+    endpoint_id: str | None = Field(default=None, max_length=80)
+    voice: str | None = Field(default=None, max_length=60)
+    bot_id: str = Field(default='', max_length=80)
+
+@router.get('/realtime-settings')
+async def realtime_settings_get(user: str = Depends(require_user)):
+    return realtime_settings.get()
+
+@router.put('/realtime-settings')
+async def realtime_settings_put(body: RealtimeSettings, user: str = Depends(require_user)):
+    try:return realtime_settings.update(body.endpoint_id,body.voice,body.bot_id)
+    except ValueError as error:raise HTTPException(422,str(error)) from error
+
+@router.get('/realtime-usage')
+async def realtime_usage_get(month: str = '', user: str = Depends(require_user)):
+    return realtime_usage.summary(month if len(month)==7 else '')
+
+def _same_origin(socket):
+    origin=socket.headers.get('origin')
+    if not origin:return True
+    from urllib.parse import urlparse
+    return urlparse(origin).netloc==socket.headers.get('host','')
+
+@router.websocket('/{ident}/realtime')
+async def realtime(socket: WebSocket, ident: str):
+    """The browser's side of a realtime call: PCM16 16 kHz microphone audio in (binary), the model's audio and small events
+    out (JSON). The provider key stays here; the first message says which connection and voice (and the paid consent)."""
+    user=get_current_user(socket)
+    try:
+        if user is None or not _same_origin(socket):raise HTTPException(401,'authentication required')
+        call=calls.require(ident,user)
+    except HTTPException:
+        await socket.close(1008);return
+    await socket.accept()
+    async def sink(message):
+        try:await socket.send_text(json.dumps(message))
+        except Exception:pass
+    session=None
+    try:
+        first=json.loads(await asyncio.wait_for(socket.receive_text(),15))
+        if first.get('type')!='start':raise ValueError('Send start first.')
+        if not first.get('consent'):raise ValueError('Enable paid realtime voice explicitly before starting this call.')
+        if call['ended'] or call.get('room_id'):raise ValueError('Realtime voice is not available for this call.')
+        if first.get('endpoint_id') not in {c['id'] for c in realtime_session.choices()}:
+            raise ValueError('Add an API connection with a key for OpenAI, xAI or Google in Settings > Models.')
+        session=realtime_session.RealtimeSession(call,first['endpoint_id'],str(first.get('voice') or ''),sink)
+        await session.start()
+        while True:
+            message=await socket.receive()
+            if message.get('type')=='websocket.disconnect':break
+            if message.get('bytes'):await session.send_audio(message['bytes'],16000);continue
+            try:event=json.loads(message.get('text') or '{}')
+            except ValueError:continue
+            kind=event.get('type')
+            if kind=='played':await session.played(event.get('item_id'),float(event.get('ms') or 0))
+            elif kind=='mute':session.muted=bool(event.get('value'))
+            elif kind=='end':break
+    except (ValueError,asyncio.TimeoutError) as error:
+        await sink({'type':'error','message':str(error) if isinstance(error,ValueError) else 'Realtime voice startup timed out.'})
+    except Exception:
+        await sink({'type':'error','message':'Realtime voice could not connect. Check API access, billing and the selected connection.'})
+    finally:
+        if session:await session.close()
+        if not call['ended'] and session and session.ready_at is not None:calls.end(call)
+        with contextlib.suppress(Exception):await socket.close()
 
 @router.get('/voices')
 async def voices(user: str = Depends(require_user)):

@@ -325,7 +325,7 @@ def clean_field(key: str, value, current: Optional[dict] = None):
     if key == "reply_style":
         return _choice(value, ("default", "conversational"), key)
     if key == "call_mode":
-        return _choice(value, ("turns", "live"), key)
+        return _choice(value, ("turns", "live", "realtime"), key)
     if key == "voice_id":
         if value is None:
             return None

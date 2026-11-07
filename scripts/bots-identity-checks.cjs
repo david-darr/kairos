@@ -127,7 +127,7 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
     assert.doesNotMatch(await text(card('permissions')), /saved choices for later|not available yet/i, 'no level is described as inactive');
 
     await openSection('voice');
-    await waitFor(`!!document.querySelector('${card('voice')} .bots-switch-row ~ *') && /Call mode|Turns/.test(document.querySelector('${card('voice')}').textContent)`);
+    await waitFor(`!!document.querySelector('${card('voice')} .bots-switch-row ~ *') && /Call mode|Local/.test(document.querySelector('${card('voice')}').textContent)`);
     await openSection('who');
     await waitFor(`/Account/.test(document.querySelector('${card('who')}').textContent)`);
     assert.match(await text(card('who')), /not shared with other people/);

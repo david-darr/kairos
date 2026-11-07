@@ -83,6 +83,8 @@ def _masked(ep: dict) -> dict:
         "kind": ep.get("kind", "api"),
         "num_ctx": ep.get("num_ctx"),
         "supports_images": ep.get("kind") in ("claude_cli", "codex_cli", "antigravity_cli") or bool(ep.get("supports_images")),
+        "realtime_provider": ep.get("realtime_provider"),
+        "realtime_model": ep.get("realtime_model"),
     }
 
 
@@ -204,6 +206,50 @@ def set_image_support(endpoint_id: str, enabled: bool) -> dict:
     endpoint["supports_images"] = bool(enabled)
     write_json_atomic(endpoints_file(), data)
     return _masked(endpoint)
+
+
+def realtime_provider_of(ep: dict) -> Optional[str]:
+    """The realtime speech-to-speech provider a connection can drive (Track A), or None. An api connection with a key
+    that the person marked for one provider, else by its official host (api.openai.com, api.x.ai, Google's)."""
+    from core import realtime_voice
+    if not ep or ep.get("kind") != "api":
+        return None
+    if not (ep.get("has_api_key") or ep.get("api_key_encrypted")):
+        return None
+    return ep.get("realtime_provider") or realtime_voice.provider_for_url(ep.get("base_url", ""))
+
+
+def set_realtime(endpoint_id: str, provider: Optional[str], model: Optional[str] = None) -> dict:
+    """Mark an api connection as a realtime voice connection for `provider` ('openai', 'xai', 'gemini'; None clears it)."""
+    from core import realtime_voice
+    data = _load()
+    endpoint = data.get(endpoint_id)
+    if endpoint is None:
+        raise KeyError(endpoint_id)
+    if endpoint.get("kind") != "api":
+        raise ValueError("Realtime voice needs an API connection with a key.")
+    if provider is not None and provider not in realtime_voice.ADAPTERS:
+        raise ValueError("Choose openai, xai or gemini.")
+    model = (model or "").strip()
+    if len(model) > 160 or any(c.isspace() for c in model):
+        raise ValueError("A model id has no spaces and is at most 160 characters.")
+    endpoint["realtime_provider"] = provider
+    endpoint["realtime_model"] = model or None
+    write_json_atomic(endpoints_file(), data)
+    return _masked(endpoint)
+
+
+def realtime_runtime(endpoint_id: str) -> tuple[str, str, str]:
+    """(provider, model, api_key) for a realtime session, key decrypted - for the server side only, never a route's answer."""
+    from core import realtime_voice
+    ep = get_endpoint(endpoint_id)
+    provider = realtime_provider_of(ep)
+    if not provider:
+        raise ValueError("That connection is not set up for realtime voice.")
+    key = api_key_of(ep)
+    if not key:
+        raise ValueError("That connection has no API key.")
+    return provider, ep.get("realtime_model") or realtime_voice.adapter(provider).default_model, key
 
 
 def delete_endpoint(endpoint_id: str) -> None:

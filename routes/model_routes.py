@@ -178,6 +178,22 @@ async def set_image_support(endpoint_id: str, body: ImageSupportRequest, user: s
         raise HTTPException(400, str(error))
 
 
+class RealtimeRequest(BaseModel):
+    provider: Optional[str] = None      # openai | xai | gemini; null clears it
+    model: Optional[str] = None
+
+
+@router.patch("/{endpoint_id}/realtime")
+async def set_realtime(endpoint_id: str, body: RealtimeRequest, user: str = Depends(require_user)) -> dict:
+    """Mark an API connection as a realtime speech-to-speech voice connection (Track A). The key stays in the connection."""
+    try:
+        return model_endpoints.set_realtime(endpoint_id, body.provider, body.model)
+    except KeyError:
+        raise HTTPException(404, "endpoint not found")
+    except ValueError as error:
+        raise HTTPException(400, str(error))
+
+
 @router.post("/{endpoint_id}/test")
 async def test_endpoint(endpoint_id: str, user: str = Depends(require_user)) -> dict:
     """Real reachability probe (David's ask 2026-08-31, matching Odysseus's

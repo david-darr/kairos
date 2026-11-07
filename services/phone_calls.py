@@ -146,12 +146,27 @@ async def _session(account: str, record: dict, mode: str, message: str = "") -> 
     return {"token": mint("stream", account, STREAM_TTL, mode=mode, message=message, bot_id=bot["id"]), "bot": bot}
 
 
+def realtime_choice(account: str, bot: dict) -> Optional[dict]:
+    """{'endpoint_id', 'voice'} when this bot's calls run in realtime mode (its Local | Realtime setting, a realtime
+    connection chosen for it and still valid), else None. Choosing the connection is the person's paid consent."""
+    if (bot or {}).get("call_mode") != "realtime":
+        return None
+    from core import realtime_settings
+    from services import realtime_session
+    with accounts.as_account(account):
+        chosen = realtime_settings.for_bot(bot.get("id") or "")
+        valid = {c["id"] for c in realtime_session.choices()}
+    return chosen if chosen["endpoint_id"] in valid else None
+
+
 async def live_problem(account: str, record: dict, bot: dict) -> str:
     """Why a live conversation cannot start (spoken to the caller), or ''. Tests replace this."""
     from core import speech
     from services import bot_voice
     if not (record.get("conversation_endpoint_id") and record.get("conversation_model")):
         return "Phone calls need a conversation model chosen in Kairos settings. Goodbye."
+    if realtime_choice(account, bot):
+        return ""         # the provider hears and speaks; no local speech engine or voice is needed
     if not speech.engine_available() or not speech.installed_model():
         return "Kairos has no speech recognition set up yet. Goodbye."
     with accounts.as_account(account):
@@ -358,10 +373,22 @@ async def serve_stream(provider_name: str, socket, pipeline_factory=None, bridge
         if not bot:
             await socket.close(1011)
             return "no bot"
-        factory = pipeline_factory or LivePipeline.open
-        pipeline = await factory(account, record, bot, session)
         opening = (f"{disclosure(bot.get('name'))} {session.get('message', '')}".strip() if session["mode"] == "outbound"
                    else f"Hi, it's {bot.get('name') or 'Kairos'}. How can I help?")
+        chosen = realtime_choice(account, bot)
+        if chosen:
+            from services import realtime_phone
+            pipeline = await (pipeline_factory or LivePipeline.open)(account, record, bot, session)
+            try:
+                bridge = realtime_phone.RealtimePhoneBridge(provider, socket.send, pipeline.call, chosen["endpoint_id"],
+                                                            chosen["voice"] or "", stream_id=first.get("stream_id", ""),
+                                                            opening=opening, **(bridge_options or {}))
+                await bridge.run(socket.recv)
+            finally:
+                await pipeline.close()
+            return "ended"
+        factory = pipeline_factory or LivePipeline.open
+        pipeline = await factory(account, record, bot, session)
         from core import turn_detect
         options = {"stream_id": first.get("stream_id", ""), "opening": opening, "smart_turn": turn_detect.ready()[0],
                    **(bridge_options or {})}

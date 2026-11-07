@@ -74,7 +74,7 @@ def view(call):
         task = task_service.get_task(job['task_id']) or {}
         jobs.append({**job, 'status': task.get('status', 'unavailable'),
                      'result': next((c['text'] for c in reversed(task.get('comments', [])) if c.get('kind') == 'result'), '')[:8000]})
-    return {k: call.get(k) for k in ('id','parent_id','agent_id','room_id','members','ended','summary_state','summary_error','summary','started_at','mode','live_error','live_finalized','live_usage')} | {'jobs': jobs}
+    return {k: call.get(k) for k in ('id','parent_id','agent_id','room_id','members','ended','summary_state','summary_error','summary','started_at','mode','live_error','live_finalized','live_usage','realtime')} | {'jobs': jobs}
 
 
 def choices():
@@ -450,6 +450,9 @@ async def finalize(call):
         if call.get('live_id'):
             from services import call_live
             await call_live.close(call)
+        if call.get('realtime'):
+            from services import realtime_session
+            await realtime_session.close_for(call)
         call['summary_state'] = 'pending'; call['summary_error'] = None; _save(call)
         try:
             transcript = '\n'.join(f"{_name(m['speaker']) if m.get('speaker') else m['role']}{' (interrupted)' if m.get('interrupted') else ''}: {m['content']}" for m in call['messages'])
