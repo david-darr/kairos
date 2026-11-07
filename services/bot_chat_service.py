@@ -641,7 +641,7 @@ def state(owner: str, sid: str) -> dict:
             "branch_revision": thread["branch_revision"],
             "turn": ({"id": turn["turn_id"], **{k: turn[k] for k in ("turn_id", "status", "stopping", "started_at", "permission")}}
                      if turn else None),
-            "context": _context_view(session),
+            "context": _context_view(session, endpoint),
             "queue": {"items": [_queue_item(i) for i in queue["items"]], "revision": queue["revision"],
                       "paused": queue["paused"], "consumed_queue_ids": queue["consumed_queue_ids"]},
             "goal": bot_goal_runs.current(sid),
@@ -657,10 +657,19 @@ def state(owner: str, sid: str) -> dict:
             "last_read_message_id": thread.get("last_read_message_id")}
 
 
-def _context_view(session: dict) -> dict:
-    """The context meter the header shows: percent used when a turn has measured it, else None."""
+def _context_view(session: dict, endpoint: dict | None = None) -> dict:
+    """The context meter the header shows: percent used when a turn has measured it, else None. `auto`
+    when the conversation compacts itself, so the header asks nothing of the person: a local or API model
+    with auto-compaction on (services/chat_service.py, in the background), or a CLI that manages its own
+    context."""
     meter = session.get("context_state") or {}
-    return {"percent": meter.get("percent") if isinstance(meter.get("percent"), (int, float)) else None}
+    kind = (endpoint or {}).get("kind")
+    auto = kind in ("claude_cli", "codex_cli", "antigravity_cli")
+    if kind in chat_service.AUTO_COMPACT_KINDS:
+        from core import settings as settings_store
+        auto = bool(settings_store.get_setting("auto_compact"))
+    return {"percent": meter.get("percent") if isinstance(meter.get("percent"), (int, float)) else None,
+            "auto": auto}
 
 
 # -- branches --------------------------------------------------------------------

@@ -217,12 +217,16 @@ class AutoCompactTests(ChatCase):
         settings_store.update_settings(auto_compact=True)
         self.addCleanup(lambda: settings_store.update_settings(auto_compact=True))
         self.compacted = []
+        chat_service._ahead.clear()
+        self.addCleanup(chat_service._ahead.clear)
 
-        async def compact(session_id, keep_tail=chat_service.COMPACTION_TAIL_KEEP, **record):  # trigger, pruned (unit 6)
-            self.compacted.append(len(session_manager.get_session(session_id)["messages"]))
-            self.kept = keep_tail
-            return {"archived": 4}
-        patch.object(chat_service, "_compact_session", new=compact).start()
+        # Seamless compaction (2026-11-07): the summary is written in the background, on what the chat held
+        # when it started; the message that started it goes ahead without waiting for it.
+        async def summarise(session_id, endpoint, fold):
+            self.compacted.append(fold["through_index"])
+            self.kept = 8 - fold["through_index"]
+            return "SUMMARY", None
+        patch.object(chat_service, "_write_summary", new=summarise).start()
 
     def fill(self, percent, size=10):
         for i in range(8):
@@ -231,13 +235,25 @@ class AutoCompactTests(ChatCase):
 
     async def send(self):
         with patch.object(openai_compatible, "_post_chat", new=tool_turn()):
-            return await chat_service.send_message(self.sid, "next")
+            reply = await chat_service.send_message(self.sid, "next")
+        job = chat_service._ahead.get(self.sid)
+        if job:
+            await job["task"]
+        return reply
 
-    async def test_near_a_full_window_it_compacts_before_the_message_goes_in(self):
+    async def test_near_a_full_window_the_summary_is_written_from_the_chat_before_the_message(self):
         self.fill(90)
         self.assertEqual(await self.send(), "Nothing open.")
-        self.assertEqual(self.compacted, [8], "compacted before the new message was saved")
+        self.assertEqual(self.compacted, [2], "folded through the 8 messages held before the new one, minus the tail")
         self.assertEqual(self.kept, chat_service.COMPACTION_TAIL_KEEP, "short messages: the usual six are kept")
+        # The next message finds it ready and applies it with no model call; nothing is added to the chat.
+        session_manager.set_context_state(self.sid, {"used_tokens": 1, "percent": 90, "capacity_tokens": 8192})
+        shown = [m["content"] for m in session_manager.get_session(self.sid)["messages"]]
+        self.assertTrue(await chat_service._compact_if_nearly_full(self.sid))
+        session = session_manager.get_session(self.sid)
+        self.assertEqual([m["content"] for m in session["messages"]], shown, "the transcript is exactly as it was")
+        self.assertEqual(len(session["compactions"]), 1)
+        self.assertEqual(self.compacted, [2], "no second summary")
 
     async def test_long_recent_messages_are_not_all_kept(self):
         """Found live: six long kept messages left an 8,192-token chat at 96%
@@ -271,16 +287,21 @@ class AutoCompactTests(ChatCase):
         session_manager.set_context_state(self.sid, {"used_tokens": 1, "percent": 95})
         with patch.object(chat_service, "_resolve_endpoint", return_value=CLAUDE):
             self.assertFalse(await chat_service._compact_if_nearly_full(self.sid), "Claude Code compacts itself")
+            chat_service.prepare_compaction_ahead(self.sid)
+            self.assertNotIn(self.sid, chat_service._ahead, "nor ahead of time")
         session_manager.set_context_state(self.sid, {"used_tokens": 1, "percent": None})
         self.assertFalse(await chat_service._compact_if_nearly_full(self.sid), "an unknown window is never guessed")
 
     async def test_a_failed_compaction_never_costs_the_message(self):
         self.fill(95)
 
-        async def broken(session_id):
+        async def broken(session_id, endpoint, fold):
             raise RuntimeError("the summariser fell over")
-        with patch.object(chat_service, "_compact_session", new=broken):
+        with patch.object(chat_service, "_write_summary", new=broken):
             self.assertEqual(await self.send(), "Nothing open.")
+        self.assertFalse(session_manager.get_session(self.sid).get("compactions"))
+        with patch.object(chat_service, "_auto_plan", side_effect=RuntimeError("planning fell over")):
+            self.assertFalse(await chat_service._compact_if_nearly_full(self.sid))
 
 
 if __name__ == "__main__":

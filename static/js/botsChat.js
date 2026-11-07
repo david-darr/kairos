@@ -58,7 +58,8 @@ function readState(raw = {}) {
   const caps = raw.capabilities || {};
   return { leaf: raw.active_leaf_id ?? null, revision: raw.branch_revision ?? raw.revision ?? 0, readId: raw.last_read_message_id ?? null, pinnedId: raw.pinned_message_id ?? null,
     queue: asQueue(raw.queue), goal: raw.goal || null, model: raw.model?.label || raw.effective_model?.label || '', turnId: runningTurnId(raw.turn) || raw.running_turn_id || null,
-    caps: { steer: !!caps.steer, queueing: caps.queueing !== false, images: caps.images !== false, speech: caps.speech !== false }, contextPercent: raw.context?.percent ?? null };
+    caps: { steer: !!caps.steer, queueing: caps.queueing !== false, images: caps.images !== false, speech: caps.speech !== false }, contextPercent: raw.context?.percent ?? null,
+    contextAuto: !!raw.context?.auto };
 }
 
 // options: agent, sessionId, initialMessage (a message ID to land on), onThreadChanged(sessionId, why), person, flushSettings(), mentions()
@@ -277,7 +278,9 @@ export async function mountBotsChat(host, options) {
     composer.setQueue(state.queue);
     syncBusy(true);
     const percent = state.contextPercent;
-    contextPill.hidden = !(Number.isFinite(percent) && percent >= 80);
+    // A conversation that compacts itself (in the background, or a CLI's own) asks nothing of the person;
+    // Compact now stays in the menu.
+    contextPill.hidden = state.contextAuto || !(Number.isFinite(percent) && percent >= 80);
     contextPill.textContent = contextPill.hidden ? '' : `Context ${Math.round(percent)}% full. Compact now`;
     contextPill.disabled = isBusy();
     paintGoal(); paintPinned(); ensurePoll();

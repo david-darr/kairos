@@ -88,6 +88,27 @@ def last_reply(rows: list[dict]) -> Optional[dict]:
             "output_tokens": run.get("output_tokens"), "ended_at": run.get("ended_at")}
 
 
+def compaction_records(rows: list[dict]) -> list[dict]:
+    """Each recorded compaction (unit 6 and seamless compaction), oldest first, with when it ended: a summary,
+    a no-model prune, or Claude Code compacting its own context. A run whose record does not parse is skipped."""
+    import json
+    found = []
+    for row in rows:
+        if row.get("purpose") != "compact" or not row.get("compaction"):
+            continue
+        try:
+            record = json.loads(row["compaction"])
+        except (TypeError, ValueError):
+            continue
+        if isinstance(record, dict):
+            found.append({**record, "at": row.get("ended_at") or row.get("started_at")})
+    return sorted(found, key=lambda r: r.get("at") or 0)
+
+
+# Compactions that leave no checkpoint on the chat (each is counted from its run instead).
+NO_CHECKPOINT_METHODS = ("prune", "cli")
+
+
 def summarize(session: dict, rows: list[dict]) -> dict:
     """The chat's usage: `rows` are every run recorded for it (oldest first or any order)."""
     chat_ids = {r["id"] for r in rows if r.get("surface") == "chat"}
@@ -95,6 +116,7 @@ def summarize(session: dict, rows: list[dict]) -> dict:
     for row in rows:
         groups[group(row, chat_ids)].append(row)
     whole = totals(rows)
+    records = compaction_records(groups["side"])
     return {
         "session_id": session.get("id"),
         "source": SOURCE,
@@ -102,9 +124,12 @@ def summarize(session: dict, rows: list[dict]) -> dict:
         **{k: whole[k] for k in (*TOKEN_FIELDS, "total_tokens", "tool_calls", "cache_hit_percent",
                                   "reported_runs", "failed", "stopped", "cost")},
         "runs": whole["runs"],
-        # Summaries the chat keeps, plus prunes that made no model call (unit 6), each recorded on a run.
+        # Summaries the chat keeps, plus prunes that made no model call (unit 6) and Claude Code's own
+        # compactions, each recorded on a run.
         "compactions": len(session.get("compactions") or []) + sum(
-            1 for r in groups["side"] if r.get("purpose") == "compact" and '"method": "prune"' in (r.get("compaction") or "")),
+            1 for r in records if r.get("method") in NO_CHECKPOINT_METHODS),
+        # The newest one, for Chat details: the only place a compaction shows (it never interrupts the chat).
+        "last_compaction": records[-1] if records else None,
         "helper_runs": len(groups["helpers"]),
         "side_runs": len(groups["side"]),
         "side_purposes": {p: sum(1 for r in groups["side"] if r["purpose"] == p)

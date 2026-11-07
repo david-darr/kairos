@@ -978,7 +978,7 @@ async function renderAddedModelsPanel(body, status, page) {
   // and never compact themselves (services/chat_service.py).
   const longChats = group({ title: "Long chats", cls: "long-chats" }, [row({
     title: "Compact local and API chats automatically",
-    description: "When a chat fills 85% of the model's context window, Kairos summarises its earlier part before your next message, as Compact does: the last messages stay word for word and nothing is deleted. Claude Code and Codex manage their own.",
+    description: "When a chat fills 85% of the model's context window, Kairos summarises its earlier part in the background, so your next message does not wait. Only what is sent to the model shrinks: the whole conversation stays in the chat, the last messages stay word for word, and nothing is deleted. Chat details shows when it happened. Claude Code and Codex manage their own.",
     control: toggle({ checked: settings.auto_compact !== false, label: "Compact local and API chats automatically",
       onChange: (on) => api("/api/settings/auto-compact", { method: "POST", body: JSON.stringify({ enabled: on }) }) }),
   })]);

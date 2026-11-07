@@ -95,6 +95,27 @@ class Summaries(unittest.TestCase):
         self.assertEqual((usage["runs"], usage["turns"]), (0, 0))
         self.assertIsNone(usage["last_reply"])
         self.assertIsNone(usage["input_tokens"])
+        self.assertIsNone(usage["last_compaction"])
+
+    def test_compactions_are_counted_and_the_newest_is_shown(self):
+        """Seamless compaction (2026-11-07): compaction never shows in the chat, so Chat details carries the
+        record. A summary is counted from the chat's checkpoint; a prune and Claude Code's own compaction,
+        which leave none, from their runs. An unreadable record is skipped, not guessed."""
+        summary = '{"trigger": "auto", "method": "summary", "tokens_before": 7600, "tokens_after": 2100, "written_ahead": true}'
+        rows = [run("t", "s1", started=0),
+                run("p", "s1", purpose="compact", endpoint_id=None, started=10,
+                    compaction='{"trigger": "auto", "method": "prune", "tokens_before": 7100, "tokens_after": 6000}'),
+                run("s", "s1", purpose="compact", started=20, compaction=summary),
+                run("c", "s1", purpose="compact", endpoint_id=None, started=30,
+                    compaction='{"trigger": "cli", "method": "cli", "by": "Claude Code", "tokens_before": 151000}'),
+                run("x", "s1", purpose="compact", started=40, compaction="not json")]
+        usage = session_usage.summarize({"compactions": [{"through_index": 6}]}, rows)
+        self.assertEqual(usage["compactions"], 3, "one checkpoint, one prune, one Claude Code compaction")
+        self.assertEqual((usage["last_compaction"]["trigger"], usage["last_compaction"]["tokens_before"]), ("cli", 151000))
+        self.assertEqual(usage["last_compaction"]["at"], NOW + 35)
+        usage = session_usage.summarize({"compactions": [{"through_index": 6}]}, rows[:3])
+        self.assertEqual(usage["last_compaction"]["written_ahead"], True)
+        self.assertEqual(usage["side_purposes"], {"compact": 2})
 
 
 class Store(unittest.TestCase):

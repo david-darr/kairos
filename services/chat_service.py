@@ -671,6 +671,7 @@ async def _send_message(session_id: str, text: str, attachment_ids: list[str] | 
     _remember_claude_session(session_id, brain)
     _turn_done(scope, context, "done", text, reply)
     _reply_hook(session_id, endpoint, text, reply)
+    prepare_compaction_ahead(session_id)
     return reply
 
 
@@ -927,6 +928,7 @@ async def _stream_message(session_id: str, text: str, attachment_ids: list[str] 
     _turn_done(scope, context, "failed" if provider_failed else "done", text, "".join(reply_parts))
     if not provider_failed:
         _reply_hook(session_id, endpoint, text, "".join(reply_parts))
+        prepare_compaction_ahead(session_id)
 
 
 async def _stream_with_permission_prompts(session_id: str, brain, full_text: str, tally: runs.Tally):
@@ -1185,26 +1187,33 @@ def _fixed_prompt_chars(session_id: str) -> int:
     return len(json.dumps(system, ensure_ascii=False)) + len(json.dumps(brain.tools, ensure_ascii=False))
 
 
-async def _compact_if_nearly_full(session_id: str) -> bool:
-    """Compact a local/API chat near a full window, before the next message
-    goes in (Settings > Added Models; on by default). The same Compact as the
-    button: a summary, the last messages kept word for word, nothing deleted.
-    A compaction that fails or has nothing new to fold never blocks the
-    message.
+# Seamless compaction (David, 2026-11-07: "it just happens naturally", as in
+# Claude Code). The summary is written in the background as soon as a turn
+# leaves the chat over the line, so the next message never waits for it; it
+# is applied, with no model call, when that message goes in. Nothing is added
+# to the transcript. A message that comes before the summary is ready gets the
+# no-model prune instead, and waits for the summary only when the chat is so
+# full that the request would otherwise overflow the window.
+AUTO_COMPACT_WAIT_PERCENT = 95
+_ahead: dict[str, dict] = {}  # session id -> {"task": the summary being written, "pruned": characters}
 
-    First the cheaper step (Session Usage and Model Tracking, unit 6): old
-    tool results outside the kept tail are replayed as one-line stubs, with
-    no model call. Only if that alone does not bring the chat back under the
-    line is a summary written. Either way the compaction is recorded on a run
-    (trigger, method, tokens before and after)."""
+
+def _auto_due(session_id: str) -> Optional[tuple[dict, dict]]:
+    """(endpoint, context reading) when this chat compacts itself now: a local or API chat over
+    AUTO_COMPACT_PERCENT of its window with auto-compaction on (Settings > Added Models). Else None."""
     from core import settings as settings_store
     if not settings_store.get_setting("auto_compact"):
-        return False
+        return None
     endpoint = _resolve_endpoint(session_id)
     state = (session_manager.get_session(session_id) or {}).get("context_state") or {}
     if (endpoint is None or endpoint.get("kind") not in AUTO_COMPACT_KINDS
             or not isinstance(state.get("percent"), (int, float)) or state["percent"] < AUTO_COMPACT_PERCENT):
-        return False
+        return None
+    return endpoint, state
+
+
+def _auto_plan(session_id: str, state: dict) -> dict:
+    """Where an automatic compaction would cut, and what the no-model prune alone would save."""
     messages = [m for m in (session_manager.get_session(session_id) or {}).get("messages", [])
                 if not m.get("display_only")]
     capacity = int(state.get("capacity_tokens") or 0)
@@ -1212,28 +1221,158 @@ async def _compact_if_nearly_full(session_id: str) -> bool:
     before = state.get("used_tokens")
     tail_start = messages[-keep].get("ts") if keep and len(messages) > keep else None
     saved = session_manager.tool_prune_savings(session_id, tail_start)
-    if saved:
-        session_manager.prune_tool_results(session_id, tail_start)
-        after = max(0, int(before or 0) - saved // CHARS_PER_TOKEN)
-        if capacity and after * 100 / capacity < AUTO_COMPACT_PERCENT:
-            _record_compaction(session_id, {"trigger": "auto", "method": "prune", "tokens_before": before,
-                                            "tokens_after": after, "tokens_after_estimated": True,
-                                            "chars_pruned": saved, "percent_before": state["percent"]})
-            await close_session_brain(session_id)
-            logger.info("auto-compacted chat %s at %s%% by stubbing old tool results (%s characters), no summary",
-                        session_id, state["percent"], saved)
-            return True
+    after = max(0, int(before or 0) - saved // CHARS_PER_TOKEN)
+    return {"keep": keep, "tail_start": tail_start, "saved": saved, "before": before, "after": after,
+            "capacity": capacity, "percent": state["percent"],
+            "prune_clears": bool(saved and capacity and after * 100 / capacity < AUTO_COMPACT_PERCENT)}
+
+
+def _start_summary_ahead(session_id: str, endpoint: dict, plan: dict) -> Optional[dict]:
+    """The background summary for this chat, started now unless one is already being written or is
+    ready and still fits the chat. None when there is nothing new to fold. What it folds is fixed here,
+    before anything else is added to the chat."""
+    job = _ahead.get(session_id)
+    if job and (not job["task"].done() or _ready_fold(session_id, job)):
+        return job
+    _ahead.pop(session_id, None)
     try:
-        result = await _compact_session(session_id, keep_tail=keep, trigger="auto", pruned=saved)
+        fold = _fold_plan(session_id, plan["keep"])
     except HTTPException as e:
-        logger.info("auto-compact of chat %s skipped: %s", session_id, e.detail)
+        logger.info("background summary of chat %s not started: %s", session_id, e.detail)
+        return None
+
+    async def write():
+        try:
+            summary, run_id = await _write_summary(session_id, endpoint, fold)
+            return {"fold": fold, "summary": summary, "run_id": run_id, "endpoint_id": endpoint.get("id")}
+        except HTTPException as e:
+            logger.info("background summary of chat %s skipped: %s", session_id, e.detail)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("background summary of chat %s failed; the chat goes on uncompacted", session_id)
+        return None
+
+    job = {"task": asyncio.create_task(write()), "pruned": 0}
+    _ahead[session_id] = job
+    return job
+
+
+def _ready_fold(session_id: str, job: dict) -> Optional[dict]:
+    """The finished background summary, if the part it folds is still exactly the chat's: no edit, rewind,
+    branch switch or other compaction since it was written. Messages added after it do not matter."""
+    task = job.get("task")
+    if task is None or not task.done() or task.cancelled() or task.exception() is not None:
+        return None
+    result = task.result()
+    if not result:
+        return None
+    try:
+        current = _fold_view(session_id)
+    except HTTPException:
+        return None
+    fold = result["fold"]
+    if (current["prior_through"] != fold["prior_through"] or len(current["compactions"]) != len(fold["compactions"])
+            or _fold_key(current["messages"], fold["prior_through"], fold["through_index"]) != fold["key"]):
+        return None
+    return result
+
+
+def prepare_compaction_ahead(session_id: str) -> None:
+    """After a turn: if it left the chat over the line, start writing the summary now, between turns,
+    so the next message finds it ready. A chat the no-model prune alone will bring back under the line
+    needs no summary; the prune is applied, instantly, when the next message goes in. Never raises."""
+    try:
+        due = _auto_due(session_id)
+        if due is None:
+            return
+        endpoint, state = due
+        plan = _auto_plan(session_id, state)
+        if not plan["prune_clears"]:
+            _start_summary_ahead(session_id, endpoint, plan)
+    except Exception:
+        logger.exception("could not start the background summary of chat %s", session_id)
+
+
+async def _apply_ready_summary(session_id: str, endpoint: dict, state: dict, job: dict) -> bool:
+    ready = _ready_fold(session_id, job)
+    if ready is None:
         return False
+    _ahead.pop(session_id, None)
+    pruned = job.get("pruned") or 0
+    await _apply_compaction(session_id, endpoint, ready["fold"], ready["summary"], ready["run_id"],
+                            trigger="auto", pruned=pruned, before=state.get("used_tokens"),
+                            extra={"written_ahead": True, "percent_before": state.get("percent")})
+    logger.info("auto-compacted chat %s at %s%% with the summary written ahead (%s messages folded)",
+                session_id, state.get("percent"), ready["fold"]["through_index"] - ready["fold"]["prior_through"])
+    return True
+
+
+async def _compact_if_nearly_full(session_id: str) -> bool:
+    """Compact a local/API chat near a full window as the next message goes
+    in, without making that message wait (Settings > Added Models; on by
+    default). Nothing is deleted and nothing is added to the transcript: only
+    what is sent to the model shrinks. A compaction that fails or has nothing
+    new to fold never blocks the message.
+
+    In order: the summary written ahead in the background, if it is ready and
+    still fits the chat (no model call now); else the cheap step (unit 6): old
+    tool results outside the kept tail replayed as one-line stubs, no model
+    call. If the chat is still over the line the summary is started (or left
+    running) in the background for a later message; only a chat at
+    AUTO_COMPACT_WAIT_PERCENT or more, whose request would otherwise overflow,
+    waits for it. Each step is recorded on a run (trigger, method, tokens
+    before and after), which Chat details shows."""
+    try:
+        return await _compact_now(session_id)
+    except asyncio.CancelledError:
+        raise
     except Exception:
         logger.exception("auto-compact of chat %s failed; the message goes ahead", session_id)
         return False
-    logger.info("auto-compacted chat %s at %s%% of its window (%s messages folded)",
-                session_id, state["percent"], result.get("archived"))
-    return True
+
+
+async def _compact_now(session_id: str) -> bool:
+    due = _auto_due(session_id)
+    if due is None:
+        return False
+    endpoint, state = due
+    job = _ahead.get(session_id)
+    if job and await _apply_ready_summary(session_id, endpoint, state, job):
+        return True
+    plan = _auto_plan(session_id, state)
+    if plan["saved"]:
+        session_manager.prune_tool_results(session_id, plan["tail_start"])
+        await close_session_brain(session_id)
+        if plan["prune_clears"]:
+            _record_compaction(session_id, {"trigger": "auto", "method": "prune", "tokens_before": plan["before"],
+                                            "tokens_after": plan["after"], "tokens_after_estimated": True,
+                                            "chars_pruned": plan["saved"], "percent_before": plan["percent"]})
+            logger.info("auto-compacted chat %s at %s%% by stubbing old tool results (%s characters), no summary",
+                        session_id, plan["percent"], plan["saved"])
+            return True
+    job = _start_summary_ahead(session_id, endpoint, plan)
+    wait = plan["capacity"] and plan["after"] * 100 / plan["capacity"] >= AUTO_COMPACT_WAIT_PERCENT
+    if job is not None and wait:
+        logger.info("chat %s is at %s%% with no summary ready: this message waits for the one being written",
+                    session_id, plan["percent"])
+        try:
+            await asyncio.shield(job["task"])
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
+        job["pruned"] = (job.get("pruned") or 0) + plan["saved"]
+        if await _apply_ready_summary(session_id, endpoint, state, job):
+            return True
+        job["pruned"] = 0
+    if plan["saved"]:
+        # Not enough on its own, but in effect from now on; recorded as its own step.
+        _record_compaction(session_id, {"trigger": "auto", "method": "prune", "tokens_before": plan["before"],
+                                        "tokens_after": plan["after"], "tokens_after_estimated": True,
+                                        "chars_pruned": plan["saved"], "percent_before": plan["percent"]})
+        return True
+    return False
 
 
 def _record_turn_telemetry(session_id: str, endpoint: dict, brain, turn_usage) -> None:
@@ -1287,6 +1426,15 @@ def _record_turn_telemetry(session_id: str, endpoint: dict, brain, turn_usage) -
         session_manager.set_context_state(session_id, state)
     except Exception:
         logger.exception("context state update failed for session %s", session_id)
+    # Claude Code compacted its own context during the turn: nothing was shown in the chat; record it so
+    # Chat details can say it happened.
+    live = brain.actual if isinstance(brain, _BotRecovery) else brain
+    noted = getattr(live, "cli_compactions", None)
+    if isinstance(noted, list) and noted:
+        for item in noted:
+            _record_compaction(session_id, {"trigger": "cli", "method": "cli", "by": "Claude Code",
+                                            "cli_trigger": item.get("trigger"), "tokens_before": item.get("pre_tokens")})
+        noted.clear()
 
 
 async def close_session_brain(session_id: str) -> None:
@@ -1296,6 +1444,9 @@ async def close_session_brain(session_id: str) -> None:
 
 
 async def shutdown() -> None:
+    for job in list(_ahead.values()):
+        job["task"].cancel()
+    _ahead.clear()
     for session_id in list(_brains.keys()):
         await close_session_brain(session_id)
 
@@ -1459,26 +1610,35 @@ def _estimated_tokens_sent(session_id: str, endpoint: dict, fixed_chars: int) ->
     return (len(json.dumps(replayed, ensure_ascii=False)) + fixed_chars) // CHARS_PER_TOKEN
 
 
-async def _compact_session(session_id: str, keep_tail: int = COMPACTION_TAIL_KEEP, trigger: str = "manual",
-                           pruned: int = 0) -> dict:
+def _fold_view(session_id: str) -> dict:
+    """The messages a compaction counts over and the folds already made: the whole transcript, or for a
+    bot's conversation (a tree) the selected branch and the folds that apply to it (core/bot_message_tree.py)."""
     session = session_manager.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
-    endpoint = _resolve_endpoint(session_id)
-    if endpoint is None:
-        raise HTTPException(status_code=400, detail="add a model to this chat before compacting it")
-
     messages = session.get("messages", [])
     compactions = session.get("compactions") or []
     prior_through = compactions[-1]["through_index"] if compactions else 0
     if session.get("agent_id"):
-        # A bot's conversation is a tree: compact the selected branch only, and
-        # count from the fold that applies to it (core/bot_message_tree.py).
         from core import bot_message_tree as tree
         session = tree.ensure(session_id)
         messages = tree.ancestry(session)
         compactions = tree.checkpoints(session, messages)
         prior_through = tree.boundary(messages, compactions[-1]) if compactions else 0
+    return {"messages": messages, "compactions": compactions, "prior_through": prior_through}
+
+
+def _fold_key(messages: list[dict], start: int, end: int) -> str:
+    """A fingerprint of the folded messages, so a summary written ahead is applied only to the same text."""
+    import hashlib
+    rows = [(m.get("role"), m.get("content"), m.get("ts"), m.get("bot_message_id")) for m in messages[start:end]]
+    return hashlib.sha256(json.dumps(rows, ensure_ascii=False, default=str).encode("utf-8")).hexdigest()
+
+
+def _fold_plan(session_id: str, keep_tail: int = COMPACTION_TAIL_KEEP) -> dict:
+    """What one compaction folds: from the last fold up to the kept tail. 400 when there is nothing new."""
+    view = _fold_view(session_id)
+    messages, prior_through = view["messages"], view["prior_through"]
     # "New conversation" is counted over real messages only: the stored
     # "Conversation compacted" notice is display-only and must not look like
     # something said since the last fold (it made a second, paid summary run
@@ -1492,12 +1652,18 @@ async def _compact_session(session_id: str, keep_tail: int = COMPACTION_TAIL_KEE
     to_fold_in = [m for m in messages[prior_through:through_index] if not m.get("display_only")]
     if through_index <= prior_through or not to_fold_in:
         raise HTTPException(status_code=400, detail="not enough new conversation to compact yet")
+    return {"compactions": view["compactions"], "prior_through": prior_through, "through_index": through_index,
+            "to_fold_in": to_fold_in, "key": _fold_key(messages, prior_through, through_index)}
 
-    transcript = (chr(10) * 2).join(_compaction_transcript(to_fold_in))
+
+async def _write_summary(session_id: str, endpoint: dict, fold: dict) -> tuple[str, Optional[str]]:
+    """The summary of what `fold` folds, from a detached brain, recorded as a "compact" side run.
+    Changes nothing stored. Returns (summary, the side run's id)."""
+    transcript = (chr(10) * 2).join(_compaction_transcript(fold["to_fold_in"]))
     prompt = COMPACTION_PROMPT
-    if compactions:
+    if fold["compactions"]:
         prompt = (
-            f"[Summary of everything before this point:]\n{compactions[-1]['summary']}"
+            f"[Summary of everything before this point:]\n{fold['compactions'][-1]['summary']}"
             "\n\n[New conversation since then, to fold into that summary:]\n"
         ) + prompt
     prompt += transcript
@@ -1520,12 +1686,34 @@ async def _compact_session(session_id: str, keep_tail: int = COMPACTION_TAIL_KEE
         await brain.disconnect()
     if not summary:
         raise HTTPException(status_code=502, detail="the summary came back empty")
+    return summary, side.run_id
 
+
+async def _compact_session(session_id: str, keep_tail: int = COMPACTION_TAIL_KEEP, trigger: str = "manual",
+                           pruned: int = 0) -> dict:
+    if session_manager.get_session(session_id) is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    endpoint = _resolve_endpoint(session_id)
+    if endpoint is None:
+        raise HTTPException(status_code=400, detail="add a model to this chat before compacting it")
+    fold = _fold_plan(session_id, keep_tail)
+    summary, run_id = await _write_summary(session_id, endpoint, fold)
+    _ahead.pop(session_id, None)  # a summary written ahead no longer fits once this one is in
     before = ((session_manager.get_session(session_id) or {}).get("context_state") or {}).get("used_tokens")
+    return await _apply_compaction(session_id, endpoint, fold, summary, run_id, trigger=trigger, pruned=pruned,
+                                   before=before)
+
+
+async def _apply_compaction(session_id: str, endpoint: dict, fold: dict, summary: str, run_id: Optional[str], *,
+                            trigger: str, pruned: int = 0, before=None, extra: Optional[dict] = None) -> dict:
+    """Put a written summary in: the checkpoint, its record on the summary's run, and a fresh brain next
+    turn. No model call. Only the Compact button (trigger "manual") adds a line to the transcript; an
+    automatic compaction leaves the chat exactly as the person sees it."""
+    through_index, prior_through = fold["through_index"], fold["prior_through"]
     fixed = _fixed_prompt_chars(session_id)
     session_manager.compact_session(session_id, through_index, summary)
     record = {"trigger": trigger, "method": "prune+summary" if pruned else "summary", "tokens_before": before,
-              "messages_folded": through_index - prior_through}
+              "messages_folded": through_index - prior_through, **(extra or {})}
     if pruned:
         record["chars_pruned"] = pruned
     if endpoint["kind"] in AUTO_COMPACT_KINDS:
@@ -1533,7 +1721,7 @@ async def _compact_session(session_id: str, keep_tail: int = COMPACTION_TAIL_KEE
             record.update(tokens_after=_estimated_tokens_sent(session_id, endpoint, fixed), tokens_after_estimated=True)
         except Exception:
             logger.exception("could not estimate chat %s after compaction", session_id)
-    _record_compaction(session_id, record, run_id=side.run_id)
+    _record_compaction(session_id, record, run_id=run_id)
     if endpoint["kind"] == "antigravity_cli":
         session_manager.set_antigravity_conversation_id(session_id, None)
     if endpoint["kind"] == "codex_cli":
@@ -1549,10 +1737,12 @@ async def _compact_session(session_id: str, keep_tail: int = COMPACTION_TAIL_KEE
     # it already had cached.
     await close_session_brain(session_id)
 
-    session_manager.append_message(
-        session_id, "assistant",
-        "**Conversation compacted**" + chr(10) * 2 + summary,
-        extra={"display_only": True},
-    )
+    if trigger == "manual":
+        # The person asked for this one, so the chat shows what it now carries.
+        session_manager.append_message(
+            session_id, "assistant",
+            "**Conversation compacted**" + chr(10) * 2 + summary,
+            extra={"display_only": True},
+        )
     return {"compacted_through": through_index, "archived": through_index - prior_through, "summary": summary}
 

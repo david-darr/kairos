@@ -159,6 +159,11 @@ class Brain:
         # finishes, since Brain itself doesn't know which model_endpoint_id
         # it's associated with.
         self.last_usage: dict | None = None
+        # Claude Code compacts its own context, inside a turn, when it decides
+        # to. Kairos shows nothing for it; it only notes each one here
+        # (trigger, tokens before) so chat_service can record it for Chat
+        # details, then clears the list.
+        self.cli_compactions: list[dict] = []
         # Only used to exclude this session's own history from cross-session
         # search results (David's ask 2026-08-31, shared memory + cross-
         # session awareness — see core/hive_mind_server.py) — a session
@@ -795,6 +800,9 @@ class Brain:
                     raise RuntimeError("Claude Code timed out waiting for a response")
 
                 self._observe(message)
+                if getattr(message, "subtype", None) == "compact_boundary" and not getattr(message, "parent_tool_use_id", None):
+                    meta = (getattr(message, "data", None) or {}).get("compact_metadata") or {}
+                    self.cli_compactions.append({"trigger": meta.get("trigger"), "pre_tokens": meta.get("pre_tokens")})
                 if isinstance(message, StreamEvent):
                     if message.parent_tool_use_id:
                         continue

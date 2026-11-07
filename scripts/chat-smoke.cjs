@@ -501,6 +501,37 @@ app.whenReady().then(async () => {
     await win.loadURL(base); await mount();
     await waitFor("document.querySelector('#context-pill').hidden");
 
+    // Seamless compaction (David, 2026-11-07): a local chat the server compacted on its own looks exactly as it
+    // did. Every message stays on screen (the folded ones included, each still editable), nothing says
+    // "compacted", and the next message goes straight out: no Compact call, no wait, no notice, no toast.
+    chats.cmp = { id: 'cmp', title: 'Long local chat', model_endpoint_id: 'local',
+      compactions: [{ through_index: 4, summary: 'SUMMARY of the earlier part', created_at: Date.now() / 1000 }],
+      context_state: { used_tokens: 7200, capacity_tokens: 8192, percent: 87.9, estimated_capacity: false, capacity_source: 'endpoint_num_ctx', model: 'local-model' },
+      messages: [{ role: 'user', content: 'Earliest question about the vendor', archived: true }, { role: 'assistant', content: 'Earliest answer', archived: true },
+        { role: 'user', content: 'Second question', archived: true }, { role: 'assistant', content: 'Second answer', archived: true },
+        { role: 'user', content: 'Latest question' }, { role: 'assistant', content: 'Latest answer' }] };
+    await open('cmp');
+    await waitFor("document.querySelectorAll('#chat-messages > .msg').length === 6");
+    const transcript = () => js("document.querySelector('#chat-messages').innerText");
+    assert.ok((await transcript()).includes('Earliest question about the vendor'), 'the folded messages are still on screen');
+    assert.ok(!/compact/i.test(await transcript()), 'no compaction notice in the transcript');
+    await waitFor("document.querySelectorAll('#chat-messages .msg-edit').length === 3");
+    const sentBefore = requests.length;
+    await js("document.querySelector('#chat-input').value='Next question'; document.querySelector('#chat-input').dispatchEvent(new Event('input')); document.querySelector('#chat-send').click()");
+    await waitFor("document.querySelector('#chat-send').dataset.mode==='stop'");
+    while (!pending) await delay(20);
+    assert.equal(pending.sid, 'cmp', 'the message went straight out');
+    await waitFor("document.querySelector('#chat-messages').innerText.includes('Working on your request')");
+    chats.cmp.messages.push({ role: 'assistant', content: pending.text });
+    pending.res.end('data: {"done":true}\n\n'); pending = null;
+    await waitFor("document.querySelector('#chat-send').dataset.mode!=='stop'");
+    const sent = requests.slice(sentBefore).map(r => r.path);
+    assert.ok(!sent.includes('/api/chat/compact'), 'the page never asked for a compaction');
+    assert.ok((await transcript()).includes('Earliest question about the vendor') && !/compact/i.test(await transcript()), 'still the whole chat, still no notice');
+    assert.ok(await js("[...document.querySelectorAll('#toast-host .toast')].every(t => !/compact/i.test(t.textContent))"), 'no toast either');
+    delete chats.cmp;
+    await open('s1');
+
     // -- side browser, web fallback (David's ask 2026-09-15). This suite has
     // no preload bridge, so window.jarvis is undefined and browserPane.js
     // takes its iframe path — which is exactly the path a phone or any

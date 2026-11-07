@@ -6,7 +6,7 @@ Workloads: simple chat, tool-heavy chat (one 3,000-char tool result per turn), 1
 (a small window: core tools only), auto-compaction on and off.
 Run: .venv/Scripts/python.exe -B -X utf8 scripts/g12_token_audit.py [--json out.json]
 """
-import asyncio, copy, json, os, sys, tempfile
+import asyncio, copy, json, logging, os, sys, tempfile
 from pathlib import Path
 from unittest.mock import patch, AsyncMock
 
@@ -80,23 +80,44 @@ async def run_workload(tool_heavy, auto, turns=100):
         return {"role": "assistant", "content": None, "tool_calls": [{"id": "c", "type": "function",
                 "function": {"name": "search_vault", "arguments": '{"query": "plan"}'}}]}
 
+    # Seamless compaction (2026-11-07): a summary is written in the background after the turn that crossed the
+    # line and applied when the next message goes in. comp_at counts summaries APPLIED at each turn; r.summ
+    # counts summaries WRITTEN; r.waits counts messages that had to wait for one (the overflow last resort).
+    # Turns here follow each other with no pause at all, the worst case for writing ahead.
+    r.waits = 0
+
+    class Waits(logging.Handler):
+        def emit(self, record):
+            if "waits for the one being written" in record.getMessage():
+                r.waits += 1
+    handler, level = Waits(), chat_service.logger.level
+    chat_service.logger.addHandler(handler)
+    chat_service.logger.setLevel(logging.INFO)
     first_req, comp_at = {}, {}
-    with patch.object(chat_service, "_resolve_endpoint", side_effect=lambda s: ENDPOINT), \
-         patch("core.model_endpoints.resolve_runtime", return_value=("http://fake", "local-model", None, WINDOW)), \
-         patch("core.external_brain.ExternalBrain._execute_tool", new=AsyncMock(return_value=TOOL_RESULT)), \
-         patch("core.providers.openai_compatible._post_chat", new=fake_post):
-        for n in range(1, turns + 1):
-            r.replies.extend(([tool_call()] if tool_heavy else []) + [{"role": "assistant", "content": ANSWER.format(n=n)}])
-            first_req[n] = len(r.bodies)
-            ncomp = len(r.summ)
-            await chat_service.send_message(sid, USER.format(n=n) + (" " + PLANT_TEXT if n == 3 else ""))
-            comp_at[n] = len(r.summ) - ncomp
+    try:
+        with patch.object(chat_service, "_resolve_endpoint", side_effect=lambda s: ENDPOINT), \
+             patch("core.model_endpoints.resolve_runtime", return_value=("http://fake", "local-model", None, WINDOW)), \
+             patch("core.external_brain.ExternalBrain._execute_tool", new=AsyncMock(return_value=TOOL_RESULT)), \
+             patch("core.providers.openai_compatible._post_chat", new=fake_post):
+            for n in range(1, turns + 1):
+                r.replies.extend(([tool_call()] if tool_heavy else []) + [{"role": "assistant", "content": ANSWER.format(n=n)}])
+                first_req[n] = len(r.bodies)
+                folds = len(session_manager.get_session(sid).get("compactions") or [])
+                await chat_service.send_message(sid, USER.format(n=n) + (" " + PLANT_TEXT if n == 3 else ""))
+                comp_at[n] = len(session_manager.get_session(sid).get("compactions") or []) - folds
+            job = chat_service._ahead.pop(sid, None)
+            if job:
+                await job["task"]
+    finally:
+        chat_service.logger.removeHandler(handler)
+        chat_service.logger.setLevel(level)
     return r, first_req, comp_at, sid
 
 
 def report(name, tool_heavy, auto, out):
     r, first, comp, sid = asyncio.run(run_workload(tool_heavy, auto))
     row = {"workload": name, "auto_compact": auto, "turns": 100, "requests": len(r.bodies), "compactions": len(r.summ),
+           "summaries_applied": sum(comp.values()), "messages_that_waited": r.waits,
            "compaction_turns": [n for n, c in comp.items() if c], "summariser_tokens_est": sum(r.summ) // 4,
            "input_total_tokens_est": sum(size(b) for b in r.bodies) // 4, "turn": {}}
     for n in (1, 10, 50, 100):
@@ -123,7 +144,7 @@ if __name__ == "__main__":
             row = report(name, th, auto, out)
             t = row["turn"]
             print(f"\n== {name}, auto-compact {'on' if auto else 'off'} ==")
-            print(f"requests {row['requests']}, compactions {row['compactions']} at turns {row['compaction_turns']}, summariser input ~{row['summariser_tokens_est']} tok total")
+            print(f"requests {row['requests']}, summaries written {row['compactions']}, applied {row['summaries_applied']} at turns {row['compaction_turns']}, messages that waited {row['messages_that_waited']}, summariser input ~{row['summariser_tokens_est']} tok total")
             print(f"input sent across 100 turns ~{row['input_total_tokens_est']} tok; peak request ~{row['peak_request_tokens_est']} tok vs window {WINDOW}; requests over window: {row['requests_over_window']}")
             for n in (1, 10, 50, 100):
                 c = t[n]

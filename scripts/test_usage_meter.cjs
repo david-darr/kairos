@@ -63,4 +63,15 @@ assert.equal(cost({ total: 0.00123, s: { estimated: 2 } }), '$0.0012 estimated')
 assert.equal(cost({ total: 1.5, s: { estimated: 2, unknown: 1 } }), '$1.50 estimated, 1 run not priced');
 assert.equal(cost({ total: 0.2, s: { actual: 1 } }), '$0.20 reported');
 assert.equal(value(usageRows(full), 'Cost'), NA, 'an older backend without costs says n/a');
+// Seamless compaction (2026-11-07): the chat never shows a compaction, so Chat details names the newest one.
+const hint = (rows, label) => rows.find(r => r[0] === label)?.[2];
+assert.equal(value(usageRows(full), 'Last compaction'), 'none', 'an older backend or an uncompacted chat');
+rows = usageRows({ ...full, last_compaction: { trigger: 'auto', method: 'summary', tokens_before: 14200, tokens_after: 6100, tokens_after_estimated: true, written_ahead: true } });
+assert.equal(value(rows, 'Last compaction'), 'Automatic, 14K to ~6.1K tokens');
+assert.match(hint(rows, 'Last compaction'), /in the background before it was needed/);
+rows = usageRows({ ...full, last_compaction: { trigger: 'cli', method: 'cli', tokens_before: 151000 } });
+assert.equal(value(rows, 'Last compaction'), 'By Claude Code, from 151K tokens');
+rows = usageRows({ ...full, last_compaction: { trigger: 'manual', method: 'summary', tokens_before: null } });
+assert.equal(value(rows, 'Last compaction'), 'By you');
+for (const r of usageRows({ ...full, last_compaction: { trigger: 'auto', method: 'prune' } })) assert.ok(!/—/.test(`${r[1]} ${r[2] || ''}`), 'no em-dashes');
 console.log('usage meter: ok');

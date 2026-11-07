@@ -73,10 +73,27 @@ export function sideCalls(usage) {
   return kinds.length ? `${usage.side_runs} (${kinds.join(', ')})` : String(usage.side_runs);
 }
 
+// The newest compaction, in words: [value, hint]. Compaction never shows in the chat itself, so this row is
+// where a curious person can see that it happened and what it saved.
+const COMPACTED_BY = { auto: 'Automatic', manual: 'By you', cli: 'By Claude Code' };
+export function lastCompaction(record) {
+  if (!record) return ['none', 'This chat has not been compacted'];
+  const who = COMPACTED_BY[record.trigger] || 'Automatic';
+  const before = Number.isFinite(record.tokens_before) ? formatShort(record.tokens_before) : null;
+  const after = Number.isFinite(record.tokens_after) ? `${record.tokens_after_estimated ? '~' : ''}${formatShort(record.tokens_after)}` : null;
+  const size = before && after ? `, ${before} to ${after} tokens` : before ? `, from ${before} tokens` : '';
+  const hint = record.method === 'cli' ? 'Claude Code shortened its own context during a reply'
+    : record.method === 'prune' ? 'Older tool results were shortened for the model, with no model call'
+    : record.written_ahead ? 'Summarised in the background before it was needed, so no message waited for it'
+    : 'Older turns were summarised for the model';
+  return [`${who}${size}`, `${hint}. The full conversation stays in the chat.`];
+}
+
 // The Usage card's rows, in order: [label, value, hint]. Pure, so a Node test can check it.
 export function usageRows(usage) {
   if (!usage) return [];
   const last = usage.last_reply || null;
+  const [compacted, compactedHint] = lastCompaction(usage.last_compaction);
   return [
     ['Calls', formatCount(usage.runs), 'Every recorded model run in this chat'],
     ['Turns', formatCount(usage.turns), 'Your messages and the replies to them'],
@@ -87,6 +104,7 @@ export function usageRows(usage) {
     ['Cache hit', formatPercent(usage.cache_hit_percent), 'Cache reads over input, for runs that reported both'],
     ['Tool calls', formatCount(usage.tool_calls)],
     ['Compactions', formatCount(usage.compactions)],
+    ['Last compaction', compacted, compactedHint],
     ['Helper runs', formatCount(usage.helper_runs)],
     ['Side calls', sideCalls(usage), 'Model calls that were not a turn: compactions, summaries'],
     ['Side call tokens', formatCount(usage.parts?.side?.total_tokens), 'Included in the totals above'],
