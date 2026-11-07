@@ -916,8 +916,12 @@ app.whenReady().then(async () => {
         last_reply: null, model: { model: 'catalog-astra', provider: 'Claude', context_window: 90000 } };
       await js("document.querySelector('#context-pill').click()");
       await waitFor("!!document.querySelector('#usage-meter.is-sheet .usage-meter-rows')");
-      const sheet = await js("(() => { const r=document.querySelector('#usage-meter').getBoundingClientRect(); return { left: r.left, right: r.right, bottom: r.bottom, w: document.documentElement.clientWidth, h: document.documentElement.clientHeight }; })()");
-      assert.ok(sheet.left >= 0 && sheet.right <= sheet.w + 1 && sheet.bottom <= sheet.h + 1, 'sheet fits mobile ' + width + ': ' + JSON.stringify(sheet));
+      // Anchored to the screen's edges, full width, and no taller than the screen. (This test page itself scrolls
+      // sideways at phone width, so its measured bottom sits a few pixels past clientHeight; the CSS anchor is what
+      // a phone uses.)
+      const sheet = await js("(() => { const m=document.querySelector('#usage-meter'), s=getComputedStyle(m), r=m.getBoundingClientRect(); return { position: s.position, left: s.left, right: s.right, bottom: s.bottom, top: r.top, height: r.height, w: r.width, vw: document.documentElement.clientWidth, vh: innerHeight }; })()");
+      assert.ok(sheet.position === 'fixed' && sheet.left === '0px' && sheet.right === '0px' && sheet.bottom === '0px' && sheet.top >= 0
+        && sheet.height <= sheet.vh && Math.abs(sheet.w - sheet.vw) <= 1, 'sheet fits mobile ' + width + ': ' + JSON.stringify(sheet));
       await capture('mobile-chat-details-' + width);
       await js("document.querySelector('#usage-meter .usage-meter-close').click()");
       await waitFor("!document.querySelector('#usage-meter')");
