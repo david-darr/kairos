@@ -172,7 +172,10 @@ class Catalog(Base):
         self.assertFalse(Path(self.dir.name, 'fake.onnx.part').exists())
 
     def test_state_is_honest(self):
-        self.assertEqual(speech_optional.state('kokoro')['state'], 'not_pinned')
+        # Kokoro was pinned on 2026-11-07 to its official release files; an entry with no pin still never downloads.
+        self.assertTrue(speech_optional.is_pinned(speech_optional.entry('kokoro')), 'Kokoro is pinned to its official files')
+        with patch.dict(speech_optional.entry('kokoro')['files'][0], {'sha256': None}):
+            self.assertEqual(speech_optional.state('kokoro')['state'], 'not_pinned')
         self.assertTrue(speech_optional.is_pinned(speech_optional.item('smart-turn')) if hasattr(speech_optional, 'item') else True)
         self.assertEqual(speech_optional.state('smart-turn')['state'], 'not_downloaded', 'Smart Turn is pinned to its official file')
         with patch.object(speech_optional, 'is_pinned', return_value=True):
@@ -264,8 +267,9 @@ class SmartTurn(Base):
         self.assertEqual({o['name'] for o in body['optional']}, {'smart-turn', 'kokoro'})
         self.assertFalse(body['turn_detect']['ready'])
         self.assertFalse(any(Path(self.dir.name).iterdir()))
-        # Kokoro is still unpinned (its publisher lists no digest), so asking for it is refused before any network call.
-        response = self.client.post('/api/speech/optional/kokoro/download')
+        # An unpinned entry is refused before any network call (Kokoro, pinned since 2026-11-07, stands in unpinned).
+        with patch.dict(speech_optional.entry('kokoro')['files'][0], {'sha256': None}):
+            response = self.client.post('/api/speech/optional/kokoro/download')
         self.assertEqual(response.status_code, 400)
         self.assertIn('not pinned', response.json()['detail'])
         self.assertEqual(self.client.post('/api/speech/optional/nope/download').status_code, 400)

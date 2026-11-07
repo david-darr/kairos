@@ -30,9 +30,10 @@ OPTIONAL_DIR = os.path.join(DATA_DIR, "speech_models", "onnx")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 # Pins come only from the publisher's own listing, never a mirror. Smart Turn v3.2 CPU: Hugging Face's file API for
-# pipecat-ai/smart-turn-v3 (LFS sha256, 8,679,182 bytes), read 2026-11-06. Kokoro: TODO(pin): GitHub publishes no
-# digest for the thewh1teagle/kokoro-onnx model-files-v1.0 assets (kokoro-v1.0.onnx 325,532,387 bytes, voices-v1.0.bin
-# 28,214,398 bytes); pin once the files have been fetched and hashed with the user's OK. Unpinned entries never download.
+# pipecat-ai/smart-turn-v3 (LFS sha256, 8,679,182 bytes), read 2026-11-06. Kokoro: GitHub publishes no digest for the
+# thewh1teagle/kokoro-onnx model-files-v1.0 assets, so they were fetched from that release with David's OK on
+# 2026-11-07, matched the sizes listed there (kokoro-v1.0.onnx 325,532,387 bytes, voices-v1.0.bin 28,214,398 bytes),
+# and their sha256 pinned here. Unpinned entries never download.
 CATALOG = [
     {"name": "smart-turn", "label": "Smart Turn", "kind": "turn", "needs": ["onnxruntime"],
      "description": "Decides whether you have finished your sentence, so Kairos answers sooner without cutting you off. Runs on the processor in about 12 ms.",
@@ -41,8 +42,12 @@ CATALOG = [
                 "sha256": "2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f"}]},
     {"name": "kokoro", "label": "Kokoro voice", "kind": "voice", "needs": ["onnxruntime", "kokoro_onnx"],
      "description": "A natural local voice that speaks sentence by sentence. The device voice stays as the fallback.",
-     "files": [{"file": "kokoro-model.onnx", "size_mb": 310, "url": None, "sha256": None},
-               {"file": "kokoro-voices.bin", "size_mb": 27, "url": None, "sha256": None}]},
+     "files": [{"file": "kokoro-model.onnx", "size_mb": 310,
+                "url": "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx",
+                "sha256": "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5"},
+               {"file": "kokoro-voices.bin", "size_mb": 27,
+                "url": "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin",
+                "sha256": "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"}]},
 ]
 
 RUNTIME_NAMES = {"onnxruntime": "the ONNX runtime", "kokoro_onnx": "the Kokoro engine package"}
