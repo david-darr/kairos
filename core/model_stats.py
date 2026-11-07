@@ -15,7 +15,7 @@ import statistics
 import time
 from typing import Iterable, Optional
 
-from core import runs
+from core import run_cost, runs
 from core.session_usage import ttft_seconds
 
 DEFAULT_DAYS = 7
@@ -97,6 +97,7 @@ def summarize(rows: list[dict], kind: Optional[str] = None) -> dict:
         "tool_quality": _tool_quality(rows),
         "input_tokens": _sum(rows, "input_tokens"),
         "output_tokens": _sum(rows, "output_tokens"),
+        "cost": run_cost.summarize(rows),
         "last_run_at": max((r.get("started_at") or 0 for r in rows), default=None) or None,
         # Newest first: unit 7's "failed N of its last 10" reads these.
         "recent_outcomes": [r.get("outcome") for r in sorted(rows, key=lambda r: r.get("started_at") or 0, reverse=True)[:10]],

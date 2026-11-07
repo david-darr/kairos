@@ -510,6 +510,9 @@ def record(context: RunContext, tally: Tally, outcome: str, stop: Optional[StopR
             "retries": context.counters.get("retries"),
             "tool_quality": json.dumps(tally.tool_quality, sort_keys=True) if tally.tool_quality else None,
         }
+        # Unit 4: priced now, so a later price change does not rewrite history.
+        from core import run_cost
+        row.update(run_cost.for_record(row, context))
         session_manager_store.record_run(row, timeline)
     except Exception:
         logger.exception("could not record run %s", context.run_id)

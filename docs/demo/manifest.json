@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "80b06d3bbae3271f9ab46f72e96de24ce578c9d86781fda96535ed3a05531f84",
+  "app.js": "120864c68840fe5aa5544bc3afe5cb23e070bc95954f08b6e22b3371903ee242",
   "fixtures.js": "750c73f825518b76c381209db63221d27248f2685a6edf3dcfa592d99bd42637",
   "index.html": "71859f6b44470817f89041395322c71ff6480ee480cf2303b4f3bc6b176f5554",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -1459,7 +1459,7 @@
   "static/js/mobileTabSheet.js": "f5859c20a334c37adc6ee4c6df7178ef76b0470a4ff5831ef64e9e382858a58f",
   "static/js/mobileVoiceRow.js": "7d9af569ad51e07f6829492688569977d567f3c6a73720900f5efb85459ed9ea",
   "static/js/modelSetup.js": "75b1810b2b4ccf92fe96da428764985020bb321a16ca32afb2609d0a1ce9b0cb",
-  "static/js/modelStats.js": "dde863dcf94cff113a9aa140e5a03c5ea8cb2cfc9b260f74840efe82d67472ed",
+  "static/js/modelStats.js": "22db26217dcd71807945b7c4daf5afb3d32bbd75035484ba3fa407a966852a8a",
   "static/js/notchComposer.js": "d192d263a9b47eac630c433907d5d4f400c3e9ef3098ab55b280108c1ed4e8eb",
   "static/js/notchDrop.js": "76f8b73f1e2f189e7ceebedaf4956310b88ede8c0747cbc17dacebcd0a350556",
   "static/js/notchGlow.js": "f64ab289b7070d364762703c9a21ad0d0cf92b73af1765bd1b8a3eb693106f81",
@@ -1518,7 +1518,7 @@
   "static/js/taskActivity.js": "729ee06df10c02d967b311f6efad3fee7a9f58e9eed70a816484e35c29a52681",
   "static/js/turnEndpoint.js": "bda0823d8196632b1db02cac31be9427b9538a7cbaaf755e302721308879e6e6",
   "static/js/usage-overlay.js": "6a134ef6210778afb3c3a6c641a0676fe19a11840660edb4e4dc4fcf0c9cba2b",
-  "static/js/usageMeter.js": "d0bd2f0f79d2fb65066724bacd8ee5c2be7beb3bb40164a5eaa7d1581f533627",
+  "static/js/usageMeter.js": "5f8898e79438d3b0f3df2834d680e9cf4226475a4117d040496779c64c958957",
   "static/js/vaultEditor.js": "9e1f3794db0e8e412cbe6e8ff21ddcda80fce20e58b9fd9e9875e68f8febf463",
   "static/js/vaultExplorer.js": "0bbc40cd6a229a6f75670355c40549551055ab455a6e96bbdb222e0bc29a2d75",
   "static/js/vaultGraph.js": "4a9e913285296b69bef61066b063a212449347aa301224124ab673436db87d0d",

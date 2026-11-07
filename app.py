@@ -168,6 +168,8 @@ async def lifespan(_app: FastAPI):
     # Turns off pulled community installs (services/store_catalog.py).
     start_store_watch()
     from services import background_tasks; background_tasks.start()
+    # Public price lists for cost estimates (Session Usage and Model Tracking): daily, only with API connections.
+    from core import price_feeds; price_feeds.start()
     # Bot conversations: reconcile uncertain dispatches and restart waiting queues.
     from services import bot_chat_service; await bot_chat_service.startup()
     from services import bot_skill_library
@@ -240,6 +242,7 @@ async def lifespan(_app: FastAPI):
             await remote_access.stop()
             await agent_calls.shutdown()
             await background_tasks.stop()
+            await price_feeds.stop()
             session_manager_store.stop_background_migration()
             task_scheduler.stop()
             bot_app_events.stop()

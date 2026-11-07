@@ -25,6 +25,7 @@ export function speedLine(stat, days = 7) {
   if (Number.isFinite(stat.tokens_per_second_median)) parts.push(`${Math.round(stat.tokens_per_second_median)} tok/s`);
   parts.push(reliabilityText(stat));
   if (stat.stopped) parts.push(`${stat.stopped} stopped`);
+  if (stat.cost && Number.isFinite(stat.cost.total_usd)) parts.push(costText(stat.cost));
   return `Last ${days} days: ${parts.join(' · ')}`;
 }
 
@@ -39,6 +40,30 @@ export function statsTitle(stat, days = 7) {
     lines.push(`Tool calls: ${total - broken} of ${total} well formed${q.repaired ? `, ${q.repaired} repaired` : ''}.`);
   }
   if (Number.isFinite(stat.retries) && stat.retries) lines.push(`Kairos retried on a backup model ${stat.retries} time${stat.retries === 1 ? '' : 's'}.`);
+  if (stat.cost) lines.push(`Cost: ${costText(stat.cost)}. ${costSource(stat.cost)}`.trim());
   for (const missing of stat.not_reported || []) lines.push(`Not reported: ${missing}.`);
   return lines.join('\n');
+}
+
+// Cost in words (unit 4): "$0.0123 estimated", "included (subscription or local)", "unknown"; never "$0" for
+// unknown. Sub-cent amounts keep 4 decimals. `cost` is a summary from core/run_cost.py summarize.
+export function formatUsd(value) {
+  if (!Number.isFinite(value)) return 'unknown';
+  return value > 0 && value < 0.01 ? `$${value.toFixed(4)}` : `$${value.toFixed(2)}`;
+}
+
+export function costText(cost) {
+  if (!cost || !cost.statuses) return 'unknown';
+  const s = cost.statuses;
+  const priced = (s.estimated || 0) + (s.actual || 0);
+  const runs = Object.values(s).reduce((a, b) => a + b, 0);
+  if (!priced) return s.included && s.included === runs ? 'included (subscription or local)' : 'unknown';
+  const kind = s.actual && !s.estimated ? 'reported' : 'estimated';
+  const rest = runs - priced;
+  const restWord = s.included === rest ? 'included' : 'not priced';
+  return `${formatUsd(cost.total_usd)} ${kind}` + (rest ? `, ${rest} run${rest === 1 ? '' : 's'} ${restWord}` : '');
+}
+
+export function costSource(cost) {
+  return cost?.sources?.length ? `Priced from: ${cost.sources.join('; ')}.` : '';
 }

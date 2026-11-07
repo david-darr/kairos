@@ -12,7 +12,7 @@ of its own: it counts only the runs made in it.
 """
 from typing import Iterable, Optional
 
-from core import runs
+from core import run_cost, runs
 
 TOKEN_FIELDS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")
 SOURCE = "runs"  # every figure here is read from the runs table
@@ -57,6 +57,7 @@ def totals(rows: list[dict]) -> dict:
         "total_tokens": _sum(rows, "total_tokens"),
         "tool_calls": _sum(rows, "tool_calls") or 0,
         "cache_hit_percent": cache_hit_percent(rows),
+        "cost": run_cost.summarize(rows),
         "failed": sum(1 for r in rows if r.get("outcome") == "failed"),
         "stopped": sum(1 for r in rows if r.get("outcome") == "stopped"),
     }
@@ -99,7 +100,7 @@ def summarize(session: dict, rows: list[dict]) -> dict:
         "source": SOURCE,
         "turns": len(groups["turns"]),
         **{k: whole[k] for k in (*TOKEN_FIELDS, "total_tokens", "tool_calls", "cache_hit_percent",
-                                  "reported_runs", "failed", "stopped")},
+                                  "reported_runs", "failed", "stopped", "cost")},
         "runs": whole["runs"],
         "compactions": len(session.get("compactions") or []),
         "helper_runs": len(groups["helpers"]),

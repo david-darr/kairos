@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const context = { el: () => ({ append() {} }), Number, Math, console };
 vm.createContext(context);
 const load = file => fs.readFileSync(file, 'utf8').replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '');
-vm.runInContext(load('static/js/usageMeter.js') + '\nthis.api = { usageRows, coverageNote, formatCount, formatRate, formatSeconds, formatShort, contextParts, modelRows, sideCalls, NA };', context);
+vm.runInContext(load('static/js/modelStats.js') + '\n' + load('static/js/usageMeter.js') + '\nthis.api = { usageRows, coverageNote, formatCount, formatRate, formatSeconds, formatShort, contextParts, modelRows, sideCalls, NA };', context);
 const { usageRows, coverageNote, formatCount, formatRate, formatSeconds, formatShort, contextParts, modelRows, sideCalls, NA } = context.api;
 const value = (rows, label) => rows.find(r => r[0] === label)?.[1];
 
@@ -55,4 +55,12 @@ assert.equal(sideCalls({ side_runs: 3, side_purposes: { compact: 1, chat_summary
 assert.equal(sideCalls({ side_runs: 0, side_purposes: {} }), '0');
 assert.equal(sideCalls({}), NA);
 assert.equal(value(usageRows({ ...full, parts: { side: { total_tokens: null } } }), 'Side call tokens'), NA);
+// Cost (unit 4): unknown is never $0, a subscription is included, sub-cent keeps 4 decimals.
+const cost = statuses => value(usageRows({ ...full, cost: { total_usd: statuses.total ?? null, statuses: statuses.s, sources: [] } }), 'Cost');
+assert.equal(cost({ s: { unknown: 2 } }), 'unknown');
+assert.equal(cost({ s: { included: 3 } }), 'included (subscription or local)');
+assert.equal(cost({ total: 0.00123, s: { estimated: 2 } }), '$0.0012 estimated');
+assert.equal(cost({ total: 1.5, s: { estimated: 2, unknown: 1 } }), '$1.50 estimated, 1 run not priced');
+assert.equal(cost({ total: 0.2, s: { actual: 1 } }), '$0.20 reported');
+assert.equal(value(usageRows(full), 'Cost'), NA, 'an older backend without costs says n/a');
 console.log('usage meter: ok');

@@ -4,6 +4,7 @@
 // sheet on a phone (chat.css). Every figure is read from the chat's recorded runs
 // (GET /api/sessions/{id}/usage) and says so; a figure the provider never reported shows "n/a", never 0.
 import { el } from './api.js';
+import { costText, costSource } from './modelStats.js';
 
 export const NA = 'n/a';
 
@@ -89,6 +90,7 @@ export function usageRows(usage) {
     ['Side call tokens', formatCount(usage.parts?.side?.total_tokens), 'Included in the totals above'],
     ['First output', last ? formatSeconds(last.ttft_seconds) : NA, 'Last reply: time from sending to the first visible text'],
     ['Speed', last ? formatRate(last.tokens_per_second) : NA, 'Last reply; n/a when it arrived in one piece'],
+    ['Cost', usage.cost ? costText(usage.cost) : NA, costSource(usage.cost) || 'Priced when each run is recorded'],
   ];
 }
 
