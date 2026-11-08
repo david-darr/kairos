@@ -24,7 +24,7 @@ module.exports = async function checkArtifactPanes({ js, win, waitFor, capture, 
   await navigate('chat', { sessionId: 's1' });
   await waitFor("!!document.querySelector('.artifact-card')");
   await js("localStorage.removeItem('kairos:chat-pane-width'); if (document.querySelector('#chat-history-toggle').getAttribute('aria-expanded') === 'true') document.querySelector('#chat-history-toggle').click()");
-  await js("(async () => { const card = document.querySelector('.artifact-card'); card.click(); for (let i = 0; i < 200 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); document.querySelector('.media-viewer-pane').click(); return true; })()");
+  await js("(async () => { const card = document.querySelector('.artifact-card'); card.click(); for (let i = 0; i < 600 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); const pane = document.querySelector('.media-viewer-pane:not([hidden])'); if (!pane) throw new Error('the viewer did not offer Open beside chat'); pane.click(); return true; })()");
   await waitFor("!!document.querySelector('.artifact-document')");
   await split('default');
   assert.equal(await js("document.querySelector('.chat-pane-resizer').getAttribute('role')"), 'separator');

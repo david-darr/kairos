@@ -625,7 +625,7 @@ async function run({ js, waitFor, delay, navigate, win, capture, liveBroadcast, 
   await capture('design-pane-editable-560');
   // Desktop redesign: a document opens beside the design in one stack, split by an adjustable
   // divider; Background tasks can join them as a third pane.
-  await js("(async () => { const card = document.querySelector('#chat-messages .artifact-card'); card.click(); for (let i = 0; i < 200 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); document.querySelector('.media-viewer-pane').click(); return true; })()");
+  await js("(async () => { const card = document.querySelector('#chat-messages .artifact-card'); card.click(); for (let i = 0; i < 600 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); const pane = document.querySelector('.media-viewer-pane:not([hidden])'); if (!pane) throw new Error('the viewer did not offer Open beside chat'); pane.click(); return true; })()");
   await waitFor("[...document.querySelectorAll('.chat-pane-stack > .chat-stacked-pane')].map(p => p.dataset.paneKind).sort().join() === 'design,documents' || document.querySelectorAll('.chat-pane-stack > .chat-stacked-pane').length === 2");
   assert.equal(await js("document.querySelectorAll('.chat-pane-stack > .chat-stacked-pane').length"), 2, 'the design and the document share the side');
   assert.ok(await js("!!document.querySelector('.chat-pane-stack-resizer')"), 'a divider splits the design and the document');

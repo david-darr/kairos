@@ -552,7 +552,7 @@ app.whenReady().then(async () => {
     assert.equal(await js("document.querySelector('.browser-frame').getAttribute('src')"), 'https://example.test/docs', 'a refused address must not navigate the frame');
     // One right-hand pane at a time: in the desktop app the browser's page is
     // a native layer that would paint straight over a file preview.
-    await js("(async () => { const card = document.querySelector('.artifact-card'); card.click(); for (let i = 0; i < 200 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); document.querySelector('.media-viewer-pane').click(); return true; })()");
+    await js("(async () => { const card = document.querySelector('.artifact-card'); card.click(); for (let i = 0; i < 600 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); const pane = document.querySelector('.media-viewer-pane:not([hidden])'); if (!pane) throw new Error('the viewer did not offer Open beside chat'); pane.click(); return true; })()");
     await waitFor("!!document.querySelector('.artifact-panel:not(.browser-panel)')");
     assert.equal(await js("document.querySelectorAll('.browser-panel').length"), 0, 'opening a file preview closes the browser');
     await js("document.querySelector('[aria-label=\"Close file preview\"]').click()");
@@ -567,13 +567,13 @@ app.whenReady().then(async () => {
     await waitFor("(document.querySelector('#model-picker-label').textContent.split(' · ').slice(1).join(' · '))==='CLI default'");
     await waitFor("fetch('/api/sessions/s1').then(r=>r.json()).then(s=>s.model_override==='')");
     assert.equal(chats.s1.model_override, '');
-    await js("(async () => { const card = document.querySelector('.artifact-card'); card.click(); for (let i = 0; i < 200 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); document.querySelector('.media-viewer-pane').click(); return true; })()");
+    await js("(async () => { const card = document.querySelector('.artifact-card'); card.click(); for (let i = 0; i < 600 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); const pane = document.querySelector('.media-viewer-pane:not([hidden])'); if (!pane) throw new Error('the viewer did not offer Open beside chat'); pane.click(); return true; })()");
     await waitFor("!!document.querySelector('.artifact-tab-panel:not([hidden]) .artifact-document h1')");
     await capture('desktop-artifact');
     await js("[...document.querySelectorAll('.artifact-tab-panel:not([hidden]) .artifact-toolbar button')].find(b=>b.textContent==='Source').click()");
     // Source view is line-numbered now; read the code text without the numbers.
     assert.ok(await js("[...document.querySelectorAll('.artifact-tab-panel:not([hidden]) .artifact-source .artifact-line')].map(l => l.lastChild.textContent).join('\\n').startsWith('# Project brief')"));
-    await js("document.querySelector('[aria-label=\"Close file preview\"]').click(); true"); await js("(async () => { const card = document.querySelectorAll('.artifact-card')[1]; card.click(); for (let i = 0; i < 200 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); document.querySelector('.media-viewer-pane').click(); return true; })()");
+    await js("document.querySelector('[aria-label=\"Close file preview\"]').click(); true"); await js("(async () => { const card = document.querySelectorAll('.artifact-card')[1]; card.click(); for (let i = 0; i < 600 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); const pane = document.querySelector('.media-viewer-pane:not([hidden])'); if (!pane) throw new Error('the viewer did not offer Open beside chat'); pane.click(); return true; })()");
     await waitFor("!!document.querySelector('.artifact-tab-panel:not([hidden]) .artifact-frame')");
     // Same-origin so Select mode can read the static DOM; never scripts.
     assert.equal(await js("document.querySelector('.artifact-tab-panel:not([hidden]) .artifact-frame').getAttribute('sandbox')"), 'allow-same-origin');
@@ -583,13 +583,13 @@ app.whenReady().then(async () => {
     // Card 7 is the macro-enabled .docm — deliberately never previewed, so
     // the download-only fallback still has a real subject now that .docx is
     // a structured preview.
-    await js("document.querySelector('[aria-label=\"Close file preview\"]').click(); true"); await js("(async () => { const card = document.querySelectorAll('.artifact-card')[7]; card.click(); for (let i = 0; i < 200 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); document.querySelector('.media-viewer-pane').click(); return true; })()");
+    await js("document.querySelector('[aria-label=\"Close file preview\"]').click(); true"); await js("(async () => { const card = document.querySelectorAll('.artifact-card')[7]; card.click(); for (let i = 0; i < 600 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); const pane = document.querySelector('.media-viewer-pane:not([hidden])'); if (!pane) throw new Error('the viewer did not offer Open beside chat'); pane.click(); return true; })()");
     await waitFor("!!document.querySelector('.artifact-fallback')");
     assert.ok(await js("document.querySelector('.artifact-tab-panel:not([hidden]) .artifact-toolbar a').href.includes('download=true')"));
 
     // -- Office previews (David's ask 2026-09-15). Every string below comes
     // from the document, so these also confirm content is inserted as text.
-    await js("document.querySelector('[aria-label=\"Close file preview\"]').click(); true"); await js("(async () => { const card = document.querySelectorAll('.artifact-card')[2]; card.click(); for (let i = 0; i < 200 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); document.querySelector('.media-viewer-pane').click(); return true; })()");
+    await js("document.querySelector('[aria-label=\"Close file preview\"]').click(); true"); await js("(async () => { const card = document.querySelectorAll('.artifact-card')[2]; card.click(); for (let i = 0; i < 600 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); const pane = document.querySelector('.media-viewer-pane:not([hidden])'); if (!pane) throw new Error('the viewer did not offer Open beside chat'); pane.click(); return true; })()");
     await waitFor("!!document.querySelector('.artifact-tab-panel:not([hidden]) .office-doc')");
     assert.equal(await js("document.querySelector('.artifact-tab-panel:not([hidden]) .office-doc h1').textContent"), 'Project brief');
     // Reading order: the table sits between the two paragraphs, not after
@@ -598,7 +598,7 @@ app.whenReady().then(async () => {
     assert.equal(await js("document.querySelector('.artifact-tab-panel:not([hidden]) .office-grid th').textContent"), 'Area');
     await capture('desktop-office-docx');
 
-    await js("document.querySelector('[aria-label=\"Close file preview\"]').click(); true"); await js("(async () => { const card = document.querySelectorAll('.artifact-card')[4]; card.click(); for (let i = 0; i < 200 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); document.querySelector('.media-viewer-pane').click(); return true; })()");
+    await js("document.querySelector('[aria-label=\"Close file preview\"]').click(); true"); await js("(async () => { const card = document.querySelectorAll('.artifact-card')[4]; card.click(); for (let i = 0; i < 600 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); const pane = document.querySelector('.media-viewer-pane:not([hidden])'); if (!pane) throw new Error('the viewer did not offer Open beside chat'); pane.click(); return true; })()");
     await waitFor("document.querySelectorAll('.artifact-tab-panel:not([hidden]) .office-tab').length===2");
     assert.equal(await js("document.querySelector('.artifact-tab-panel:not([hidden]) .office-tab.active').textContent"), 'Budget');
     // Sheets carry column letters and row numbers; read cell A1 itself.
@@ -610,7 +610,7 @@ app.whenReady().then(async () => {
     assert.equal(await js("document.querySelector('.artifact-tab-panel:not([hidden]) .office-tab.active').textContent"), 'Notes');
     await capture('desktop-office-xlsx');
 
-    await js("document.querySelector('[aria-label=\"Close file preview\"]').click(); true"); await js("(async () => { const card = document.querySelectorAll('.artifact-card')[5]; card.click(); for (let i = 0; i < 200 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); document.querySelector('.media-viewer-pane').click(); return true; })()");
+    await js("document.querySelector('[aria-label=\"Close file preview\"]').click(); true"); await js("(async () => { const card = document.querySelectorAll('.artifact-card')[5]; card.click(); for (let i = 0; i < 600 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); const pane = document.querySelector('.media-viewer-pane:not([hidden])'); if (!pane) throw new Error('the viewer did not offer Open beside chat'); pane.click(); return true; })()");
     await waitFor("!!document.querySelector('.artifact-tab-panel:not([hidden]) .office-slide')");
     assert.equal(await js("document.querySelector('.artifact-tab-panel:not([hidden]) .office-slide [data-pick=\"pptx:slide=1;shape=2\"]').textContent"), 'Quarterly review');
     assert.equal(await js("document.querySelectorAll('.artifact-tab-panel:not([hidden]) .office-slide [data-pick]').length"), 3);
@@ -622,7 +622,7 @@ app.whenReady().then(async () => {
     assert.ok(await js("!!document.querySelector('.artifact-tab-panel:not([hidden]) .office-slide .office-grid')"), 'slide tables render');
     await capture('desktop-office-pptx');
 
-    await js("document.querySelector('[aria-label=\"Close file preview\"]').click(); true"); await js("(async () => { const card = document.querySelectorAll('.artifact-card')[6]; card.click(); for (let i = 0; i < 200 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); document.querySelector('.media-viewer-pane').click(); return true; })()");
+    await js("document.querySelector('[aria-label=\"Close file preview\"]').click(); true"); await js("(async () => { const card = document.querySelectorAll('.artifact-card')[6]; card.click(); for (let i = 0; i < 600 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); const pane = document.querySelector('.media-viewer-pane:not([hidden])'); if (!pane) throw new Error('the viewer did not offer Open beside chat'); pane.click(); return true; })()");
     await waitFor("!!document.querySelector('.artifact-tab-panel:not([hidden]) .office-grid')");
     // Parsed server-side precisely so a quoted separator survives (row 1 is the header row, so A2).
     assert.equal(await js("document.querySelector('.artifact-tab-panel:not([hidden]) .office-grid td[data-pick$=\"cell=A2\"]').textContent"), 'Smith, John');
@@ -970,7 +970,7 @@ app.whenReady().then(async () => {
       delete chats.s1.usage;
       await js("document.querySelector('#chat-messages').scrollTop=0");
       await capture('mobile-chat-' + width);
-      await js("(async () => { const card = document.querySelector('.artifact-card'); card.click(); for (let i = 0; i < 200 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); document.querySelector('.media-viewer-pane').click(); return true; })()");
+      await js("(async () => { const card = document.querySelector('.artifact-card'); card.click(); for (let i = 0; i < 600 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); const pane = document.querySelector('.media-viewer-pane:not([hidden])'); if (!pane) throw new Error('the viewer did not offer Open beside chat'); pane.click(); return true; })()");
       await waitFor("!!document.querySelector('.artifact-tab-panel:not([hidden]) .artifact-document')");
       await delay(250); // let the deliberate slide-in animation settle
       assert.ok(await js("document.querySelector('.artifact-panel').getBoundingClientRect().right <= innerWidth+1"));
