@@ -516,7 +516,7 @@ app.whenReady().then(async () => {
     assert.ok((await transcript()).includes('Earliest question about the vendor'), 'the folded messages are still on screen');
     assert.ok(!/compact/i.test(await transcript()), 'no compaction notice in the transcript');
     await waitFor("document.querySelectorAll('#chat-messages .msg-edit').length === 3");
-    const sentBefore = requests.length;
+    const beforeCompactedSend = requests.length;
     await js("document.querySelector('#chat-input').value='Next question'; document.querySelector('#chat-input').dispatchEvent(new Event('input')); document.querySelector('#chat-send').click()");
     await waitFor("document.querySelector('#chat-send').dataset.mode==='stop'");
     while (!pending) await delay(20);
@@ -525,7 +525,7 @@ app.whenReady().then(async () => {
     chats.cmp.messages.push({ role: 'assistant', content: pending.text });
     pending.res.end('data: {"done":true}\n\n'); pending = null;
     await waitFor("document.querySelector('#chat-send').dataset.mode!=='stop'");
-    const sent = requests.slice(sentBefore).map(r => r.path);
+    const sent = requests.slice(beforeCompactedSend).map(r => r.path);
     assert.ok(!sent.includes('/api/chat/compact'), 'the page never asked for a compaction');
     assert.ok((await transcript()).includes('Earliest question about the vendor') && !/compact/i.test(await transcript()), 'still the whole chat, still no notice');
     assert.ok(await js("[...document.querySelectorAll('#toast-host .toast')].every(t => !/compact/i.test(t.textContent))"), 'no toast either');
