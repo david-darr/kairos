@@ -5,12 +5,16 @@
 // with Hide (Mute for sound), Lock and Remove; clips drag along their lane and between lanes of their kind, trim at
 // both edges and split at the playhead. Comment pins (step 4) show on their own lane. Our own plain JavaScript; the
 // maths lives in studioEditorModel.js. tabs/studio/view.js owns the project and passes every change back up.
+// Step 5 adds a keyframe row under each overlay track that has keyframes (or holds the selected clip): a diamond per
+// keyframe moment of each clip, picked by a click (Shift adds), dragged along the clip (snapping to the playhead and
+// whole frames), and track names that show whole (a wider head, the full name as a tip) and rename in place (double-click
+// or F2 on the name).
 import { el } from './api.js';
 import * as M from './studioEditorModel.js';
 
 const KIND_GROUP = { title: 'type', statement: 'type', quote: 'type', 'big-number': 'data', list: 'data', image: 'picture',
   split: 'picture', logo: 'picture', end: 'type', scene: 'scene', stage: 'stage' };
-const CLIP_GROUP = { text: 'type', image: 'picture', shape: 'data', sound: 'sound' };
+const CLIP_GROUP = { text: 'type', image: 'picture', shape: 'data', video: 'picture', sound: 'sound' };
 const MAX_CANVAS = 16000;
 const peakCache = new Map();
 function peaksOf(info) {
@@ -28,7 +32,8 @@ const token = (node, name) => getComputedStyle(node).getPropertyValue(name).trim
 
 // handlers: seek(t), select(index), move(from, to), trim(index, bars), zoom(z, anchorTime), toggleSnap(), clearWorkArea(),
 // selectClip(id), moveClip(id, trackId, start), trimClip(id, { start, in, out, fade_in, fade_out }), split(), toggleRipple(),
-// addTrack(kind), trackAction(trackId, 'hidden' | 'locked' | 'remove'), addClip(kind), selectComment(id)
+// addTrack(kind), trackAction(trackId, 'hidden' | 'locked' | 'remove'), addClip(kind), selectComment(id),
+// selectKey(clipId, own, add), moveKey(clipId, fromOwn, toOwn), renameTrack(trackId, name)
 export function createTimeline(handlers) {
   let s = null, drag = null, swallowClick = false;
   const zoomSlider = el('input', { type: 'range', min: 0, max: 1000, step: 1, 'aria-label': 'Timeline zoom', class: 'ste-zoom' });
@@ -77,8 +82,21 @@ export function createTimeline(handlers) {
       const b = el('button', { type: 'button', class: 'ste-head-tool', text, 'aria-label': label, title: label, 'data-track-action': action, ...(pressed === undefined ? {} : { 'aria-pressed': String(pressed) }) });
       b.addEventListener('click', () => handlers.trackAction?.(track.id, action)); return b;
     };
-    heads.append(el('div', { class: `ste-head ste-trackhead ${kind}`, role: 'group', 'aria-label': `Track ${track.name}`, 'data-track-head': track.id }, [
-      el('span', { class: 'ste-head-name', text: track.name, title: track.name }),
+    const name = el('button', { type: 'button', class: 'ste-head-name', text: track.name, title: `${track.name}. Double-click (or F2) to rename.`, 'aria-label': `Track ${track.name}. Press F2 to rename.`, 'data-track-name': track.id });
+    const rename = () => {
+      if (track.locked) return;
+      const input = el('input', { class: 'ste-head-rename', value: track.name, maxlength: 40, 'aria-label': `Rename track ${track.name}` });
+      input.value = track.name;
+      let done = false;
+      const finish = commit => { if (done) return; done = true; if (commit && input.value.trim() && input.value.trim() !== track.name) handlers.renameTrack?.(track.id, input.value); else input.replaceWith(name); };
+      input.addEventListener('keydown', event => { event.stopPropagation(); if (event.key === 'Enter') { event.preventDefault(); finish(true); } if (event.key === 'Escape') { event.preventDefault(); finish(false); name.focus(); } });
+      input.addEventListener('blur', () => finish(true));
+      name.replaceWith(input); input.focus(); input.select();
+    };
+    name.addEventListener('dblclick', rename);
+    name.addEventListener('keydown', event => { if (event.key === 'F2' || (event.key === 'Enter' && event.shiftKey)) { event.preventDefault(); event.stopPropagation(); rename(); } });
+    heads.append(el('div', { class: `ste-head ste-trackhead ${kind}`, role: 'group', 'aria-label': `Track ${track.name}`, 'data-track-head': track.id, title: track.name }, [
+      name,
       tool(track.kind === 'audio' ? 'M' : 'H', `${track.kind === 'audio' ? 'Mute' : 'Hide'} track ${track.name}`, 'hidden', !!track.hidden),
       tool('L', `Lock track ${track.name}`, 'locked', !!track.locked),
       tool('x', `Remove track ${track.name}`, 'remove')]));
@@ -86,10 +104,29 @@ export function createTimeline(handlers) {
       role: 'group', 'aria-label': `Clips on ${track.name}` });
     content.append(node);
     for (const c of track.clips) node.append(clipNode(track, c));
+    if (track.kind === 'overlay' && track.clips.some(c => c.keys || c.id === s.selectedClip)) keyLane(track);
     return node;
   }
+  // A track's keyframe row: one diamond per keyframe moment of each clip, inside the clip's span.
+  function keyLane(track) {
+    heads.append(el('div', { class: 'ste-head ste-khead', text: 'Keyframes', title: `Keyframes on ${track.name}. A adds them at the playhead.`, 'aria-hidden': 'true' }));
+    const node = el('div', { class: 'ste-lane ste-klane' + (track.locked ? ' locked' : ''), 'data-key-track': track.id, role: 'group', 'aria-label': `Keyframes on ${track.name}` });
+    for (const c of track.clips) {
+      const span = el('span', { class: 'ste-kspan' + (c.id === s.selectedClip ? ' selected' : ''), 'aria-hidden': 'true' });
+      span.style.left = x(c.start) + 'px'; span.style.width = Math.max(2, x(M.clipLength(c))) + 'px'; node.append(span);
+      for (const m of M.keyMoments(c)) {
+        if (m.t < c.start - 1e-6 || m.t > M.clipEnd(c) + 1e-6) continue;
+        const picked = s.selectedKeys?.clip === c.id && s.selectedKeys.owns.some(o => Math.abs(o - m.own) < 1 / 120);
+        const props = m.props.map(k => M.KEY_NAMES[k].toLowerCase()).join(', ');
+        const key = el('button', { type: 'button', class: 'ste-key' + (picked ? ' picked' : ''), 'data-key-clip': c.id, 'data-key-own': String(m.own), 'aria-pressed': String(picked),
+          title: `${M.timecode(m.t)}: ${props}`, 'aria-label': `Keyframe of clip ${c.id} at ${M.timecode(m.t)}: ${props}` });
+        key.style.left = x(m.t) + 'px'; node.append(key);
+      }
+    }
+    content.append(node);
+  }
   function clipNode(track, c) {
-    const selected = c.id === s.selectedClip, length = M.clipLength(c), label = M.clipLabel(c, s.sounds);
+    const selected = c.id === s.selectedClip, length = M.clipLength(c), label = M.clipLabel(c, s.sounds, s.media);
     const node = el('button', { type: 'button', class: 'ste-tclip' + (selected ? ' selected' : '') + (track.locked ? ' locked' : ''), 'data-clip': c.id, 'data-track': track.id,
       'data-kind': CLIP_GROUP[c.kind] || 'type', 'data-clip-kind': c.kind, 'aria-pressed': String(selected),
       'aria-label': `${c.kind} clip ${c.id} on ${track.name}: ${label}. ${M.spokenTime(length)}, from ${M.timecode(c.start)}.${track.locked ? ' Locked.' : ''}` }, [
@@ -246,7 +283,16 @@ export function createTimeline(handlers) {
   // Pointer: the ruler and empty lanes scrub, a clip selects or drags, a beat's right edge and both edges of a
   // track clip trim.
   content.addEventListener('pointerdown', event => {
-    if (!s || event.button !== 0 || event.target.closest('.ste-pinmark')) return;
+    if (!s || event.button !== 0 || event.target.closest('.ste-pinmark, .ste-head-rename')) return;
+    const keyNode = event.target.closest('.ste-key');
+    if (keyNode) {
+      const found = M.findClip(s.p, keyNode.dataset.keyClip);
+      if (!found) return;
+      try { content.setPointerCapture(event.pointerId); } catch { /* a pointer the page did not start */ }
+      drag = { mode: 'key-press', id: found.clip.id, clip: found.clip, track: found.track, own: Number(keyNode.dataset.keyOwn), node: keyNode, x0: event.clientX, shift: event.shiftKey };
+      event.preventDefault();
+      return;
+    }
     const trim = event.target.closest('[data-trim]'), clip = event.target.closest('.ste-clip');
     const edge = event.target.closest('[data-edge]'), tclip = event.target.closest('.ste-tclip');
     try { content.setPointerCapture(event.pointerId); } catch { /* a pointer the page did not start */ }
@@ -295,6 +341,19 @@ export function createTimeline(handlers) {
   content.addEventListener('pointermove', event => {
     if (!drag) return;
     if (drag.mode === 'scrub') return scrubTo(event);
+    if (drag.mode === 'key-press' && !drag.track.locked && Math.abs(event.clientX - drag.x0) > 3) drag.mode = 'key-move';
+    if (drag.mode === 'key-move') {
+      let t = timeAt(event.clientX);
+      if (!event.shiftKey) {
+        if (s.snap && Math.abs(t - s.time) * s.zoom <= 8) t = s.time;
+        else t = Math.round(t * M.FPS) / M.FPS;
+      }
+      t = Math.min(M.clipEnd(drag.clip), Math.max(drag.clip.start, t));
+      drag.to = M.ownTime(drag.clip, t);
+      drag.node.style.left = x(t) + 'px'; drag.node.classList.add('dragging');
+      showTip(`Keyframe at ${M.timecode(t)}`, x(t));
+      return;
+    }
     if (drag.mode === 'clip-press' && !drag.track.locked && Math.hypot(event.clientX - drag.x0, event.clientY - drag.y0) > 4) { drag.mode = 'clip-move'; drag.node.classList.add('dragging'); }
     if (drag.mode === 'clip-move') return clipDrag(event);
     if (drag.mode === 'clip-trim') {
@@ -336,6 +395,8 @@ export function createTimeline(handlers) {
       if (event.type === 'pointerup' && d.to?.ok && (d.to.track !== d.track.id || Math.abs(d.to.start - d.clip.start) > 1e-6)) handlers.moveClip?.(d.id, d.to.track, d.to.start); else build();
     }
     if (d.mode === 'clip-trim') { swallowClick = true; if (event.type === 'pointerup' && d.result) handlers.trimClip?.(d.id, d.result); else build(); }
+    if (d.mode === 'key-press' && event.type === 'pointerup') { swallowClick = true; handlers.selectKey?.(d.id, d.own, d.shift); }
+    if (d.mode === 'key-move') { swallowClick = true; if (event.type === 'pointerup' && d.to !== undefined && Math.abs(d.to - d.own) > 1e-6) handlers.moveKey?.(d.id, d.own, d.to); else build(); }
     setTimeout(() => { swallowClick = false; }, 0);
   };
   content.addEventListener('pointerup', finish);
@@ -343,8 +404,9 @@ export function createTimeline(handlers) {
   // Keyboard (Enter on a clip) selects; a pointer press already did.
   content.addEventListener('click', event => {
     if (swallowClick) { swallowClick = false; return; }
-    const clip = event.target.closest('.ste-clip'), tclip = event.target.closest('.ste-tclip');
-    if (clip) handlers.select(Number(clip.dataset.index));
+    const clip = event.target.closest('.ste-clip'), tclip = event.target.closest('.ste-tclip'), keyNode = event.target.closest('.ste-key');
+    if (keyNode) handlers.selectKey?.(keyNode.dataset.keyClip, Number(keyNode.dataset.keyOwn), event.shiftKey);
+    else if (clip) handlers.select(Number(clip.dataset.index));
     else if (tclip) handlers.selectClip?.(tclip.dataset.clip);
   });
   // Ctrl + wheel zooms around the pointer; a plain wheel scrolls the timeline sideways.

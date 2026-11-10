@@ -62,6 +62,11 @@ CHAPTER_MAX_SECONDS = 480       # one part is one render worker job (at most 14,
 MIN_CHAPTERS, MAX_CHAPTERS = 2, 30
 CHAPTER_TITLE_LIMIT = 80
 LEAD, TAIL = .25, .45           # seconds of picture before a line starts and after it ends
+# Frame rates (Content Studio Editor step 6): 30, or 60 for smoother motion at about twice the render time and frames.
+FPS_CHOICES = (30, 60)
+# Caption styles (step 7): the whole line, or the line with the word being said lit (highlight) or on a box (box). The
+# word styles use word times aligned from the narration (core/video_align.py); a line without them keeps line captions.
+CAPTION_STYLES = ("line", "highlight", "box")
 SAY_LIMIT, CLAUSE_LIMIT = 400, 100
 DEFAULT_VOICE = "af_heart"
 VOICE_ID = re.compile(r"[a-z]{2}_[a-z0-9]{1,30}")
@@ -108,8 +113,8 @@ def validate(project: dict) -> dict:
     p.setdefault("bpm", 120)
     _number(p["bpm"], "bpm", 60, 180)
     p.setdefault("fps", 30)
-    if isinstance(p["fps"], bool) or p["fps"] != 30:
-        _error("fps", "use 30 frames per second.")
+    if isinstance(p["fps"], bool) or p["fps"] not in FPS_CHOICES:
+        _error("fps", "use 30 or 60 frames per second.")
     p.setdefault("aspects", ["16:9"])
     if (not isinstance(p["aspects"], list) or not p["aspects"] or
             any(not isinstance(a, str) or a not in ASPECTS for a in p["aspects"]) or
@@ -186,7 +191,8 @@ def validate(project: dict) -> dict:
             _error("renderer", "choose threejs (built in) or blender (only when Blender is installed); it draws the 3D stage beats.")
     # Tracks and clips over the beats (core/video_tracks.py); a video without them is unchanged.
     from core import video_tracks
-    video_tracks.validate(p, _audio_lookup(p["id"]))
+    from core import video_media
+    video_tracks.validate(p, _audio_lookup(p["id"]), video_media.lookup(p["id"]))
     if is_narrated or "narration" in p:
         p["narration"] = _narration(p.get("narration"))
     for i, b in enumerate(beats):
@@ -489,7 +495,7 @@ def _chapters(value, beats):
 
 def chapter_spans(project):
     """Each chapter with its place on the timeline: {id, title, first, last (beat indexes, last exclusive), start, end
-    (seconds), first_frame, frames}. Frame f shows time f / 30; a chapter's part holds every frame from the first one at
+    (seconds), first_frame, frames}. Frame f shows time f / fps; a chapter's part holds every frame from the first one at
     or after its start up to the next chapter's first frame, so the parts together are exactly the whole video's frames."""
     beats = project["beats"]
     index = {b["id"]: i for i, b in enumerate(beats)}
@@ -498,13 +504,14 @@ def chapter_spans(project):
     for b in beats:
         starts.append(at)
         at += beat_seconds(b, project.get("bpm", 120))
-    total = math.ceil(at * 30 - 1e-7)
+    fps = project.get("fps", 30)
+    total = math.ceil(at * fps - 1e-7)
     out = []
     for n, chapter in enumerate(chapters):
         first = index[chapter["start"]]
         last = index[chapters[n + 1]["start"]] if n + 1 < len(chapters) else len(beats)
         out.append({"id": chapter["id"], "title": chapter["title"], "first": first, "last": last, "start": starts[first],
-                    "end": starts[last] if last < len(beats) else at, "first_frame": min(total, math.ceil(starts[first] * 30 - 1e-7))})
+                    "end": starts[last] if last < len(beats) else at, "first_frame": min(total, math.ceil(starts[first] * fps - 1e-7))})
     for n, span in enumerate(out):
         span["frames"] = (out[n + 1]["first_frame"] if n + 1 < len(out) else total) - span["first_frame"]
     return out
@@ -547,14 +554,24 @@ def _narration(value):
     value = {"voice": DEFAULT_VOICE, "captions": True} if value is None else value
     if not isinstance(value, dict):
         _error("narration", "give voice and captions.")
-    for key in value.keys() - {"voice", "captions"}:
-        _error("narration." + key, "unknown narration field; use voice or captions.")
+    for key in value.keys() - {"voice", "captions", "caption_style"}:
+        _error("narration." + key, "unknown narration field; use voice, captions or caption_style.")
     out = {"voice": value.get("voice", DEFAULT_VOICE), "captions": value.get("captions", True)}
     if not isinstance(out["voice"], str) or not VOICE_ID.fullmatch(out["voice"]):
         _error("narration.voice", "use a Kokoro voice id such as af_heart or bm_george.")
     if not isinstance(out["captions"], bool):
         _error("narration.captions", "use true or false.")
+    style = value.get("caption_style", "line")
+    if style not in CAPTION_STYLES:
+        _error("narration.caption_style", "choose line, highlight (the word being said in the accent colour) or box (on an accent box).")
+    if style != "line":
+        out["caption_style"] = style     # the line style is the default and is not stored, so older videos stay as they were
     return out
+
+
+def word_captions(project) -> bool:
+    """Whether the video's captions light the word being said (they need word times from the narration)."""
+    return (project.get("narration") or {}).get("caption_style", "line") != "line"
 
 
 def speech_key(voice, say):
@@ -575,7 +592,7 @@ def _timing(b, narration, path):
         return
     spoken = b.get("spoken")
     if spoken is not None:
-        ok = (isinstance(spoken, dict) and set(spoken) - {"mouth"} == {"key", "seconds", "parts"} and isinstance(spoken["key"], str)
+        ok = (isinstance(spoken, dict) and set(spoken) - {"mouth", "words", "align"} == {"key", "seconds", "parts"} and isinstance(spoken["key"], str)
               and isinstance(spoken["parts"], list) and isinstance(spoken["seconds"], (int, float))
               and not isinstance(spoken["seconds"], bool) and math.isfinite(spoken["seconds"])
               and 0 < spoken["seconds"] <= 60 and 1 <= len(spoken["parts"]) <= 40)
@@ -587,6 +604,20 @@ def _timing(b, narration, path):
         if ok and "mouth" in spoken:
             ok = (isinstance(spoken["mouth"], str) and re.fullmatch(r"[XAEOMF]{1,2000}", spoken["mouth"]) is not None
                   and len(spoken["mouth"]) <= math.ceil((LEAD + spoken["seconds"]) * 30) + 2)
+        if ok and "words" in spoken:
+            # Word times (core/video_align.py): one [start, end] per word of the line, in order, inside the line.
+            from core import video_align
+            words = spoken["words"]
+            ok = (isinstance(words, list) and len(words) == len(video_align.words_of(b["say"])) and all(
+                isinstance(w, list) and len(w) == 2 and all(isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) for x in w)
+                and 0 <= w[0] <= w[1] <= LEAD + spoken["seconds"] + 1e-6 for w in words)
+                and all(a[0] <= b2[0] + 1e-9 for a, b2 in zip(words, words[1:])))
+        if ok and "align" in spoken:
+            al = spoken["align"]
+            ok = (isinstance(al, dict) and set(al) <= {"method", "confidence", "note"} and isinstance(al.get("method"), str)
+                  and len(al["method"]) <= 40 and isinstance(al.get("confidence"), (int, float)) and not isinstance(al["confidence"], bool)
+                  and 0 <= al["confidence"] <= 1 and (not isinstance(al.get("note"), str) or len(al["note"]) <= 200)
+                  and ("note" not in al or isinstance(al["note"], str)))
         if not ok:
             _error(path + ".spoken", "leave spoken to the narration step (video_narrate); it is measured, not written.")
         if spoken["key"] != speech_key(narration["voice"], b["say"]):
@@ -610,6 +641,15 @@ def beat_seconds(beat, bpm) -> float:
 
 def duration(project) -> float:
     return sum(beat_seconds(b, project.get("bpm", 120)) for b in project["beats"])
+
+
+def fps(project) -> int:
+    return project.get("fps", 30)
+
+
+def frame_count(project) -> int:
+    """Frames in the whole video: frame f shows time f / fps."""
+    return math.ceil(duration(project) * fps(project) - 1e-7)
 
 
 def get(video_id) -> dict:

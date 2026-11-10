@@ -91,6 +91,8 @@ function allowedRequest(raw, origin, designId, videoId = '', playerPath = '', lo
     if (videoId) {
       return (url.pathname + url.search === playerPath) ||
         (url.pathname.startsWith(`/api/videos/${videoId}/assets/`) && /^\/api\/videos\/[a-f0-9]{12}\/assets\/[a-f0-9]{64}\.(png|jpg|gif|webp)$/.test(url.pathname)) ||
+        // A video clip's decoded frames (core/video_media.py), by number.
+        (url.pathname.startsWith(`/api/videos/${videoId}/assets/media/`) && /^\/api\/videos\/[a-f0-9]{12}\/assets\/media\/[a-f0-9]{64}\/\d{1,6}\.jpg$/.test(url.pathname)) ||
         /^\/static\/motion\/(engine|kit|layout|rig|scene|stage|stage3d|overlay)\.js$/.test(url.pathname) || THREE_PATH.test(url.pathname) ||
         (url.pathname.startsWith(`/api/design-fonts/${look}/`) && /^\/api\/design-fonts\/[a-z0-9_-]+\/[A-Za-z0-9_.-]+\.(woff2?|ttf|otf)$/.test(url.pathname));
     }
@@ -125,12 +127,13 @@ async function renderJob(origin, job, backendUrl, token) {
   current.look = String(job.look || '');
   // A long video (core/video_longform.py) is rendered one chapter at a time: `first` and `count` name the chapter's
   // frames inside the whole video's `frames`. One job captures at most 14,400 frames (8 minutes); a video is at most 20 minutes.
-  if (video && (!/^[a-z0-9_-]{1,60}$/.test(current.look) || job.fps !== 30 || !Number.isInteger(job.frames) || job.frames < 1 || job.frames > 36000)) throw new Error('refused invalid video timing');
+  // 30 or 60 frames a second (Content Studio Editor step 6); 20 minutes at 60 is 72,000 frames.
+  if (video && (!/^[a-z0-9_-]{1,60}$/.test(current.look) || ![30, 60].includes(job.fps) || !Number.isInteger(job.frames) || job.frames < 1 || job.frames > 72000)) throw new Error('refused invalid video timing');
   // Only the overlay pass captures PNG with alpha, and only from the overlay player.
   if (video && job.alpha !== undefined && (job.alpha !== true || !match[3] || job.preview)) throw new Error('refused an invalid overlay job');
   if (video && !job.preview) {
     const first = job.first ?? 0, count = job.count ?? job.frames;
-    if (!Number.isInteger(first) || !Number.isInteger(count) || first < 0 || count < 1 || count > 14400 || first + count > job.frames) throw new Error('refused invalid video frame range');
+    if (!Number.isInteger(first) || !Number.isInteger(count) || first < 0 || count < 1 || count > 28800 || first + count > job.frames) throw new Error('refused invalid video frame range');
   }
   const isolated = configure(origin);
   const win = new BrowserWindow({
@@ -208,8 +211,8 @@ async function captureVideo(win, job, backendUrl, token) {
   gone.catch(() => {});
   const evaluate = code => Promise.race([win.webContents.executeJavaScript(code, true), gone]);
   const info = await evaluate('Promise.resolve(window.kdReady).then(() => document.fonts.ready).then(() => window.kdInfo)');
-  if (!info || info.width !== job.w || info.height !== job.h || info.fps !== 30 ||
-      !Number.isFinite(info.duration) || info.duration <= 0 || Math.ceil(info.duration * 30 - 1e-7) !== job.frames) {
+  if (!info || info.width !== job.w || info.height !== job.h || info.fps !== job.fps ||
+      !Number.isFinite(info.duration) || info.duration <= 0 || Math.ceil(info.duration * job.fps - 1e-7) !== job.frames) {
     throw new Error('The motion player dimensions or timing do not match this video job');
   }
   const first = job.first ?? 0;

@@ -38,6 +38,7 @@ class ChannelEditBody(Body):
     style_pack: Optional[str] = Field(None, max_length=40)
     long_per_week: Optional[int] = Field(None, ge=0, le=7)
     renderer: Optional[str] = Field(None, max_length=10)
+    fps: Optional[int] = Field(None, ge=0, le=60)
 
 
 class BatchBody(Body):

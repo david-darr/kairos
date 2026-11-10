@@ -346,9 +346,11 @@ app.whenReady().then(async () => {
     // Pack B: the 3D renderer is shown plainly; without Blender on the computer it cannot be picked.
     assert.deepEqual(await js("[...document.querySelector('[aria-label=\"3D renderer\"]').options].map(o=>[o.textContent, o.disabled])"),
       [["The style pack's choice", false], ['three.js (built in)', false], ['Blender (not installed)', true]]);
+    // Step 6: the channel's frame rate.
+    await js("(() => { const s = document.querySelector('[aria-label=\"Frame rate\"]'); s.value = '60'; s.dispatchEvent(new Event('change', { bubbles: true })); })()");
     await click('.sc-dialog-panel button', 'Save look');
     await wait("!document.querySelector('[aria-label=\"Look id\"]')");
-    assert.deepEqual(last('/channels/1/edit').body, { look: 'sport', aspect: '16:9', notes: 'Calm, curious.', voice: 'af_heart', style_pack: 'aaaaaaaaaaaa', renderer: '', long_per_week: 2 });
+    assert.deepEqual(last('/channels/1/edit').body, { look: 'sport', aspect: '16:9', notes: 'Calm, curious.', voice: 'af_heart', style_pack: 'aaaaaaaaaaaa', renderer: '', fps: 60, long_per_week: 2 });
     await wait("document.querySelector('[data-channel-id=\"1\"]').textContent.includes('style Flat science explainer, look sport, 16:9, voice notes set')");
     await noOverflow(); await labels();
 

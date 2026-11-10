@@ -9,7 +9,7 @@ const path = require('node:path');
     { id: 'a', kind: 'title', bars: 1, transition: 'whip' },
     { id: 'b', bars: 2, transition: 'zoom' }, { id: 'c', kind: 'end', bars: 1 }
   ] });
-  assert.equal(p.duration, 8); assert.equal(p.fps, 30); assert.equal(p.bar, 2);
+  assert.equal(p.duration, 8); assert.equal(p.fps, 60, '60 frames a second is kept (step 6)'); assert.equal(L.normalizeProject({ fps: 24 }).fps, 30, 'any other rate is 30'); assert.equal(p.bar, 2);
   assert.deepEqual(p.beats.map(b => [b.start, b.end]), [[0, 2], [2, 6], [6, 8]]);
   assert.equal(L.beatAt(p, 2).id, 'b'); assert.equal(L.beatAt(p, -1).id, 'a');
   assert.equal(L.beatAt(p, 8).id, 'c'); assert.equal(L.beatAt(p, Infinity).id, 'a');

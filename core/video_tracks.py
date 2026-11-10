@@ -16,6 +16,12 @@ operations (models included), only by the person in Studio after unlocking it.
 
 Everything here is data checked against fixed lists and ranges; nothing in a clip runs. Positions are shares of the
 frame (x, y, w, h from 0 to 1), so a clip keeps its place in every aspect.
+
+Step 5 adds keyframes (`keys`), our own tween model: per property (x, y, scale, rotation, opacity) a list of
+{t, v, ease}, `t` in the clip's own time (the clock of `in` and `out`), so a trim or split never moves a keyframe against
+the clip's content. Between two keys the value follows the first key's ease; outside them it holds. A property without
+keys keeps its plain value (the box's x and y, `scale`, `rotation`, `opacity`). static/motion/overlay.js draws the same.
+Step 7 adds video clips on overlay tracks: the person's own file, decoded at upload into frames (core/video_media.py).
 """
 from __future__ import annotations
 
@@ -24,7 +30,7 @@ import math
 import re
 
 TRACK_KINDS = ("overlay", "audio")
-CLIP_KINDS = {"overlay": ("text", "image", "shape"), "audio": ("sound",)}
+CLIP_KINDS = {"overlay": ("text", "image", "shape", "video"), "audio": ("sound",)}
 MAX_TRACKS, MAX_TRACK_CLIPS, MAX_CLIPS = 8, 60, 200
 COLORS = ("text", "dim", "accent", "accent-2", "bg", "surface", "white", "black")
 SHAPES = ("rect", "ellipse", "line", "arrow")
@@ -39,15 +45,22 @@ SOUND_MAX_SECONDS = 180.0      # one sound file's length (core/video_store.add_a
 ID = re.compile(r"[a-zA-Z][a-zA-Z0-9_-]{0,47}")
 IMAGE = re.compile(r"assets/[a-f0-9]{64}\.(?:png|jpg|gif|webp)")
 AUDIO = re.compile(r"assets/[a-f0-9]{64}\.wav")
-COMMON = ("id", "kind", "start", "in", "out", "opacity", "fade_in", "fade_out")
+VIDEO = re.compile(r"media/[a-f0-9]{64}")
+COMMON = ("id", "kind", "start", "in", "out", "opacity", "fade_in", "fade_out", "scale", "rotation", "keys")
 FIELDS = {"text": COMMON + ("text", "box", "role", "style", "color", "align"),
           "image": COMMON + ("image", "box", "fit"),
           "shape": COMMON + ("shape", "box", "color", "fill", "stroke"),
+          "video": COMMON + ("video", "box", "fit"),
           "sound": ("id", "kind", "start", "in", "out", "volume", "fade_in", "fade_out", "audio")}
+# Keyframes (step 5): the properties, their ranges and the eases (static/motion/overlay.js has the same lists).
+KEY_PROPS = ("x", "y", "scale", "rotation", "opacity")
+KEY_RANGES = {"x": (-1, 2), "y": (-1, 2), "scale": (.05, 10), "rotation": (-3600, 3600), "opacity": (0, 1)}
+EASES = ("linear", "in", "out", "in-out", "back", "hold")
+MAX_KEYS, MAX_CLIP_KEYS = 60, 200
 # A clip's editable fields for video_edit (op clip_set); id and kind are fixed once a clip exists.
 SETTABLE = {kind: tuple(f for f in fields if f not in ("id", "kind")) for kind, fields in FIELDS.items()}
 DEFAULT_BOX = {"text": {"x": .1, "y": .08, "w": .8, "h": .16}, "image": {"x": .62, "y": .08, "w": .3, "h": .3},
-               "shape": {"x": .1, "y": .7, "w": .3, "h": .06}}
+               "shape": {"x": .1, "y": .7, "w": .3, "h": .06}, "video": {"x": .55, "y": .1, "w": .4, "h": .4}}
 TRACK_NAMES = {"overlay": "Overlay", "audio": "Sound"}
 
 
@@ -75,10 +88,10 @@ def end(clip) -> float:
     return clip["start"] + length(clip)
 
 
-def validate(p: dict, audio_seconds=None) -> None:
+def validate(p: dict, audio_seconds=None, media_seconds=None) -> None:
     """Check and complete p["tracks"] in place (a deep copy from video_store.validate). An empty list is removed, so a
     video without overlays is stored exactly as before. `audio_seconds(name)` gives an uploaded sound's length, or
-    None when this video does not hold that file."""
+    None when this video does not hold that file; `media_seconds(name)` the same for an uploaded video file."""
     if "tracks" not in p:
         return
     tracks = p["tracks"]
@@ -113,7 +126,7 @@ def validate(p: dict, audio_seconds=None) -> None:
         if count > MAX_CLIPS:
             _error("tracks", f"a video holds at most {MAX_CLIPS} clips in all.")
         for j, clip in enumerate(clips):
-            _clip(clip, f"{path}.clips[{j}]", track["kind"], audio_seconds)
+            _clip(clip, f"{path}.clips[{j}]", track["kind"], audio_seconds, media_seconds)
             if clip["id"] in clip_ids or clip["id"] in beat_ids:
                 _error(f"{path}.clips[{j}].id", "each clip needs an id no other clip or beat has.")
             clip_ids.add(clip["id"])
@@ -134,7 +147,37 @@ def _box(value, path):
     return box
 
 
-def _clip(clip, path, track_kind, audio_seconds):
+def _keys(value, path):
+    """A clip's keyframes: {property: [{t, v, ease}]}, each list sorted by t with no two keys at the same time."""
+    if not isinstance(value, dict):
+        _error(path, "give {property: [{t, v, ease}]} with properties " + ", ".join(KEY_PROPS) + ".")
+    out, count = {}, 0
+    for prop in sorted(value):
+        if prop not in KEY_PROPS:
+            _error(f"{path}.{prop}", "keyframe a clip's " + ", ".join(KEY_PROPS) + ".")
+        keys = value[prop]
+        if not isinstance(keys, list) or not 1 <= len(keys) <= MAX_KEYS:
+            _error(f"{path}.{prop}", f"give 1 to {MAX_KEYS} keyframes, or leave the property out.")
+        low, high = KEY_RANGES[prop]
+        clean = []
+        for n, key in enumerate(keys):
+            where = f"{path}.{prop}[{n}]"
+            if not isinstance(key, dict) or not {"t", "v"} <= set(key) or set(key) - {"t", "v", "ease"}:
+                _error(where, "give {t (seconds of the clip's own time), v (the value), ease}.")
+            clean.append({"t": _number(key["t"], where + ".t", 0, LONGEST), "v": _number(key["v"], where + ".v", low, high),
+                          "ease": _choice(key.get("ease", "linear"), where + ".ease", EASES)})
+        clean.sort(key=lambda k: k["t"])
+        for a, b in zip(clean, clean[1:]):
+            if b["t"] - a["t"] < 1 / 120:
+                _error(f"{path}.{prop}", f"two keyframes at {a['t']:g} seconds; keep one key per moment.")
+        out[prop] = clean
+        count += len(clean)
+    if count > MAX_CLIP_KEYS:
+        _error(path, f"a clip holds at most {MAX_CLIP_KEYS} keyframes in all.")
+    return out
+
+
+def _clip(clip, path, track_kind, audio_seconds, media_seconds=None):
     if not isinstance(clip, dict):
         _error(path, "give a clip object.")
     kind = clip.get("kind")
@@ -165,6 +208,15 @@ def _clip(clip, path, track_kind, audio_seconds):
         return
     clip["opacity"] = _number(clip.get("opacity", 1), path + ".opacity", 0, 1)
     clip["box"] = _box(clip.get("box", copy.deepcopy(DEFAULT_BOX[kind])), path + ".box")
+    for key, low, high, default in (("scale", .05, 10, 1), ("rotation", -3600, 3600, 0)):
+        if key in clip:
+            clip[key] = _number(clip[key], f"{path}.{key}", low, high)
+            if clip[key] == default:
+                clip.pop(key)          # the plain value is not stored, so an untouched clip stays as it was
+    if "keys" in clip:
+        clip["keys"] = _keys(clip["keys"], path + ".keys")
+        if not clip["keys"]:
+            clip.pop("keys")
     if kind == "text":
         text = clip.get("text")
         if not isinstance(text, str) or not text.strip() or len(text) > TEXT_LIMIT:
@@ -176,6 +228,15 @@ def _clip(clip, path, track_kind, audio_seconds):
         if not isinstance(clip.get("image"), str) or not IMAGE.fullmatch(clip["image"]):
             _error(path + ".image", "use assets/<sha256>.png, .jpg, .gif or .webp from this video's images.")
         clip["fit"] = _choice(clip.get("fit", "contain"), path + ".fit", FITS)
+    elif kind == "video":
+        if not isinstance(clip.get("video"), str) or not VIDEO.fullmatch(clip["video"]):
+            _error(path + ".video", "use media/<sha256> from a video file the person uploaded to this video.")
+        seconds = media_seconds(clip["video"]) if media_seconds else None
+        if media_seconds and seconds is None:
+            _error(path + ".video", "this video holds no such video file; upload it to the video first.")
+        if seconds is not None and clip["out"] > seconds + 1 / 30:
+            _error(path + ".out", f"the video file is {seconds:.2f} seconds long; end the clip at or before that.")
+        clip["fit"] = _choice(clip.get("fit", "cover"), path + ".fit", FITS)
     else:
         clip["shape"] = _choice(clip.get("shape", "rect"), path + ".shape", SHAPES)
         clip["color"] = _choice(clip.get("color", "accent"), path + ".color", COLORS)
@@ -220,9 +281,10 @@ def check_frames(project, first_frame, last_frame, limit=8) -> set:
     """Frames for the post-render checks to look at: the middle of each visible text clip inside [first, last], so its
     contrast against what is really behind it is measured on a rendered frame."""
     picks = []
-    for clip in clips_in(project, first_frame / 30, (last_frame + 1) / 30):
+    fps = project.get("fps", 30)
+    for clip in clips_in(project, first_frame / fps, (last_frame + 1) / fps):
         if clip["kind"] == "text":
-            frame = int((clip["start"] + end(clip)) / 2 * 30)
+            frame = int((clip["start"] + end(clip)) / 2 * fps)
             if first_frame <= frame <= last_frame:
                 picks.append(frame)
     picks = sorted(set(picks))
@@ -243,6 +305,8 @@ def describe_clip(clip) -> str:
         return f"image {clip['image'][7:19]}"
     if clip["kind"] == "shape":
         return f"{clip['color']} {clip['shape']}"
+    if clip["kind"] == "video":
+        return f"video {clip['video'][6:18]}"
     return f"sound {clip['audio'][7:19]}"
 
 
@@ -256,6 +320,10 @@ def outline_lines(project) -> list[str]:
             extra = f", volume {clip['volume']:g}" if clip["kind"] == "sound" else f", opacity {clip['opacity']:g}"
             box = clip.get("box")
             where = f", box x{box['x']:g} y{box['y']:g} w{box['w']:g} h{box['h']:g}" if box else ""
+            where += "".join(f", {k} {clip[k]:g}" for k in ("scale", "rotation") if k in clip)
+            if clip.get("keys"):
+                where += ", keyframes " + "; ".join(f"{prop} " + " ".join(f"{k['t']:g}s={k['v']:g}" + ("" if k["ease"] == "linear" else f"({k['ease']})")
+                                                                         for k in keys) for prop, keys in clip["keys"].items())
             lines.append(f"  - clip {clip['id']} {round(clip['start'], 2):g}-{round(end(clip), 2):g}s {describe_clip(clip)}{extra}{where}"
                          + (f", fades {clip['fade_in']:g}/{clip['fade_out']:g}s" if clip["fade_in"] or clip["fade_out"] else ""))
     return lines
@@ -277,7 +345,7 @@ def timeline(project) -> dict:
                 item[key] = b[key]
         beats.append(item)
         at += seconds
-    out = {"title": project["title"], "duration": round(at, 3), "fps": 30, "aspects": project["aspects"],
+    out = {"title": project["title"], "duration": round(at, 3), "fps": project.get("fps", 30), "aspects": project["aspects"],
            "tracks": [{"id": "beats", "kind": "beats", "name": "Beats (the main picture)", "clips": beats}]}
     if project.get("chapters"):
         out["chapters"] = project["chapters"]
@@ -310,7 +378,9 @@ def apply_op(draft, op, n, agent=False):
 
     ops: track_add {track: {kind, name?, id?}}; track_set {id, field: name|hidden|locked, value}; track_remove {id};
     track_move {id, to}; clip_add {track, clip}; clip_set {id, field, value}; clip_remove {id, ripple?};
-    clip_move {id, track?, start?}; clip_trim {id, start? (new left edge), end? (new right edge)}; clip_split {id, at}.
+    clip_move {id, track?, start?}; clip_trim {id, start? (new left edge), end? (new right edge)}; clip_split {id, at};
+    clip_key {id, prop, at (seconds on the timeline), value, ease?} sets or replaces one keyframe; clip_unkey {id, prop?,
+    at?} removes the key at `at` (every property's when prop is left out), or all of a property's keys when `at` is.
     `agent` (a model asking from Studio's Ask Kairos) may not lock or unlock a track."""
     kind = op.get("op")
     tracks = draft.setdefault("tracks", [])
@@ -389,6 +459,33 @@ def apply_op(draft, op, n, agent=False):
             clip["start"], clip["in"] = round(clip["start"] + delta, 4), round(clip["in"] + delta, 4)
         if "end" in op:
             clip["out"] = round(clip["in"] + _number(op["end"], f"ops[{n}].end", 0, LONGEST) - clip["start"], 4)
+    elif kind in ("clip_key", "clip_unkey"):
+        if clip["kind"] == "sound":
+            raise ValueError(f"ops[{n}].id: a sound clip has no keyframes; change its volume or fades.")
+        prop = op.get("prop")
+        if prop is not None and prop not in KEY_PROPS:
+            raise ValueError(f"ops[{n}].prop: keyframe a clip's " + ", ".join(KEY_PROPS) + ".")
+        at = None if op.get("at") is None else _number(op["at"], f"ops[{n}].at", 0, LONGEST)
+        if at is not None and not clip["start"] - 1e-6 <= at <= end(clip) + 1e-6:
+            raise ValueError(f"ops[{n}].at: give a time inside the clip, {clip['start']:g} to {end(clip):g} seconds.")
+        own = None if at is None else round(clip["in"] + at - clip["start"], 4)   # the key's time in the clip's own clock
+        keys = clip.setdefault("keys", {})
+        if kind == "clip_key":
+            if prop is None or own is None or "value" not in op:
+                raise ValueError(f"ops[{n}]: clip_key needs id, prop, at and value.")
+            keys[prop] = [k for k in keys.get(prop, []) if abs(k["t"] - own) >= 1 / 120]
+            keys[prop].append({"t": own, "v": op["value"], "ease": op.get("ease", "linear")})
+            keys[prop].sort(key=lambda k: k["t"])
+        else:
+            for name in [prop] if prop else list(keys):
+                if own is None:
+                    keys.pop(name, None)
+                else:
+                    keys[name] = [k for k in keys.get(name, []) if abs(k["t"] - own) >= 1 / 120]
+                    if not keys[name]:
+                        keys.pop(name)
+        if not keys:
+            clip.pop("keys")
     elif kind == "clip_split":
         at = _number(op.get("at"), f"ops[{n}].at", 0, LONGEST)
         if not clip["start"] + 1 / 30 <= at <= end(clip) - 1 / 30:
@@ -397,7 +494,7 @@ def apply_op(draft, op, n, agent=False):
         track["clips"].insert(index + 1, second)
     else:
         raise ValueError(f"ops[{n}].op: choose set, insert, remove, move, project, track_add, track_set, track_remove, "
-                         "track_move, clip_add, clip_set, clip_remove, clip_move, clip_trim or clip_split.")
+                         "track_move, clip_add, clip_set, clip_remove, clip_move, clip_trim, clip_split, clip_key or clip_unkey.")
 
 
 def split(clip, at, new_id):
@@ -418,7 +515,12 @@ OP_HELP = ("Tracks and clips (layers over the beats): track_add {op:track_add, t
            "end? (new right edge)}; clip_split {op:clip_split, id, at (seconds)}. An overlay track holds text {text, box, role title|body, "
            "style card|plain, color text|dim|accent|accent-2|bg|surface|white|black, align left|center|right}, image {image: assets/<sha>.png "
            "from this video, box, fit contain|cover} and shape {shape rect|ellipse|line|arrow, box, color, fill, stroke 0.001-0.05} clips; "
+           "video {video: media/<sha> uploaded by the person, box, fit contain|cover} clips; "
            "an audio track holds sound {audio: assets/<sha>.wav uploaded by the person, volume 0-1} clips. Every clip has start (seconds "
-           "on the timeline), in and out (its own time; length = out - in), fade_in, fade_out, and (pictures) opacity 0-1; box is "
-           "{x, y, w, h} as shares of the frame. Clips on one track never overlap; later tracks draw on top; captions stay above all. "
-           "A locked track cannot change. ")
+           "on the timeline), in and out (its own time; length = out - in), fade_in, fade_out, and (pictures) opacity 0-1, scale "
+           "(0.05-10, around the box centre) and rotation (degrees); box is {x, y, w, h} as shares of the frame. Keyframes animate "
+           "a picture clip: clip_key {op:clip_key, id, prop: x|y|scale|rotation|opacity, at (seconds on the timeline, inside the "
+           "clip), value, ease: linear|in|out|in-out|back|hold} (x and y are the box's left and top, -1 to 2 so a clip can fly in); "
+           "clip_unkey {op:clip_unkey, id, prop?, at?}. The ease on a key shapes the move from it to the next key; values hold "
+           "before the first key and after the last. Clips on one track never overlap; later tracks draw on top; captions stay "
+           "above all. A locked track cannot change. ")

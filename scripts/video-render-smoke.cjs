@@ -58,6 +58,7 @@ app.whenReady().then(async () => {
   if (args.includes('--pack-b')) py.push('--pack-b');
   if (args.includes('--preview')) py.push('--preview');
   if (args.includes('--tracks')) py.push('--tracks');
+  for (const name of ['--motion', '--fps60', '--exports']) if (args.includes(name)) py.push(name);
   for (const name of ['--models', '--keep', '--name', '--renderer']) if (flag(name)) py.push(name, flag(name));
   backend = spawn(python, py, { cwd: ROOT, env: { ...process.env, KAIROS_RENDER_TOKEN: token }, stdio: 'inherit', windowsHide: true });
   const exited = new Promise(resolve => backend.on('exit', code => resolve(code)));
@@ -73,7 +74,8 @@ app.whenReady().then(async () => {
   const job = result.job;
   const summary = { seconds: job.seconds, render_seconds: result.render_seconds, real_voice: result.real_voice, loudness: job.loudness,
     narration: job.narration, notes: job.notes, sheets: result.sheets, sheet_match: result.sheet_match, pack: result.pack || null, kept: result.kept || null, long: result.long || null,
-    renderer: job.renderer || null, capture_fps: job.capture_fps || null, fps: job.fps || null, measured: job.measured || null, overlay: result.overlay || null };
+    renderer: job.renderer || null, capture_fps: job.capture_fps || null, capture_seconds: job.capture_seconds || null, frames: job.frames || null, fps: job.fps || null,
+    measured: job.measured || null, overlay: result.overlay || null, motion: result.motion || null, exports: result.exports || null };
   console.log(JSON.stringify(summary, null, 2));
   if (args.includes('--preview')) return finish(0, 'Preview frames kept in ' + result.kept);
   if (!job.narration || !job.narration.lines) return finish(1, 'The render has no narration track.');
@@ -127,6 +129,20 @@ app.whenReady().then(async () => {
     if (o.sound_clips !== 1) return finish(1, 'The sound clip was not mixed into the soundtrack.');
     const clipNotes = (job.notes || []).filter(n => /^Clip /.test(n));
     if (clipNotes.length) return finish(1, 'The clip checks named problems: ' + clipNotes.join(' '));
+  }
+  // Steps 5 to 7: keyframes, the video clip in the frames, word captions aligned; 60 fps; the exports.
+  if (args.includes('--motion')) {
+    const m = result.motion || {};
+    if (!(m.aligned >= Math.ceil(m.lines * .8))) return finish(1, `Too few lines got word times: ${m.aligned} of ${m.lines} (${JSON.stringify(m.confidence)}; ${(m.align_notes || []).join(' ')}).`);
+    const away = (m.sky_in_box || []).reduce((n, v, i) => n + Math.abs(v - (m.box_before_clip || [])[i]), 0);
+    if (!(away > 60)) return finish(1, `The video clip is not in its box in the encoded frames: ${JSON.stringify(m.sky_in_box)} against ${JSON.stringify(m.box_before_clip)} before it.`);
+    const clipNotes = (job.notes || []).filter(n => /^Clip /.test(n));
+    if (clipNotes.length) return finish(1, 'The clip checks named problems: ' + clipNotes.join(' '));
+  }
+  if (args.includes('--fps60') && job.fps !== 60) return finish(1, `Rendered at ${job.fps} frames a second, not 60.`);
+  if (args.includes('--exports')) {
+    const e = result.exports || {};
+    if (!e.webm?.bytes || !e.mov?.bytes || !e.gif?.bytes || e.gif.bytes > 15 * 1024 * 1024) return finish(1, 'An export is missing or the GIF is over its cap: ' + JSON.stringify(e));
   }
   finish(0, 'Video render smoke passed.');
 });

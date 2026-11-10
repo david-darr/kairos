@@ -53,6 +53,14 @@ function serve(req, res) {
     res.end(template.replace('<!--KD-TOKENS-->', `<style>:root{${css}}</style>`)
       .replace('<!--KD-PROJECT-->', `<script type="application/json" id="kd-project">${JSON.stringify(project)}</script>`)); return;
   }
+  // A video clip's decoded frames (step 7): frame n is a flat colour from its number, so a drawn pixel names the frame.
+  const frameMatch = /^\/api\/videos\/sample\/assets\/media\/a{64}\/(\d{1,6})\.jpg$/.exec(url.pathname);
+  if (frameMatch) {
+    if (url.searchParams.get('rt') !== 'fixture-token') { res.writeHead(403); res.end(); return; }
+    const n = Number(frameMatch[1]);
+    res.writeHead(n < 30 ? 200 : 404, { 'Content-Type': 'image/svg+xml' });
+    res.end(n < 30 ? `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="36"><rect width="64" height="36" fill="rgb(${n * 8},${255 - n * 8},90)"/></svg>` : ''); return;
+  }
   if (url.pathname.startsWith('/api/videos/sample/assets/')) {
     if (url.searchParams.get('rt') !== 'fixture-token') { res.writeHead(403); res.end(); return; }
     const image = { 'field.svg': photo, 'mark.svg': mark }[path.posix.basename(url.pathname)];
@@ -255,6 +263,75 @@ app.whenReady().then(async () => {
   assert.ok(overlayResult.deterministic, 'The same time draws the same pixels');
   fs.writeFileSync(path.join(output, 'motion-overlays.png'), Buffer.from(overlayResult.frame, 'base64'));
   console.log('PASS overlay tracks; frame: ' + path.join(output, 'motion-overlays.png'));
-  console.log('Motion engine Electron checks passed (two looks, three aspects, all beats, cameras, transitions, image treatments and overlay tracks).');
+  // Steps 5 to 7: keyframes drawn by our own interpolation, a video clip's exact frame by number (the render page
+  // awaits it), 60 frames a second in the player's info, and the word being said lit in the captions.
+  const later = await js(`(async () => {
+    const E = await import('/static/motion/engine.js'), O = await import('/static/motion/overlay.js');
+    const base = JSON.parse(document.getElementById('kd-project').textContent), options = { aspect: '16:9', tokens: ${JSON.stringify(looks.dark)}, assetsBase: '/api/videos/sample/assets/' };
+    const out = {}, canvas = () => document.createElement('canvas');
+    const px = (c, x, y) => [...c.getContext('2d').getImageData(Math.round(x), Math.round(y), 1, 1).data.slice(0, 3)];
+    const hash = async (m, c, t) => { m.drawFrame(t); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+      return [...new Uint8Array(await crypto.subtle.digest('SHA-256', d))].map(v => v.toString(16).padStart(2, '0')).join(''); };
+    // Keyframes: x from -0.3 to 0.4 (ease out) over the clip's own 0 to 1 s, a quarter turn and a half to full size.
+    const keyed = [{ id: 'k', kind: 'overlay', name: 'Moves', clips: [{ id: 'm1', kind: 'shape', start: 1, in: 0, out: 2, opacity: 1, shape: 'rect', color: 'white', fill: true,
+      box: { x: .1, y: .4, w: .2, h: .2 }, keys: { x: [{ t: 0, v: -.3, ease: 'out' }, { t: 1, v: .4 }], rotation: [{ t: 0, v: 0 }, { t: 1, v: 90 }], scale: [{ t: 0, v: .5 }, { t: 1, v: 1 }] } }] }];
+    const kc = canvas(), km = E.mount(kc, { ...base, tracks: keyed }, options); await km.ready;
+    const at = t => km.layout(t).find(e => e.clip === 'm1');
+    out.keyMid = at(1.5); out.keyEnd = at(2.5); out.keyBefore = at(1);
+    out.easeOut = O.ease('out', .5);
+    const k1 = await hash(km, kc, 1.37), k2 = await hash(km, kc, 1.61), k3 = await hash(km, kc, 1.37);
+    out.keyDeterministic = k1 === k3 && k1 !== k2;
+    km.drawFrame(1.5); out.keyFrame = kc.toDataURL('image/png').split(',')[1];
+    // A video clip: 30 decoded frames, the clip starts at 1 s and plays from 0.2 s into the file.
+    const media = { ['a'.repeat(64)]: { frames: 30, width: 64, height: 36 } };
+    const video = [{ id: 'v', kind: 'overlay', name: 'Video', clips: [{ id: 'v1', kind: 'video', start: 1, in: .2, out: 1, opacity: 1, video: 'media/' + 'a'.repeat(64), fit: 'cover', box: { x: .5, y: .5, w: .3, h: .3 } }] }];
+    const vc = canvas(), vm = E.mount(vc, { ...base, tracks: video, media }, { ...options, strict: true }); await vm.ready;
+    try { vm.drawFrame(1.5); out.strictThrew = false; } catch (error) { out.strictThrew = /not ready/.test(error.message); }
+    const colourAt = async t => { await vm.prepare(t); vm.drawFrame(t); return px(vc, 1920 * .65, 1080 * .65); };
+    out.frames = { a: await colourAt(1.5), b: await colourAt(1.5 + 1 / 120), c: await colourAt(1.5 + 1 / 30) };
+    out.frameIndex = vm.layout(1.5).find(e => e.clip === 'v1')?.videoFrame;
+    out.infoKinds = vm.info.clips.map(c => c.kind);
+    // 60 frames a second: the player says so, and every frame's time is n / 60.
+    const sixty = E.mount(canvas(), { ...base, fps: 60 }, options); await sixty.ready; out.fps = sixty.info.fps; sixty.dispose();
+    // Word captions: one narrated beat, six aligned words; the box style lights the word being said.
+    const words = [[.3, .55], [.6, .8], [.85, 1.05], [1.1, 1.3], [1.35, 1.7], [1.75, 2.4]];
+    const narrated = style => ({ ...base, narration: { voice: 'af_heart', captions: true, caption_style: style },
+      beats: [{ id: 'w', kind: 'statement', text: 'Sky', bars: 2, seconds: 3, say: 'Look up on a clear day.', spoken: { key: 'k', seconds: 2.4, parts: [[.25, 2.45, 'Look up on a clear day.']], words } }] });
+    const lc = canvas(), bc = canvas(), hc = canvas();
+    const line = E.mount(lc, narrated('line'), options), boxed = E.mount(bc, narrated('box'), options), lit = E.mount(hc, narrated('highlight'), options);
+    await Promise.all([line.ready, boxed.ready, lit.ready]);
+    out.word = [.2, .65, 1.2, 2.0].map(t => boxed.layout(t).find(e => e.role === 'caption')?.word ?? null);
+    out.wordStyle = boxed.layout(1.2).find(e => e.role === 'caption')?.captionStyle;
+    const diff = async (a, ca, b, cb, t) => { a.drawFrame(t); b.drawFrame(t); const x = ca.getContext('2d').getImageData(0, 0, 1920, 1080).data, y = cb.getContext('2d').getImageData(0, 0, 1920, 1080).data; let n = 0; for (let i = 0; i < x.length; i += 4) if (x[i] !== y[i] || x[i + 1] !== y[i + 1] || x[i + 2] !== y[i + 2]) n++; return n; };
+    out.boxDiff = await diff(line, lc, boxed, bc, 1.2); out.litDiff = await diff(line, lc, lit, hc, 1.2); out.beforeDiff = await diff(line, lc, boxed, bc, .26);
+    const unsure = E.mount(canvas(), { ...narrated('box'), beats: narrated('box').beats.map(b => ({ ...b, spoken: { ...b.spoken, words: undefined } })) }, options); await unsure.ready;
+    out.fallback = unsure.layout(1.2).find(e => e.role === 'caption')?.captionStyle;
+    boxed.drawFrame(1.2); out.wordFrame = bc.toDataURL('image/png').split(',')[1];
+    for (const m of [km, vm, line, boxed, lit, unsure]) m.dispose();
+    return out;
+  })()`);
+  const eased = -.3 + .7 * later.easeOut;
+  assert.ok(Math.abs(later.keyMid.frame.x / 1920 - eased) < 1e-4, 'Half way, x follows the ease out curve: ' + later.keyMid.frame.x / 1920 + ' vs ' + eased);
+  assert.ok(Math.abs(later.keyMid.rotation - 45) < 1e-6 && Math.abs(later.keyMid.scale - .75) < 1e-6, 'Rotation and scale between their keys (linear)');
+  assert.ok(Math.abs(later.keyEnd.frame.x / 1920 - .4) < 1e-6 && later.keyEnd.rotation === 90, 'After the last key the values hold');
+  assert.ok(Math.abs(later.keyBefore.frame.x / 1920 + .3) < 1e-6, 'At the first key: its value');
+  assert.ok(later.keyMid.w > later.keyMid.frame.w * .75 * .99, 'The reported box bounds the turned, scaled clip');
+  assert.ok(later.keyDeterministic, 'Keyframed clips draw the same pixels at the same time');
+  assert.equal(later.strictThrew, true, 'The render page never draws a video frame it has not loaded');
+  assert.equal(later.frameIndex, 21, 'Frame floor((0.2 + 0.5) x 30) = 21 at 1.5 s');
+  assert.deepEqual(later.frames.a, [168, 87, 90], 'The pixel is frame 21\'s own colour: ' + later.frames.a);
+  assert.deepEqual(later.frames.a, later.frames.b, 'A time inside the same frame draws the same frame');
+  assert.notDeepEqual(later.frames.a, later.frames.c, 'The next frame draws the next picture');
+  assert.deepEqual(later.infoKinds, ['video']);
+  assert.equal(later.fps, 60, 'A 60 fps video tells the render worker its frame rate');
+  assert.deepEqual(later.word, [null, 1, 3, 5], 'The word being said, and the last one said between words');
+  assert.equal(later.wordStyle, 'box');
+  assert.ok(later.boxDiff > 500 && later.litDiff > 50, 'The lit word draws differently from the line style: ' + later.boxDiff + ', ' + later.litDiff);
+  assert.equal(later.beforeDiff, 0, 'Before the first word the caption is the plain line');
+  assert.equal(later.fallback, 'line', 'A line without word times keeps line captions');
+  fs.writeFileSync(path.join(output, 'motion-keyframes.png'), Buffer.from(later.keyFrame, 'base64'));
+  fs.writeFileSync(path.join(output, 'motion-word-caption.png'), Buffer.from(later.wordFrame, 'base64'));
+  console.log('PASS keyframes, video frames by number, 60 fps info, word captions; frames: motion-keyframes.png, motion-word-caption.png');
+  console.log('Motion engine Electron checks passed (two looks, three aspects, all beats, cameras, transitions, image treatments, overlay tracks, keyframes, video clips and word captions).');
   cleanup(); app.exit(0);
 }).catch(error => { console.error(error); cleanup(); app.exit(1); });

@@ -26,6 +26,12 @@ sample with core/style_pack_sample.make. --renderer blender first makes a new ve
 (the person's own install, found by core/blender_tools.py), so the sample goes through the Blender runner, its overlay
 pass and FFmpeg compositing; without Blender it renders with three.js and says so. --preview renders a few still frames
 of the sample's beats instead (for a look pass) and keeps them with --keep.
+
+Content Studio Editor steps 5 to 7: --motion puts keyframed overlays (a title that slides in, a badge that pops and
+turns, an arrow that blinks), a video clip from a file "uploaded" through the store (a sky gradient FFmpeg makes here,
+standing in for the person's own file) and word captions (the box style; word times aligned from the narration with
+whisper.cpp) on the video. --fps60 renders at 60 frames a second. --exports then makes the WebM, MOV and GIF from the
+MP4 (and a ProRes MOV, measured only), keeping the WebM and GIF with --keep.
 """
 import argparse
 import asyncio
@@ -308,6 +314,52 @@ async def add_tracks(project):
     return video_store.save(project["id"], {**project, "tracks": tracks})
 
 
+def sky_clip():
+    """A 6-second sky with a moving sun, drawn by FFmpeg here, standing in for a video file the person uploads."""
+    import subprocess
+    from core import ffmpeg_tools
+    out = Path(tempfile.mkdtemp(prefix="sky-clip-")) / "sky.mp4"
+    sun = "lte(hypot(X-(170+90*T)\\,Y-150)\\,58)"      # a sun crossing a sky that pales towards the horizon
+    sky = (f"color=c=black:s=960x540:d=6:r=30,format=rgb24,geq=r='if({sun}\\,255\\,20+130*Y/H)'"
+           f":g='if({sun}\\,226\\,60+140*Y/H)':b='if({sun}\\,140\\,120+120*Y/H)'")
+    subprocess.run([ffmpeg_tools.find(), "-v", "error", "-y", "-f", "lavfi", "-i", sky,
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", str(out)], check=True, capture_output=True,
+                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return out.read_bytes()
+
+
+async def add_motion(project, fps):
+    """Steps 5 to 7 on a narrated video: keyframed overlays, a video clip and word captions (box style)."""
+    from core import video_media, video_narration, video_render, video_store
+    project = video_store.save(project["id"], {**video_store.get(project["id"]), "fps": fps,
+                                               "narration": {**project["narration"], "caption_style": "box"}})
+    project = await asyncio.to_thread(video_narration.prepare, project["id"])
+    spans = {b["id"]: (b["start"], b["end"]) for b in video_render.outline(project)}
+    ids = [b["id"] for b in project["beats"]]
+    s1, s2, s3 = spans[ids[0]], spans[ids[1]], spans[ids[2]]
+    media = video_media.add_video(project["id"], sky_clip(), "mp4", "Sky")
+    badge = video_store.add_asset(project["id"], badge_png(), "png")
+    r = lambda v: round(v, 3)
+    title_len = r(min(3.6, s1[1] - s1[0] - .4))
+    tracks = [
+        {"id": "titles", "kind": "overlay", "name": "Titles", "clips": [
+            {"id": "intro", "kind": "text", "start": r(s1[0] + .3), "in": 0, "out": title_len, "fade_in": 0, "fade_out": .3,
+             "text": "Why is the sky blue?", "box": {"x": .27, "y": .07, "w": .46, "h": .12}, "role": "title", "style": "card", "color": "text",
+             "keys": {"x": [{"t": 0, "v": -.5, "ease": "out"}, {"t": .9, "v": .27}], "opacity": [{"t": 0, "v": 0}, {"t": .4, "v": 1}]}}]},
+        {"id": "video", "kind": "overlay", "name": "Video", "clips": [
+            {"id": "sky", "kind": "video", "start": r(s2[0] + .3), "in": .5, "out": r(min(5.5, .5 + s2[1] - s2[0] - .6)), "fade_in": 0, "fade_out": .4,
+             "video": media["media"], "box": {"x": .62, "y": .3, "w": .32, "h": .32}, "fit": "cover",
+             "keys": {"y": [{"t": .5, "v": 1.05, "ease": "out"}, {"t": 1.3, "v": .3}], "rotation": [{"t": .5, "v": 8, "ease": "out"}, {"t": 1.3, "v": 0}]}}]},
+        {"id": "marks", "kind": "overlay", "name": "Marks", "clips": [
+            {"id": "badge", "kind": "image", "start": r(s3[0] + .3), "in": 0, "out": r(s3[1] - s3[0] - .6), "fade_in": 0, "fade_out": .25,
+             "image": badge, "box": {"x": .82, "y": .07, "w": .1, "h": .17}, "fit": "contain",
+             "keys": {"scale": [{"t": 0, "v": .2, "ease": "back"}, {"t": .6, "v": 1}], "rotation": [{"t": 0, "v": -40, "ease": "out"}, {"t": .6, "v": 0}]}},
+            {"id": "arrow", "kind": "shape", "start": r(s2[0] + 1.6), "in": 0, "out": r(min(2.4, s2[1] - s2[0] - 2)), "fade_in": 0, "fade_out": 0,
+             "shape": "arrow", "color": "accent-2", "fill": True, "stroke": .006, "box": {"x": .5, "y": .3, "w": .09, "h": .06},
+             "keys": {"opacity": [{"t": 0, "v": 0, "ease": "hold"}, {"t": .3, "v": 1, "ease": "hold"}, {"t": .9, "v": .25, "ease": "hold"}, {"t": 1.2, "v": 1}]}}]}]
+    return video_store.save(project["id"], {**video_store.get(project["id"]), "tracks": tracks}), media
+
+
 def overlay_frame(path, t, box, keep=None):
     """The rendered frame at t (FFmpeg), and the median colour inside a clip's box."""
     import subprocess
@@ -356,6 +408,10 @@ async def main(args):
     real_voice = bool(args.models)
     if real_voice:
         speech_optional.OPTIONAL_DIR = args.models
+        # Word captions use the whisper.cpp model next to Kokoro's folder (speech_models), read only.
+        from core import video_align
+        if any(Path(args.models).parent.glob("ggml-*.bin")):
+            video_align.MODEL_DIR = str(Path(args.models).parent)
     else:
         video_narration._ready = lambda voice: tone_voice()
     app = FastAPI()
@@ -425,6 +481,11 @@ async def main(args):
         project = None if args.style_pack or args.long_form or args.pack_b else video_store.create(spec["title"], owner="smoke", beats=beats, **options)
         if args.tracks:
             project = await add_tracks(project)
+        if args.fps60 and not args.motion:
+            project = video_store.save(project["id"], {**video_store.get(project["id"]), "fps": 60})
+        media = None
+        if args.motion:
+            project, media = await add_motion(project, 60 if args.fps60 else 30)
         if args.long_form:
             # The pack is test-approved here (in the app only the person approves), then the chaptered video is made in it.
             style_pack_store.submit(pack["id"], 1, {"by": "render smoke"})
@@ -509,12 +570,45 @@ async def main(args):
             result["overlay"] = {"bg": bg, "card": overlay_frame(job["path"], intro["start"] + 1.0, intro["box"], frame_keep),
                                  "sound_clips": (job.get("narration") or {}).get("sound_clips"),
                                  "clips": sum(len(t["clips"]) for t in project["tracks"])}
+        if args.motion:
+            # The words were aligned, the video clip is in the encoded frames (its sky blue inside its box once it has
+            # risen), and the title card rests where its last keyframe puts it.
+            beats = project["beats"]
+            spoken = [b["spoken"] for b in beats if "spoken" in b]
+            sky = project["tracks"][1]["clips"][0]
+            settled = sky["start"] + (1.3 - sky["in"]) + .4
+            frame_keep = (Path(args.keep) / f"{args.name or 'narrated-sample'}-video-clip-frame.png") if args.keep else None
+            if frame_keep:
+                frame_keep.parent.mkdir(parents=True, exist_ok=True)
+            intro = project["tracks"][0]["clips"][0]
+            result["motion"] = {
+                "fps": project["fps"], "lines": len(spoken), "aligned": sum(1 for x in spoken if "words" in x),
+                "confidence": [x.get("align", {}).get("confidence") for x in spoken], "method": (spoken[0].get("align") or {}).get("method"),
+                "words": sum(len(x.get("words", [])) for x in spoken), "media": media,
+                "sky_in_box": overlay_frame(job["path"], settled, sky["box"], frame_keep),
+                "box_before_clip": overlay_frame(job["path"], max(0, sky["start"] - .3), sky["box"]),
+                "align_notes": sorted({(x.get("align") or {}).get("note", "") for x in spoken} - {""}),
+                "title_at_rest": overlay_frame(job["path"], intro["start"] + 1.6, intro["box"]),
+                "keys": sum(len(v) for t in project["tracks"] for c in t["clips"] for v in (c.get("keys") or {}).values())}
+        if args.exports:
+            from core import video_export
+            master = Path(job["path"])
+            exports = {"mp4": {"bytes": master.stat().st_size}}
+            for fmt in ("webm", "mov", "gif"):
+                exports[fmt] = await asyncio.to_thread(video_export.make, master, fmt)
+            began_prores = time.time()
+            prores = await asyncio.to_thread(video_export.prores, master, master.with_name("prores-measure.mov"))
+            exports["prores_measured"] = {"bytes": prores.stat().st_size, "seconds_spent": round(time.time() - began_prores, 2)}
+            result["exports"] = exports
         if args.keep:
             keep = Path(args.keep)
             keep.mkdir(parents=True, exist_ok=True)
             slug = spec["aspects"][0].replace(":", "-")
             stem = args.name or "narrated-sample"
             shutil.copy2(job["path"], keep / f"{stem}.mp4")
+            if args.exports:
+                for fmt in ("webm", "gif"):
+                    shutil.copy2(Path(job["path"]).with_suffix("." + fmt), keep / f"{stem}.{fmt}")
             for sheet in sheets:
                 shutil.copy2(character_store.sheet_path(sheet["id"], 1), keep / f"{stem}-character-sheet-{sheet['name'].lower().replace(' ', '-')}.png")
             if pack:
@@ -600,6 +694,9 @@ if __name__ == "__main__":
     parser.add_argument("--renderer", choices=("threejs", "blender"), default="threejs")
     parser.add_argument("--preview", action="store_true")
     parser.add_argument("--tracks", action="store_true")
+    parser.add_argument("--motion", action="store_true")
+    parser.add_argument("--fps60", action="store_true")
+    parser.add_argument("--exports", action="store_true")
     parsed = parser.parse_args()
     data = tempfile.mkdtemp(prefix="video-render-smoke-")
     os.environ["JARVIS_DATA_DIR"] = data

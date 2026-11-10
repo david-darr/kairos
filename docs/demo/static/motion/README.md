@@ -14,6 +14,18 @@ shares. Hidden tracks and audio tracks draw nothing. `layout(t)` reports each cl
 screen with `clip`, `track` and (text) `role: 'overlay'`, its colours and `truncated`;
 `info.clips` lists the visible clips. core/video_tracks.py checks the same data.
 
+Steps 5 to 7 of the editor build: a clip's `keys` animate x, y, scale, rotation and
+opacity with our own interpolation (`valueAt`, `ease`: linear, in, out, in-out, back,
+hold; no animation library), keyed in the clip's own time so a trim or split keeps them
+on its content; scale and rotation turn the clip around its box's centre, and `layout`
+reports the turned bounds (`x`, `y`, `w`, `h`) with the unturned `frame`. Video clips show
+frame `floor((in + t - start) * 30)` of a file decoded at upload (core/video_media.py);
+`prepare(t)` loads the exact frames and `drawWhenReady(t)` draws once they are in, which
+is what the render page's `kdDrawFrame` returns (a strict mount refuses to draw a frame
+it has not loaded). `setTracks` swaps the overlays live for the editor's canvas drags.
+`narration.caption_style` `highlight` or `box` lights the word being said from the line's
+aligned `spoken.words` (core/video_align.py); a line without them keeps line captions.
+
 `player.html` has exactly one `<!--KD-PROJECT-->` and `<!--KD-TOKENS-->` placeholder.
 Replace the former with a complete JSON script element named `kd-project` (escape
 `<` as `\u003c` in JSON), and the latter with the look's style/font-face block.
@@ -79,7 +91,7 @@ Transition-scaled `size` remains the visible size, while `fontSize` permits floo
 checks even during zoom/flip transitions.
 
 Normalization limits: 64 beats, BPM 40..240, bars .25..16, text 180 codepoints,
-sub 160, number 24, five items of 100 each, ids 64; fps is always 30. Unknown kinds
+sub 160, number 24, five items of 100 each, ids 64; fps is 30 or 60 (anything else is 30). Unknown kinds
 become statements, unknown cameras/transitions become still/cut. Image names are
 single safe filenames with an optional `assets/` prefix. Empty projects get an
 end card. These defensive limits should agree with backend validation; the

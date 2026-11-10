@@ -254,6 +254,21 @@ def _behind(raw, box):
     return float(np.median(linear @ np.array([.2126, .7152, .0722])))
 
 
+def _rest_bounds(clip, w, h):
+    """Where a keyframed clip comes to rest (every property at its last key), as frame-pixel bounds of the turned and
+    scaled box, the way static/motion/overlay.js draws it. None for a clip without keys."""
+    if not clip or not clip.get("keys"):
+        return None
+    last = lambda prop, plain: clip["keys"][prop][-1]["v"] if clip["keys"].get(prop) else plain
+    box = clip["box"]
+    x, y, scale, turn = last("x", box["x"]), last("y", box["y"]), last("scale", clip.get("scale", 1)), last("rotation", clip.get("rotation", 0))
+    cx, cy, hw, hh = (x + box["w"] / 2) * w, (y + box["h"] / 2) * h, box["w"] * w / 2 * scale, box["h"] * h / 2 * scale
+    a = math.radians(turn)
+    pts = [(cx + dx * math.cos(a) - dy * math.sin(a), cy + dx * math.sin(a) + dy * math.cos(a)) for dx, dy in ((-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh))]
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    return {"x": min(xs), "y": min(ys), "w": max(xs) - min(xs), "h": max(ys) - min(ys)}
+
+
 def overlay_notes(project, aspect="16:9", layouts=None, frames=None, times=None):
     """Checks for the overlay and audio clips (Content Studio Editor step 3), each naming its clip: text cut off with an
     ellipsis, text outside the safe area (which also keeps it clear of the caption band), text that reads too fast,
@@ -282,6 +297,7 @@ def overlay_notes(project, aspect="16:9", layouts=None, frames=None, times=None)
             if clip["kind"] == "text" and len(clip["text"].split()) / video_tracks.length(clip) > 3.5:
                 notes.append(f"{names[clip['id']]} reads faster than 3.5 words/s; shorten the text or lengthen the clip.")
     by_time = {round(s.get("time", -1), 6): s.get("elements", []) for s in layouts or []}
+    clips = {c["id"]: c for t in tracks for c in t["clips"]}
     for sample in layouts or []:
         for box in sample.get("elements", []):
             if not box.get("clip") or box.get("kind") != "text":
@@ -289,8 +305,13 @@ def overlay_notes(project, aspect="16:9", layouts=None, frames=None, times=None)
             label = names.get(box["clip"], f"Clip {box['clip']}")
             if box.get("truncated"):
                 notes.append(f"{label}: its text is cut off with an ellipsis; shorten it or make its box bigger.")
-            if box["x"] < left - .5 or box["x"] + box["w"] > right + .5 or box["y"] < safe_top - .5 or box["y"] + box["h"] > safe_bottom + .5:
-                notes.append(f"{label} has text outside the safe area" + (" (or over the captions)" if captioned else "") + "; move it inward.")
+            outside = lambda b: b["x"] < left - .5 or b["x"] + b["w"] > right + .5 or b["y"] < safe_top - .5 or b["y"] + b["h"] > safe_bottom + .5
+            if outside(box):
+                # A keyframed clip may pass outside on its way (a fly-in): only where it comes to rest counts.
+                rest = _rest_bounds(clips.get(box["clip"]), w, h) if box.get("animated") else None
+                if rest is None or outside(rest):
+                    notes.append(f"{label} has text outside the safe area" + (" where it comes to rest" if rest else "")
+                                 + (" (or over the captions)" if captioned else "") + "; move it inward.")
             fg, bg = _luminance(box.get("color")), _luminance(box.get("bg")) if box.get("bg") else None
             if fg is not None and bg is not None and _contrast(fg, bg) < 4.5:
                 notes.append(f"{label} has text contrast under 4.5:1 on its card; pick another colour.")

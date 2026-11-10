@@ -5,7 +5,9 @@ at its commas), every part is spoken on its own through Kokoro's synthesis API (
 measured, and the parts are joined with short pauses into the beat's line. The measurement goes into the beat's
 `spoken` ({key, seconds, parts}); video_store derives the beat's length from it, so each line's measured length sets
 its shot's length and every caption carries a measured time. Kokoro's ONNX model returns audio only (its one output
-is `audio`, checked 2026-11-10), so there are no word timings: captions are line parts, not words.
+is `audio`, checked 2026-11-10), so it gives no word timings; when the video's captions light the word being said
+(narration.caption_style highlight or box), each line's words are aligned against its own audio by core/video_align.py
+(whisper.cpp, already part of the app) and stored as `spoken.words`, with `spoken.align` saying how sure it was.
 
 The spoken lines are cached per video as 24 kHz mono WAV files named by their speech key (voice + text + the account's
 Pronunciations entries for words in the line), so an edit, to a line or to the list, re-speaks only the lines it changed. `track()` lays the lines on the 48 kHz timeline for core/video_audio.py, which
@@ -19,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
-from core import video_mouth, video_store
+from core import video_align, video_mouth, video_store
 
 RATE = 24000
 OUT_RATE = 48000
@@ -114,14 +116,24 @@ def prepare(video_id, synthesize=None):
     todo = missing(project)
     lips = [b["id"] for b in project["beats"] if b["kind"] == "scene" and "spoken" in b and "mouth" not in b["spoken"]
             and b["id"] not in todo]
-    if not todo and not lips:
+    # Word captions: lines spoken before the video asked for them are aligned from their own audio, without speaking again.
+    words = video_store.word_captions(project)
+    unaligned = [b["id"] for b in project["beats"] if words and "spoken" in b and "align" not in b["spoken"] and b["id"] not in todo]
+    if not todo and not lips and not unaligned:
         return project
     speak_one = (synthesize or _ready(voice).synthesize) if todo else None
     measured = {}
     for b in project["beats"]:
-        if b["id"] in lips:
-            # Measured before it became a scene: its mouth shapes come from the line already spoken.
-            measured[b["id"]] = {**b["spoken"], "mouth": video_mouth.for_beat(read_clip(video_id, b["spoken"]["key"]), video_store.LEAD, RATE)}
+        if b["id"] in lips or b["id"] in unaligned:
+            # Measured before it became a scene (or before word captions): its mouth shapes and word times come from
+            # the line already spoken.
+            samples = read_clip(video_id, b["spoken"]["key"])
+            measured[b["id"]] = dict(b["spoken"])
+            if b["id"] in lips:
+                measured[b["id"]]["mouth"] = video_mouth.for_beat(samples, video_store.LEAD, RATE)
+            if b["id"] in unaligned:
+                line_parts = [[s - video_store.LEAD, e - video_store.LEAD, t] for s, e, t in b["spoken"]["parts"]]
+                measured[b["id"]].update(video_align.for_beat(b["say"], samples, RATE, video_store.LEAD, line_parts))
             continue
         if b["id"] not in todo:
             continue
@@ -133,6 +145,8 @@ def prepare(video_id, synthesize=None):
         if b["kind"] == "scene":
             # A speaking character's mouth follows this line's own audio envelope (core/video_mouth.py).
             measured[b["id"]]["mouth"] = video_mouth.for_beat(samples, video_store.LEAD, RATE)
+        if words:
+            measured[b["id"]].update(video_align.for_beat(b["say"], samples, RATE, video_store.LEAD, parts))
     with video_store._lock("video:" + video_id):
         current = video_store.get(video_id)
         changed = False

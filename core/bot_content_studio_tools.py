@@ -111,7 +111,7 @@ def _pipeline(args, ctx, bot, role):
     channels = [{"id": c["id"], "niche_id": c["niche_id"], "niche": c["niche_name"], "platform": c["platform"], "handle": c["handle"],
                  "paused": bool(c["paused"]), "look": c["look"], "aspect": c["aspect"] or "9:16",
                  "notes": c["notes"], "voice": c["voice"], "style_pack": c.get("style_pack") or "motion-type",
-                 "renderer_3d": c.get("renderer") or "the style pack's own",
+                 "renderer_3d": c.get("renderer") or "the style pack's own", "fps": c.get("fps") or 30,
                  "long_videos_a_week": studio.long_cap(c), "long_videos_last_7_days": studio.long_this_week(c["id"])}
                 for c in studio.list_channels(status="live")]
     strategies = {r: [{"id": s["id"], "name": s["name"], "default": bool(s["is_default"])}
@@ -200,6 +200,9 @@ def _pick(args, ctx, bot, role):
     if post["style_pack"] not in formats.STYLE_PACKS:
         tail += (f" It is made in the user-made style pack {formats.all_packs()[post['style_pack']]['name']}: the Editor passes "
                  f"style_pack={post['style_pack']} to video_create, which applies the pack's approved look, voice and characters.")
+    channel_fps = (studio.get_channel(post["channel_id"]) if post.get("channel_id") else {} or {}).get("fps")
+    if channel_fps == 60:
+        tail += " The channel posts at 60 frames a second: the Editor passes fps=60 to video_create."
     if _base(post["style_pack"]) == "glossy-3d":
         castable = [c["name"] for c in _characters() if c["castable_version"] and c.get("form") == "3d"]
         channel = studio.get_channel(post["channel_id"]) if post.get("channel_id") else {}

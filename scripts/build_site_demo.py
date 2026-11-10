@@ -111,6 +111,9 @@ def bundle(target):
         # The background effects import the vendored art (static/vendor/ascii-magic) by relative
         # path, including a per-piece dynamic import esbuild expands into a glob; both need the files staged.
         shutil.copytree(STATIC / "vendor", stage / "static" / "vendor")
+        # Studio's editor maths takes the keyframe interpolation from the motion engine (static/motion/overlay.js),
+        # so the one curve the render draws is the one the editor shows.
+        shutil.copytree(STATIC / "motion", stage / "static" / "motion")
         for original in (REPO / "tabs").rglob("*.js"):
             copied = stage / original.relative_to(REPO)
             copied.parent.mkdir(parents=True, exist_ok=True)

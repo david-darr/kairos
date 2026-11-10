@@ -90,7 +90,7 @@ def spans_of(project) -> list[dict]:
     """The parts a render is made of: the chapters, or (a Blender video without chapters) the whole video as one part."""
     if video_store.chaptered(project):
         return video_store.chapter_spans(project)
-    total = math.ceil(video_store.duration(project) * 30 - 1e-7)
+    total = video_store.frame_count(project)
     return [{"id": "all", "title": project["title"], "first": 0, "last": len(project["beats"]), "start": 0.,
              "end": video_store.duration(project), "first_frame": 0, "frames": total}]
 
@@ -102,6 +102,8 @@ def chapter_keys(project, aspect, renderer=None) -> list[str]:
     shared = {"engine": engine_hash(), "look": project["look"], "tokens": _look(project["look"]), "aspect": aspect,
               "bpm": project["bpm"], "captions": (project.get("narration") or {}).get("captions", True),
               "palette": project.get("palette"), "cast": project.get("cast"), "style_pack": project.get("style_pack")}
+    if video_store.fps(project) != 30:   # kept out of 30 fps keys, so parts made before 60 fps keep their names
+        shared["fps"] = video_store.fps(project)
     if renderer == "blender":       # kept out of older keys, so unit 4's three-free parts keep their names
         shared.update(renderer="blender", samples=video_blender.SAMPLES)
     keys = []
@@ -109,9 +111,9 @@ def chapter_keys(project, aspect, renderer=None) -> list[str]:
         first, last = span["first"], span["last"]
         body = {**shared, "beats": beats[first:last], "before": beats[first - 1] if first else None,
                 "after": beats[last] if last < len(beats) else None, "order": [[b["kind"], b["id"]] for b in beats[:last]],
-                "offset": round(span["start"] * 30 - span["first_frame"], 6), "frames": span["frames"]}
+                "offset": round(span["start"] * video_store.fps(project) - span["first_frame"], 6), "frames": span["frames"]}
         from core import video_tracks
-        clips = video_tracks.clips_in(project, span["start"] - 1 / 30, span["end"] + 1 / 30)
+        clips = video_tracks.clips_in(project, span["start"] - 1 / video_store.fps(project), span["end"] + 1 / video_store.fps(project))
         if clips:   # kept out of the key otherwise, so a chapter without overlays keeps its part's name
             body["clips"] = clips
         keys.append(hashlib.sha256(json.dumps(body, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:24])
@@ -128,7 +130,7 @@ def youtube_chapters(project) -> tuple[str, list[str]]:
     """The chapter list for a YouTube description ("0:00 Title" per line) and why YouTube would not show it as
     chapters, if it would not: the first at 0:00, at least three, each at least ten seconds long."""
     spans = video_store.chapter_spans(project) if video_store.chaptered(project) else []
-    text = "\n".join(f"{_clock(s['first_frame'] / 30)} {s['title']}" for s in spans)
+    text = "\n".join(f"{_clock(s['first_frame'] / video_store.fps(project))} {s['title']}" for s in spans)
     problems = []
     if len(spans) < YOUTUBE_MIN_CHAPTERS:
         problems.append(f"YouTube shows chapters only when there are at least {YOUTUBE_MIN_CHAPTERS}; this video has {len(spans)}.")
@@ -282,7 +284,7 @@ def _sample_times(project, span):
     if len(picks) > SAMPLES_PER_CHAPTER:
         picks = [picks[round(i * (len(picks) - 1) / (SAMPLES_PER_CHAPTER - 1))] for i in range(SAMPLES_PER_CHAPTER)]
     low, high = span["first_frame"], span["first_frame"] + span["frames"] - 1
-    return sorted({min(high, max(low, int((starts[i][0] + starts[i][1]) / 2 * 30))) for i in picks} | clip_frames)
+    return sorted({min(high, max(low, int((starts[i][0] + starts[i][1]) / 2 * video_store.fps(project)))) for i in picks} | clip_frames)
 
 
 async def _chapter(project, aspect, span, key, parts, state, index):
@@ -292,12 +294,12 @@ async def _chapter(project, aspect, span, key, parts, state, index):
     if state.get("renderer") == "blender":
         return await _blender_chapter(project, aspect, span, key, parts, state, index, sample_frames)
     temp = parts / f"{key}.partial.mp4"
-    encoder = await asyncio.to_thread(ffmpeg_tools.Encoder, temp, None)
+    encoder = await asyncio.to_thread(lambda: ffmpeg_tools.Encoder(temp, None, fps=video_store.fps(project)))
     seen, began = 0, time.monotonic()
     samples, layouts = [], []
     chapter = state["chapters"][index]
     try:
-        job = video_render._job(project, aspect, secrets.token_hex(8), frame_times=[f / 30 for f in sample_frames],
+        job = video_render._job(project, aspect, secrets.token_hex(8), frame_times=[f / video_store.fps(project) for f in sample_frames],
                                 frames=(span["first_frame"], span["frames"]))
 
         async def consume(frames, layout):
@@ -495,7 +497,7 @@ async def _join(project, aspect, spans, keys, parts, state):
                 if path.is_file():
                     samples.append((i, path.read_bytes()))
         samples.sort()
-        frames, times = [raw for _, raw in samples], [i / 30 for i, _ in samples]
+        frames, times = [raw for _, raw in samples], [i / video_store.fps(project) for i, _ in samples]
         notes = video_checks.check(project, aspect, layouts, frames, measured, voice or None)
         notes += video_render.character_notes(project, layouts, frames, times)
         notes += video_checks.overlay_notes(project, aspect, layouts, frames, times)

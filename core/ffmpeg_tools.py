@@ -66,7 +66,7 @@ AUDIO_ARGS = ["-c:a", "aac", "-b:a", "192k", "-af", LOUDNORM, "-ar", "48000"]
 class Encoder:
     """A pipe whose stderr goes to disk so verbose FFmpeg cannot deadlock it. Without a soundtrack it writes a
     picture-only part (a long video's chapter); the whole video's sound is added when the parts are joined."""
-    def __init__(self, out, soundtrack, *, executable=None, timeout=180):
+    def __init__(self, out, soundtrack, *, executable=None, timeout=180, fps=30):
         self.path = Path(out)
         self.timeout = timeout
         exe = executable or find()
@@ -74,7 +74,7 @@ class Encoder:
             raise RuntimeError(MISSING)
         self.stderr = tempfile.TemporaryFile()
         # JPEG frames are full range; players expect TV range BT.709, or the colours wash out.
-        self.argv = ([exe, "-y", "-f", "image2pipe", "-framerate", "30", "-c:v", "mjpeg", "-i", "-"]
+        self.argv = ([exe, "-y", "-f", "image2pipe", "-framerate", str(int(fps)), "-c:v", "mjpeg", "-i", "-"]
                      + (["-i", str(soundtrack)] if soundtrack is not None else []) + VIDEO_ARGS
                      + (AUDIO_ARGS + ["-shortest"] if soundtrack is not None else ["-an"])
                      + ["-movflags", "+faststart", str(out)])

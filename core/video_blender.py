@@ -89,7 +89,7 @@ async def _overlay(project, aspect, span, folder: Path, state, chapter, sample_f
     from core import video_render
     over = folder / "overlay"
     over.mkdir(parents=True, exist_ok=True)
-    job = video_render._job(project, aspect, secrets.token_hex(8), frame_times=[f / 30 for f in sample_frames],
+    job = video_render._job(project, aspect, secrets.token_hex(8), frame_times=[f / video_store.fps(project) for f in sample_frames],
                             frames=(span["first_frame"], span["frames"]))
     job["path"] += "&layer=overlay"
     job["alpha"] = True
@@ -173,15 +173,15 @@ async def _blender(folder: Path, aspect, span, stage, poses, state, chapter):
     return {"frames": rendered, "seconds": time.monotonic() - began}
 
 
-def composite(base_dir: Path, overlay_dir: Path, first: int, count: int, out: Path, timeout=3600):
+def composite(base_dir: Path, overlay_dir: Path, first: int, count: int, out: Path, timeout=3600, fps=30):
     """FFmpeg overlays the 2D pass on Blender's frames and encodes a picture-only part with the shared video settings."""
     exe = ffmpeg_tools.find()
     if not exe:
         raise RuntimeError(ffmpeg_tools.MISSING)
     vf = ffmpeg_tools.VIDEO_ARGS[1]
     video = [a for i, a in enumerate(ffmpeg_tools.VIDEO_ARGS) if i not in (0, 1)]
-    ffmpeg_tools._run([exe, "-y", "-framerate", "30", "-start_number", str(first), "-i", str(base_dir / "f_%06d.png"),
-                       "-framerate", "30", "-start_number", str(first), "-i", str(overlay_dir / "o_%06d.png"),
+    ffmpeg_tools._run([exe, "-y", "-framerate", str(fps), "-start_number", str(first), "-i", str(base_dir / "f_%06d.png"),
+                       "-framerate", str(fps), "-start_number", str(first), "-i", str(overlay_dir / "o_%06d.png"),
                        "-filter_complex", f"[0:v][1:v]overlay=0:0:format=auto,{vf}[v]", "-map", "[v]", "-frames:v", str(count),
                        *video, "-an", "-movflags", "+faststart", str(out)], timeout, "composite the overlay on Blender's frames")
     return out
@@ -210,7 +210,7 @@ async def chapter(project, aspect, span, key, parts: Path, state, index, sample_
                 shutil.copyfile(black, target)
     state["status"] = "compositing"
     temp = parts / f"{key}.partial.mp4"
-    await asyncio.to_thread(composite, base, folder / "overlay", span["first_frame"], span["frames"], temp)
+    await asyncio.to_thread(composite, base, folder / "overlay", span["first_frame"], span["frames"], temp, 3600, video_store.fps(project))
     samples = []
     for n in sample_frames:
         with Image.open(base / f"f_{n:06d}.png") as b, Image.open(folder / "overlay" / f"o_{n:06d}.png") as o:

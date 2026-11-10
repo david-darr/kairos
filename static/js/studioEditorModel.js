@@ -1,7 +1,11 @@
 // Pure logic for Studio's video editor (no DOM): beat timing on the timeline, timecodes, frame steps, zoom and ruler
 // maths, snapping, trimming in half bars, shuttle speeds, the keyboard table and the remembered pane sizes.
 // tabs/studio/view.js and static/js/studioTimeline.js draw it; scripts/test_studio_editor_model.cjs checks it.
-// Written for Kairos (Content Studio Editor build spec, steps 1 and 2); no third-party code.
+// Written for Kairos (Content Studio Editor build spec, steps 1 to 7); no third-party code. Steps 5 to 7 add the canvas
+// handles' maths (snapping to the safe area and centre lines, nudges), keyframes (add at the playhead, move, copy and
+// paste; the values come from the engine's own interpolation in static/motion/overlay.js) and video clips.
+import { valueAt, KEY_PROPS, EASES, KEY_RANGES } from '../motion/overlay.js';
+export { KEY_PROPS, EASES };
 
 export const FPS = 30;
 // The scene schema's choices (core/style_packs.py, core/character_store.py, core/video_store.py); a Python test
@@ -162,7 +166,11 @@ export const SHORTCUTS = [
   ['Home / End', 'Start or end of the video'],
   ['I / O', 'Set the start or end of the work area at the playhead'],
   ['Alt + X', 'Clear the work area'],
-  ['Delete', 'Delete the selected beat or clip (with Ripple on, later clips on its track move up)'],
+  ['Delete', 'Delete the selected keyframes, clip or beat (with Ripple on, later clips on its track move up)'],
+  ['A', 'Add keyframes at the playhead to the selected clip (its animated properties, or all of them)'],
+  ['[ / ]', 'Previous or next keyframe of the selected clip'],
+  ['Ctrl + C / Ctrl + V', 'Copy the selected keyframes; paste them at the playhead on the selected clip'],
+  ['Arrows on the preview', 'With the clip box focused: nudge the clip 1 pixel (Shift: 10)'],
   ['S', 'Split the selected clip at the playhead'],
   ['C', 'Comment mode: click the preview to pin a comment for Kairos'],
   ['Ctrl + D', 'Duplicate the selected beat'],
@@ -181,6 +189,8 @@ export function keyAction(e) {
     if (key === 'z') return e.shiftKey ? 'redo' : 'undo';
     if (key === 'y') return 'redo';
     if (key === 'd') return 'duplicate';
+    if (key === 'c' && !e.shiftKey) return 'copy-keys';
+    if (key === 'v' && !e.shiftKey) return 'paste-keys';
     return null;
   }
   if (e.altKey) {
@@ -199,6 +209,10 @@ export function keyAction(e) {
     case 'Home': return 'start';
     case 'End': return 'end';
     case 's': return 'split';
+    // Keyframes (step 5): A adds them at the playhead. K stays the shuttle's stop, as in other editors' J/K/L.
+    case 'a': return 'keyframe';
+    case '[': return 'previous-key';
+    case ']': return 'next-key';
     case 'c': return 'comment';
     case 'Escape': return 'escape';
     case 'i': return 'mark-in';
@@ -267,7 +281,7 @@ export function musicLevel(t, spans, volume = .7) {
 // Overlay tracks hold text, image and shape clips drawn over the beats (the last track on top, captions above all);
 // audio tracks hold sound clips. A clip starts at `start` on the timeline and plays its own time from `in` to `out`.
 export const TRACK_KINDS = ['overlay', 'audio'];
-export const CLIP_KINDS = { overlay: ['text', 'image', 'shape'], audio: ['sound'] };
+export const CLIP_KINDS = { overlay: ['text', 'image', 'shape', 'video'], audio: ['sound'] };
 export const CLIP_COLORS = ['text', 'dim', 'accent', 'accent-2', 'bg', 'surface', 'white', 'black'];
 export const CLIP_SHAPES = ['rect', 'ellipse', 'line', 'arrow'];
 export const MAX_TRACKS = 8, MAX_TRACK_CLIPS = 60, MAX_CLIPS = 200;
@@ -346,9 +360,10 @@ export function removeClip(track, id, ripple = false) {
   return track;
 }
 // Where a clip is on screen in plain words, for the timeline and for screen readers.
-export function clipLabel(c, sounds = {}) {
+export function clipLabel(c, sounds = {}, media = {}) {
   if (c.kind === 'text') return c.text || 'Text';
   if (c.kind === 'image') return c.image ? `Image ${c.image.slice(7, 15)}` : 'Image (choose one)';
+  if (c.kind === 'video') return media[c.video]?.title || (c.video ? `Video ${c.video.slice(6, 14)}` : 'Video (choose one)');
   if (c.kind === 'shape') return `${c.color || 'accent'} ${c.shape || 'rect'}`;
   return sounds[c.audio]?.title || (c.audio ? `Sound ${c.audio.slice(7, 15)}` : 'Sound (choose one)');
 }
@@ -360,3 +375,160 @@ export function clipSnapTargets(p, list, extra = {}, ignore = null) {
 }
 // Comment pins show on the preview near their time.
 export const pinVisible = (pin, t, near = 1.5) => Math.abs(pin.t - t) <= near;
+
+// -- Keyframes and the canvas (Content Studio Editor build spec, step 5; core/video_tracks.py checks the same rules) -----
+// A clip's keys are per property, in the clip's own time (the clock of `in` and `out`): own = in + (t - start).
+export const KEY_NAMES = { x: 'Left', y: 'Top', scale: 'Size', rotation: 'Turn', opacity: 'Opacity' };
+export const EASE_NAMES = { linear: 'Linear', in: 'Ease in', out: 'Ease out', 'in-out': 'Ease in and out', back: 'Overshoot', hold: 'Hold' };
+const KEY_EPS = 1 / 120;
+export const ownTime = (clip, t) => r4((clip.in || 0) + t - clip.start);
+export const timelineTime = (clip, own) => r4(clip.start + own - (clip.in || 0));
+export const animatedProps = clip => KEY_PROPS.filter(prop => clip.keys?.[prop]?.length);
+const plain = (clip, prop) => prop === 'x' ? clip.box.x : prop === 'y' ? clip.box.y : prop === 'scale' ? (clip.scale ?? 1) : prop === 'rotation' ? (clip.rotation ?? 0) : (clip.opacity ?? 1);
+// Every keyable value of a visual clip at timeline time t, as the engine draws it.
+export function clipValues(clip, t) {
+  const own = ownTime(clip, t), out = {};
+  for (const prop of KEY_PROPS) {
+    const keys = clip.keys?.[prop];
+    out[prop] = keys?.length ? valueAt([...keys].sort((a, b) => a.t - b.t).map(k => ({ ...k, ease: k.ease || 'linear' })), own) : plain(clip, prop);
+  }
+  return out;
+}
+const fit = (prop, v) => { const [lo, hi] = KEY_RANGES[prop]; return Math.round(clamp(v, lo, hi) * 10000) / 10000; };
+// Set (or replace) one key at timeline time t; an existing key there keeps its ease unless one is given.
+export function setKey(clip, prop, t, value, ease) {
+  const own = ownTime(clip, t), keys = (clip.keys ||= {})[prop] ||= [];
+  const at = keys.findIndex(k => Math.abs(k.t - own) < KEY_EPS);
+  const key = { t: own, v: fit(prop, value), ease: ease || (at >= 0 ? keys[at].ease : 'linear') || 'linear' };
+  if (at >= 0) keys[at] = key; else keys.push(key);
+  keys.sort((a, b) => a.t - b.t);
+  return key;
+}
+// Keys for every animated property (or all of them when none is) at t, holding the values the clip shows there.
+export function keyAll(clip, t) {
+  const values = clipValues(clip, t), props = animatedProps(clip).length ? animatedProps(clip) : KEY_PROPS;
+  for (const prop of props) setKey(clip, prop, t, values[prop]);
+  return props;
+}
+function tidy(clip) {
+  for (const prop of KEY_PROPS) if (clip.keys && !clip.keys[prop]?.length) delete clip.keys[prop];
+  if (clip.keys && !Object.keys(clip.keys).length) delete clip.keys;
+  return clip;
+}
+// Remove the keys at these own times (every property's, or `props`). Returns how many went.
+export function removeKeys(clip, owns, props = KEY_PROPS) {
+  let gone = 0;
+  for (const prop of props) {
+    const keys = clip.keys?.[prop];
+    if (!keys) continue;
+    const kept = keys.filter(k => !owns.some(o => Math.abs(k.t - o) < KEY_EPS));
+    gone += keys.length - kept.length; clip.keys[prop] = kept;
+  }
+  tidy(clip);
+  return gone;
+}
+// Turn a property's animation off: its value at t becomes the plain value and its keys go.
+export function unanimate(clip, prop, t) {
+  const v = clipValues(clip, t)[prop];
+  if (clip.keys) delete clip.keys[prop];
+  setPlain(clip, prop, v);
+  return tidy(clip);
+}
+export function setPlain(clip, prop, v) {
+  if (prop === 'x' || prop === 'y') {
+    const size = prop === 'x' ? clip.box.w : clip.box.h;
+    clip.box = { ...clip.box, [prop]: Math.round(clamp(v, 0, 1 - size) * 10000) / 10000 };
+  } else if (prop === 'scale') { if (fit('scale', v) === 1) delete clip.scale; else clip.scale = fit('scale', v); }
+  else if (prop === 'rotation') { if (fit('rotation', v) === 0) delete clip.rotation; else clip.rotation = fit('rotation', v); }
+  else clip.opacity = fit('opacity', v);
+}
+// A change made on the canvas or in a field: an animated property gets a key at the playhead (auto-record stays off
+// for the rest); a plain one changes its plain value.
+export function applyValues(clip, t, values) {
+  for (const [prop, v] of Object.entries(values)) {
+    if (!KEY_PROPS.includes(prop) || !Number.isFinite(v)) continue;
+    if (clip.keys?.[prop]?.length) setKey(clip, prop, t, v); else setPlain(clip, prop, v);
+  }
+  return clip;
+}
+// The distinct key times of a clip (own time) with the properties keyed at each, sorted.
+export function keyMoments(clip) {
+  const out = new Map();
+  for (const prop of KEY_PROPS) for (const k of clip.keys?.[prop] || []) {
+    const near = [...out.keys()].find(o => Math.abs(o - k.t) < KEY_EPS);
+    const at = near ?? k.t;
+    if (!out.has(at)) out.set(at, []);
+    out.get(at).push(prop);
+  }
+  return [...out.entries()].sort((a, b) => a[0] - b[0]).map(([own, props]) => ({ own, t: timelineTime(clip, own), props }));
+}
+// Move every key at own time `from` to own time `to` (a key already at `to` on the same property is replaced).
+export function moveKeys(clip, from, to) {
+  to = r4(Math.max(0, to));
+  for (const prop of KEY_PROPS) {
+    const keys = clip.keys?.[prop];
+    const key = keys?.find(k => Math.abs(k.t - from) < KEY_EPS);
+    if (!key) continue;
+    clip.keys[prop] = keys.filter(k => k === key || Math.abs(k.t - to) >= KEY_EPS);
+    key.t = to;
+    clip.keys[prop].sort((a, b) => a.t - b.t);
+  }
+  return clip;
+}
+// Copy the keys at these own times; paste them with their spacing kept, the first at timeline time t.
+export function copyKeys(clip, owns) {
+  const base = Math.min(...owns), keys = {};
+  for (const prop of KEY_PROPS) {
+    const picked = (clip.keys?.[prop] || []).filter(k => owns.some(o => Math.abs(k.t - o) < KEY_EPS));
+    if (picked.length) keys[prop] = picked.map(k => ({ dt: r4(k.t - base), v: k.v, ease: k.ease || 'linear' }));
+  }
+  return Object.keys(keys).length ? { keys } : null;
+}
+export function pasteKeys(clip, clipboard, t) {
+  const own = ownTime(clip, t), pasted = new Set();
+  for (const [prop, list] of Object.entries(clipboard?.keys || {})) {
+    if (!KEY_PROPS.includes(prop)) continue;
+    for (const k of list) { setKey(clip, prop, timelineTime(clip, own + k.dt), k.v, k.ease); pasted.add(r4(own + k.dt)); }
+  }
+  return [...pasted].sort((a, b) => a - b);
+}
+// The previous or next key moment of a clip from timeline time t, inside the clip, or null.
+export function nextKeyTime(clip, t, direction) {
+  const times = keyMoments(clip).map(m => m.t).filter(x => x >= clip.start - 1e-6 && x <= clipEnd(clip) + 1e-6);
+  return direction < 0 ? [...times].reverse().find(x => x < t - 1e-4) ?? null : times.find(x => x > t + 1e-4) ?? null;
+}
+
+// Snapping a box (shares of the frame) while it moves on the canvas: its left edge, centre and right edge to the
+// vertical lines, its top, middle and bottom to the horizontal ones, within `reach` (a share). Returns the snapped x
+// and y and the lines it snapped to, for the guides.
+export function canvasLines(safe) {
+  const xs = [0, .5, 1], ys = [0, .5, 1];
+  if (safe) { xs.push(safe.x, safe.x + safe.w); ys.push(safe.y, safe.y + safe.h); }
+  return { xs, ys };
+}
+export function snapMove(box, lines, reachX, reachY) {
+  const pick = (start, size, targets, reach) => {
+    let best = null;
+    for (const [offset, edge] of [[0, 'start'], [size / 2, 'centre'], [size, 'end']]) for (const line of targets) {
+      const d = Math.abs(start + offset - line);
+      if (d <= reach && (!best || d < best.d)) best = { d, value: line - offset, line, edge };
+    }
+    return best;
+  };
+  const sx = pick(box.x, box.w, lines.xs, reachX), sy = pick(box.y, box.h, lines.ys, reachY);
+  return { x: sx ? sx.value : box.x, y: sy ? sy.value : box.y, guides: { x: sx?.line ?? null, y: sy?.line ?? null } };
+}
+// A nudge on the canvas: `dx` and `dy` in frame pixels.
+export function nudge(values, dx, dy, w, h) {
+  return { x: values.x + dx / w, y: values.y + dy / h };
+}
+// The angle (degrees) of a point around a centre, for the rotate handle; with `step` it rounds to that many degrees.
+export function angleOf(cx, cy, px, py, step = 0) {
+  const a = Math.atan2(py - cy, px - cx) * 180 / Math.PI + 90;
+  return step ? Math.round(a / step) * step : a;
+}
+// Video clips (step 7): a clip from an uploaded file starts at the playhead, as long as the file (at most 30 s).
+export function videoClip(p, at, media, info) {
+  return { id: uniqueId(p, 'k'), kind: 'video', start: r4(Math.max(0, at)), in: 0, out: r4(Math.min(info?.seconds || 3, 30)), fade_in: 0, fade_out: 0,
+    opacity: 1, video: media, box: { x: .55, y: .1, w: .4, h: .4 }, fit: 'cover' };
+}

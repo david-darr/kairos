@@ -8,8 +8,8 @@ from typing import Any, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
-from core import (accounts, design_render, design_render_bridge, design_systems, ffmpeg_tools, video_agent, video_longform, video_plan,
-                  video_render, three_vendor, video_store)
+from core import (accounts, design_render, design_render_bridge, design_systems, ffmpeg_tools, video_agent, video_export, video_longform,
+                  video_media, video_plan, video_render, three_vendor, video_store)
 from core.auth import auth_manager
 from core.middleware import get_current_user, require_user
 from core.constants import STATIC_DIR
@@ -51,6 +51,9 @@ class VideoBody(BaseModel):
 class RenderBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     aspect: str = "16:9"
+    format: str = Field("mp4", pattern=r"^(mp4|webm|mov|gif)$")   # step 6: other formats are encoded from the MP4
+    start: Optional[float] = Field(None, ge=0, le=1200)             # a GIF's stretch (the editor's work area)
+    end: Optional[float] = Field(None, ge=0, le=1200)
 
 
 class CopyAsset(BaseModel):
@@ -162,6 +165,8 @@ def player_page(project):
             raise HTTPException(422, "cast: " + str(error).strip("'")) from None
     if project.get("renderer") == "blender" and not _blender_ready():
         data["renderer"] = "threejs"     # the page draws what will render: without Blender, three.js
+    if any(c.get("kind") == "video" for t in project.get("tracks") or [] for c in t["clips"]):
+        data["media"] = video_media.player_media(project)     # frame counts of the video files the clips use
     if project.get("style_pack"):
         # The pack's look as numbers and names (palette colours, lighting, caption case); nothing else of it reaches the page.
         from core import style_pack_store
@@ -247,6 +252,26 @@ async def get_asset(video_id: str, name: str, rt: Optional[str] = None):
                                        "Access-Control-Allow-Origin": "*", "Content-Security-Policy": "default-src 'none'; sandbox"})
 
 
+@router.get("/api/videos/{video_id}/assets/media/{sha}/{frame}")
+async def get_media_frame(video_id: str, sha: str, frame: str, rt: Optional[str] = None):
+    """One decoded frame of a video file the person uploaded (core/video_media.py), by number; same capability as assets."""
+    account = design_render.asset_account(video_id, rt) if rt else design_render.request_account()
+    match = re.fullmatch(r"(\d{1,6})\.jpg", frame)
+    if account is None or not match:
+        raise HTTPException(404, "Video frame not found")
+    with accounts.as_account(account):
+        path = _call(video_media.frame_path, video_id, sha, match[1])
+    return FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable",
+                                       "Access-Control-Allow-Origin": "*", "Content-Security-Policy": "default-src 'none'; sandbox"})
+
+
+@router.get("/api/videos/{video_id}/media")
+async def media(video_id: str, user: str = Depends(require_user)):
+    """The video files uploaded to this video: length, frames, size, title and the sound made from each."""
+    _video(video_id, user)
+    return {"media": video_media.info(video_id)}
+
+
 @router.post("/api/videos/{video_id}/assets")
 async def add_asset(video_id: str, request: Request, user: str = Depends(require_user)):
     _video(video_id, user)
@@ -264,6 +289,11 @@ async def add_asset(video_id: str, request: Request, user: str = Depends(require
             raise HTTPException(422, "asset: upload an image or a sound in the file field.")
         try:
             ext = Path(upload.filename or "").suffix
+            if ext.lower().lstrip(".") in video_media.TYPES:
+                # A video for a video clip (step 7): the person's own file, decoded by FFmpeg into frames and its sound.
+                raw = await upload.read(video_media.UPLOAD_LIMIT + 1)
+                made = await asyncio.to_thread(_call, video_media.add_video, video_id, raw, ext, Path(upload.filename or "").stem)
+                return {"media": made, "audio": video_store.audio_info(video_id).get(made.get("audio")) if made.get("audio") else None}
             if ext.lower().lstrip(".") in video_store.AUDIO_TYPES:
                 # A sound for an audio clip (Content Studio Editor step 3): the person's own file, decoded by FFmpeg.
                 raw = await upload.read(video_store.AUDIO_UPLOAD_LIMIT + 1)
@@ -353,9 +383,24 @@ async def kairos_run(video_id: str, run_id: str, action: str, user: str = Depend
     return _call(actions[action], video_id, run_id)
 
 
+@router.post("/api/videos/{video_id}/narrate")
+async def narrate(video_id: str, user: str = Depends(require_user)):
+    """Speak the lines not spoken yet and, with a word caption style, find each line's word times (core/video_align.py)."""
+    from core import video_narration
+    _video(video_id, user)
+    try:
+        return await asyncio.to_thread(video_narration.prepare, video_id)
+    except video_narration.NarrationUnavailable as error:
+        raise HTTPException(503, str(error)) from None
+    except LookupError as error:
+        raise HTTPException(404, str(error).strip("'")) from None
+
+
 @router.post("/api/videos/{video_id}/render")
 async def render_video(video_id: str, body: RenderBody, user: str = Depends(require_user)):
     _video(video_id, user)
+    if body.format != "mp4":
+        return _call(video_export.start, video_id, body.aspect, body.format, body.start, body.end)
     return _call(video_render.start, video_id, body.aspect)
 
 
@@ -380,7 +425,7 @@ async def cancel_job(job_id: str, user: str = Depends(require_user)):
 @router.get("/api/videos/{video_id}/renders/{file}")
 async def download(video_id: str, file: str, user: str = Depends(require_user)):
     _video(video_id, user)
-    if not re.fullmatch(r"(?:(?:16-9|9-16|1-1)-v[1-9][0-9]*\.(?:mp4|chapters\.txt)|(?:sheet|thumb)-(?:16-9|9-16|1-1)\.png|soundtrack\.wav)", file):
+    if not re.fullmatch(r"(?:(?:16-9|9-16|1-1)-v[1-9][0-9]*\.(?:mp4|webm|mov|gif|chapters\.txt)|(?:sheet|thumb)-(?:16-9|9-16|1-1)\.png|soundtrack\.wav)", file):
         raise HTTPException(404, "Render not found")
     path = video_store._folder(video_id) / "renders" / file
     if not path.is_file():

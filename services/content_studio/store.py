@@ -38,7 +38,7 @@ ASPECTS = ("9:16", "16:9", "1:1")
 # Columns added after the first release; a store made before them gains them when it opens.
 LATER_COLUMNS = {"snapshots": {"source": "TEXT NOT NULL DEFAULT 'manual'"},
                  "channels": {"look": "TEXT", "aspect": "TEXT", "notes": "TEXT NOT NULL DEFAULT ''", "voice": "TEXT", "style_pack": "TEXT",
-                              "long_per_week": "INTEGER", "renderer": "TEXT"},
+                              "long_per_week": "INTEGER", "renderer": "TEXT", "fps": "INTEGER"},
                  "posts": {"pick_reason": "TEXT NOT NULL DEFAULT ''", "tags": "TEXT NOT NULL DEFAULT ''",
                            "ai_label": "INTEGER NOT NULL DEFAULT 1", "format_id": "INTEGER REFERENCES formats(id)",
                            "port_id": "INTEGER REFERENCES ports(id)", "style_pack": "TEXT",
@@ -362,14 +362,19 @@ class Store:
         return row["n"] if row else 0
 
     def edit_channel(self, channel_id, look=None, aspect=None, notes=None, voice=None, style_pack=None, long_per_week=None,
-                     renderer=None):
+                     renderer=None, fps=None):
         """The channel's own look (a Studio video look id), aspect, voice notes, narrator voice (a Kokoro voice id) and
         style pack (a built-in or the account's own approved pack), so the Editor and Script Writer make each channel's
         posts in its own style and the channel keeps one voice. None leaves a field as it is; "" clears it.
         `renderer` picks what draws a glossy 3D pack's videos on this channel: "threejs" (built in), "blender" (only when
-        Blender is installed, core/blender_tools.py), or "" for the pack's own choice."""
+        Blender is installed, core/blender_tools.py), or "" for the pack's own choice. `fps` is the channel's frame
+        rate, 30 or 60 (0 clears it back to 30): the Editor makes the channel's videos at it."""
         self.get_channel(channel_id)
         changes = {}
+        if fps is not None:
+            if isinstance(fps, bool) or fps not in (0, 30, 60):
+                raise StudioError("the frame rate is 30 or 60 frames a second")
+            changes["fps"] = fps if fps == 60 else None
         if renderer is not None:
             if renderer not in ("", "threejs", "blender"):
                 raise StudioError("the 3D renderer is threejs, blender, or empty for the style pack's own choice")

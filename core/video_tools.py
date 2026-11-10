@@ -134,7 +134,9 @@ def _flatten(beats, chapters):
 
 
 _NARRATION = {"type": "object", "properties": {"voice": _str("Kokoro voice id, e.g. af_heart, am_michael, bf_emma, bm_george"),
-                                               "captions": {"type": "boolean"}}}
+                                               "captions": {"type": "boolean"},
+                                               "caption_style": {"type": "string", "enum": list(video_store.CAPTION_STYLES),
+                                                                 "description": "line (default), highlight (the word being said in the accent colour) or box (on an accent box); word styles fall back to line captions where the words cannot be aligned"}}}
 
 
 @register("video_create", FLOW + NARRATION + LONG + SCENES + PACKS + "Create a video project with a chosen look and beats; returns a Studio link. Pick a look with creative_direction(type=video) first.",
@@ -147,6 +149,8 @@ _NARRATION = {"type": "object", "properties": {"voice": _str("Kokoro voice id, e
                    "style_pack": _str("A user-made style pack's id; its approved version is used"),
                    "renderer": {"type": "string", "enum": list(video_store.RENDERERS_3D),
                                 "description": "What draws stage beats: threejs (built in) or blender (when installed)"},
+                   "fps": {"type": "integer", "enum": list(video_store.FPS_CHOICES),
+                           "description": "30 (default) or 60 frames a second; 60 takes about twice as long to render"},
                    "chapters": {"type": "array", "maxItems": video_store.MAX_CHAPTERS, "items": {"type": "object", "properties": {
                        "title": _str("Chapter title, shown in the YouTube chapter list"),
                        "beats": {"type": "array", "items": {"type": "object"}, "description": "The chapter's beats; then leave top-level beats empty"},
@@ -189,7 +193,7 @@ async def _create(args, ctx):
         for i, beat in enumerate(beats):
             if isinstance(beat, dict):
                 beat.setdefault("id", f"b{i + 1}")
-    options = {k: args[k] for k in ("aspects", "bpm", "music", "narration", "cast", "palette", "style_pack", "chapters", "renderer") if k in args}
+    options = {k: args[k] for k in ("aspects", "bpm", "fps", "music", "narration", "cast", "palette", "style_pack", "chapters", "renderer") if k in args}
     project = video_store.create(args.get("title"), look=look, beats=beats, owner=owner, chat_key_=key, **options)
     title = project["title"].replace("[", "").replace("]", "").replace("\n", " ")
     step = "video_narrate for the shot plan, " if video_store.narrated(project) else ""
@@ -219,8 +223,8 @@ def edit(project, ops, agent=False):
             raise ValueError(f"ops[{n}]: give an operation object.")
         kind = op.get("op")
         if kind == "project":
-            if op.get("field") not in ("title", "look", "bpm", "aspects", "music", "narration", "cast", "palette", "style_pack", "chapters", "renderer") or "value" not in op:
-                raise ValueError(f"ops[{n}].field: project edits title, look, bpm, aspects, music, narration, cast, palette, style_pack, chapters or renderer with value.")
+            if op.get("field") not in ("title", "look", "bpm", "fps", "aspects", "music", "narration", "cast", "palette", "style_pack", "chapters", "renderer") or "value" not in op:
+                raise ValueError(f"ops[{n}].field: project edits title, look, bpm, fps, aspects, music, narration, cast, palette, style_pack, chapters or renderer with value.")
             draft[op["field"]] = op["value"]
         elif kind == "set":
             if op.get("field") not in ("kind", "bars", "text", "sub", "number", "items", "image", "camera", "transition", "treatment", "say", "scene", "stage") or "value" not in op:
@@ -257,7 +261,7 @@ def edit(project, ops, agent=False):
 
 @register("video_edit", "Change a video atomically. ops: set {op:set,id,field,value} (field say sets or, with an empty value, removes a narration line); "
           "insert {op:insert,before|after,beat}; remove {op:remove,id}; move {op:move,id,before|after}; "
-          "project {op:project,field,value} for title,look,bpm,aspects,music,narration,cast,palette,style_pack ({id, version}),chapters ([{id, title, start}]),renderer (threejs or blender); a scene beat's whole scene is set with field scene, a stage beat's with field stage. "
+          "project {op:project,field,value} for title,look,bpm,fps (30 or 60),aspects,music,narration ({voice, captions, caption_style: line|highlight|box}),cast,palette,style_pack ({id, version}),chapters ([{id, title, start}]),renderer (threejs or blender); a scene beat's whole scene is set with field scene, a stage beat's with field stage. "
           + video_tracks.OP_HELP +
           "Use beat, track and clip ids from video_outline. A bad operation changes nothing. Preview again after edits.",
           _object({"video_id": _ID, "ops": {"type": "array", "items": {"type": "object"}}}, ("ops",)), surfaces=ALL, effect=WRITE)
@@ -358,7 +362,7 @@ async def _render(args, ctx):
 def _estimate(project):
     from core import video_longform
     fps = max((d.get("fps") or 0 for d in video_longform.describe(project["id"])), default=0) or video_longform.TYPICAL_FPS
-    frames = math.ceil(video_store.duration(project) * 30)
+    frames = video_store.frame_count(project)
     return f"About {max(1, round(frames / fps / 60))} minutes to render {round(video_store.duration(project) / 60, 1):g} minutes of video at {fps:g} frames a second."
 
 

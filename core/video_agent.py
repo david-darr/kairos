@@ -129,13 +129,14 @@ def delete_comment(video_id, comment_id):
 
 # -- what changed, item by item -------------------------------------------------------------------------------------
 
-PROJECT_FIELDS = ("title", "look", "bpm", "aspects", "music", "narration", "cast", "palette", "style_pack", "chapters", "renderer")
+PROJECT_FIELDS = ("title", "look", "bpm", "fps", "aspects", "music", "narration", "cast", "palette", "style_pack", "chapters", "renderer")
 FIELD_WORDS = {"text": "text", "sub": "supporting text", "number": "number", "items": "list items", "image": "picture",
                "camera": "camera", "transition": "transition", "treatment": "picture treatment", "say": "narration line",
                "bars": "length", "kind": "kind", "scene": "scene", "stage": "3D stage", "opacity": "opacity", "fade_in": "fade in",
                "fade_out": "fade out", "box": "position and size", "role": "text size role", "style": "text style",
                "color": "colour", "align": "alignment", "fit": "fit", "shape": "shape", "fill": "fill", "stroke": "line width",
-               "volume": "volume", "audio": "sound", "name": "name", "hidden": "visibility", "locked": "lock"}
+               "volume": "volume", "audio": "sound", "name": "name", "hidden": "visibility", "locked": "lock", "scale": "size",
+               "rotation": "turn", "keys": "keyframes", "video": "video file"}
 
 
 def _beat(b):

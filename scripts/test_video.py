@@ -86,7 +86,7 @@ class ValidationTests(unittest.TestCase):
 
     def test_project_fields(self):
         cases = [("id", "../x"), ("id", 1), ("title", ""), ("title", "a" * 121), ("title", None),
-                 ("look", ""), ("look", "../sport"), ("look", 4), ("fps", 60), ("fps", True),
+                 ("look", ""), ("look", "../sport"), ("look", 4), ("fps", 45), ("fps", 24), ("fps", True),
                  ("bpm", 59), ("bpm", 181), ("bpm", True), ("bpm", float("nan")), ("bpm", "120"),
                  ("aspects", []), ("aspects", "16:9"), ("aspects", ["4:3"]), ("aspects", ["16:9", "16:9"]),
                  ("aspects", [{}]), ("beats", []), ("beats", {}), ("beats", [None]), ("music", None)]
@@ -725,7 +725,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             entered.set()
             await asyncio.Future()
         class Encoder:
-            def __init__(self, path, wav):
+            def __init__(self, path, wav, fps=30):
                 self.path = path
                 self.path.write_bytes(b"partial")
             def abort(self):
@@ -752,7 +752,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         p["beats"] = [{"id": "one", "kind": "title", "bars": .5, "text": "Go"}]
         p = video_store.save(p["id"], p)
         class Encoder:
-            def __init__(self, path, wav):
+            def __init__(self, path, wav, fps=30):
                 self.path = path
                 self.count = 0
                 self.path.write_bytes(b"mp4")
@@ -1203,8 +1203,8 @@ assert.equal(L.LIMITS.beats, 100);
         for needle in ("drawCaption(t); return;", "drawCaption(t);\n  }", "role: 'caption'", "safeArea(aspect, project.captioned)"):
             self.assertIn(needle, engine)
         worker = (ROOT / "electron/designRender.js").read_text(encoding="utf-8")
-        self.assertIn("count > 14400", worker, "one worker job takes a 480-second video or chapter")
-        self.assertIn("job.frames > 36000", worker, "a chaptered video runs to 20 minutes")
+        self.assertIn("count > 28800", worker, "one worker job takes a 480-second video or chapter, at 60 frames a second too")
+        self.assertIn("job.frames > 72000", worker, "a chaptered video runs to 20 minutes, at 60 frames a second too")
         self.assertEqual(video_store.NARRATED_MAX_SECONDS * 30, 14400)
         self.assertEqual(video_store.CHAPTER_MAX_SECONDS * 30, 14400)
         self.assertEqual(video_store.CHAPTERED_MAX_SECONDS * 30, 36000)
@@ -1661,7 +1661,7 @@ class LongRenderTests(unittest.IsolatedAsyncioTestCase):
         test = self
 
         class Encoder:
-            def __init__(self, path, wav):
+            def __init__(self, path, wav, fps=30):
                 self.path, self.count = Path(path), 0
                 self.path.write_bytes(b"")
                 test.assertIsNone(wav, "a chapter part is picture only")

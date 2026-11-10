@@ -64,11 +64,12 @@ def _job(project, aspect, job_id, times=None, frame_times=(), frames=None):
     w, h = _aspect(project, aspect)
     version = project["version"]
     duration = video_store.duration(project)
-    total = math.ceil(duration * 30 - 1e-7)
+    fps = video_store.fps(project)
+    total = video_store.frame_count(project)
     first, count = frames or (0, total)
     # A chapter can take longer than a short video; the token outlives the capture.
     token = design_render.sign(project["id"], f"video:{aspect}:{version}", 900 if frames is None else max(900, 600 + int(count * .5)))
-    low, high = first / 30, (first + count) / 30
+    low, high = first / fps, (first + count) / fps
     kept = sorted({round(t, 6) for t in list(frame_times) + list(times or []) if 0 <= t < duration})
     beats = sorted({round(b["start"] + (b["end"] - b["start"]) * f, 6)
                     for b in outline(project) for f in (.25, .5, .75)} - set(kept))
@@ -79,7 +80,7 @@ def _job(project, aspect, job_id, times=None, frame_times=(), frames=None):
         beats = [beats[round(i * (len(beats) - 1) / max(1, room - 1))] for i in range(room)] if room else []
     samples = sorted(set(kept[:LAYOUT_SAMPLES]) | set(beats))
     job = {"id": job_id, "kind": "video", "path": f"/api/videos/{project['id']}/player?aspect={quote(aspect, safe='')}&rt={token}&v={version}",
-           "w": w, "h": h, "look": project["look"], "fps": 30, "frames": total,
+           "w": w, "h": h, "look": project["look"], "fps": fps, "frames": total,
            "preview": times is not None, "times": times or [], "layoutTimes": samples}
     if frames is not None:
         job.update(first=first, count=count)
@@ -158,7 +159,7 @@ def character_notes(project, layouts, frames, times):
 
 def wait_seconds(project):
     """How long a caller waits for one render: the capture budget plus narration and encoding."""
-    frames = math.ceil(video_store.duration(project) * 30 - 1e-7)
+    frames = video_store.frame_count(project)
     return design_render_bridge.video_seconds({"frames": frames}) + 120
 
 
@@ -275,14 +276,15 @@ async def _render(project, aspect, job_id):
             n += 1
         out = folder / f"{slug}-v{n}.mp4"
         temp = out.with_name(out.stem + ".partial.mp4")
-        encoder = ffmpeg_tools.Encoder(temp, wav)
-        total = math.ceil(video_store.duration(project) * 30 - 1e-7)
+        fps = video_store.fps(project)
+        encoder = ffmpeg_tools.Encoder(temp, wav, fps=fps)
+        total = video_store.frame_count(project)
         indices = {round(i * (total - 1) / 11) for i in range(12)}
         sheet_indices = set(indices)
         # Overlay text clips (Content Studio Editor step 3): one more kept frame inside each, for the contrast check.
         from core import video_tracks
         indices |= video_tracks.check_frames(project, 0, total - 1)
-        job = _job(project, aspect, job_id, frame_times=[i / 30 for i in indices])
+        job = _job(project, aspect, job_id, frame_times=[i / fps for i in indices])
         seen = 0
         thumb_index = min(total - 1, thumb_frame(project, job["fps"]))
         samples, layouts, thumb = [], [], None
@@ -309,11 +311,12 @@ async def _render(project, aspect, job_id):
         await design_render_bridge.video(job, consume)
         # The measured capture speed (frames a second through the render worker), for the render-speed estimates.
         state["capture_fps"] = round(total / max(1e-6, time.monotonic() - captured), 1)
+        state["capture_seconds"] = round(time.monotonic() - captured, 2)
         state["status"] = "encoding"
         await asyncio.to_thread(encoder.finish)
         encoder = None
         measured = await _thread_done(ffmpeg_tools.loudness, temp)
-        frames_kept, times_kept = [f for _, f in samples], [i / 30 for i, _ in samples]
+        frames_kept, times_kept = [f for _, f in samples], [i / fps for i, _ in samples]
         notes = video_checks.check(project, aspect, layouts, frames_kept, measured, voice or None)
         notes += character_notes(project, layouts, frames_kept, times_kept)
         notes += video_checks.overlay_notes(project, aspect, layouts, frames_kept, times_kept)
@@ -327,7 +330,7 @@ async def _render(project, aspect, job_id):
                 image.thumbnail((480, 480))
                 image.save(thumb_path, "PNG")
         temp.replace(out)
-        state.update(status="ready", file=out.name, path=str(out), loudness=measured, notes=notes, narration=voice or None,
+        state.update(status="ready", file=out.name, path=str(out), loudness=measured, notes=notes, narration=voice or None, fps=fps, frames=total,
                      renderer=video_blender.effective(project), stage=_stage_info(project),
                      seconds=round(video_store.duration(project), 2),
                      url=f"/api/videos/{project['id']}/renders/{out.name}", sheet=sheet.name, thumbnail=thumb_path.name)

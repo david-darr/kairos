@@ -538,7 +538,7 @@ def video_resources(video_id, user):
     from core import video_render, video_store
     video_store.require_user_access(video_id, user, is_admin(user))
     folder = video_store._folder(video_id)
-    pattern = re.compile(r"(?:(?:16-9|9-16|1-1)-v[1-9][0-9]*\.(?:mp4|chapters\.txt)|(?:sheet|thumb)-(?:16-9|9-16|1-1)\.png|soundtrack\.wav)")
+    pattern = re.compile(r"(?:(?:16-9|9-16|1-1)-v[1-9][0-9]*\.(?:mp4|webm|mov|gif|chapters\.txt)|(?:sheet|thumb)-(?:16-9|9-16|1-1)\.png|soundtrack\.wav)")
     files = sorted((p for p in (folder / "renders").iterdir() if p.is_file() and pattern.fullmatch(p.name)),
                    key=lambda p: (p.stat().st_mtime_ns, p.name))
     thumbs = [p.name for p in files if p.name.startswith("thumb-")]

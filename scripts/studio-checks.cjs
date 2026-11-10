@@ -66,6 +66,8 @@ const trackProject = { id: trackId, owner: 'local', title: 'Layers', look: 'spor
   music: { mood: 'calm', volume: .6 }, version: 1, updated: Date.now() / 1000, created: Date.now() / 1000 };
 const trackSounds = { [soundAsset]: { seconds: 2.5, title: 'Chime', rate: 40, peaks: Buffer.from(Array.from({ length: 100 }, (_, i) => Math.round(90 + 80 * Math.sin(i / 4)))).toString('base64') } };
 const review = { comments: [], runs: [], since: { since: null, changes: [] }, connection: 'Test model', dry_run_over: 5 };
+// Step 7: a video file this video holds (its decoded frames stand in as the app icon) with its sound.
+const videoSha = 'f'.repeat(64), trackMedia = { ['media/' + videoSha]: { seconds: 4, frames: 120, width: 192, height: 192, title: 'Waves', bytes: 2400000, audio: soundAsset, cut: false } };
 const asks = [];
 // The app page carries the exact Content-Security-Policy the backend sends for "/" (core/middleware.py), so the
 // hashed three.js import map is checked in a real browser under the real policy.
@@ -85,7 +87,7 @@ async function serve(req, res) {
     res.end(template.replace('<!--KD-TOKENS-->', `<style>:root{${Object.entries(tokens).map(([k, v]) => `${k}:${v}`).join(';')}}</style>`)
       .replace('<!--KD-PROJECT-->', `<script type="application/json" id="kd-project">${JSON.stringify(project)}</script>`)); return;
   }
-  if (/^\/api\/videos\/[^/]+\/renders\/.+\.mp4$/.test(p)) {
+  if (/^\/api\/videos\/[^/]+\/renders\/.+\.(mp4|webm|mov|gif)$/.test(p)) {
     res.setHeader('Content-Type', 'video/mp4'); res.end(fs.readFileSync(path.join(root, 'docs/media/kairos-ad.mp4'))); return;
   }
   if (p.startsWith('/api/')) {
@@ -100,6 +102,14 @@ async function serve(req, res) {
     if (p === `/api/tab-studio/videos/${trackId}/resources`) return json(res, { assets: [imageAsset], renders: [], jobs: [], thumbnail: null });
     if (p === `/api/videos/${trackId}/assets/${imageAsset.slice(7)}`) { res.setHeader('Content-Type', 'image/png'); res.end(fs.readFileSync(path.join(root, 'static/img/app-192.png'))); return; }
     if (p === `/api/videos/${trackId}/audio`) return json(res, { sounds: trackSounds });
+    if (p === `/api/videos/${trackId}/media`) return json(res, { media: trackMedia });
+    if (p.startsWith(`/api/videos/${trackId}/assets/media/${videoSha}/`)) { res.setHeader('Content-Type', 'image/png'); res.end(fs.readFileSync(path.join(root, 'static/img/app-192.png'))); return; }
+    if (/^\/api\/videos\/[a-f0-9]{12}\/media$/.test(p)) return json(res, { media: {} });
+    if (p === `/api/videos/${sceneId}/narrate`) {
+      // Narrating with a word style finds the line's word times (core/video_align.py): six words, aligned surely.
+      sceneProject.beats[0].spoken = { ...sceneProject.beats[0].spoken, words: [[.3, .55], [.6, .8], [.85, 1.05], [1.1, 1.3], [1.35, 1.7], [1.75, 2.4]], align: { method: 'whisper.cpp base.en', confidence: 1 } };
+      sceneProject.version++; return json(res, sceneProject);
+    }
     if (p === `/api/videos/${trackId}/review`) return json(res, review);
     if (/^\/api\/videos\/[a-f0-9]{12}\/audio$/.test(p)) return json(res, { sounds: {} });
     if (/^\/api\/videos\/[a-f0-9]{12}\/review$/.test(p)) return json(res, { comments: [], runs: [], since: { since: null, changes: [] }, connection: 'Test model', dry_run_over: 5 });
@@ -188,7 +198,7 @@ async function serve(req, res) {
       Object.assign(project, structuredClone(prior), { version: project.version + 1 }); return json(res, project);
     }
     if (p === `/api/videos/${id}/render`) {
-      const job = { id: 'job' + (jobs.length + 1), video_id: id, aspect: body.aspect, status: 'rendering 0/180', polls: 0 };
+      const job = { id: 'job' + (jobs.length + 1), video_id: id, aspect: body.aspect, status: 'rendering 0/180', polls: 0, ...(body.format && body.format !== 'mp4' ? { kind: 'export', format: body.format, status: 'rendering the MP4 first' } : {}) };
       jobs.push(job); return json(res, job);
     }
     if (p.startsWith('/api/video-jobs/')) {
@@ -196,8 +206,10 @@ async function serve(req, res) {
       if (p.endsWith('/cancel')) job.status = 'failed: cancelled';
       else if (!job.status.startsWith('failed:')) {
         job.polls++;
-        job.status = job.polls === 1 ? 'rendering 90/180' : job.polls === 2 ? 'encoding' : 'ready';
-        if (job.status === 'ready') {
+        job.status = job.polls === 1 ? (job.kind === 'export' ? `encoding ${job.format.toUpperCase()}` : 'rendering 90/180') : job.polls === 2 ? 'encoding' : 'ready';
+        if (job.status === 'ready' && job.kind === 'export') {
+          const slug = job.aspect.replace(':', '-'); Object.assign(job, { file: `${slug}-v1.${job.format}`, bytes: 1572864, seconds_spent: 4.2, notes: [] });
+        } else if (job.status === 'ready') {
           const slug = job.aspect.replace(':', '-'); job.file = `${slug}-v1.mp4`; job.notes = ['The end card stays still.'];
           if (!renders.includes(job.file)) renders.push(job.file, `sheet-${slug}.png`, 'soundtrack.wav');
         }
@@ -510,6 +522,19 @@ app.whenReady().then(async () => {
     assert.equal(await js("document.querySelectorAll('.ste-bed').length"), 3, 'A music lane under every beat');
     assert.equal(await js("document.querySelectorAll('.ste-guide[data-guide=captions]').length"), 1, 'A narrated video shows its caption band');
     assert.ok(await js("document.querySelector('.ste-clip.narrated').getAttribute('aria-label').includes('Length set by its narration') && !document.querySelector('.ste-clip.narrated .ste-trim')"), 'A narrated beat is not trimmed by hand');
+    // Step 7: word captions. The style is a project choice; narrating finds the word times, and the preview lights the word.
+    await tab('project');
+    await wait("!!document.querySelector('[aria-label=\"Caption style\"]')");
+    await js("(() => { const s = document.querySelector('[aria-label=\"Caption style\"]'); s.value = 'box'; s.dispatchEvent(new Event('change', { bubbles: true })); })()");
+    await wait("document.querySelector('.studio-editor-top [role=status]').textContent==='Saved'");
+    assert.equal(writes.filter(w => w.path === `/api/videos/${sceneId}` && w.method === 'PUT').at(-1).body.narration.caption_style, 'box', 'The caption style is saved on the narration');
+    await click('Narrate and align words');
+    await wait("document.querySelector('[data-caption-status]')?.textContent.startsWith('1 of 1 lines have word times')");
+    await js("document.querySelector('[data-group=captions]').scrollIntoView({ block: 'center' })");
+    // The preview lights the word being said: at 1.0 s, the fourth word ("a clear day" fixture times).
+    await blur(); await press('Home'); for (let i = 0; i < 30; i++) await press('ArrowRight');
+    await pause(300); await capture('desktop-captions');
+    await tab('beat');
     await wait("document.querySelector('.ste-member strong')?.textContent === '1. Pip'");
     const sceneEdit = async (label, value) => js(`(() => { const n=document.querySelector('[aria-label=${JSON.stringify(label)}]'); if (n.type === 'checkbox') n.checked = value; else n.value = ${JSON.stringify(value)}; n.dispatchEvent(new Event(n.tagName === 'SELECT' || n.type === 'checkbox' ? 'change' : 'input', { bubbles: true })); })()`);
     const lastScene = () => writes.filter(w => w.path === `/api/videos/${sceneId}` && w.method === 'PUT').at(-1)?.body.beats[0].scene;
@@ -694,10 +719,110 @@ app.whenReady().then(async () => {
     await wait("!document.querySelector('.ste-pending .ste-run') && document.querySelector('.ste-clip[data-index=\"0\"]').textContent.includes('Six points')");
     await wait("document.querySelector('.ste-since summary').textContent.includes('(1)')");
     assert.ok(await js("document.querySelector('.ste-since').textContent.includes('Changed beat l2')"), 'The person sees their changes since Kairos last turn');
+    // Step 5: the track names read whole and rename in place; the clip moves, snaps, nudges, scales and turns on the
+    // preview with real DevTools input; keyframes are added with A, made by a drag at another time, dragged on their row,
+    // copied, pasted and deleted.
+    assert.equal(await js("(() => { const n = document.querySelector('.ste-head-name[data-track-name=t1]'); return n.scrollWidth <= n.clientWidth + 1; })()"), true, 'The track name reads whole');
+    await js("document.querySelector('.ste-head-name[data-track-name=t1]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))");
+    await wait("!!document.querySelector('.ste-head-rename')");
+    await js("(() => { const i = document.querySelector('.ste-head-rename'); i.value = 'Titles and lower thirds'; })()");
+    await js("document.querySelector('.ste-head-rename').focus()"); await press('Enter'); await saved();
+    assert.equal(lastTracks()[0].name, 'Titles and lower thirds', 'A track renamed in place');
+    assert.equal(await js("document.querySelector('[data-track-head=t1]').title"), 'Titles and lower thirds', 'The full name is the head tip');
+    await js("document.querySelector('.ste-tclip[data-clip=k2]').click()"); await pause(150);
+    await tap({ x: await tX(5.5), y: rulerBox.cy }); await blur(); await pause(200);
+    const frameNow = await box('.ste-frame'), pxShare = 1 / frameNow.w;
+    const k2At = () => lastTracks()[0].clips.find(c => c.id === 'k2');
+    let sel = await box('.ste-selbox[data-clip-box=k2]');
+    const before2 = structuredClone(k2At().box);
+    await drag({ x: sel.cx, y: sel.cy }, { x: sel.cx - 40, y: sel.cy + 30 }, MODS.alt); await saved();
+    assert.ok(Math.abs(k2At().box.x - (before2.x - 40 * pxShare)) < .006 && Math.abs(k2At().box.y - (before2.y + 30 / frameNow.h)) < .006, 'Dragged on the preview: ' + JSON.stringify([before2, k2At().box]));
+    // Snapping: dropped a few pixels off the frame's centre line, the clip's centre lands on it and the guide shows while dragging.
+    sel = await box('.ste-selbox[data-clip-box=k2]');
+    const toCentre = frameNow.x + frameNow.w / 2 + 4;
+    await mouse('mouseMoved', sel.cx, sel.cy); await mouse('mousePressed', sel.cx, sel.cy);
+    for (let i = 1; i <= 8; i++) { await debug.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: sel.cx + (toCentre - sel.cx) * i / 8, y: sel.cy, button: 'left', buttons: 1 }); await pause(16); }
+    assert.equal(await js("!!document.querySelector('.ste-snapline.x')"), true, 'A snap guide shows on the centre line');
+    await capture('desktop-canvas-snap');
+    await mouse('mouseReleased', toCentre, sel.cy); await pause(120); await saved();
+    assert.ok(Math.abs(k2At().box.x + k2At().box.w / 2 - .5) < 1e-3, 'Snapped to the centre line: ' + JSON.stringify(k2At().box));
+    // Arrow nudges with the box focused: 1 frame pixel, Shift 10.
+    const nudged = structuredClone(k2At().box);
+    await js("document.querySelector('.ste-selbox[data-clip-box=k2]').focus()");
+    await press('ArrowRight'); await press('ArrowDown', 'shift'); await saved();
+    assert.ok(Math.abs(k2At().box.x - (nudged.x + 1 / 1920)) < 2e-4 && Math.abs(k2At().box.y - (nudged.y + 10 / 1080)) < 2e-4, 'Nudged 1 px right and 10 px down: ' + JSON.stringify([nudged, k2At().box]));
+    assert.ok(Math.abs(await playhead() - 5.5) < .02, 'Arrows on the focused clip box do not move the playhead');
+    // Scale from a corner, turn with the knob.
+    sel = await box('.ste-selbox[data-clip-box=k2] .ste-handle.corner.se');
+    const centre = await box('.ste-selbox[data-clip-box=k2]');
+    await drag({ x: sel.cx, y: sel.cy }, { x: centre.cx + (sel.cx - centre.cx) * 1.5, y: centre.cy + (sel.cy - centre.cy) * 1.5 }); await saved();
+    assert.ok(Math.abs(k2At().scale - 1.5) < .08, 'Scaled from the corner: ' + k2At().scale);
+    sel = await box('.ste-selbox[data-clip-box=k2] .ste-handle.rotate');
+    const knob = await box('.ste-selbox[data-clip-box=k2]');
+    await drag({ x: sel.cx, y: sel.cy }, { x: knob.cx + (knob.cy - sel.cy), y: knob.cy }, MODS.shift); await saved();
+    assert.ok(Math.abs(k2At().rotation - 90) < 1, 'Turned a quarter with Shift: ' + k2At().rotation);
+    await capture('desktop-canvas-handles');
+    // Keyframes: A at 5.5 s keys every property; a drag at 7 s keys the position there.
+    await blur(); await press('a'); await saved();
+    assert.deepEqual(Object.keys(k2At().keys).sort(), ['opacity', 'rotation', 'scale', 'x', 'y'], 'A keys every property at the playhead');
+    assert.ok(Object.values(k2At().keys).every(list => list.length === 1 && Math.abs(list[0].t - .5) < 1e-3), 'At the clip\'s own time 0.5 s');
+    await tap({ x: await tX(7), y: rulerBox.cy }); await blur(); await pause(200);
+    sel = await box('.ste-selbox[data-clip-box=k2]');
+    await drag({ x: sel.cx, y: sel.cy }, { x: sel.cx - 120, y: sel.cy }, MODS.alt); await saved();
+    assert.equal(k2At().keys.x.length, 2, 'Dragging an animated clip at another time adds a keyframe there');
+    assert.ok(Math.abs(k2At().keys.x[1].t - 2) < 1e-3 && k2At().keys.x[1].v < k2At().keys.x[0].v, 'The new key holds the new place: ' + JSON.stringify(k2At().keys.x));
+    assert.equal(await js("document.querySelectorAll('.ste-klane[data-key-track=t1] .ste-key[data-key-clip=k2]').length"), 2, 'Two keyframe diamonds on the row');
+    // The playhead between the keys: the engine draws the clip between its two places (our own interpolation).
+    await tap({ x: await tX(6.25), y: rulerBox.cy }); await pause(150);
+    const mid = await js("(() => { const b = document.querySelector('.ste-selbox[data-clip-box=k2]'); return parseFloat(b.style.left) / 100; })()");
+    assert.ok(mid < k2At().keys.x[0].v && mid > k2At().keys.x[1].v, 'Between the keys the clip is between its places: ' + mid);
+    // Drag the second diamond half a second earlier (Shift: no snapping to frames).
+    let diamond = await box('.ste-key[data-key-clip=k2][data-key-own="2"]');
+    await drag({ x: diamond.cx, y: diamond.cy }, { x: diamond.cx - tpps / 2, y: diamond.cy }, MODS.shift); await saved();
+    assert.ok(Math.abs(k2At().keys.x[1].t - 1.5) < .05, 'The keyframe moved half a second earlier: ' + JSON.stringify(k2At().keys.x));
+    // Pick it, copy, paste at 7.5 s, then delete the picked pasted keys.
+    diamond = await box(`.ste-key[data-key-clip=k2][data-key-own="${k2At().keys.x[1].t}"]`);
+    await tap({ x: diamond.cx, y: diamond.cy });
+    assert.equal(await js("document.querySelectorAll('.ste-key.picked').length"), 1, 'A click picks the keyframe');
+    await blur(); await press('c', 'ctrl');
+    await tap({ x: await tX(7.5), y: rulerBox.cy }); await blur(); await press('v', 'ctrl'); await saved();
+    assert.equal(k2At().keys.x.length, 3, 'Pasted at the playhead');
+    assert.ok(Math.abs(k2At().keys.x[2].t - 2.5) < .02, 'At the clip\'s own time 2.5 s: ' + JSON.stringify(k2At().keys.x));
+    await blur(); await press('Delete'); await saved();
+    assert.equal(k2At().keys.x.length, 2, 'Delete removes the picked keyframes, not the clip');
+    assert.ok(lastTracks()[0].clips.some(c => c.id === 'k2'), 'The clip stays');
+    // [ and ] jump between keyframes; the Motion inspector shows the eases and sets one.
+    await blur(); await press('[');
+    assert.ok(Math.abs(await playhead() - 6.5) < .03, '[ goes to the previous keyframe: ' + await playhead());
+    await press('[');
+    assert.ok(Math.abs(await playhead() - 5.5) < .03, 'and the one before: ' + await playhead());
+    await wait("!!document.querySelector('[aria-label=\"Ease from this keyframe\"]') && !document.querySelector('[aria-label=\"Ease from this keyframe\"]').disabled");
+    await js("(() => { const s = document.querySelector('[aria-label=\"Ease from this keyframe\"]'); s.value = 'out'; s.dispatchEvent(new Event('change', { bubbles: true })); })()"); await saved();
+    assert.ok(Object.values(k2At().keys).every(list => list[0].ease === 'out'), 'The ease is set on every key at that moment');
+    await js("document.querySelector('[data-group=clip-motion]').scrollIntoView({ block: 'center' })"); await capture('desktop-keyframes');
+    // Step 7: a video clip from the person's own file, with its sound on an audio track at the same time.
+    await tab('assets');
+    await tap({ x: await tX(.25), y: rulerBox.cy });
+    await js("document.querySelector('[aria-label=\"Add Waves at the playhead\"]').click()"); await saved();
+    const vclip = lastTracks().flatMap(t => t.clips).find(c => c.kind === 'video');
+    assert.ok(vclip && vclip.video === 'media/' + videoSha && Math.abs(vclip.out - 4) < 1e-6 && vclip.fit === 'cover', 'A video clip at the playhead: ' + JSON.stringify(vclip));
+    assert.ok(lastTracks().filter(t => t.kind === 'audio').flatMap(t => t.clips).some(c => c.audio === soundAsset && Math.abs(c.start - vclip.start) < 1e-6 && Math.abs(c.out - c.in - 4) < 1e-6), 'Its sound at the same time');
+    await tap({ x: await tX(1), y: rulerBox.cy }); await pause(400);
+    const lit = await js(`(() => { const c = document.querySelector('.studio-stage canvas'), g = c.getContext('2d'); const b = ${JSON.stringify(vclip.box)};
+      const d = g.getImageData(Math.round((b.x + b.w * .3) * c.width), Math.round((b.y + b.h * .3) * c.height), Math.round(b.w * .4 * c.width), Math.round(b.h * .4 * c.height)).data, seen = new Set();
+      for (let i = 0; i < d.length; i += 4 * 31) seen.add((d[i] >> 3) + ',' + (d[i + 1] >> 3) + ',' + (d[i + 2] >> 3)); return seen.size; })()`);
+    assert.ok(lit > 6, 'The video frame draws in the clip box (' + lit + ' colours)');
+    await capture('desktop-video-clip');
+    // Step 6: the frame rate on the project.
+    await tab('project');
+    await js("(() => { const s = document.querySelector('[aria-label=\"Frame rate\"]'); s.value = '60'; s.dispatchEvent(new Event('change', { bubbles: true })); })()"); await saved();
+    assert.equal(writes.filter(w => w.path === `/api/videos/${trackId}` && w.method === 'PUT').at(-1).body.fps, 60, 'The frame rate is saved');
+    await tab('beat');
     await noOverflow(); await labels();
     win.setContentSize(390, 1000); await pause(400); await noOverflow(); await labels(); await capture('phone-tracks');
     fs.writeFileSync(path.join(output, 'phone-tracks-canvas.png'), Buffer.from((await js("document.querySelector('.studio-stage canvas').toDataURL('image/png')")).split(',')[1], 'base64'));
     assert.equal(await js("[...document.querySelectorAll('.ste-track-tool')].every(n => getComputedStyle(n).display === 'none')"), true, 'Track tools stay on desktop (the phone strip shows beats only)');
+    assert.equal(await js("[...document.querySelectorAll('.ste-klane, .ste-khead')].every(n => getComputedStyle(n).display === 'none')"), true, 'Keyframe rows stay on desktop too');
     win.setContentSize(1440, 1000); await pause(300);
     assert.deepEqual(await js('window.__csp || []'), [], 'Nothing refused by the page policy');
 
@@ -725,6 +850,21 @@ app.whenReady().then(async () => {
     await wait("[...document.querySelectorAll('.studio-download a[download]')].some(a=>a.textContent==='Download chapter list')");
     await noOverflow(); await labels();
     await tab('beat');
+    // Step 6: exports. WebM, MOV and a GIF of the work area, made from the MP4 of this version.
+    await win.loadURL(base + '/#/studio/' + id); await wait("!!document.querySelector('.studio-stage canvas')");
+    await tab('render');
+    await wait("!!document.querySelector('[data-group=exports]')");
+    await click('Export WebM');
+    await wait("[...document.querySelectorAll('.studio-job[data-job-kind=export] a[download]')].some(a => a.textContent === 'Download WEBM')");
+    assert.equal(writes.filter(w => w.path === `/api/videos/${id}/render`).at(-1).body.format, 'webm', 'The export asks for WebM');
+    const ruler0 = await box('.ste-lane.ste-ruler');
+    await blur(); await tap({ x: await timeX(1), y: ruler0.cy }); await blur(); await press('i');
+    await tap({ x: await timeX(2.5), y: ruler0.cy }); await blur(); await press('o'); await tab('render');
+    await js("[...document.querySelectorAll('[data-group=exports] button')].find(b => b.textContent.startsWith('Export GIF')).click()"); await pause(400);
+    const gifAsk = writes.filter(w => w.path === `/api/videos/${id}/render`).at(-1).body;
+    assert.equal(gifAsk.format, 'gif', 'The GIF export'); assert.ok(Math.abs(gifAsk.start - 1) < .05 && Math.abs(gifAsk.end - 2.5) < .05, 'of the work area: ' + JSON.stringify(gifAsk));
+    await js("document.querySelector('[data-group=exports]').scrollIntoView({ block: 'center' })"); await capture('desktop-exports');
+    await tab('beat');
     // Deep-link a fresh shell load.
     await win.loadURL(base + '/#/studio/' + id); await wait("!!document.querySelector('.studio-stage canvas')");
     enabled = false;
@@ -739,7 +879,9 @@ app.whenReady().then(async () => {
       'Space, J/K/L, frame steps, beat edges, I/O, Alt+X, Delete, Ctrl+D, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, Alt+arrows, N, G, ?', 'keys in fields', 'aspect', 'render progress', 'downloads',
       'history confirmation', 'pane persistence per person', 'both themes', 'phone stacked view', 'scene inspector round trip', 'scene undo and redo', 'stage inspector round trip', 'cast picker', 'waveform and music lanes',
       'chat card', 'recovery', 'long video chapters, markers, plan gate and resume', '3D preview under the real policy',
-      'tracks: add, drag, trim both edges, split, lanes, lock, hide, ripple, undo, sound, image', 'Ask Kairos: comment pin, run, undo, dry run', 'deep link', 'Studio enable handoff', '1440 and 390', 'labels', 'offline'] }));
+      'tracks: add, drag, trim both edges, split, lanes, lock, hide, ripple, undo, sound, image', 'Ask Kairos: comment pin, run, undo, dry run',
+      'step 5: track rename in place, canvas move, snap guide, nudges, scale, turn, keyframes (A, drag, row drag, copy, paste, delete, [ ], ease)',
+      'step 6: frame rate, WebM and GIF exports', 'step 7: video clip with its sound, frame drawn, word caption style and narrate', 'deep link', 'Studio enable handoff', '1440 and 390', 'labels', 'offline'] }));
   } catch (error) {
     console.error(error.stack);
     if (win && !win.isDestroyed()) fs.writeFileSync(path.join(output, 'failure.png'), (await win.webContents.capturePage()).toPNG());

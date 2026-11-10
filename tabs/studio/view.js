@@ -100,7 +100,7 @@ async function lookTokens(look) {
   if (!tokenCache.has(look)) tokenCache.set(look, api(`${BASE}/tokens/${encodeURIComponent(look)}`).catch(e => { tokenCache.delete(look); throw e; }));
   return tokenCache.get(look);
 }
-async function preview(canvas, p, aspect) {
+async function preview(canvas, p, aspect, extra = {}) {
   const [data, { mount }] = await Promise.all([lookTokens(p.look), import(MOTION_URL)]);
   // Font-face rules are produced by the same server helper as the render player.
   if (data.font_css && !document.getElementById('studio-font-' + p.look)) {
@@ -110,7 +110,7 @@ async function preview(canvas, p, aspect) {
   const characters = p.cast?.length ? await castSpecs(p) : {};
   // Pack B's 3D shots draw live with three.js: the app page maps its bare name with a hashed import map
   // (static/index.html, core/middleware.py). The preview draws at the video's size without the render's 2x supersampling.
-  const options = { aspect, tokens: data.variables, assetsBase: `/api/videos/${p.id}/assets/`, ss: 1 };
+  const options = { aspect, tokens: data.variables, assetsBase: `/api/videos/${p.id}/assets/`, ss: 1, onFrame: extra.onFrame };
   let player;
   try {
     player = mount(canvas, { ...p, characters }, options);
@@ -303,6 +303,9 @@ async function editor(host, id, looks, back, parentDisposed) {
   // Step 4: Ask Kairos's comments, runs and the person's changes since its last turn (core/video_agent.py).
   let selectedClip = null, sounds = {}, review = { comments: [], runs: [], since: { changes: [] }, connection: null, dry_run_over: 5 };
   let commenting = false, draftPin = null, asking = false;
+  // Steps 5 to 7: the video files uploaded to this video, the keyframes picked on the timeline ({clip, owns}), the
+  // copied keyframes, and a drag on the preview in progress.
+  let media = {}, selectedKeys = null, keyClipboard = null, canvasDrag = null, frameQueued = false;
   const names = {}, forms = {};  // each cast character's name and its form (2d draws scenes, 3d plays stage beats)
   const state = sessions.get(id) || { p: null, undo: [], redo: [], dirty: false, revision: 0, saving: null, error: '' };
   state.view ||= {};
@@ -318,7 +321,7 @@ async function editor(host, id, looks, back, parentDisposed) {
     const recovered = await Promise.allSettled(loadJobs(id).map(jobId => api(`/api/video-jobs/${jobId}`)));
     jobs = [...new Map([...resources.jobs, ...recovered.filter(r => r.status === 'fulfilled').map(r => r.value)].map(j => [j.id, j])).values()];
     aspect = view.aspect && state.p.aspects.includes(view.aspect) ? view.aspect : state.p.aspects[0];
-    await Promise.all([loadPlan(), loadSounds(), loadReview()]);
+    await Promise.all([loadPlan(), loadSounds(), loadReview(), loadMedia()]);
   } catch (error) { host.replaceChildren(el('p', { role: 'alert', text: error.message }), button('Back to projects', back)); return () => { disposed = true; }; }
   if (parentDisposed()) return () => {};
   let panes = M.clampPanes(loadPanes(user), { width: innerWidth, height: innerHeight });
@@ -369,6 +372,10 @@ async function editor(host, id, looks, back, parentDisposed) {
     trackAction: (trackId, action) => guarded(() => trackAction(trackId, action)),
     addClip: kind => guarded(() => addClip(kind)),
     selectComment: commentId => focusComment(commentId),
+    // Step 5: keyframes on the timeline, and track names renamed in place.
+    selectKey: (clipId, own, add) => selectKey(clipId, own, add),
+    moveKey: (clipId, from, to) => guarded(() => moveKey(clipId, from, to)),
+    renameTrack: (trackId, name) => guarded(() => renameTrack(trackId, name)),
   });
   function guarded(action) { Promise.resolve().then(action).catch(error => toast(error.message, 'error')); }
 
@@ -429,7 +436,7 @@ async function editor(host, id, looks, back, parentDisposed) {
   }
   function selectBeat(index, { seek = false } = {}) {
     if (index < 0 || index >= state.p.beats.length) return;
-    selected = index; selectedClip = null;
+    selected = index; selectedClip = null; selectedKeys = null;
     if (seek) { const c = clipList()[index]; if (time < c.start || time >= c.end) { stop(); time = c.start; } }
     drawBeats(); drawInspector(); refreshTimeline(); timeline.reveal(index); drawFrame();
   }
@@ -456,6 +463,7 @@ async function editor(host, id, looks, back, parentDisposed) {
     const found = M.findClip(state.p, clipId);
     if (!found) return;
     selectedClip = clipId;
+    if (selectedKeys && selectedKeys.clip !== clipId) selectedKeys = null;
     if (seek && (time < found.clip.start || time >= M.clipEnd(found.clip))) { stop(); time = found.clip.start; }
     rightTabs.show('beat'); drawBeats(); drawInspector(); refreshTimeline(); timeline.revealTime(found.clip.start); drawFrame();
   }
@@ -475,20 +483,23 @@ async function editor(host, id, looks, back, parentDisposed) {
   // A new clip at the playhead: on the selected clip's track when it fits there, else the first unlocked track of its
   // kind with room, else a new track.
   function addClip(kind, extra = {}) {
+    const newId = addClipWith(kind, M.newClip(state.p, kind, time, extra), 'add-clip-' + Date.now());
+    selectClip(newId);
+    return newId;
+  }
+  function addClipWith(kind, made, group, at = time) {
     if (clipCount(state.p) >= M.MAX_CLIPS) throw Error(`A video holds at most ${M.MAX_CLIPS} clips.`);
-    const trackKind = kind === 'sound' ? 'audio' : 'overlay';
-    const probe = M.newClip(state.p, kind, time, extra), length = M.clipLength(probe);
+    const trackKind = kind === 'sound' ? 'audio' : 'overlay', length = M.clipLength(made);
     const current = selectedClip && M.findClip(state.p, selectedClip)?.track;
     const candidates = [current, ...M.tracksOf(state.p)].filter(t => t && t.kind === trackKind && !t.locked && t.clips.length < M.MAX_TRACK_CLIPS);
-    let track = candidates.find(t => M.fits(t, time, length)) || null;
-    const group = 'add-clip-' + Date.now(), trackId = track?.id || addTrack(trackKind, undefined, group);   // one undo step
+    const track = candidates.find(t => M.fits(t, at, length)) || null;
+    const trackId = track?.id || addTrack(trackKind, undefined, group);   // one undo step
     let newId;
     changed(p => {
-      const target = p.tracks.find(t => t.id === trackId), clip = M.newClip(p, kind, time, extra);
-      clip.start = M.freeStart(target, time, M.clipLength(clip));
+      const target = p.tracks.find(t => t.id === trackId), clip = { ...structuredClone(made), id: M.uniqueId(p, 'k') };
+      clip.start = M.freeStart(target, at, M.clipLength(clip));
       target.clips.push(clip); M.sortClips(target); newId = clip.id;
     }, true, group);
-    selectClip(newId);
     return newId;
   }
   function moveClip(clipId, trackId, start) {
@@ -530,20 +541,218 @@ async function editor(host, id, looks, back, parentDisposed) {
     } else changed(p => { const t = p.tracks.find(x => x.id === trackId); t[action] = !t[action]; });
     drawInspector(); refreshTimeline();
   }
-  // The selected visual clip's box on the preview (and nothing in the video itself). Redrawn only when it changes,
-  // since playback calls this every frame.
+  // The selected visual clip on the preview: its box with handles, drawn over the canvas and never into the video
+  // (step 5). Drag inside to move (snapping to the frame's centre lines, edges and copy safe area; Alt turns snapping
+  // off), a corner to scale around the centre, a side to change the box's width or height, the round knob to turn it
+  // (Shift: 15 degree steps). With the box focused, arrows nudge 1 frame pixel (Shift: 10). A property with keyframes
+  // gets a key at the playhead; the others change their plain value. Redrawn only when something it shows changes.
   let selectionKey = '';
-  function drawSelection() {
+  const frameSize = () => ({ '16:9': [1920, 1080], '9:16': [1080, 1920], '1:1': [1080, 1080] }[aspect]);
+  function selectedVisual() {
     const found = selectedClip && M.findClip(state.p, selectedClip);
+    return found?.clip.box ? found : null;
+  }
+  function drawSelection(force = false) {
+    const found = selectedVisual();
+    const clip = canvasDrag?.draft || found?.clip;
     const live = !!found && time >= found.clip.start && time < M.clipEnd(found.clip);
-    const key = found?.clip.box ? `${found.clip.id}|${live}|${JSON.stringify(found.clip.box)}` : '';
-    if (key === selectionKey) return;
-    selectionKey = key; selectionLayer.replaceChildren();
-    if (!found?.clip.box) return;
-    const b = found.clip.box;
-    const node = el('div', { class: 'ste-selbox' + (live ? '' : ' idle'), 'data-guide': 'clip' }, [el('span', { text: `${found.clip.kind} ${found.clip.id}${live ? '' : ' (not on screen now)'}` })]);
-    Object.assign(node.style, { left: b.x * 100 + '%', top: b.y * 100 + '%', width: b.w * 100 + '%', height: b.h * 100 + '%' });
+    const v = clip ? M.clipValues(clip, Math.min(Math.max(time, clip.start), M.clipEnd(clip) - 1e-4)) : null;
+    const key = clip ? `${clip.id}|${live}|${JSON.stringify(clip.box)}|${JSON.stringify(v)}|${found.track.locked}|${JSON.stringify(canvasDrag?.guides || null)}` : '';
+    if (key === selectionKey && !force) return;
+    selectionKey = key;
+    const focused = selectionLayer.contains(document.activeElement);
+    selectionLayer.replaceChildren();
+    if (!clip) return;
+    const locked = !!found.track.locked;
+    const node = el('div', { class: 'ste-selbox' + (live ? '' : ' idle') + (locked ? ' locked' : ''), 'data-guide': 'clip', 'data-clip-box': clip.id, tabindex: '0', role: 'group',
+      'aria-label': `${found.clip.kind} clip ${clip.id} on the preview${locked ? ', locked' : ''}. Drag to move; arrows nudge it.`,
+      'aria-roledescription': 'clip on the preview' }, [el('span', { class: 'ste-selbox-label', text: `${found.clip.kind} ${found.clip.id}${live ? '' : ' (not on screen now)'}` })]);
+    Object.assign(node.style, { left: v.x * 100 + '%', top: v.y * 100 + '%', width: clip.box.w * 100 + '%', height: clip.box.h * 100 + '%',
+      transform: `rotate(${v.rotation}deg) scale(${v.scale})` });
+    node.style.setProperty('--inv', String(1 / Math.max(.05, v.scale)));
+    if (!locked) {
+      for (const corner of ['nw', 'ne', 'se', 'sw']) node.append(el('span', { class: `ste-handle corner ${corner}`, 'data-handle': 'scale', 'data-corner': corner, title: 'Drag to scale', 'aria-hidden': 'true' }));
+      for (const side of ['e', 's']) node.append(el('span', { class: `ste-handle side ${side}`, 'data-handle': side === 'e' ? 'width' : 'height', title: side === 'e' ? 'Drag to change the width' : 'Drag to change the height', 'aria-hidden': 'true' }));
+      node.append(el('span', { class: 'ste-handle rotate', 'data-handle': 'rotate', title: 'Drag to turn (Shift: 15 degree steps)', 'aria-hidden': 'true' }));
+    }
+    node.addEventListener('keydown', nudgeKey);
     selectionLayer.append(node);
+    for (const [axis, line] of Object.entries(canvasDrag?.guides || {})) {
+      if (line === null) continue;
+      const g = el('div', { class: `ste-snapline ${axis}`, 'data-snapline': axis, 'aria-hidden': 'true' });
+      Object.assign(g.style, axis === 'x' ? { left: line * 100 + '%' } : { top: line * 100 + '%' });
+      selectionLayer.append(g);
+    }
+    if (focused) node.focus();
+  }
+  // Live changes while dragging: the engine draws the draft at once (setTracks), the project changes on release.
+  function draftShow(draft) {
+    const tracks = clone(state.p.tracks), at = M.findClip({ beats: [], tracks }, draft.id);
+    if (at) at.track.clips[at.index] = draft;
+    player?.setTracks?.(tracks, mediaFrames());
+    try { player?.drawFrame(Math.min(time, player.duration)); } catch { /* drawFrame reports its own errors */ }
+    drawSelection();
+  }
+  function commitClip(clipId, mutate, group = '') {
+    changed(p => { const f = M.findClip(p, clipId); if (f) mutate(f.clip); }, true, group);
+    drawInspector();
+  }
+  function canvasTime(clip) { return Math.min(Math.max(time, clip.start), M.clipEnd(clip) - 1e-4); }
+  selectionLayer.addEventListener('pointerdown', event => {
+    const box = event.target.closest('.ste-selbox');
+    const found = selectedVisual();
+    if (!box || !found || found.track.locked || event.button !== 0 || commenting) return;
+    event.preventDefault(); event.stopPropagation();
+    box.focus({ preventScroll: true });
+    stop();
+    const r = frameBox.getBoundingClientRect(), [fw, fh] = frameSize(), t = canvasTime(found.clip);
+    const start = M.clipValues(found.clip, t), handle = event.target.dataset.handle || 'move';
+    const cx = r.left + (start.x + found.clip.box.w / 2) * r.width, cy = r.top + (start.y + found.clip.box.h / 2) * r.height;
+    canvasDrag = { id: found.clip.id, handle, x0: event.clientX, y0: event.clientY, start, t, rect: r, fw, fh, cx, cy, box0: { ...found.clip.box },
+      angle0: M.angleOf(cx, cy, event.clientX, event.clientY), dist0: Math.hypot(event.clientX - cx, event.clientY - cy) || 1, draft: clone(found.clip), moved: false, guides: null };
+    try { selectionLayer.setPointerCapture(event.pointerId); } catch { /* a pointer the page did not start */ }
+  });
+  selectionLayer.addEventListener('pointermove', event => {
+    const d = canvasDrag;
+    if (!d) return;
+    const dx = (event.clientX - d.x0) / d.rect.width, dy = (event.clientY - d.y0) / d.rect.height;
+    if (!d.moved && Math.hypot(event.clientX - d.x0, event.clientY - d.y0) < 2) return;
+    d.moved = true;
+    const draft = clone(M.findClip(state.p, d.id).clip), values = {};
+    d.guides = null;
+    if (d.handle === 'move') {
+      let x = d.start.x + dx, y = d.start.y + dy;
+      if (panes.snap && !event.altKey) {
+        const lines = M.canvasLines(layoutModule ? (({ x: sx, y: sy, w: sw, h: sh }) => ({ x: sx / d.fw, y: sy / d.fh, w: sw / d.fw, h: sh / d.fh }))(layoutModule.safeArea(aspect, captionedNow())) : null);
+        const snapped = M.snapMove({ x, y, w: draft.box.w, h: draft.box.h }, lines, 8 / d.rect.width, 8 / d.rect.height);
+        x = snapped.x; y = snapped.y; d.guides = snapped.guides;
+      }
+      Object.assign(values, { x, y });
+    } else if (d.handle === 'scale') {
+      values.scale = d.start.scale * Math.hypot(event.clientX - d.cx, event.clientY - d.cy) / d.dist0;
+    } else if (d.handle === 'rotate') {
+      values.rotation = d.start.rotation + M.angleOf(d.cx, d.cy, event.clientX, event.clientY, event.shiftKey ? 15 : 0) - (event.shiftKey ? Math.round(d.angle0 / 15) * 15 : d.angle0);
+    } else {
+      // A side handle: the box's own width or height (not keyframed), measured along the clip's turned axis.
+      const a = d.start.rotation * Math.PI / 180, along = d.handle === 'width' ? (dx * d.rect.width * Math.cos(a) + dy * d.rect.height * Math.sin(a)) / d.rect.width
+        : (-dx * d.rect.width * Math.sin(a) + dy * d.rect.height * Math.cos(a)) / d.rect.height;
+      const key = d.handle === 'width' ? 'w' : 'h', pos = key === 'w' ? 'x' : 'y';
+      const size = Math.max(.02, Math.min(1 - draft.box[pos], d.box0[key] + along / Math.max(.05, d.start.scale)));
+      draft.box = { ...draft.box, [key]: Math.round(size * 10000) / 10000 };
+    }
+    M.applyValues(draft, d.t, values);
+    d.draft = draft;
+    draftShow(draft);
+  });
+  const endCanvasDrag = event => {
+    const d = canvasDrag;
+    if (!d) return;
+    canvasDrag = null;
+    try { selectionLayer.releasePointerCapture(event.pointerId); } catch { /* already released */ }
+    if (d.moved && event.type === 'pointerup') {
+      const draft = d.draft;
+      commitClip(d.id, c => { c.box = draft.box; for (const k of ['scale', 'rotation', 'opacity']) { if (k in draft) c[k] = draft[k]; else delete c[k]; } if (draft.keys) c.keys = draft.keys; else delete c.keys; });
+    } else { player?.setTracks?.(state.p.tracks, mediaFrames()); drawFrame(); }
+    drawSelection(true);
+  };
+  selectionLayer.addEventListener('pointerup', endCanvasDrag);
+  selectionLayer.addEventListener('pointercancel', endCanvasDrag);
+  function nudgeKey(event) {
+    const found = selectedVisual();
+    const step = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
+    if (!found || !step || event.altKey || event.ctrlKey || event.metaKey) return;
+    event.preventDefault(); event.stopPropagation();
+    if (found.track.locked) return toast(`The track ${found.track.name} is locked.`, 'error');
+    const [fw, fh] = frameSize(), n = event.shiftKey ? 10 : 1, t = canvasTime(found.clip);
+    const v = M.clipValues(found.clip, t), to = M.nudge(v, step[0] * n, step[1] * n, fw, fh);
+    commitClip(found.clip.id, c => M.applyValues(c, t, to), `${found.clip.id}.nudge`);
+    drawSelection(true);
+  }
+  // A click on a clip shown on the preview selects it (the top one under the pointer).
+  frameBox.addEventListener('pointerdown', event => {
+    if (commenting || event.button !== 0 || event.target.closest('.ste-selbox, .ste-pin, .ste-pin-form') || !player?.layout) return;
+    const r = frameBox.getBoundingClientRect(), [fw, fh] = frameSize();
+    const px = (event.clientX - r.left) / r.width * fw, py = (event.clientY - r.top) / r.height * fh;
+    let boxes = [];
+    try { boxes = player.layout(Math.min(time, player.duration)).filter(b => b.clip); } catch { return; }
+    const hit = boxes.reverse().find(b => px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h);
+    if (hit && hit.clip !== selectedClip) { selectClip(hit.clip); event.preventDefault(); }
+  });
+  const captionedNow = () => state.p.narration?.captions !== false && state.p.beats.some(b => b.spoken?.parts?.length);
+  // The video files' frame counts for the engine (core/video_media.py), by hash.
+  function mediaFrames() {
+    return Object.fromEntries(Object.entries(media).map(([name, info]) => [name.slice(6), { frames: info.frames, width: info.width, height: info.height }]));
+  }
+  async function loadMedia() { try { media = (await api(endpoint + '/media')).media || {}; } catch { media = {}; } }
+
+  // -- keyframes (step 5) -----------------------------------------------------------------------------------------
+  function selectKey(clipId, own, add) {
+    const found = M.findClip(state.p, clipId);
+    if (!found) return;
+    if (selectedClip !== clipId) selectClip(clipId);
+    const owns = add && selectedKeys?.clip === clipId ? [...selectedKeys.owns] : [];
+    const at = owns.findIndex(o => Math.abs(o - own) < 1 / 120);
+    if (at >= 0 && add) owns.splice(at, 1); else owns.push(own);
+    selectedKeys = owns.length ? { clip: clipId, owns } : null;
+    stop(); time = M.timelineTime(found.clip, own);
+    refreshTimeline(); drawFrame(); drawInspector();
+  }
+  function moveKey(clipId, from, to) {
+    const found = M.findClip(state.p, clipId);
+    if (!found) return;
+    if (found.track.locked) throw Error(`The track ${found.track.name} is locked. Unlock it to change its keyframes.`);
+    changed(p => { const f = M.findClip(p, clipId); if (f) M.moveKeys(f.clip, from, to); });
+    if (selectedKeys?.clip === clipId) selectedKeys.owns = selectedKeys.owns.map(o => Math.abs(o - from) < 1 / 120 ? Math.round(to * 10000) / 10000 : o);
+    stop(); time = M.timelineTime(found.clip, to); drawInspector(); refreshTimeline(); drawFrame();
+  }
+  function keyframeAtPlayhead() {
+    const found = selectedVisual();
+    if (!found) throw Error('Select a text, image, shape or video clip to add keyframes to it.');
+    if (found.track.locked) throw Error(`The track ${found.track.name} is locked. Unlock it to add keyframes.`);
+    if (!(time >= found.clip.start && time <= M.clipEnd(found.clip))) throw Error('Move the playhead inside the clip to add a keyframe there.');
+    let props = [];
+    changed(p => { const f = M.findClip(p, found.clip.id); if (f) props = M.keyAll(f.clip, time); });
+    selectedKeys = { clip: found.clip.id, owns: [M.ownTime(found.clip, time)] };
+    toast(`Keyframe at ${M.timecode(time)}: ${props.map(k => M.KEY_NAMES[k].toLowerCase()).join(', ')}.`);
+    drawInspector(); refreshTimeline(); drawFrame();
+  }
+  function deleteKeys() {
+    const found = M.findClip(state.p, selectedKeys.clip);
+    if (!found) { selectedKeys = null; return; }
+    if (found.track.locked) throw Error(`The track ${found.track.name} is locked. Unlock it to change its keyframes.`);
+    const owns = selectedKeys.owns;
+    changed(p => { const f = M.findClip(p, found.clip.id); if (f) M.removeKeys(f.clip, owns); });
+    selectedKeys = null; drawInspector(); refreshTimeline(); drawFrame();
+  }
+  function copyKeys() {
+    const found = selectedKeys && M.findClip(state.p, selectedKeys.clip);
+    if (!found) throw Error('Pick keyframes on the timeline first (click a diamond; Shift adds more).');
+    keyClipboard = M.copyKeys(found.clip, selectedKeys.owns);
+    toast(keyClipboard ? `Copied ${selectedKeys.owns.length} ${selectedKeys.owns.length === 1 ? 'keyframe' : 'keyframes'}.` : 'Nothing to copy there.');
+  }
+  function pasteKeys() {
+    const found = selectedVisual();
+    if (!keyClipboard) throw Error('Copy keyframes first (Ctrl + C with keyframes picked).');
+    if (!found) throw Error('Select a clip to paste the keyframes on.');
+    if (found.track.locked) throw Error(`The track ${found.track.name} is locked.`);
+    let owns = [];
+    changed(p => { const f = M.findClip(p, found.clip.id); if (f) owns = M.pasteKeys(f.clip, keyClipboard, time); });
+    selectedKeys = { clip: found.clip.id, owns };
+    drawInspector(); refreshTimeline(); drawFrame();
+  }
+  function jumpKey(direction) {
+    const found = selectedVisual();
+    if (!found) return;
+    const next = M.nextKeyTime(found.clip, time, direction);
+    if (next === null) return;
+    stop(); time = next; drawFrame(); timeline.revealTime(next); drawInspector();
+  }
+  function renameTrack(trackId, name) {
+    const track = M.tracksOf(state.p).find(t => t.id === trackId), clean = String(name || '').replace(/[<>\r\n\t]/g, ' ').trim().slice(0, 40);
+    if (!track || !clean || clean === track.name) return refreshTimeline();
+    if (track.locked) { refreshTimeline(); throw Error(`The track ${track.name} is locked. Unlock it to rename it.`); }
+    changed(p => { const t = p.tracks.find(x => x.id === trackId); if (t) t.name = clean; });
+    drawInspector(); refreshTimeline();
   }
 
   function refreshTimeline() {
@@ -554,7 +763,7 @@ async function editor(host, id, looks, back, parentDisposed) {
     if (Number.isFinite(view.outPoint) && view.outPoint > sum) delete view.outPoint;
     timeline.update({ p: state.p, list: clipsNow, total: sum, time, selected, zoom: view.zoom, snap: panes.snap, inPoint: view.inPoint, outPoint: view.outPoint,
       marks: M.chapterMarks(state.p, clipsNow), peaks, spans: M.speechSpans(state.p, clipsNow), music: state.p.music,
-      selectedClip, sounds, comments: review.comments, ripple: !!panes.ripple });
+      selectedClip, sounds, media, comments: review.comments, ripple: !!panes.ripple, selectedKeys });
   }
   function timing() {
     time = Math.min(time, total()); refreshTimeline(); drawFrame(); loadPeaks();
@@ -583,7 +792,9 @@ async function editor(host, id, looks, back, parentDisposed) {
     // The browser can drop a canvas's pixels (a GPU reset); the engine's own buffers go too, so mount it again.
     canvas.addEventListener('contextrestored', () => { if (!disposed && canvas.isConnected) remount(); });
     try {
-      const [next] = await Promise.all([preview(canvas, clone(state.p), aspect), layoutModule || import(LAYOUT_URL).then(m => { layoutModule = m; })]);
+      const onFrame = () => { if (rate || frameQueued) return; frameQueued = true; requestAnimationFrame(() => { frameQueued = false; if (!disposed && player === next) drawFrame(); }); };
+      let next;
+      [next] = await Promise.all([preview(canvas, { ...clone(state.p), media: mediaFrames() }, aspect, { onFrame }), layoutModule || import(LAYOUT_URL).then(m => { layoutModule = m; })]);
       if (disposed || generation !== mountGeneration) { next.dispose?.(); return; }
       let named = false;
       for (const [cid, entry] of Object.entries(await castSpecs(state.p).catch(() => ({})))) { const form = entry.spec?.form === '3d' ? '3d' : '2d'; if ((entry.spec?.name && names[cid] !== entry.spec.name) || forms[cid] !== form) { names[cid] = entry.spec?.name || names[cid]; forms[cid] = form; named = true; } }
@@ -656,10 +867,14 @@ async function editor(host, id, looks, back, parentDisposed) {
       case 'mark-in': view.inPoint = time; if (Number.isFinite(view.outPoint) && view.outPoint <= time) delete view.outPoint; return refreshTimeline();
       case 'mark-out': view.outPoint = time; if (Number.isFinite(view.inPoint) && view.inPoint >= time) delete view.inPoint; return refreshTimeline();
       case 'clear-work-area': delete view.inPoint; delete view.outPoint; return refreshTimeline();
-      case 'delete': return selectedClip ? deleteClip() : deleteBeat();
+      case 'delete': return selectedKeys ? deleteKeys() : selectedClip ? deleteClip() : deleteBeat();
+      case 'keyframe': return keyframeAtPlayhead();
+      case 'previous-key': case 'next-key': return jumpKey(action === 'previous-key' ? -1 : 1);
+      case 'copy-keys': return copyKeys();
+      case 'paste-keys': return pasteKeys();
       case 'split': return splitClip();
       case 'comment': return setCommenting(!commenting);
-      case 'escape': if (commenting || draftPin) { draftPin = null; return setCommenting(false); } if (selectedClip) { selectedClip = null; drawInspector(); refreshTimeline(); drawFrame(); } return undefined;
+      case 'escape': if (commenting || draftPin) { draftPin = null; return setCommenting(false); } if (selectedKeys) { selectedKeys = null; refreshTimeline(); drawInspector(); return undefined; } if (selectedClip) { selectedClip = null; drawInspector(); refreshTimeline(); drawFrame(); } return undefined;
       case 'duplicate': return duplicateBeat();
       case 'move-earlier': return move(selected, selected - 1);
       case 'move-later': return move(selected, selected + 1);
@@ -734,10 +949,33 @@ async function editor(host, id, looks, back, parentDisposed) {
       button('Add at playhead', () => addClip('sound', { audio: asset, out: Math.round(Math.min(info.seconds, 30) * 1000) / 1000 }), { class: 'btn quiet', 'aria-label': `Add ${info.title} at the playhead` })]));
     if (!Object.keys(sounds).length) soundList.append(el('li', { class: 'meta', text: 'No sounds yet.' }));
     assetsPanel.append(el('h4', { text: 'Sounds' }), soundList, field('Upload a sound', soundUpload, '', 'Your own WAV, MP3, OGG, M4A, AAC or FLAC file, up to 50 MB; the first 3 minutes are kept. Needs FFmpeg.'));
+    // Videos (step 7): the person's own files, decoded into frames once; a clip shows them over the video.
+    const videoUpload = el('input', { type: 'file', accept: '.mp4,.m4v,.mov,.webm,.mkv,video/*', 'aria-label': 'Upload a video file' });
+    videoUpload.addEventListener('change', () => upload(videoUpload, async result => {
+      await Promise.all([loadMedia(), loadSounds()]); drawAssets(); refreshTimeline();
+      const m = result.media || {};
+      toast(`Added ${m.title || 'the video'} (${Number(m.seconds || 0).toFixed(1)} s${m.cut ? `, the first ${Math.round(m.seconds)} s of ${Math.round(m.source_seconds)} s` : ''}${m.audio ? ', with its sound' : ''}).`);
+    }, 'Decoding the video file...'));
+    const videoList = el('ul', { class: 'ste-sounds ste-videos', 'aria-label': 'Video files in this video' });
+    for (const [name, info] of Object.entries(media)) videoList.append(el('li', {}, [
+      el('img', { class: 'ste-video-thumb', alt: '', src: `/api/videos/${id}/assets/media/${name.slice(6)}/0.jpg` }),
+      el('span', { text: `${info.title} (${info.seconds.toFixed(1)} s, ${info.width} x ${info.height}${info.audio ? ', with sound' : ''})` }),
+      button('Add at playhead', () => addVideo(name, info), { class: 'btn quiet', 'aria-label': `Add ${info.title} at the playhead` })]));
+    if (!Object.keys(media).length) videoList.append(el('li', { class: 'meta', text: 'No video files yet.' }));
+    assetsPanel.append(el('h4', { text: 'Videos' }), videoList, field('Upload a video', videoUpload, '', 'Your own MP4, MOV, M4V, WebM or MKV file, up to 200 MB; the first 60 seconds are kept, at 30 frames a second and at most 1280 pixels on the long side. Its sound comes along as a sound. Needs FFmpeg; nothing is fetched.'));
   }
-  async function upload(input, then) {
+  // A video clip at the playhead, and its sound on an audio track at the same time (one undo step).
+  function addVideo(name, info) {
+    const group = 'add-video-' + Date.now();
+    const clipId = addClipWith('video', M.videoClip(state.p, time, name, info), group);
+    const found = M.findClip(state.p, clipId);
+    if (info.audio && sounds[info.audio] && found) addClipWith('sound', M.newClip(state.p, 'sound', found.clip.start, { audio: info.audio, out: M.clipLength(found.clip) }), group, found.clip.start);
+    selectClip(clipId);
+  }
+  async function upload(input, then, busy = '') {
     if (!input.files[0]) return;
     const form = new FormData(); form.append('file', input.files[0]); input.disabled = true;
+    if (busy) toast(busy);
     try { await then(await api(endpoint + '/assets', { method: 'POST', headers: {}, body: form })); }
     catch (error) { toast(error.message, 'error'); } finally { input.disabled = false; input.value = ''; }
   }
@@ -933,8 +1171,11 @@ async function editor(host, id, looks, back, parentDisposed) {
     if (beatTab) beatTab.textContent = found ? 'Clip' : 'Beat';
     if (found) {
       const trackIndex = state.p.tracks.indexOf(found.track);
-      inspector.append(clipForm({ p: state.p, trackIndex, clipIndex: found.index, images: resources.assets, sounds, time, helpers: sceneHelpers,
-        actions: { split: () => run('split'), remove: ripple => deleteClip(ripple), moveTo: trackId => {
+      inspector.append(clipForm({ p: state.p, trackIndex, clipIndex: found.index, images: resources.assets, sounds, media, time, helpers: sceneHelpers,
+        selectedKeys: selectedKeys?.clip === found.clip.id ? selectedKeys.owns : [],
+        actions: { split: () => run('split'), remove: ripple => deleteClip(ripple), keyAll: () => run('keyframe'), jump: direction => jumpKey(direction),
+          seek: t => { stop(); time = t; drawFrame(); timeline.revealTime(t); drawInspector(); },
+          redraw: () => { drawInspector(); refreshTimeline(); drawFrame(); }, moveTo: trackId => {
           const target = state.p.tracks.find(t => t.id === trackId);
           if (!target || target === found.track) return;
           if (target.locked) { toast(`${target.name} is locked.`, 'error'); drawInspector(); return; }
@@ -1043,8 +1284,11 @@ async function editor(host, id, looks, back, parentDisposed) {
     for (const a of ASPECTS) aspects.append(el('label', { class: 'studio-check' }, [el('input', { type: 'checkbox', checked: state.p.aspects.includes(a), onchange: event => {
       changed(p => { p.aspects = event.target.checked ? [...p.aspects, a] : p.aspects.filter(v => v !== a); });
     } }), el('span', { text: a })]));
+    // Step 6: the frame rate. 60 is smoother and about twice the frames and render time (measured: see the Render tab).
+    const fps = field('Frame rate', select('Frame rate', [['30', '30 frames a second'], ['60', '60 frames a second']], String(state.p.fps || 30), v => changed(p => { p.fps = Number(v); })), 'fps',
+      '60 is smoother for fast motion and takes about twice as long to render. YouTube shows both.');
     projectPanel.append(group('Video', [titleField, field('Look', select('Project look', looks.map(l => [l.id, l.name]), state.p.look, v => { changed(p => { p.look = v; }); drawProject(); }), 'look'), swatches,
-      aspects, el('small', { class: 'studio-error', 'data-error-path': 'aspects', role: 'alert' })]),
+      aspects, el('small', { class: 'studio-error', 'data-error-path': 'aspects', role: 'alert' }), fps]),
     group('Music', [el('div', { class: 'ste-row2' }, [field('Tempo (BPM)', el('input', { type: 'number', min: 60, max: 180, value: state.p.bpm, 'aria-label': 'Tempo in beats per minute', oninput: e => changed(p => { p.bpm = Number(e.target.value); }, true, 'bpm') }), 'bpm', '60 to 180 BPM'),
       field('Music mood', select('Music mood', MOODS, state.p.music.mood, v => changed(p => { p.music.mood = v; })), 'music.mood')]),
     field('Music volume', el('input', { type: 'range', min: 0, max: 1, step: .01, value: state.p.music.volume, 'aria-label': 'Music volume', oninput: e => changed(p => { p.music.volume = Number(e.target.value); }, true, 'music.volume') }), 'music.volume', '0 to 1. The music ducks under narration on its own.')]));
@@ -1061,7 +1305,33 @@ async function editor(host, id, looks, back, parentDisposed) {
           : `three.js is built in and fast. ${b.message}`;
       }).catch(() => {});
     }
+    if (state.p.beats.some(b => b.say)) projectPanel.append(captionsGroup());
     projectPanel.append(castGroup());
+  }
+  // Step 7: caption styles. A word style lights the word being said; its times come from aligning each spoken line
+  // with the app's own speech recognition (core/video_align.py). A line it cannot align with confidence keeps line captions.
+  function captionsGroup() {
+    const narration = state.p.narration || { voice: 'af_heart', captions: true };
+    const styleNames = [['line', 'Whole line'], ['highlight', 'Line, the word being said in the accent colour'], ['box', 'Line, the word being said on an accent box']];
+    const style = select('Caption style', styleNames, narration.caption_style || 'line', v => {
+      changed(p => { p.narration = { ...(p.narration || { voice: 'af_heart', captions: true }) }; if (v === 'line') delete p.narration.caption_style; else p.narration.caption_style = v; });
+      drawProject();
+    });
+    style.disabled = narration.captions === false;
+    const spoken = state.p.beats.filter(b => b.say && b.spoken), words = spoken.filter(b => b.spoken.words), unsure = spoken.filter(b => b.spoken.align && !b.spoken.words);
+    const why = unsure.find(b => b.spoken.align?.note)?.spoken.align.note;
+    const facts = narration.caption_style && narration.caption_style !== 'line'
+      ? (spoken.length ? `${words.length} of ${state.p.beats.filter(b => b.say).length} lines have word times` + (unsure.length ? `; ${unsure.length} keep line captions (${why || 'the words could not be matched surely'}).` : '.') + (spoken.length > words.length + unsure.length ? ' Narrate to align the rest.' : '')
+        : 'Narrate the video to find the word times.') : 'Captions show each spoken line whole.';
+    const status = el('p', { class: 'meta', role: 'status', 'data-caption-status': '', text: facts });
+    const narrate = button('Narrate and align words', async () => {
+      if (!await save()) throw Error('Fix the highlighted fields first.');
+      narrate.disabled = true; status.textContent = 'Narrating and aligning the words...';
+      try { await takeProject(await write(endpoint + '/narrate', {})); toast('Narrated.'); }
+      catch (error) { status.textContent = error.message; } finally { narrate.disabled = false; }
+    }, { class: 'btn', title: 'Speak any lines not spoken yet and find each word\'s time' });
+    return group('Captions', [field('Caption style', style, 'narration.caption_style', 'Word styles use your speech model from Settings > Speech, on this computer.'), status,
+      narration.caption_style && narration.caption_style !== 'line' ? el('div', { class: 'studio-actions' }, [narrate]) : null].filter(Boolean), { 'data-group': 'captions' });
   }
   // The project's cast: characters pinned to a version. A scene can only show characters cast here.
   function castGroup() {
@@ -1161,7 +1431,16 @@ async function editor(host, id, looks, back, parentDisposed) {
   function drawJobs() {
     queue.replaceChildren(el('h3', { text: 'Render queue and downloads' }), el('div', { class: 'studio-actions' }, [
       ...ASPECTS.map(a => button('Render ' + a, () => startRender([a]))), button('Render chosen aspects', () => startRender(state.p.aspects)),
-    ]));
+    ]), el('p', { class: 'meta', text: `MP4 at ${state.p.fps || 30} frames a second, the file YouTube posting uses.` }));
+    // Step 6: other formats, encoded from the MP4 of this version (rendered first when it is not there yet).
+    const exportAspect = select('Export aspect', state.p.aspects, view.aspect && state.p.aspects.includes(view.aspect) ? view.aspect : state.p.aspects[0], () => {});
+    const work = Number.isFinite(view.inPoint) || Number.isFinite(view.outPoint);
+    const workRange = () => M.playRange(total(), view.inPoint, view.outPoint), gifRange = workRange();
+    queue.append(el('section', { class: 'ste-group ste-exports', 'aria-label': 'Export other formats', 'data-group': 'exports' }, [el('h4', { text: 'Export' }),
+      el('p', { class: 'meta', text: 'Made from the MP4 of this version: WebM (VP9 and Opus) for the web, MOV (the same H.264 picture, for editing apps) and a GIF of up to 60 seconds, kept under 15 MB.' }),
+      field('Aspect', exportAspect),
+      el('div', { class: 'studio-actions' }, [button('Export WebM', () => startExport(exportAspect.value, 'webm')), button('Export MOV', () => startExport(exportAspect.value, 'mov')),
+        button(work ? `Export GIF of the work area (${(gifRange.end - gifRange.start).toFixed(1)} s)` : 'Export GIF', () => startExport(exportAspect.value, 'gif', workRange()), { title: 'Set In and Out (I, O) to export part of the video' })])]));
     const panel = planPanel();
     if (panel) queue.append(panel);
     // A long render from an earlier run (before an app restart) shows with Resume until a new job takes over its aspect.
@@ -1178,7 +1457,11 @@ async function editor(host, id, looks, back, parentDisposed) {
     }
     for (const job of jobs) {
       if (job.kind === 'long') { queue.append(longJob(job)); continue; }
-      const item = el('article', { class: 'card studio-job', 'data-job-id': job.id }, [el('strong', { text: `${job.aspect} · ${job.status}` })]);
+      const what = job.kind === 'export' ? `${job.aspect} · ${String(job.format).toUpperCase()}` : `${job.aspect} · MP4 ${job.fps || state.p.fps || 30} fps`;
+      const item = el('article', { class: 'card studio-job', 'data-job-id': job.id, 'data-job-kind': job.kind || 'render' }, [el('strong', { text: `${what} · ${job.status}` })]);
+      if (job.status === 'ready' && job.kind === 'export') item.append(el('p', { class: 'meta', text: `${megabytes(job.bytes)}${job.fps ? `, ${job.fps} frames a second, ${job.long_side} px` : ''}, made in ${Number(job.seconds_spent || 0).toFixed(1)} s` }),
+        el('a', { class: 'btn', href: endpoint + '/renders/' + job.file, download: job.file, text: `Download ${String(job.format).toUpperCase()}` }));
+      if (job.status === 'ready' && job.kind !== 'export' && job.capture_seconds) item.append(el('p', { class: 'meta', text: `${job.frames} frames captured in ${job.capture_seconds.toFixed(1)} s (${job.capture_fps} a second).` }));
       const match = /^rendering (\d+)\/(\d+)/.exec(job.status);
       if (match) item.append(el('progress', { max: match[2], value: match[1], 'aria-label': 'Frames rendered' }));
       if (!job.status.startsWith('failed:') && job.status !== 'ready') item.append(button('Cancel render', async () => { Object.assign(job, await write(`/api/video-jobs/${job.id}/cancel`, {})); drawJobs(); }));
@@ -1190,6 +1473,7 @@ async function editor(host, id, looks, back, parentDisposed) {
       const url = endpoint + '/renders/' + file, slug = file.split('-v')[0];
       const links = el('div', { class: 'studio-actions' });
       const extras = resources.renders.includes(file.replace(/\.mp4$/, '.chapters.txt')) ? [['Download chapter list', file.replace(/\.mp4$/, '.chapters.txt')]] : [];
+      for (const fmt of ['webm', 'mov', 'gif']) { const other = file.replace(/\.mp4$/, '.' + fmt); if (resources.renders.includes(other) || jobs.some(j => j.file === other && j.status === 'ready')) extras.push([`Download ${fmt.toUpperCase()}`, other]); }
       for (const [label, name] of [['Download MP4', file], ['Download contact sheet', `sheet-${slug}.png`], ['Download soundtrack (WAV)', 'soundtrack.wav'], ...extras]) links.append(el('a', { class: 'btn', href: endpoint + '/renders/' + name, download: name, text: label }));
       queue.append(el('article', { class: 'card studio-download' }, [el('h4', { text: file }), el('video', { src: url, controls: true, preload: 'metadata', 'aria-label': `Rendered video ${file}` }), links]));
     }
@@ -1204,6 +1488,12 @@ async function editor(host, id, looks, back, parentDisposed) {
       const at = jobs.findIndex(j => j.id === job.id); if (at >= 0) jobs[at] = job; else jobs.push(job);
       rememberJobs(id, jobs); drawJobs();
     }
+  }
+  async function startExport(aspectChoice, format, range = null) {
+    if (!await save()) throw Error('Fix the highlighted fields before exporting.');
+    if (format === 'gif' && range && range.end - range.start > 60) throw Error('A GIF holds at most 60 seconds. Set In and Out (I and O) around the part you want.');
+    const job = await write(endpoint + '/render', { aspect: aspectChoice, format, ...(format === 'gif' && range ? { start: Math.round(range.start * 1000) / 1000, end: Math.round(range.end * 1000) / 1000 } : {}) });
+    jobs.push(job); rememberJobs(id, jobs); drawJobs();
   }
   async function loadPlan() { plan = state.p.chapters?.length ? await api(endpoint + '/plan').catch(() => null) : null; }
   async function poll() {

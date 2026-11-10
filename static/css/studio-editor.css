@@ -247,7 +247,12 @@
 .ste-lane.off .ste-tclip { opacity: .45; }
 .ste-lane.locked .ste-tclip { cursor: default; }
 .ste-trackhead { gap: 2px; padding: 0 4px 0 8px; color: var(--text-dim); }
-.ste-head-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Step 5 nit: names read whole (a wider head, the full name as a tip) and rename in place (double-click or F2). */
+.studio-view .ste-head-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; padding: 0 2px;
+  border: 1px solid transparent; border-radius: 4px; background: none; color: inherit; font: inherit; cursor: text; min-height: 0; height: 20px; }
+.studio-view .ste-head-name:hover { border-color: var(--ste-line); }
+.studio-view .ste-head-name:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+.studio-view .ste-head-rename { flex: 1 1 auto; min-width: 0; height: 22px; min-height: 0; padding: 0 4px; font-size: 11px; border-radius: 4px; }
 .studio-view .ste-head-tool { flex: none; width: 18px; min-height: 18px; height: 18px; padding: 0; border: 1px solid transparent; border-radius: 4px; background: none;
   font: 600 10px/1 var(--font-mono); color: var(--text-faint); cursor: pointer; }
 .studio-view .ste-head-tool:hover { border-color: var(--ste-line); color: var(--text); }
@@ -271,7 +276,7 @@
 .ste-ctrim:hover, .ste-tclip.selected .ste-ctrim { background: rgba(var(--accent-rgb), .35); }
 .ste-tl-sep { width: 1px; align-self: stretch; margin: 2px 4px; background: var(--ste-line); }
 .studio-view .ste-tl-bar select.ste-add-track { width: auto; max-width: 150px; flex: 0 0 auto; }
-.ste-shell .ste-tl-heads { flex-basis: 118px; }
+.ste-shell .ste-tl-heads { flex-basis: 168px; }
 .ste-pinlane { --lane-h: 22px; }
 .studio-view .ste-pinmark { position: absolute; top: 3px; width: 16px; height: 16px; min-height: 16px; margin-left: -8px; padding: 0; border-radius: 50% 50% 50% 2px; border: 0;
   background: var(--accent); color: var(--bg-panel-solid); font: 600 9.5px/16px var(--font-mono); text-align: center; cursor: pointer; z-index: 5; }
@@ -280,7 +285,46 @@
 .ste-selection, .ste-pins { position: absolute; inset: 0; pointer-events: none; }
 .ste-selbox { position: absolute; border: 1.5px solid var(--accent); border-radius: 2px; box-shadow: 0 0 0 1px rgba(var(--wash-rgb), .6); }
 .ste-selbox.idle { border-style: dashed; opacity: .7; }
-.ste-selbox span { position: absolute; left: -1px; bottom: 100%; font-size: 10px; line-height: 1.3; padding: 1px 5px; border-radius: 3px 3px 0 0; background: var(--accent); color: var(--bg-panel-solid); white-space: nowrap; }
+.ste-selbox .ste-selbox-label { position: absolute; left: -1px; bottom: 100%; font-size: 10px; line-height: 1.3; padding: 1px 5px; border-radius: 3px 3px 0 0; background: var(--accent); color: var(--bg-panel-solid); white-space: nowrap;
+  transform: scale(var(--inv, 1)); transform-origin: left bottom; pointer-events: none; }
+/* Step 5: the box takes the pointer (move), with corner handles (scale), side handles (width, height) and a knob (turn).
+   The handles keep their size on screen whatever the clip's scale (--inv). */
+.ste-selbox { pointer-events: auto; cursor: move; transform-origin: center; touch-action: none; }
+.ste-selbox.locked { cursor: not-allowed; }
+.ste-selbox:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.ste-handle { position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px; border: 1.5px solid var(--accent); background: var(--bg-panel-solid); border-radius: 2px;
+  transform: scale(var(--inv, 1)); z-index: 2; }
+.ste-handle.corner.nw { left: 0; top: 0; cursor: nwse-resize; } .ste-handle.corner.ne { left: 100%; top: 0; cursor: nesw-resize; }
+.ste-handle.corner.se { left: 100%; top: 100%; cursor: nwse-resize; } .ste-handle.corner.sw { left: 0; top: 100%; cursor: nesw-resize; }
+.ste-handle.side.e { left: 100%; top: 50%; cursor: ew-resize; border-radius: 5px; } .ste-handle.side.s { left: 50%; top: 100%; cursor: ns-resize; border-radius: 5px; }
+.ste-handle.rotate { left: 50%; top: -22px; border-radius: 50%; cursor: grab; background: var(--accent); }
+.ste-handle.rotate::after { content: ''; position: absolute; left: 50%; top: 100%; width: 1.5px; height: 12px; margin-left: -.75px; background: var(--accent); }
+.ste-snapline { position: absolute; pointer-events: none; background: var(--accent); opacity: .85; z-index: 3; }
+.ste-snapline.x { top: 0; bottom: 0; width: 1px; margin-left: -.5px; }
+.ste-snapline.y { left: 0; right: 0; height: 1px; margin-top: -.5px; }
+/* Keyframe rows: a diamond per keyframe moment, the clip's span faint behind them. */
+.ste-klane, .ste-khead { --lane-h: 20px; }
+.ste-khead { font-size: 10px; padding-left: 18px; }
+.ste-kspan { position: absolute; top: 9px; height: 2px; background: var(--ste-line); border-radius: 1px; pointer-events: none; }
+.ste-kspan.selected { background: rgba(var(--accent-rgb), .35); }
+.studio-view .ste-key { position: absolute; top: 4px; width: 11px; height: 11px; min-height: 0; margin-left: -5.5px; padding: 0; border: 1.5px solid var(--text-dim);
+  background: var(--bg-panel-solid); transform: rotate(45deg); border-radius: 1.5px; cursor: ew-resize; z-index: 4; }
+.studio-view .ste-key:hover { border-color: var(--accent); }
+.studio-view .ste-key.picked { background: var(--accent); border-color: var(--accent); }
+.studio-view .ste-key.dragging { box-shadow: var(--popup-shadow); }
+.studio-view .ste-key:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ste-klane.locked .ste-key { cursor: default; }
+/* The Motion group of the clip inspector. */
+.ste-motion-rows { display: grid; gap: 4px; margin: 4px 0 6px; }
+.ste-motion-row { display: grid; grid-template-columns: 64px minmax(56px, 1fr) auto auto; gap: 6px; align-items: center; font-size: 12px; }
+.ste-motion-row.keyed .ste-motion-name { color: var(--accent); font-weight: 600; }
+.ste-motion-row input[type=number] { min-height: 0; height: 26px; }
+.ste-key-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 2px; font-size: 11.5px; }
+.ste-key-list li { display: flex; gap: 8px; align-items: baseline; }
+.studio-view .ste-key-go { border: 0; background: none; padding: 0; color: var(--accent); font: 600 11.5px var(--font-mono); cursor: pointer; min-height: 0; }
+.studio-view .ste-key-go.picked { text-decoration: underline; }
+.ste-videos li { display: flex; gap: 6px; align-items: center; }
+.ste-video-thumb { width: 48px; height: 27px; object-fit: cover; border-radius: 3px; background: var(--ste-wash); flex: none; }
 .studio-stage.commenting .ste-pins { pointer-events: auto; cursor: crosshair; }
 .studio-view .ste-pin { position: absolute; width: 22px; height: 22px; min-height: 22px; margin: -22px 0 0 -2px; padding: 0; border: 2px solid var(--bg-panel-solid); border-radius: 50% 50% 50% 2px;
   background: var(--accent); color: var(--bg-panel-solid); font: 600 11px/18px var(--font-mono); text-align: center; pointer-events: auto; cursor: pointer; box-shadow: 0 1px 3px rgba(var(--shade-rgb), .35); }
@@ -320,14 +364,19 @@
 .ste-locked-note { color: var(--warn); }
 
 @media (max-width: 760px) {
-  .ste-olane, .ste-alane, .ste-pinlane, .ste-tl-sep, .ste-add-track, .studio-view .ste-track-tool { display: none; }
+  .ste-olane, .ste-alane, .ste-klane, .ste-khead, .ste-pinlane, .ste-tl-sep, .ste-add-track, .studio-view .ste-track-tool { display: none; }
   .studio-view .ste-pin { width: 30px; height: 30px; line-height: 26px; margin-top: -30px; }
 }
 .kairos-redesign [data-view][data-custom-tab="true"] .ste-shell .ste-tclip { border-radius: 6px !important; padding: 2px 9px; min-height: 0;
   background-color: color-mix(in srgb, var(--clip) 18%, var(--bg-panel-solid)) !important; color: var(--text) !important;
   border-color: color-mix(in srgb, var(--clip) 55%, var(--bg-panel-solid)) !important; }
 .kairos-redesign [data-view][data-custom-tab="true"] .ste-shell .ste-tclip.selected { background-color: color-mix(in srgb, var(--clip) 32%, var(--bg-panel-solid)) !important; }
-.kairos-redesign [data-view][data-custom-tab="true"] .ste-shell :is(.ste-head-tool, .ste-pinmark, .ste-comment-go) { min-height: 0 !important; padding: 0 !important; }
+.kairos-redesign [data-view][data-custom-tab="true"] .ste-shell :is(.ste-head-tool, .ste-pinmark, .ste-comment-go, .ste-key, .ste-key-go) { min-height: 0 !important; padding: 0 !important; }
+.kairos-redesign [data-view][data-custom-tab="true"] .ste-shell .ste-head-name { min-height: 0 !important; padding: 0 2px !important; border-radius: 4px !important; box-shadow: none !important;
+  background: none !important; color: inherit !important; font-size: 11px !important; justify-content: flex-start !important; border-color: transparent !important; }
+.kairos-redesign [data-view][data-custom-tab="true"] .ste-shell .ste-head-name:is(:hover, :focus-visible) { border-color: var(--ste-line) !important; }
+.kairos-redesign [data-view][data-custom-tab="true"] .ste-shell .ste-key { border-radius: 1.5px !important; background: var(--bg-panel-solid) !important; }
+.kairos-redesign [data-view][data-custom-tab="true"] .ste-shell .ste-key.picked { background: var(--accent) !important; }
 .kairos-redesign [data-view][data-custom-tab="true"] .ste-shell .ste-head-tool { border-radius: 4px !important; background-color: transparent !important; color: var(--text-faint) !important;
   border-color: transparent !important; width: 18px; height: 18px; font-size: 10px; }
 .kairos-redesign [data-view][data-custom-tab="true"] .ste-shell .ste-head-tool[aria-pressed="true"] { color: var(--accent) !important; border-color: var(--accent) !important; background-color: var(--accent-dim) !important; }

@@ -1,8 +1,8 @@
 import { clamp, expoOut, pop, inOut, hash, seededRandom, zoomAbout, scrim, card, windowReveal, BAYER, contrast, readable, luminance, rgb } from './kit.js';
 import { drawScene, sceneBoxes, groundLine, packCard, drawCardSky, drawCardWorld } from './scene.js';
 import { stageModel, stagePose, labelsAt, actorBoxes } from './stage.js';
-import { normalizeTracks, alphaAt, drawOverlay, overlayBoxes } from './overlay.js';
-import { normalizeProject, dimensions, safeArea, captionBand, captionAt, fitText, frameTime, beatAt, transitionAt, beatLayout, cameraAt, beatElapsed, transitionTransform, visibleBox, compositionAt, revealElapsed, listMarker } from './layout.js';
+import { normalizeTracks, stateAt, drawOverlay, overlayBoxes, frameIndex } from './overlay.js';
+import { isWord, normalizeProject, dimensions, safeArea, captionBand, captionAt, fitText, frameTime, beatAt, transitionAt, beatLayout, cameraAt, beatElapsed, transitionTransform, visibleBox, compositionAt, revealElapsed, listMarker } from './layout.js';
 
 function lookTokens(canvas, supplied) {
   const doc = canvas.ownerDocument, root = getComputedStyle(doc.documentElement), probe = doc.createElement('span');
@@ -96,8 +96,15 @@ export function mount(canvas, input, options = {}) {
   const measureCtx = buffer(doc, 1, 1).getContext('2d');
   const measure = (text, size, role) => { measureCtx.font = font(style, size, role); return measureCtx.measureText(text).width; };
   const images = new Map(), samples = new Map(), plans = new Map();
-  // Overlay tracks (overlay.js): text, image and shape clips over the beats, under the captions.
-  const overlays = normalizeTracks(input?.tracks);
+  // Overlay tracks (overlay.js): text, image, shape and video clips over the beats, under the captions. The editor
+  // swaps them live while a clip is dragged on the canvas (setTracks), without a new mount.
+  let media = input?.media && typeof input.media === 'object' ? input.media : {};
+  let overlays = normalizeTracks(input?.tracks, media);
+  // Video clips (step 7): the file's frames, decoded at upload (core/video_media.py), loaded on demand by number. The
+  // render page awaits prepare(t) before each frame, so every frame draws exactly frame n of its file (strict); the
+  // editor draws the nearest frame it already has while the exact one loads, and redraws when it arrives.
+  const strict = options.strict === true, frames = new Map(), loading = new Map();
+  const FRAME_CACHE = 360;
   const layers = Array.from({ length: 2 }, () => ({ bg: buffer(doc, w, h), fg: buffer(doc, w, h) }));
   let loaded = false, disposed = false;
   const plan = beat => {
@@ -119,6 +126,46 @@ export function mount(canvas, input, options = {}) {
     img.onerror = () => reject(new Error(`Motion image failed to load: ${name}`));
     img.src = assetURL(name);
   });
+  const frameURL = (name, n) => { const url = new URL(assetURL('media')); url.pathname += `/${name}/${n}.jpg`; return url.href; };
+  function loadFrame(name, n) {
+    const key = `${name}:${n}`;
+    if (frames.has(key)) return Promise.resolve(frames.get(key));
+    if (loading.has(key)) return loading.get(key);
+    const job = new Promise((resolve, reject) => {
+      const img = new Image(); img.crossOrigin = 'anonymous';
+      img.onload = () => { loading.delete(key); frames.set(key, img); if (frames.size > FRAME_CACHE) frames.delete(frames.keys().next().value); resolve(img); options.onFrame?.(); };
+      img.onerror = () => { loading.delete(key); reject(new Error(`Video frame failed to load: ${name} ${n}`)); };
+      img.src = frameURL(name, n);
+    });
+    loading.set(key, job); job.catch(() => {});
+    return job;
+  }
+  const videoClipsAt = t => overlays.filter(c => c.kind === 'video' && c.video && t >= c.start && t < c.end);
+  // Load the exact frames time t needs (and a few after it, not awaited).
+  async function prepare(time) {
+    const t = Math.min(Math.max(0, Number(time) || 0), project.duration);
+    const clips = videoClipsAt(t);
+    for (const c of clips) for (let k = 1; k <= 6; k++) loadFrame(c.video, Math.min(c.frames - 1, frameIndex(c, t) + k)).catch(() => {});
+    await Promise.all(clips.map(c => loadFrame(c.video, frameIndex(c, t))));
+  }
+  // Draw at once when every frame t needs is loaded (always, without video clips); else load them, then draw.
+  function drawWhenReady(time) {
+    const t = Math.min(Math.max(0, Number(time) || 0), project.duration);
+    if (videoClipsAt(t).every(c => frames.has(`${c.video}:${frameIndex(c, t)}`))) {
+      drawFrame(time);
+      if (videoClipsAt(t).length) prepare(t).catch(() => {});
+      return Promise.resolve();
+    }
+    return prepare(t).then(() => drawFrame(time));
+  }
+  function frameFor(clip, t) {
+    const n = frameIndex(clip, t), exact = frames.get(`${clip.video}:${n}`);
+    if (exact) return exact;
+    if (strict) throw new Error(`Video frame ${n} of ${clip.video.slice(0, 8)} was not ready; await prepare(t) before drawFrame(t).`);
+    loadFrame(clip.video, n).catch(() => {});
+    for (let d = 1; d <= 45; d++) { const near = frames.get(`${clip.video}:${n - d}`) || frames.get(`${clip.video}:${n + d}`); if (near) return near; }
+    return null;
+  }
   const ready = (async () => {
     // Explicit loads activate @font-face rules before fonts.ready can resolve early.
     await Promise.all([doc.fonts.load(font(style, 96, 'title')), doc.fonts.load(font(style, 48, 'body')),
@@ -131,6 +178,7 @@ export function mount(canvas, input, options = {}) {
     }
     if (disposed) { stage3d?.dispose(); stage3d = null; throw new Error('This preview was replaced before it was ready.'); }
     for (const beat of project.beats) plan(beat);
+    await prepare(0).catch(error => { if (strict) throw error; });
     loaded = true; drawFrame(0);
   })();
 
@@ -391,17 +439,48 @@ export function mount(canvas, input, options = {}) {
     return { part, fit, x: band.x + (band.w - boxW) / 2, y: band.y + (band.h - boxH) / 2, w: boxW, h: boxH,
       color: readable(style.text, style.bg, style.palette) };
   }
+  // The word being said at t, as its place in the fitted lines ({row, piece, index}), or null. Between two words the
+  // one just said stays lit; before the first word nothing is.
+  function currentWord(c, t) {
+    const words = c.part.words;
+    if (!words?.length || c.fit.truncated) return null;
+    let k = -1;
+    for (let i = 0; i < words.length; i++) if (t >= words[i].start) k = i;
+    if (k < 0) return null;
+    const pieces = c.fit.lines.map(line => line.split(' '));
+    if (pieces.flat().length !== c.part.text.split(' ').length) return null;   // a word broken across lines: line captions
+    let n = -1;
+    for (let row = 0; row < pieces.length; row++) for (let i = 0; i < pieces[row].length; i++) if (isWord(pieces[row][i]) && ++n === k) return { row, piece: i, index: k };
+    return null;
+  }
   function drawCaption(t) {
     const c = caption(t);
     if (!c) return;
     ctx.save(); ctx.globalAlpha = .9; card(ctx, c.x, c.y, c.w, c.h, style.bg, Math.min(style.radius, 24), style.bg); ctx.globalAlpha = 1;
-    ctx.font = font(style, c.fit.size, 'body'); ctx.fillStyle = c.color; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    c.fit.lines.forEach((line, row) => ctx.fillText(line, c.x + c.w / 2, c.y + capPad + row * c.fit.lineHeight + c.fit.size * .88));
+    ctx.font = font(style, c.fit.size, 'body'); ctx.fillStyle = c.color; ctx.textBaseline = 'alphabetic';
+    const word = project.captionStyle !== 'line' ? currentWord(c, t) : null;
+    c.fit.lines.forEach((line, row) => {
+      const baseline = c.y + capPad + row * c.fit.lineHeight + c.fit.size * .88;
+      if (!word || word.row !== row) { ctx.textAlign = 'center'; ctx.fillText(line, c.x + c.w / 2, baseline); return; }
+      // The lit word's line in three pieces, left to right from the centred line's left edge.
+      const pieces = line.split(' '), before = pieces.slice(0, word.piece).join(' '), lit = pieces[word.piece], after = pieces.slice(word.piece + 1).join(' ');
+      const left = c.x + (c.w - measure(line, c.fit.size, 'body')) / 2, space = measure(' ', c.fit.size, 'body');
+      const x1 = left + (before ? measure(before, c.fit.size, 'body') + space : 0), litW = measure(lit, c.fit.size, 'body');
+      ctx.textAlign = 'left';
+      if (before) ctx.fillText(before, left, baseline);
+      if (after) ctx.fillText(after, x1 + litW + space, baseline);
+      if (project.captionStyle === 'box') {
+        const padX = c.fit.size * .1, top = baseline - c.fit.size * .92;
+        ctx.fillStyle = style.accent; ctx.beginPath(); ctx.roundRect(x1 - padX, top, litW + padX * 2, c.fit.size * 1.16, Math.min(10, c.fit.size * .2)); ctx.fill();
+        ctx.fillStyle = readable(style.onAccent, style.accent, style.palette);
+      } else ctx.fillStyle = readable(style.accent, style.bg, style.palette);
+      ctx.fillText(lit, x1, baseline); ctx.fillStyle = c.color;
+    });
     ctx.restore();
   }
-  const overlayEnv = { w, h, style, measure, font, images };
+  const overlayEnv = { w, h, style, measure, font, images, frame: frameFor };
   function drawOverlays(t) {
-    for (const clip of overlays) drawOverlay(ctx, clip, alphaAt(clip, t), overlayEnv);
+    for (const clip of overlays) drawOverlay(ctx, clip, stateAt(clip, t), overlayEnv, t);
   }
   function drawFrame(time) {
     if (!loaded) throw new Error('Await mount.ready before drawing');
@@ -475,8 +554,11 @@ export function mount(canvas, input, options = {}) {
     }
     result.push(...overlayBoxes(overlays, t, w, h, measure, style));
     const c = caption(t);
-    if (c) result.push({ beat: c.part.beat, kind: 'text', role: 'caption', text: c.part.text, fontSize: c.fit.size, x: c.x, y: c.y, w: c.w, h: c.h,
-      color: c.color, bg: style.bg, truncated: c.fit.truncated });
+    if (c) {
+      const word = project.captionStyle !== 'line' ? currentWord(c, t) : null;
+      result.push({ beat: c.part.beat, kind: 'text', role: 'caption', text: c.part.text, fontSize: c.fit.size, x: c.x, y: c.y, w: c.w, h: c.h,
+        color: c.color, bg: style.bg, truncated: c.fit.truncated, captionStyle: c.part.words ? project.captionStyle : 'line', ...(word ? { word: word.index } : {}) });
+    }
     return result;
   }
   // The 3D pose at a time, for the Blender renderer: the stage shot on screen with every transform and the camera, or null.
@@ -490,10 +572,17 @@ export function mount(canvas, input, options = {}) {
   const stageModels = () => Object.fromEntries(project.beats.filter(b => b.kind === 'stage').map(b => [b.id, modelOf(b)]));
   // Studio's editor remounts its preview on every edit: free the 3D renderer's GPU context with the old mount.
   const dispose = () => { disposed = true; stage3d?.dispose(); stage3d = null; loaded = false; };
-  return { ready, duration: project.duration, drawFrame, layout, pose, stageModels, dispose, stageInfo: () => stage3d && { ...stage3d.info, lost: stage3d.lost },
-    info: { duration: project.duration, fps: 30, width: w, height: h, aspect, layer: overlay ? 'overlay' : 'full',
+  // The editor's live canvas edits: new overlay tracks (and media list) drawn at once, without a new mount.
+  function setTracks(tracks, nextMedia = media) {
+    media = nextMedia && typeof nextMedia === 'object' ? nextMedia : {};
+    overlays = normalizeTracks(tracks, media);
+    const missing = [...new Set(overlays.map(c => c.image).filter(name => name && !images.has(name)))];
+    return Promise.all(missing.map(loadImage)).catch(() => {});
+  }
+  return { ready, duration: project.duration, drawFrame, drawWhenReady, layout, pose, stageModels, dispose, prepare, setTracks, stageInfo: () => stage3d && { ...stage3d.info, lost: stage3d.lost },
+    info: { duration: project.duration, fps: project.fps, width: w, height: h, aspect, layer: overlay ? 'overlay' : 'full', captionStyle: project.captionStyle,
       renderer: hasStage ? (overlay ? 'blender' : 'threejs') : '2d-engine', beats: project.beats.map(({ id, start, end }) => ({ id, start, end })),
-      clips: overlays.map(({ id, track, start, end }) => ({ id, track, start, end })) } };
+      clips: overlays.map(({ id, track, start, end, kind }) => ({ id, track, start, end, kind })) } };
 }
 
 // A module import for Studio does not mount anything unless the player marker exists.
@@ -502,8 +591,9 @@ if (projectElement && document.getElementById('kd-canvas')) {
   try {
     const params = new URLSearchParams(location.search);
     const m = mount(document.getElementById('kd-canvas'), JSON.parse(projectElement.textContent), { aspect: params.get('aspect') || undefined,
-      layer: params.get('layer') === 'overlay' ? 'overlay' : 'full' });
-    window.kdInfo = m.info; window.kdDrawFrame = m.drawFrame; window.kdLayout = m.layout; window.kdReady = m.ready;
+      layer: params.get('layer') === 'overlay' ? 'overlay' : 'full', strict: !params.has('play') });
+    // The render worker awaits what kdDrawFrame returns: the exact video frames for t load first, then the frame draws.
+    window.kdInfo = m.info; window.kdDrawFrame = m.drawWhenReady; window.kdLayout = m.layout; window.kdReady = m.ready;
     window.kdPose = m.pose; window.kdStageModels = m.stageModels; window.kdStageInfo = m.stageInfo;
     if (params.has('play')) m.ready.then(() => preview(m));
   } catch (error) { window.kdReady = Promise.reject(error); }

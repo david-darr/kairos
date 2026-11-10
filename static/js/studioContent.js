@@ -228,6 +228,8 @@ export async function mountContent(host, { signal } = {}) {
     const status3d = data.styles?.renderers;
     const renderer = selectOf('3D renderer', M.rendererOptions(status3d, { inherit: true }), channel.renderer || '');
     if (!status3d?.blender?.supported) renderer.querySelector('option[value="blender"]').disabled = channel.renderer !== 'blender';
+    // Step 6: the channel's frame rate; 60 is smoother and takes about twice as long to render.
+    const fps = selectOf('Frame rate', [['30', '30 frames a second'], ['60', '60 frames a second']], String(channel.fps || 30));
     const youtube = channel.platform === 'youtube';
     const longWeek = el('input', { type: 'number', min: '0', max: '7', step: '1', 'aria-label': 'Long videos a week', value: String(channel.long_per_week ?? 1) });
     longWeek.value = String(channel.long_per_week ?? 1);
@@ -237,14 +239,16 @@ export async function mountContent(host, { signal } = {}) {
       group({}, [row({ title: 'Style pack', description: 'How this channel\'s videos look and sound. Only approved packs are listed (Styles).', control: pack }),
         row({ title: '3D renderer', description: status3d?.blender?.supported ? `For glossy 3D packs. three.js is built in and fast; Blender ${status3d.blender.version} is installed here: softer light, much slower.` : 'For glossy 3D packs. three.js is built in. Blender isn\'t installed on this computer, so it cannot be picked.', control: renderer }),
         row({ title: 'Look', description: 'A Studio video look id. Leave it empty to let the Editor choose.', control: look, stack: true }),
-        row({ title: 'Aspect', control: aspect }), row({ title: 'Voice notes', control: notes, stack: true }),
+        row({ title: 'Aspect', control: aspect }),
+        row({ title: 'Frame rate', description: '60 is smoother for fast motion and takes about twice as long to render. Shorts and most explainers look fine at 30.', control: fps }),
+        row({ title: 'Voice notes', control: notes, stack: true }),
         row({ title: 'Narrator voice', description: 'The Kokoro voice that narrates every video on this channel. Left empty, the first narrated video sets it.', control: voice, stack: true }),
         youtube ? row({ title: 'Long videos a week', description: 'Longer videos in chapters, on top of the daily Shorts. The team plans within it, and each plan comes to you before it renders.', control: longWeek }) : null]), status]);
     const save = btn('Save look', async () => {
       status.textContent = '';
       const week = Number(longWeek.value);
       if (youtube && (!Number.isInteger(week) || week < 0 || week > 7)) { status.textContent = 'Long videos a week is a whole number from 0 to 7.'; return; }
-      try { await send(`/channels/${channel.id}/edit`, { look: look.value.trim(), aspect: aspect.value, notes: notes.value.trim(), voice: voice.value.trim(), style_pack: pack.value, renderer: renderer.value, ...(youtube ? { long_per_week: week } : {}) }); }
+      try { await send(`/channels/${channel.id}/edit`, { look: look.value.trim(), aspect: aspect.value, notes: notes.value.trim(), voice: voice.value.trim(), style_pack: pack.value, renderer: renderer.value, fps: Number(fps.value), ...(youtube ? { long_per_week: week } : {}) }); }
       catch (error) { status.textContent = M.loadFailure(error); return; }
       dialog.close(); toast('Look saved.'); await reload();
     }, 'primary');

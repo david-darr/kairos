@@ -14,11 +14,28 @@ export function assetName(value) {
   const name = value.replace(/^assets\//, '');
   return /^[\w.-]{1,180}$/u.test(name) && !name.includes('..') ? name : '';
 }
+// Caption styles (step 7): the whole line, or the line with its current word in the accent colour (highlight) or on an
+// accent box (box). A word style needs the line's words aligned (core/video_align.py); a line without them keeps line captions.
+export const CAPTION_STYLES = ['line', 'highlight', 'box'];
+// The caption's words: the part's text split on spaces, counting only pieces with a letter or digit (as the server does).
+export const isWord = piece => /[\p{L}\p{N}_]/u.test(piece);
+function attachWords(captions, words, start) {
+  if (!Array.isArray(words)) return;
+  const count = captions.reduce((n, c) => n + c.text.split(' ').filter(isWord).length, 0);
+  if (words.length !== count || !words.every(w => Array.isArray(w) && Number.isFinite(w[0]) && Number.isFinite(w[1]))) return;
+  let k = 0;
+  for (const c of captions) {
+    const n = c.text.split(' ').filter(isWord).length;
+    c.words = words.slice(k, k + n).map(([a, b]) => ({ start: start + a, end: start + b }));
+    k += n;
+  }
+}
 export function normalizeProject(input = {}) {
   input = input && typeof input === 'object' ? input : {};
   const bpm = clamp(finite(input.bpm, 120), LIMITS.minBpm, LIMITS.maxBpm), bar = 240 / bpm;
   let start = 0;
   const ids = new Set(), captionsOn = input.narration?.captions !== false;
+  const captionStyle = CAPTION_STYLES.includes(input.narration?.caption_style) ? input.narration.caption_style : 'line', wordStyle = captionStyle !== 'line';
   const raw = Array.isArray(input.beats) && input.beats.length ? input.beats : [{ kind: 'end', text: input.title || 'Untitled', bars: 1 }];
   const beats = raw.slice(0, LIMITS.beats).map((value, i) => {
     const b = value && typeof value === 'object' ? value : {};
@@ -38,6 +55,8 @@ export function normalizeProject(input = {}) {
       treatment: ['halftone', 'dither'].includes(b.treatment) ? b.treatment : 'none',
       captions: captionsOn && Array.isArray(b.spoken?.parts) ? b.spoken.parts.filter(part => Array.isArray(part) && Number.isFinite(part[0]) && Number.isFinite(part[1]) && part[1] > part[0])
         .map(([from, to, text]) => ({ start: start + from, end: start + to, text: str(text, 160) })).filter(c => c.text) : [] };
+    // Word captions (step 7): each part's words with their aligned times, when the line was aligned with confidence.
+    if (result.captions.length && wordStyle) attachWords(result.captions, b.spoken?.words, start);
     // A Pack A scene keeps its setting, shot, cast and props, and the mouth shapes measured from its line.
     if (kind === 'scene' || kind === 'stage') {
       if (kind === 'scene') result.scene = normalizeScene(b.scene);
@@ -47,7 +66,7 @@ export function normalizeProject(input = {}) {
     start = end; return result;
   });
   const characters = input.characters && typeof input.characters === 'object' ? input.characters : {};
-  return { id: str(input.id, 64), title: str(input.title, 180), look: str(input.look, 64), bpm, bar, fps: 30, renderer: input.renderer === 'blender' ? 'blender' : 'threejs',
+  return { id: str(input.id, 64), title: str(input.title, 180), look: str(input.look, 64), bpm, bar, fps: input.fps === 60 ? 60 : 30, captionStyle, renderer: input.renderer === 'blender' ? 'blender' : 'threejs',
     palette: str(input.palette, 24) || 'dawn', characters, pack: normalizePack(input.pack),
     aspects: (Array.isArray(input.aspects) ? input.aspects : ['16:9']).filter(a => SIZES[a]), beats, duration: start,
     captioned: beats.some(b => b.captions.length) };
