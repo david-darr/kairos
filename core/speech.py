@@ -109,6 +109,10 @@ def engine_available() -> bool:
     """Whether the binding imports at all. Separate from whether a model is
     present, because the two fail for different reasons and the UI should say
     which."""
+    from core import vc_runtime
+    if vc_runtime.missing():
+        # whisper.cpp needs the Microsoft Visual C++ runtime; importing it without would only log a DLL traceback.
+        return False
     try:
         import pywhispercpp.model  # noqa: F401
         return True
@@ -118,8 +122,10 @@ def engine_available() -> bool:
 
 
 def status() -> dict:
-    from core import speech_acceleration, speech_optional, turn_detect
+    from core import speech_acceleration, speech_optional, turn_detect, vc_runtime
     return {
+        # Windows without the Microsoft Visual C++ runtime: Settings > Speech shows one line saying to install it.
+        "vc_runtime": vc_runtime.status(),
         # Optional ONNX downloads (Smart Turn, Kokoro): honest per-item state, nothing auto-downloads.
         "optional": speech_optional.status(),
         "turn_detect": turn_detect.status(),

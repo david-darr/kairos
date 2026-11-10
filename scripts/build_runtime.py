@@ -99,9 +99,24 @@ GET_PIP_SHA256 = "fb24e693bab954209a063d90953621412ccad4a500905a726286e038f508dd
 # It is uninstalled from the shipped runtime once the packages are in.
 PIP_VERSION = "26.2.1"
 
+# Windows installer only: Microsoft's Visual C++ 2015-2022 x64 Redistributable. onnxruntime, pywhispercpp and
+# llama-cpp-python import MSVCP140.dll and MSVCP140_1.dll, which the embeddable Python does not carry; Microsoft's
+# supported route is its own redistributable, which electron/vcredist.nsh runs quietly when a PC lacks it. Microsoft's
+# permalink (https://aka.ms/vs/17/release/vc_redist.x64.exe) moves with every release, so the pin is the versioned
+# file it redirected to on 2026-11-10 (the path carries Microsoft's own SHA-256 of the file). Signed by Microsoft
+# Corporation (Microsoft Code Signing PCA 2011), checked below at every build. A new version means updating all four
+# values here and KAIROS_VCRT_* in electron/vcredist.nsh (scripts/test_vcredist_nsis.cjs checks they agree).
+VC_REDIST_URL = ("https://download.visualstudio.microsoft.com/download/pr/e9604e21-4b79-4096-a4b3-1b63d4b55b4d/"
+                 "CC0FF0EB1DC3F5188AE6300FAEF32BF5BEEBA4BDD6E8E445A9184072096B713B/VC_redist.x64.exe")
+VC_REDIST_VERSION = "14.44.35211.0"
+VC_REDIST_SIZE = 25_635_768
+VC_REDIST_SHA256 = "cc0ff0eb1dc3f5188ae6300faef32bf5beeba4bdd6e8e445a9184072096b713b"
+VC_REDIST_SIGNER = "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = os.path.dirname(SCRIPT_DIR)
 RUNTIME_DIR = os.path.join(BASE_DIR, "electron", "runtime")
+VC_REDIST_PATH = os.path.join(BASE_DIR, "electron", "redist", "vc_redist.x64.exe")
 REQUIREMENTS = os.path.join(BASE_DIR, "requirements.txt")
 LOCKFILE = os.path.join(BASE_DIR, "requirements.lock")
 LOCK_STAMP = os.path.join(RUNTIME_DIR, ".requirements-lock-sha256")
@@ -418,12 +433,65 @@ print('bundled Claude Code', version.stdout.strip())
     log(result.stdout.strip())
 
 
+def _sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def authenticode_signer(path: str) -> tuple[str, str]:
+    """(status, signer subject) from Windows' own Authenticode check of a file."""
+    script = ("$s = Get-AuthenticodeSignature -LiteralPath $env:KAIROS_SIGNED_FILE; "
+              "[string]$s.Status + '|' + [string]$s.SignerCertificate.Subject")
+    result = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                            capture_output=True, text=True, env={**os.environ, "KAIROS_SIGNED_FILE": path})
+    if result.returncode != 0:
+        raise RuntimeError("could not read the Authenticode signature of " + path + ":\n" + result.stderr.strip())
+    status, _, subject = result.stdout.strip().partition("|")
+    return status, subject
+
+
+def ensure_vc_redist() -> None:
+    """Put Microsoft's pinned vc_redist.x64.exe where electron/vcredist.nsh packs it (Windows builds only). Reuses a
+    present copy only when its size and SHA-256 are the pinned ones; either way the file must carry a valid Microsoft
+    Corporation signature, or the build stops."""
+    have = os.path.isfile(VC_REDIST_PATH) and os.path.getsize(VC_REDIST_PATH) == VC_REDIST_SIZE \
+        and _sha256_file(VC_REDIST_PATH) == VC_REDIST_SHA256
+    if not have:
+        data = download(VC_REDIST_URL, VC_REDIST_SHA256)
+        if len(data) != VC_REDIST_SIZE:
+            raise RuntimeError(f"vc_redist.x64.exe is {len(data)} bytes, pinned {VC_REDIST_SIZE}")
+        os.makedirs(os.path.dirname(VC_REDIST_PATH), exist_ok=True)
+        with open(VC_REDIST_PATH, "wb") as handle:
+            handle.write(data)
+    status, subject = authenticode_signer(VC_REDIST_PATH)
+    if status != "Valid" or subject != VC_REDIST_SIGNER:
+        raise RuntimeError(f"vc_redist.x64.exe signature is {status!r} by {subject!r}, not a valid Microsoft one")
+    log(f"Microsoft Visual C++ runtime {VC_REDIST_VERSION} ready for the installer (sha256 and Microsoft signature OK)")
+
+
+def strip_script_launchers() -> None:
+    """Remove the runtime's Scripts folder (Windows). pip writes a console launcher .exe there for every package
+    (uvicorn.exe, httpx.exe, f2py.exe...), each with the BUILD machine's python path baked in, plus pywin32's
+    post-install scripts. Nothing in Kairos runs them: electron/main.js starts `python -m uvicorn`, kairos.cmd runs
+    python on cli/, and the folder is never put on PATH. Shipping them only leaked the build path (2.3.0-beta.1)."""
+    scripts = os.path.join(RUNTIME_DIR, "Scripts")
+    if os.path.isdir(scripts):
+        count = sum(len(files) for _, _, files in os.walk(scripts))
+        shutil.rmtree(scripts)
+        log(f"removed the runtime's Scripts folder ({count} pip launchers and scripts with the build path)")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--force", action="store_true", help="rebuild even if a runtime already exists")
     args = parser.parse_args()
 
     check_pinning_policy()
+    if IS_WINDOWS:
+        ensure_vc_redist()
 
     # electron/main.js's resolveBackendPython() looks in these exact places.
     python_exe = (os.path.join(RUNTIME_DIR, "python.exe") if IS_WINDOWS
@@ -441,6 +509,8 @@ def main() -> int:
             log("runtime is missing " + ", ".join(stale) + " - rebuilding instead of reusing it")
         else:
             log("runtime already present — verifying it instead of rebuilding (use --force to rebuild)")
+            if IS_WINDOWS:
+                strip_script_launchers()
             verify(python_exe)
             log("runtime OK")
             return 0
@@ -497,6 +567,8 @@ def main() -> int:
     # pip itself is ~13MB and is never needed at runtime by the shipped app.
     log("removing pip/setuptools from the shipped runtime")
     run(python_exe, ["-m", "pip", "uninstall", "-y", "pip", "setuptools", "wheel"])
+    if IS_WINDOWS:
+        strip_script_launchers()
 
     verify(python_exe)
     with open(LOCK_STAMP, "w", encoding="ascii") as handle:

@@ -198,6 +198,46 @@ class Catalog(Base):
             with patch.object(speech_optional, 'module_available', side_effect=lambda m: m not in ('kokoro_onnx', 'phonemizer', 'espeakng_loader')):
                 self.assertTrue(speech_optional.state('kokoro')['ready'], 'Kokoro is ready with only the model download')
 
+    def test_missing_vc_runtime_is_one_plain_line(self):
+        # beta.1 gap: onnxruntime, whisper.cpp and llama.cpp need MSVCP140/MSVCP140_1 from Microsoft's Visual C++
+        # runtime. Without it Settings > Speech must say how to fix it, not show a DLL traceback.
+        from core import llamacpp_engine, speech, vc_runtime
+        self.install('smart-turn')
+        self.install('kokoro')
+        message = 'Install the Microsoft Visual C++ runtime'
+        with patch.object(vc_runtime, 'missing', return_value=True), \
+                patch.object(speech_optional, 'module_available', return_value=True):
+            for name in ('smart-turn', 'kokoro'):
+                s = speech_optional.state(name)
+                self.assertEqual((s['state'], s['status'], s['ready']), ('needs_runtime', message, False))
+                self.assertEqual(s['missing_runtime'][0], 'vc_runtime')
+            self.assertEqual(turn_detect.ready(), (False, message))
+            self.assertEqual(kokoro_voice.ready(), (False, message))
+            self.assertFalse(speech.engine_available())
+            with patch.object(llamacpp_engine, '_model_path', return_value=__file__), self.assertRaises(RuntimeError) as raised:
+                asyncio.run(llamacpp_engine.start('any'))
+            self.assertIn(message, str(raised.exception))
+        with patch.object(vc_runtime, 'missing', return_value=False), \
+                patch.object(speech_optional, 'module_available', return_value=True):
+            self.assertTrue(speech_optional.state('smart-turn')['ready'])
+
+    def test_vc_runtime_probe(self):
+        from core import vc_runtime
+        vc_runtime.missing_dlls.cache_clear()
+        self.addCleanup(vc_runtime.missing_dlls.cache_clear)
+        with patch.object(vc_runtime.sys, 'platform', 'win32'), \
+                patch.object(vc_runtime, '_load', side_effect=lambda name: name != 'msvcp140_1.dll'):
+            self.assertEqual(vc_runtime.status(), {'missing': True, 'dlls': ['msvcp140_1.dll'],
+                                                   'message': 'Install the Microsoft Visual C++ runtime',
+                                                   'download_url': 'https://aka.ms/vs/17/release/vc_redist.x64.exe'})
+        vc_runtime.missing_dlls.cache_clear()
+        with patch.object(vc_runtime.sys, 'platform', 'darwin'):
+            self.assertFalse(vc_runtime.missing())
+        vc_runtime.missing_dlls.cache_clear()
+        if sys.platform == 'win32':
+            # The probe really loads the DLLs: this PC has the runtime, so it must say so.
+            self.assertEqual(vc_runtime.status()['missing'], False)
+
     def test_remove_deletes_files_and_cached_sessions(self):
         self.install('smart-turn')
         turn_detect.SESSION_FACTORY = lambda path: FakeSession(.9)

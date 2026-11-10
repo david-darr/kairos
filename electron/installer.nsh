@@ -1,3 +1,5 @@
+; Also: the Microsoft Visual C++ runtime, installed when missing (vcredist.nsh).
+;
 ; Kairos CLI (vault spec "Kairos CLI (Build Spec)", section 4.7).
 ; electron-builder includes this through build.nsis.include.
 ;
@@ -20,6 +22,9 @@
   ${UnStrRep}
 !else
   ${StrStr}
+
+; Microsoft's Visual C++ runtime, run only when the PC lacks it (see that file).
+!include "${BUILD_RESOURCES_DIR}\vcredist.nsh"
 
 ; The PATH page and its answer belong to the installer pass alone, for the
 ; same reason.
@@ -49,6 +54,7 @@ FunctionEnd
 !endif
 
 !macro customInstall
+  Call KairosVcRuntime
   CopyFiles /SILENT "$INSTDIR\resources\backend\cli\kairos.cmd" "$INSTDIR\kairos.cmd"
   ${If} $KairosCliPathWanted == ${BST_CHECKED}
     ReadRegStr $0 HKCU "Environment" "Path"

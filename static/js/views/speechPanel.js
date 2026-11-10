@@ -140,7 +140,11 @@ export async function renderSpeechPanel(content, status) {
     const choice = await drawVoiceChoice(kokoroReady, () => draw());
     if (choice && root.isConnected) main.push(choice);
 
-    if (!state.engine_available) {
+    if (state.vc_runtime?.missing) {
+      // Windows without Microsoft's C++ runtime (the installer normally adds it): one plain line, not a DLL error.
+      main.push(group({}, [row({ title: state.vc_runtime.message || 'Install the Microsoft Visual C++ runtime',
+        description: 'Microsoft download: aka.ms/vs/17/release/vc_redist.x64.exe. Restart Kairos afterwards.' })]));
+    } else if (!state.engine_available) {
       // A missing binding is a broken build, not something a download fixes,
       // so this deliberately does not offer one.
       main.push(group({}, [row({ title: 'Speech recognition is unavailable in this build.',

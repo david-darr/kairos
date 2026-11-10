@@ -30,6 +30,10 @@
 //                       (core/backup.py); a fresh profile restores it at
 //                       start and holds the same chats
 // The first stage alone (the original check) runs with --first-start-only.
+//
+// --port=N runs the package as a named test instance (default name "verify",
+// or --instance=NAME) on port N, so it can be checked while the installed
+// Kairos keeps port 8420. Without --port it uses 8420 exactly as before.
 
 const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
@@ -43,9 +47,19 @@ const asar = path.join(root, 'dist', 'win-unpacked', 'resources', 'app.asar');
 const backendDir = path.join(root, 'dist', 'win-unpacked', 'resources', 'backend');
 const runtimeExe = path.join(backendDir, 'runtime', 'python.exe');
 const legacyScript = path.join(root, 'scripts', 'legacy_profile.py');
-const PORT = 8420;
 const BACKSLASH = String.fromCharCode(92);
 const FIRST_ONLY = process.argv.includes('--first-start-only');
+function option(name) {
+  const flag = process.argv.find((arg) => arg.startsWith(`--${name}=`));
+  return flag ? flag.slice(name.length + 3) : '';
+}
+const PORT = option('port') ? Number(option('port')) : 8420;
+if (!Number.isInteger(PORT) || PORT < 1024 || PORT > 65535) throw new Error('--port must be 1024-65535');
+// A non-default port means a named instance: electron/instance.js refuses 8420 for one, and never lets one take the
+// real app's machine-wide hooks. Its name must match instance.js's rule.
+const INSTANCE = PORT === 8420 ? option('instance') : (option('instance') || 'verify');
+if (INSTANCE && !/^[a-z0-9][a-z0-9-]{0,19}$/.test(INSTANCE)) throw new Error('--instance must be 1-20 lowercase letters, digits or dashes');
+if (INSTANCE && PORT === 8420) throw new Error('a named instance needs --port other than 8420');
 
 function fail(msg) { throw new Error(msg); }
 
@@ -57,7 +71,7 @@ async function requireFreePort() {
     const server = net.createServer();
     server.once('error', reject);
     server.listen(PORT, '127.0.0.1', () => server.close(resolve));
-  }).catch(() => fail('127.0.0.1:8420 is already in use; close JARVIS first. The verifier did not launch or stop anything.'));
+  }).catch(() => fail(`127.0.0.1:${PORT} is already in use; close what holds it${PORT === 8420 ? ' (JARVIS)' : ''} or pick another --port. The verifier did not launch or stop anything.`));
 }
 
 // netstat gives the PID that owns the exact loopback listener. A 200 alone is
@@ -65,8 +79,8 @@ async function requireFreePort() {
 function listenerPid() {
   const result = spawnSync('netstat', ['-ano', '-p', 'TCP'], { encoding: 'utf8' });
   if (result.status !== 0) fail('could not identify the health-port owner');
-  const line = result.stdout.split(/\r?\n/).find((row) =>
-    /^\s*TCP\s+127\.0\.0\.1:8420\s+\S+\s+LISTENING\s+\d+\s*$/i.test(row));
+  const listening = new RegExp(`^\\s*TCP\\s+127\\.0\\.0\\.1:${PORT}\\s+\\S+\\s+LISTENING\\s+\\d+\\s*$`, 'i');
+  const line = result.stdout.split(/\r?\n/).find((row) => listening.test(row));
   return line ? Number(line.trim().split(/\s+/).at(-1)) : null;
 }
 
@@ -135,7 +149,14 @@ async function launch(profile, label, { args = [], env: extra = {} } = {}) {
   // its pinned JARVIS folder still lands under this throwaway profile.
   const env = { ...process.env, ELECTRON_ENABLE_LOGGING: '1', ...extra, APPDATA: profile };
   delete env.JARVIS_BACKEND_URL; // An inherited override would bypass the packaged backend.
-  child = spawn(appExe, ['--user-data-dir=' + profile, ...args], { stdio: ['ignore', log, log], env });
+  delete env.JARVIS_INSTANCE;
+  delete env.JARVIS_PORT;
+  const instanceArgs = [];
+  if (INSTANCE) {
+    instanceArgs.push('--instance=' + INSTANCE);
+    env.JARVIS_PORT = String(PORT);
+  }
+  child = spawn(appExe, ['--user-data-dir=' + profile, ...instanceArgs, ...args], { stdio: ['ignore', log, log], env });
   fs.closeSync(log);
   const deadline = Date.now() + 180000;
   let healthy = false;

@@ -162,6 +162,10 @@ async def start(name: str) -> None:
     path = _model_path(name)
     if not os.path.exists(path):
         raise FileNotFoundError(f"model not downloaded: {name}")
+    from core import vc_runtime
+    if vc_runtime.missing():
+        # llama.cpp needs it too; without it the server dies at import with only a DLL error.
+        raise RuntimeError(vc_runtime.MESSAGE + ", then restart Kairos, to run local models.")
     stop()
     _process = subprocess.Popen(
         [sys.executable, "-m", "llama_cpp.server", "--model", path, "--host", DEFAULT_HOST, "--port", str(DEFAULT_PORT)],

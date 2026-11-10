@@ -24,7 +24,7 @@ import re
 
 import httpx
 
-from core import kokoro_g2p
+from core import kokoro_g2p, vc_runtime
 from core.constants import DATA_DIR
 
 logger = logging.getLogger(__name__)
@@ -54,7 +54,7 @@ CATALOG = [
                 "sha256": "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"}]},
 ]
 
-RUNTIME_NAMES = {"onnxruntime": "the ONNX runtime", "misaki": "the misaki phonemizer", "spacy": "spaCy",
+RUNTIME_NAMES = {"vc_runtime": "the Microsoft Visual C++ runtime", "onnxruntime": "the ONNX runtime", "misaki": "the misaki phonemizer", "spacy": "spaCy",
                  "en_core_web_sm": "spaCy's English model", "num2words": "num2words"}
 
 _progress: dict[str, dict] = {}
@@ -87,7 +87,11 @@ def module_available(module: str) -> bool:
 
 
 def missing_runtime(name: str) -> list[str]:
-    return [m for m in entry(name)["needs"] if not module_available(m)]
+    """What this item still needs. On Windows the ONNX runtime imports only when the Microsoft Visual C++ runtime is
+    present (core/vc_runtime.py), which find_spec cannot see, so that is checked too and named first: it is the fix."""
+    needs = entry(name)["needs"]
+    missing = ["vc_runtime"] if "onnxruntime" in needs and vc_runtime.missing() else []
+    return missing + [m for m in needs if not module_available(m)]
 
 
 def runtime_names(missing: list[str]) -> str:
@@ -98,6 +102,8 @@ def runtime_names(missing: list[str]) -> str:
 
 
 def runtime_message(missing: list[str]) -> str:
+    if "vc_runtime" in missing:
+        return vc_runtime.MESSAGE
     return "Needs " + runtime_names(missing)
 
 
