@@ -1370,7 +1370,7 @@
     if (route === "/api/agents") return list(agentsFixture).map(agent => state.homeClear ? { ...agent, status: "idle", needs_you: 0 } : agent);
     // Phone notification devices; the shell's "need you" row only looks for one whose last push failed.
     if (route === "/api/notifications") return { devices: [] };
-    if (route === "/api/rings/pending") return { rings: [] };
+    if (route === "/api/rings/pending") return { rings: [], outbound: 0 };
     // Settings > Phone (phone calls): not set up in the demo.
     if (route === "/api/phone") return { connection: { configured: false }, fields: { twilio: ["account_sid", "auth_token"], telnyx: ["api_key", "public_key", "connection_id"] } };
     if (route === "/api/agent-calls/choices") return [];

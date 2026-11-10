@@ -1,7 +1,7 @@
 {
  "built": {
-  "app.js": "201b07dc406f77031cada44394866b9d7045cb63e46c73642ce06ac0f37549c2",
-  "fixtures.js": "0cb7d0a1b2f03b5e99d51c06f560c916a0fe0361fccf94e863445730db7b469e",
+  "app.js": "6ee2d117e7a6cd9d9f6208d1b4b502ceea6ecd4f88b527f1028356c57d5216e9",
+  "fixtures.js": "5e712e318b8fa842dc3d85fab82a0ca259b43285dac4413a8232eda97da9b5d3",
   "index.html": "765d80b018d722a27e29860be2ae3b86e889fe704be8a9dfdc0752e78379ad19",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
   "static/css/agent-ecosystem.css": "b40994f8cd2083cc7dbbce7b6ef625dfaef1013079488f5ca9caafb6d80ebad4",
@@ -1082,7 +1082,7 @@
   "tabs/studio/view.css": "63a9b5f0cdcd469c37fa0ef88080198d3fceb57e2a582e931ceb07109e451adb"
  },
  "sources": {
-  "demo/fixtures.js": "0cb7d0a1b2f03b5e99d51c06f560c916a0fe0361fccf94e863445730db7b469e",
+  "demo/fixtures.js": "5e712e318b8fa842dc3d85fab82a0ca259b43285dac4413a8232eda97da9b5d3",
   "demo/shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
   "scripts/build_site_demo.py": "62293abd875c0ee4ec573ea4a9c2c6539e6950af04230804345d6d5576183e0e",
   "static/css/agent-ecosystem.css": "b40994f8cd2083cc7dbbce7b6ef625dfaef1013079488f5ca9caafb6d80ebad4",
@@ -1485,7 +1485,7 @@
   "static/js/onboarding.js": "c56d33dc61a6c10bb66ee2677b6686aa338b645577762c3e5ec1e9edadf9c138",
   "static/js/openMic.js": "2b379217b26af16f024f2736eb8a0ffee2f54d4e10969d76458d47661a89f232",
   "static/js/openMicRealtime.js": "e2dc7c13f23a9856985bb237d4a70829ed259a16096627167ac0ee4d40ca6075",
-  "static/js/outboundCallHost.js": "1e9467bcdcab496f8bba5d107a25a295b56b2bab6acc50f98f7e5dcfc3ad3914",
+  "static/js/outboundCallHost.js": "b5fa294d7a640f67c73c97f4770ec868ba63fe75a00f44b44feb6ee950890b6a",
   "static/js/partialTranscript.js": "34990f374fde3809155fe6bc581abae8e80f15ada091d251af65cb2b56c134b3",
   "static/js/pdfViewer.js": "f6dee61eeed8b53fa90a2821469761f16d0142436b202de0a0a289fdf142defe",
   "static/js/permissionPrompt.js": "c33008a35fa4e6bc9f46be54ae2b67b2fbd5763589945801e9c244475c9dc3ff",
@@ -1503,7 +1503,7 @@
   "static/js/redesignHome.js": "93d6a758a533305b0a98b9286fa4efd765f23a547d649411f75aa775ae26c032",
   "static/js/redesignShell.js": "05e8898015c108bc66e844768dfa0165acb73083d034156e1d9831c8a6dcd541",
   "static/js/redesignToolStoreMobile.js": "cc1f076cf639b35b4aa3a8365c386419c8cd6d822ff790e804d96ded59130b1f",
-  "static/js/ringHost.js": "286cf5f8799b1d7a7b75fbb1967abb51a46c149e3443c603e43055f6ead82dc3",
+  "static/js/ringHost.js": "ff6dcd3790311153a35615727c146681a822b9e98a46f80117804416ab9dfa6e",
   "static/js/routinesPanel.js": "605dc3b69bb5b9a77071cc6e85e720afc2b95c08cb2415cef8f081a5ec395dd7",
   "static/js/runHistory.js": "29206bf0fb56af44e24cec0e878669d39d05171ee7088af18b0734cad1cb5d62",
   "static/js/runTimeline.js": "e70b02fabcf9693993f569012322a8d9c8cdc34bb4373a4a425e01f3b2dd7c12",
@@ -1751,7 +1751,7 @@
   "static/js/views/botsTeamMap.js": "4568709d075e7c98c448c0f459fc341bbc5baacbfbc19376fbd96854c38910c7",
   "static/js/views/browse.js": "489bd91e7227823d373e3660725dcfbcf6b448e7d4b874fe1ac32dbed119ab1e",
   "static/js/views/calendar.js": "7844a115ebee3c07288c032f0671940be429dc20409a0df81f5afd44969f2e42",
-  "static/js/views/chat.js": "764b9f1e832f6a89b532c2ce15550cb216fabaa3167c3d6db901f72df4c7f6af",
+  "static/js/views/chat.js": "66fbf6bb6597ef808c0138dab6b0dd199d6cefaecdadac85567d5f434ca5db13",
   "static/js/views/cookbook.js": "193fb4e480ab427a131af4844daa2df3d778350dd9abaf5599f54bde2a0736a9",
   "static/js/views/design.js": "b3b6e612764478b00ba12ebaf2f0d4d272e97657701bd271a583e03ecf553b8a",
   "static/js/views/email.js": "72de6e75ad29b971ad3f8c786b969db0a4b7ae2f34b7bdc920f227cc187ee2d7",
