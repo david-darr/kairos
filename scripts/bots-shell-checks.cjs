@@ -287,7 +287,7 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, demoState,
     await win.loadURL(base);
     await waitFor("!!document.querySelector('.dashboard-core')");
     assert.deepEqual(await js("[...document.querySelectorAll('#forge-mode-switch .segmented-tab')].map(b => b.dataset.mode)"), ['kairos', 'bots'], 'a member sees Kairos and Bots, no Forge');
-    assert.equal(await js("document.querySelector('.forge-mode-rail').getAttribute('aria-label')"), 'Switch to Bots Preview', 'the member rail steps Kairos to Bots');
+    assert.equal(await js("document.querySelector('.forge-mode-rail').getAttribute('aria-label')"), 'Switch to Bots', 'the member rail steps Kairos to Bots (no Preview badge since 2026-11-03)');
     await navigate('forgeHome');
     assert.equal(await view(), 'home', 'a member cannot route to Forge');
     await navigate('forgeShell', { projectId: 'p1' });
