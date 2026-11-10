@@ -2,7 +2,7 @@
   "id": "roblox",
   "name": "Roblox Development",
   "description": "Build games in native Roblox Studio with a project workspace, personal UI/model style and asset provenance.",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "skills": [
     "roblox-dev-skill",
     "roblox-ui-design",
@@ -39,6 +39,6 @@
     "tabs/roblox/routes.py": "1f91144b88e27d9699c77e55c88dbb587dc80af66f05c12cc3147d41c06336f5",
     "tabs/roblox/tab.json": "9a0d3224bd550e860ddbff159cb70beb8e892d18b255c0ed1b5d75ac1499bea1",
     "tabs/roblox/view.css": "383ba16ff2226a733ad5b47c10d1e13b0b6da493ca0e31fdf1dede0b38a052db",
-    "tabs/roblox/view.js": "041a551884abdc31c2d4c343175f6b378ac191db8ff127e2f01f64652225670a"
+    "tabs/roblox/view.js": "5d7e9b8ac0e2ea2692fa626c519de1a7e9844ba83a0ba798abbf1e2e5f52e377"
   }
 }

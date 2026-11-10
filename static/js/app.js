@@ -69,7 +69,7 @@ const STUB_TABS = new Set();
 const SHARED_TABS = new Set();
 let forgeAccess = false; // this account may use this computer's shell and files (Forge needs it)
 let appMode = 'kairos';
-let navigationRequests = 0;  // every switchTab call, counted when asked (switchMode compares it)
+let navigationRequests = 0;  // every navigation that got past the leave guard (switchMode compares it)
 // Browse is the desktop app's alone (Kairos Browser Phase 1): its tabs are
 // native views, which the web and phone clients cannot have.
 const browseDesktop = !!(window.jarvis && window.jarvis.browse);
@@ -144,7 +144,6 @@ let navigationVersion = 0;
 // captured once the arriving view has drawn its halftone (and the chat has
 // opened any chat it was asked for), or after 800 ms at most.
 export function switchTab(tabId, options = {}) {
-  navigationRequests++;
   // Unsaved edits (leaveGuard.js): the view on screen may ask first.
   if (hasLeaveGuard()) return canLeaveView().then(ok => ok ? switchTabNow(tabId, options) : undefined);
   return switchTabNow(tabId, options);
@@ -161,6 +160,7 @@ function routeLegacy(tabId, options = {}) {
 }
 
 function switchTabNow(tabId, options) {
+  navigationRequests++;
   ({ tab: tabId, options } = routeLegacy(tabId, options));
   // Designs live in Library > Designs (David, 2026-10-22): the old Design tab and its links open there.
   if (tabId === 'design') { options = { ...options, section: 'designs' }; tabId = 'library'; }
