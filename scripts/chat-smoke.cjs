@@ -623,7 +623,8 @@ app.whenReady().then(async () => {
     await capture('desktop-office-pptx');
 
     await js("document.querySelector('[aria-label=\"Close file preview\"]').click(); true"); await js("(async () => { const card = document.querySelectorAll('.artifact-card')[6]; card.click(); for (let i = 0; i < 600 && !document.querySelector('.media-viewer-pane:not([hidden])'); i++) await new Promise(r => setTimeout(r, 25)); const pane = document.querySelector('.media-viewer-pane:not([hidden])'); if (!pane) throw new Error('the viewer did not offer Open beside chat'); pane.click(); return true; })()");
-    await waitFor("!!document.querySelector('.artifact-tab-panel:not([hidden]) .office-grid')");
+    // Wait for the CSV's own cell: the deck's slide table is also an .office-grid until its tab gives way.
+    await waitFor("!!document.querySelector('.artifact-tab-panel:not([hidden]) .office-grid td[data-pick$=\"cell=A2\"]')");
     // Parsed server-side precisely so a quoted separator survives (row 1 is the header row, so A2).
     assert.equal(await js("document.querySelector('.artifact-tab-panel:not([hidden]) .office-grid td[data-pick$=\"cell=A2\"]').textContent"), 'Smith, John');
     await js("[...document.querySelectorAll('.artifact-tab-panel:not([hidden]) .artifact-toolbar button')].find(b=>b.textContent==='Source').click()");
