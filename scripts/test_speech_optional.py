@@ -387,8 +387,9 @@ class WarmAtCallStart(Base):
                 made.append(1)
                 return super().create(*a, **k)
         kokoro_voice.ENGINE_FACTORY = Counting
+        call_voices.set_choice('voicebox')
         speech_routes._warm_optional()
-        self.assertEqual(made, [], 'the device voice or a voice server is in use: Kokoro stays unloaded')
+        self.assertEqual(made, [], 'a voice server is the Voice: Kokoro stays unloaded')
         call_voices.configure('', 'kokoro')
         speech_routes._warm_optional()
         self.assertEqual(made, [1])

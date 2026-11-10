@@ -34,21 +34,31 @@ const load = file => import('data:text/javascript;base64,' + Buffer.from(fs.read
   assert.equal(d.pickSpeechModel({ engine_available: false, models: [] }), null);
 
   // ---- call mode ---------------------------------------------------------------------------------------------------
-  assert.deepEqual(d.pickCallMode({}), { mode: 'local', fellBack: false }, 'Local when unset');
-  assert.deepEqual(d.pickCallMode({ call_mode: 'turns' }, [{}]), { mode: 'local', fellBack: false });
-  assert.deepEqual(d.pickCallMode({ call_mode: 'realtime' }, [{ id: 'k' }]), { mode: 'realtime', fellBack: false });
-  assert.deepEqual(d.pickCallMode({ call_mode: 'live' }, [{ id: 'k' }]), { mode: 'realtime', fellBack: false }, 'the older GPT-Live mode is realtime');
-  assert.deepEqual(d.pickCallMode({ call_mode: 'realtime' }, []), { mode: 'local', fellBack: true }, 'no key: Local, and the call says so');
-  assert.deepEqual(d.pickCallMode({ call_mode: 'realtime' }, [{ id: 'k' }], true), { mode: 'local', fellBack: true }, 'group calls are local');
+  const L = (extra = {}) => ({ mode: 'local', fellBack: false, source: 'voice', endpoint: null, ...extra });
+  const liveChoice = { id: 'live:k', provider: 'openai_live' };
+  assert.deepEqual(d.pickCallMode({}), L(), 'Local when unset and the Voice is Kairos Voice');
+  assert.deepEqual(d.pickCallMode({ call_mode: 'turns' }, [{}], false, 'kairos'), L());
+  assert.deepEqual(d.pickCallMode({ call_mode: 'turns' }, [liveChoice], false, 'elevenlabs'), L(), 'ElevenLabs is a local call with that voice');
+  assert.deepEqual(d.pickCallMode({ call_mode: 'turns' }, [{ id: 'k' }, liveChoice], false, 'gpt_live'), { mode: 'realtime', fellBack: false, source: 'voice', endpoint: 'live:k' }, 'the Voice comes before Local if unset: GPT-Live');
+  assert.deepEqual(d.pickCallMode({}, [{ id: 'k', provider: 'openai' }], false, 'gpt_live'), L({ fellBack: true }), 'GPT-Live with no OpenAI key: Local, and the call says so');
+  assert.deepEqual(d.pickCallMode({ call_mode: 'local' }, [liveChoice], false, 'gpt_live'), { mode: 'local', fellBack: false, source: 'bot', endpoint: null }, "a bot set to Local overrides the Voice");
+  assert.deepEqual(d.pickCallMode({ call_mode: 'realtime' }, [{ id: 'k' }]), { mode: 'realtime', fellBack: false, source: 'bot', endpoint: null }, "a bot set to Realtime uses its own realtime choice");
+  assert.deepEqual(d.pickCallMode({ call_mode: 'live' }, [{ id: 'k' }]), { mode: 'realtime', fellBack: false, source: 'bot', endpoint: null }, 'the older GPT-Live mode is realtime');
+  assert.equal(d.pickCallMode({ call_mode: 'live' }, [{ id: 'k' }, liveChoice]).endpoint, 'live:k', 'and picks GPT-Live when it is offered');
+  assert.deepEqual(d.pickCallMode({ call_mode: 'realtime' }, []), { mode: 'local', fellBack: true, source: 'bot', endpoint: null }, 'no key: Local, and the call says so');
+  assert.deepEqual(d.pickCallMode({ call_mode: 'realtime' }, [{ id: 'k' }], true), { mode: 'local', fellBack: true, source: 'bot', endpoint: null }, 'group calls are local');
+  assert.equal(d.pickCallMode({}, [liveChoice], true, 'gpt_live').mode, 'local', 'group calls are local even on GPT-Live');
 
   // ---- voice -------------------------------------------------------------------------------------------------------
   const kokoro = { protocol: 'kokoro', models: ['kokoro'], voices: [{ id: 'af', name: 'A' }, { id: 'default', name: 'Default' }] };
   assert.deepEqual(d.pickVoice({ voice_id: 'af' }, {}, kokoro), { provider: 'neural', model: 'kokoro', voice: 'af' }, "the bot's saved voice");
-  assert.deepEqual(d.pickVoice({}, {}, kokoro), { provider: 'neural', model: 'kokoro', voice: 'default' }, 'else Kokoro when it is ready');
+  assert.deepEqual(d.pickVoice({}, {}, kokoro), { provider: 'neural', model: 'kokoro', voice: 'default' }, 'else Kairos Voice speaks with Kokoro when it is ready');
   assert.deepEqual(d.pickVoice({}, {}, { ...kokoro, error: 'Kokoro is not installed', models: [], voices: [] }), { provider: 'device', model: '', voice: '' }, 'else the device voice');
   assert.deepEqual(d.pickVoice({}, { provider: 'device' }, kokoro).provider, 'device', 'a device voice chosen in Call settings stays');
-  assert.deepEqual(d.pickVoice({}, { provider: 'neural', model: 'tts', voice: 'v' }, { protocol: 'voicestudio', models: ['tts'], voices: [{ id: 'v' }] }), { provider: 'neural', model: 'tts', voice: 'v' }, 'a saved engine voice stays while it is offered');
-  assert.equal(d.pickVoice({}, {}, { protocol: 'voicestudio', models: ['tts'], voices: [{ id: 'v' }] }).provider, 'device', 'another engine is not switched on by itself');
+  const box = { protocol: 'voicebox', models: ['profile'], voices: [{ id: 'p1' }, { id: 'p2' }] };
+  assert.deepEqual(d.pickVoice({}, { provider: 'neural', model: 'profile', voice: 'p2' }, box), { provider: 'neural', model: 'profile', voice: 'p2' }, 'a saved engine voice stays while it is offered');
+  assert.deepEqual(d.pickVoice({}, {}, box), { provider: 'neural', model: 'profile', voice: 'p1' }, 'the Voice chosen in Settings (Voicebox here) is used with its first voice');
+  assert.deepEqual(d.pickVoice({}, {}, { protocol: 'elevenlabs', models: ['eleven_flash_v2_5'], voices: [{ id: 'r' }] }).provider, 'neural', 'ElevenLabs as the Voice speaks in calls');
 
   assert.equal(d.consentKey('bot', 'k'), 'kairos:call-consent:bot:k');
   console.log('PASS call defaults: conversation, speech model, call mode, voice and consent key');

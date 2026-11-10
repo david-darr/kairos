@@ -30,7 +30,7 @@ class Turn(BaseModel):
 
 class VoiceServer(BaseModel):
     url: str = Field(max_length=300)
-    protocol: Literal['voicestudio','compatible','kokoro','elevenlabs']
+    protocol: Literal['voicebox','compatible','kokoro','elevenlabs']
 
 class Speak(BaseModel):
     text: str = Field(min_length=1, max_length=1600)

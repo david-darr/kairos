@@ -274,7 +274,7 @@ class Calls(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await client.post('/api/agent-calls/speak',json={'text':'Hi','model':'pockettts','voice':'default'})).status_code,401)
             # Pointing the call voice server at a local address stays with an admin (it reaches host-only services).
             app.dependency_overrides[require_admin]=denied
-            self.assertEqual((await client.put('/api/agent-calls/voices',json={'url':'http://127.0.0.1:8000','protocol':'voicestudio'})).status_code,401)
+            self.assertEqual((await client.put('/api/agent-calls/voices',json={'url':'http://127.0.0.1:8000','protocol':'voicebox'})).status_code,401)
 
 class Contracts(unittest.TestCase):
     def test_work_marker_never_reaches_speech_at_any_chunk_boundary(self):
@@ -334,12 +334,12 @@ class ProviderContracts(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(str(requests[0].url),'https://api.openai.com/v1/responses')
             finally:await conversation.close()
 
-    async def test_catalog_filters_unavailable_engines_and_fake_alias_voices(self):
-        client=httpx.AsyncClient(transport=httpx.MockTransport(lambda request:httpx.Response(200,json={'data':[{'id':'tts-1'}]} if request.url.path.endswith('/models') else {'voices':[{'id':'alloy','type':'openai_alias'},{'id':'profile','name':'My voice','type':'profile'}],'engines':[{'id':'pockettts','available':True},{'id':'omnivoice','available':False}]})))
-        # VoiceStudio's streaming speech route is tested against a mock server in test_voice_engines.py
-        from core import voicestudio_voice
-        with patch.object(call_voices,'configuration',return_value={'url':'http://127.0.0.1:8000','protocol':'voicestudio'}),patch.object(voicestudio_voice,'TRANSPORT',client._transport):result=await call_voices.catalog()
-        self.assertEqual(result['models'],['tts-1','pockettts']);self.assertEqual([v['id'] for v in result['voices']],['default','profile'])
+    async def test_voicebox_catalog_lists_profiles_and_the_engines_they_use(self):
+        client=httpx.AsyncClient(transport=httpx.MockTransport(lambda request:httpx.Response(200,json=[{'id':'p1','name':'Me','language':'en','default_engine':'chatterbox_turbo'},{'id':'p2','name':'Narrator','language':'en','preset_engine':'kokoro'},{'name':'no id'}])))
+        # Voicebox's whole-clip speech routes are tested against a mock server in test_voice_engines.py
+        from core import voicebox_voice
+        with patch.object(call_voices,'configuration',return_value={'url':'http://127.0.0.1:17493','protocol':'voicebox'}),patch.object(voicebox_voice,'TRANSPORT',client._transport):result=await call_voices.catalog()
+        self.assertEqual(result['models'],['profile','chatterbox_turbo','kokoro']);self.assertEqual([v['id'] for v in result['voices']],['p1','p2'])
 
 class CliConversations(unittest.IsolatedAsyncioTestCase):
     """Claude Code, Codex and Antigravity sign-ins as the call's conversation layer (core/cli_dialogue.py)."""

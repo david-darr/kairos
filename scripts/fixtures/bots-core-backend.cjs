@@ -65,7 +65,7 @@ function clean(key, value, current) {
   }
   if (key === 'notifications' || key === 'speak_replies') { if (typeof value !== 'boolean') throw bad(`${key} is true or false`); return value; }
   if (key === 'reply_style') return choice(value, ['default', 'conversational'], key);
-  if (key === 'call_mode') return choice(value, ['turns', 'live'], key);
+  if (key === 'call_mode') return choice(value, ['turns', 'local', 'live', 'realtime'], key);
   if (key === 'voice_id') { if (value === null) return null; if (typeof value !== 'string' || !/^[\w.:-]{1,200}$/.test(value)) throw bad('voice_id is a saved voice identifier'); return value; }
   if (key === 'mascot_expression') return value === null ? null : choice(value, EXPRESSIONS, key);
   if (key === 'skill_selection') {

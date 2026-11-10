@@ -397,25 +397,26 @@ export function agentCall(agent, controller) {
   async function loadSetup() {
     const token = epoch; start.disabled = true;
     try {
-      const [nextSpeech, available, choices, _, prefs, realtimeChoices, realtimePrefs] = await Promise.all([api('/api/speech/status'), whenVoicesReady(), api('/api/agent-calls/choices'), neural.load(), api('/api/bot-voice/live-settings', { toast: false }).catch(() => null), api('/api/agent-calls/realtime-choices', { toast: false }).catch(() => []), api('/api/agent-calls/realtime-settings', { toast: false }).catch(() => null)]);
+      const [nextSpeech, available, choices, _, prefs, realtimeChoices, realtimePrefs, voiceSetting] = await Promise.all([api('/api/speech/status'), whenVoicesReady(), api('/api/agent-calls/choices'), neural.load(), api('/api/bot-voice/live-settings', { toast: false }).catch(() => null), api('/api/agent-calls/realtime-choices', { toast: false }).catch(() => []), api('/api/agent-calls/realtime-settings', { toast: false }).catch(() => null), api('/api/voice-engines', { toast: false }).catch(() => null)]);
       if (disposed || epoch !== token || active || !dialog.open) return false;
       const asList = value => Array.isArray(value) ? value : [];
       liveChoicesByMode = { realtime: asList(realtimeChoices) };
       fillLiveChoices();
       if (prefs) livePrefs = prefs;
-      // Call mode: the bot's own (its panel's Local or Realtime). Realtime with no key falls back to Local, said in one line.
-      const mode = pickCallMode(agent, liveChoicesByMode.realtime, !!room);
+      // Call mode: the bot's own (its panel's Local or Realtime), else the Voice in Settings > Speech (GPT-Live there is a
+      // GPT-Live call). Realtime with no key falls back to Local, said in one line.
+      const mode = pickCallMode(agent, liveChoicesByMode.realtime, !!room, voiceSetting?.choice || '');
       callMode.value = mode.mode; cloudSetup.hidden = mode.mode !== 'realtime';
-      say1(mode.fellBack && !room ? 'Realtime voice needs an API key, so this call uses Local.' : '');
+      say1(mode.fellBack && !room ? (mode.source === 'voice' ? 'GPT-Live needs your OpenAI key, so this call uses Kairos Voice.' : 'Realtime voice needs an API key, so this call uses Local.') : '');
       if (mode.mode === 'realtime') {
         fillLiveChoices();
         const mine = (realtimePrefs && typeof realtimePrefs === 'object' && (realtimePrefs.bots?.[agent.id] || realtimePrefs)) || {};
-        // "live" is the older GPT-Live call mode: it is now the GPT-Live choice of realtime voice.
-        const gptLive = agent.call_mode === 'live' ? liveChoicesByMode.realtime.find(e => e.provider === 'openai_live') : null;
-        if (gptLive) { liveEndpoint.value = gptLive.id; fillLiveVoices(); }
+        // GPT-Live (the Voice, or the older "live" bot mode) is GPT-Live's realtime choice; else the bot's own realtime choice.
+        if (mode.endpoint) { liveEndpoint.value = mode.endpoint; fillLiveVoices(); }
         else if (mine.endpoint_id && liveChoicesByMode.realtime.some(e => e.id === mine.endpoint_id)) { liveEndpoint.value = mine.endpoint_id; fillLiveVoices(); }
         if (mine.voice && [...liveVoiceChoice.options].some(o => o.value === mine.voice)) liveVoiceChoice.value = mine.voice;
-        paid.checked = consented();
+        // Choosing GPT-Live in Settings > Speech, beside its price, is the paid consent; a bot's own Realtime asks once.
+        paid.checked = mode.source === 'voice' || consented();
       }
       // Voice: the bot's saved voice, else Kokoro when it is ready, else the device voice (callDefaults.js pickVoice).
       neural.use(pickVoice(agent, neural.saved(), neural.catalog()));

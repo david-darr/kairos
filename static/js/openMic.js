@@ -37,6 +37,7 @@ import { createVoiceTrace } from './voiceTrace.js';
 import { createFillerGate, fetchFillerClip } from './voiceFiller.js';
 import { isBackchannel, endsInQuestion } from './backchannel.js';
 import { api } from './api.js';
+import { pickVoice } from './callDefaults.js';
 
 // Tuned against normal speech at a normal distance. The onset threshold sits
 // above room tone; the barge-in threshold is higher because the microphone
@@ -63,14 +64,28 @@ const MIN_UTTERANCE_MS = 350;
 // A hard ceiling so a stuck recorder or a noisy room cannot record forever.
 const MAX_UTTERANCE_MS = 45000;
 
-// The reading voice for Open Mic when a local neural voice is chosen (Settings > Speech > Reading voice); the same
-// {provider, model, voice} shape a call keeps per bot.
+// The reading voice for Open Mic. A voice chosen for Open Mic in Settings > Speech > More options wins (saved as
+// kairos:neural-voice:openmic, the same {provider, model, voice} shape a call keeps per bot); with none chosen, or
+// "Same as the Voice", Open Mic follows the Voice in Settings > Speech: its engine (Kokoro for Kairos Voice,
+// ElevenLabs, Voicebox) when that is ready, else the OS voice. primeOpenMicVoice() looks the engine up at start.
 export const OPEN_MIC_VOICE_KEY = 'kairos:neural-voice:openmic';
-export function openMicVoiceSelection() {
+let followed = null;
+function savedOpenMicVoice() {
+  try { return JSON.parse(localStorage.getItem(OPEN_MIC_VOICE_KEY) || '{}') || {}; } catch { return {}; }
+}
+export async function primeOpenMicVoice(request = api) {
+  const saved = savedOpenMicVoice();
+  if (saved.provider === 'device' || saved.provider === 'neural') return;
   try {
-    const saved = JSON.parse(localStorage.getItem(OPEN_MIC_VOICE_KEY) || '{}');
-    if (saved.provider === 'neural' && saved.model && saved.voice) return { provider: 'neural', model: saved.model, voice: saved.voice };
-  } catch { /* storage blocked or corrupt: the OS voice */ }
+    const catalog = await Promise.race([request('/api/agent-calls/voices', { toast: false }), new Promise((_, no) => setTimeout(() => no(new Error('slow')), 1500))]);
+    const picked = pickVoice({}, {}, catalog);
+    followed = picked.provider === 'neural' ? picked : null;
+  } catch { followed = null; }
+}
+export function openMicVoiceSelection() {
+  const saved = savedOpenMicVoice();
+  if (saved.provider === 'neural' && saved.model && saved.voice) return { provider: 'neural', model: saved.model, voice: saved.voice };
+  if (saved.provider !== 'device' && followed) return { ...followed };
   return { provider: 'device' };
 }
 
@@ -475,6 +490,7 @@ export function createOpenMic({ sessionId, sendMessage, stopTurn, onState, onErr
           fail(`${message} Open Mic will use the device voice from the next reply.`);
         },
       };
+      if (!makeSpeaker) { await primeOpenMicVoice(); if (stopped) return false; }
       speaker = (makeSpeaker || (opts => createVoiceSpeaker(opts, () => (neuralFailed ? { provider: 'device' } : openMicVoiceSelection()))))(options);
       if (!isSpeechOutputSupported()) {
         // Still useful without a voice: it becomes hands-free dictation with

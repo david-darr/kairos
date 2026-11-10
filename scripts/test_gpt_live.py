@@ -18,7 +18,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_realtime_voice import KEYS, RealtimeCase, Sink, tone16  # noqa: E402  (sets the test data folder first)
 
-from core import model_endpoints, realtime_usage, realtime_voice  # noqa: E402
+from core import accounts, model_endpoints, realtime_usage, realtime_voice  # noqa: E402
 from core.phone_providers import Twilio  # noqa: E402
 from realtime_mock import MockRealtime, live_audio, live_delegation, live_said  # noqa: E402
 from services import agent_calls as calls, phone_calls, realtime_phone, realtime_session  # noqa: E402
@@ -309,6 +309,18 @@ class PhoneTests(LiveCase):
         chosen = phone_calls.realtime_choice(self.account, {"id": "b1", "call_mode": "live"})
         self.assertEqual(chosen["endpoint_id"], self.live_id)
         self.assertIsNone(phone_calls.realtime_choice(self.account, {"id": "b1", "call_mode": "turns"}))
+
+    async def test_gpt_live_as_the_voice_reaches_the_phone_unless_the_bot_says_local(self):
+        from core import call_voices
+        with accounts.as_account(self.account):
+            call_voices.set_choice("gpt_live")
+        try:
+            self.assertEqual(phone_calls.realtime_choice(self.account, {"id": "b1", "call_mode": "turns"})["endpoint_id"], self.live_id,
+                             "a bot on Same as Settings follows the Voice")
+            self.assertIsNone(phone_calls.realtime_choice(self.account, {"id": "b1", "call_mode": "local"}), "a bot set to Local overrides it")
+        finally:
+            with accounts.as_account(self.account):
+                call_voices.set_choice("kairos")
 
 
 if __name__ == "__main__":

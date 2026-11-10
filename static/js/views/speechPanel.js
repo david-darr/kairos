@@ -4,7 +4,9 @@ import { isSpeechOutputSupported, whenVoicesReady, resolveVoice, getPreferredVoi
 import { group, row, note, pill } from '../settingsKit.js';
 import { voiceSettings } from '../callVoice.js';
 
-// Settings > Workspace > Speech (David's ask 2026-09-15).
+// Settings > Workspace > Speech (David's ask 2026-09-15). Since 2026-11-10 (Locked shape) the main path is one plain
+// Voice choice (voiceEnginesSetup.js) and the microphone; everything technical (Voicebox, the voice picker, the
+// recognition model, optional downloads, the GPU runtime folder, realtime keys) sits under More options.
 //
 // Dictation ships with the engine but no model, so without this panel there
 // is no way to obtain one and the mic button can only ever refuse. Models are
@@ -95,7 +97,7 @@ export async function renderSpeechPanel(content, status) {
       toast(select.value ? 'Voice updated' : 'Using the best available voice', 'success');
     });
 
-    const rows = [row({ title: 'Reading voice', description: 'Which voice reads replies aloud in Open Mic.', control: [preview, select] })];
+    const rows = [row({ title: 'Device voice', description: 'The voice this device speaks with when no other voice is ready.', control: [preview, select] })];
     if (!voices.some(v => /^en[-_]GB/i.test(v.lang))) {
       // David asked for a British voice. None is installed, and quietly
       // offering a list of American ones would look like the request was
@@ -104,23 +106,22 @@ export async function renderSpeechPanel(content, status) {
         'Only the American voices are listed. Add one in Windows Settings under Time & language, Speech, Manage voices, Add voices, '
         + 'English (United Kingdom). It appears here after a restart and is then chosen automatically.' }));
     }
-    // Open Mic speaks through the same sentence speaker a call uses, so it can use a local neural voice server
-    // (the one set up for calls) instead of the OS voice. The OS voice stays the fallback if the server is down.
-    // Saved as kairos:neural-voice:openmic (openMic.js OPEN_MIC_VOICE_KEY).
-    const neural = voiceSettings({ id: 'openmic' }, select, {});
+    // Open Mic speaks through the same sentence speaker a call uses. By default it follows the Voice above; a voice
+    // picked here is used for Open Mic instead. Saved as kairos:neural-voice:openmic (openMic.js OPEN_MIC_VOICE_KEY).
+    const neural = voiceSettings({ id: 'openmic' }, select, {}, { follow: true });
     neural.sync();
     let neuralLoaded = false;
     const loadNeural = () => { if (neuralLoaded) return; neuralLoaded = true; neural.load(); };
     neural.node.addEventListener('change', () => { if (neural.selection().provider === 'neural') loadNeural(); });
     if (neural.selection().provider === 'neural') loadNeural();
-    rows.push(row({ title: 'Voice engine', description: 'Local neural voice plays each sentence as it is written, with the next one rendering ahead. Needs the local voice server set up for calls; otherwise the reading voice above is used.', control: [neural.node] }));
+    rows.push(row({ title: 'Open Mic voice', description: 'Same as the Voice follows your choice above. Or pick a voice from its engine, or the device voice, for Open Mic only.', control: [neural.node] }));
     // Stated here because this is exactly where someone looks for it, and
     // silence would read as an oversight rather than a real constraint.
     rows.push(row({ title: 'Output device', description:
       'Spoken replies always play through your system default output. The browser speech engine provides no way to choose a device, so change it in your operating system sound settings.' }));
     // speech-voice is its own hook, so a test can target this group rather
     // than whichever speech-devices group matched first.
-    return group({ title: 'Voice', cls: 'speech-devices speech-voice' }, rows);
+    return group({ title: 'Voice picker', cls: 'speech-devices speech-voice' }, rows);
   }
 
   async function draw() {
@@ -133,19 +134,21 @@ export async function renderSpeechPanel(content, status) {
     }
     if (!root.isConnected) return;
 
-    const parts = [];
+    // The main path: the Voice and the microphone. `parts` collects More options.
+    const main = [], parts = [];
+    const kokoroReady = (state.optional || []).some(item => item.name === 'kokoro' && item.state === 'ready');
+    const choice = await drawVoiceChoice(kokoroReady, () => draw());
+    if (choice && root.isConnected) main.push(choice);
 
     if (!state.engine_available) {
       // A missing binding is a broken build, not something a download fixes,
       // so this deliberately does not offer one.
-      parts.push(group({}, [row({ title: 'Speech recognition is unavailable in this build.',
+      main.push(group({}, [row({ title: 'Speech recognition is unavailable in this build.',
         description: 'The speech engine could not be loaded, so dictation cannot run. Reinstalling the latest release usually resolves it.' })]));
-      root.replaceChildren(...parts);
-      return;
     }
 
     const modelRows = [];
-    for (const model of state.models) {
+    for (const model of state.engine_available ? state.models : []) {
       let control;
       if (model.downloaded) {
         control = model.name === state.active_model ? pill('In use', 'ok') : pill('Downloaded', 'muted');
@@ -195,7 +198,7 @@ export async function renderSpeechPanel(content, status) {
       }
       modelRows.push(row({ title: `${model.label} · ${model.size_mb} MB`, description: model.description || '', control, cls: 'speech-model' }));
     }
-    parts.push(group({ title: 'Dictation model', description: state.active_model
+    if (state.engine_available) parts.push(group({ title: 'Recognition model', description: state.active_model
       ? `Using the ${state.active_model} model.`
       : 'No model downloaded yet. Dictation stays unavailable until one is.' }, modelRows));
 
@@ -241,30 +244,56 @@ export async function renderSpeechPanel(content, status) {
     if (optionalRows.length) parts.push(group({ title: 'Optional voice features', description: 'Not needed for dictation. They need the ONNX runtime and stay off until you download them.', cls: 'speech-optional-group' }, optionalRows));
 
     const deviceSection = await drawDevices();
-    if (deviceSection && root.isConnected) parts.push(deviceSection);
+    if (deviceSection && root.isConnected) main.push(deviceSection);
+    const engines = await drawVoiceServers(isAdmin, () => draw());
+    if (engines && root.isConnected) parts.unshift(engines);
     const voiceSection = await drawVoice();
-    if (voiceSection && root.isConnected) parts.push(voiceSection);
-    const engines = await drawVoiceEngines(isAdmin, () => draw());
-    if (engines && root.isConnected) parts.push(engines);
+    if (voiceSection && root.isConnected) parts.splice(engines ? 1 : 0, 0, voiceSection);
+    if (state.engine_available && state.acceleration?.supported) parts.push(drawRuntime(state));
     const freeVoice = await drawFreeVoice();
     if (freeVoice && root.isConnected) parts.push(freeVoice);
 
-    parts.push(note('Larger models are more accurate and slower. Transcription runs on the processor, so a long recording on a modest machine takes a few seconds.'));
-    root.replaceChildren(...parts);
+    parts.push(note('Larger recognition models are more accurate and slower. Recognition runs on the processor unless a GPU runtime is connected, so a long recording on a modest machine takes a few seconds.'));
+    const more = el('details', { class: 'speech-more' }, [el('summary', { class: 'speech-more-summary', text: 'More options' }), ...parts]);
+    if (moreOpen) more.open = true;
+    more.addEventListener('toggle', () => { moreOpen = more.open; });
+    root.replaceChildren(...main, more);
   }
+  let moreOpen = false;
 
-  // ElevenLabs and VoiceStudio as the reading voice (voiceEnginesSetup.js); Kokoro and the device voice stay the fallback.
-  async function drawVoiceEngines(admin, redraw) {
+  // The one Voice choice (voiceEnginesSetup.js): Kairos Voice, GPT-Live, ElevenLabs.
+  async function drawVoiceChoice(kokoroReady, redraw) {
     const state = await api('/api/voice-engines', { toast: false }).catch(() => null);
     if (!state) return null;
-    const { elevenLabsSetup, voiceStudioSetup } = await import('../voiceEnginesSetup.js');
-    return group({ title: 'Voice engines', cls: 'speech-voice-engines',
-      description: 'Choose who speaks: ElevenLabs on your own key, or VoiceStudio running on this computer. Each sentence is spoken as soon as it is written. If the engine fails, Kokoro (when downloaded) or the device voice takes over.' }, [
-      row({ title: 'ElevenLabs', description: 'Studio-quality voices, including your own cloned voice, on your ElevenLabs account.', control: state.active === 'elevenlabs' ? pill('In use', 'ok') : state.elevenlabs?.has_key ? pill('Key saved', 'muted') : pill('Not set up', 'muted') }),
-      elevenLabsSetup(state, { onChanged: redraw }),
-      row({ title: 'VoiceStudio', description: 'A free, fully local alternative to ElevenLabs that you install and run yourself.', control: state.active === 'voicestudio' ? pill('In use', 'ok') : pill('Not in use', 'muted') }),
-      voiceStudioSetup(state, { isAdmin: admin, onChanged: redraw }),
+    const { voiceChoice, APPLIES } = await import('../voiceEnginesSetup.js');
+    return group({ title: 'Voice', cls: 'speech-voice-choice', description: APPLIES }, [voiceChoice(state, { kokoroReady, onChanged: redraw })]);
+  }
+
+  // More options: Voicebox, or another voice server on this computer (an admin connects them).
+  async function drawVoiceServers(admin, redraw) {
+    const state = await api('/api/voice-engines', { toast: false }).catch(() => null);
+    if (!state) return null;
+    const { voiceboxSetup, compatibleSetup } = await import('../voiceEnginesSetup.js');
+    return group({ title: 'Voice servers on this computer', cls: 'speech-voice-engines',
+      description: 'For people who already run their own voice server. If it fails, Kokoro (when downloaded) or the device voice takes over.' }, [
+      row({ title: 'Voicebox', description: 'Free, open source, with cloned and designed voices. You install and open it yourself.', control: state.choice === 'voicebox' ? pill('In use', 'ok') : pill('Not in use', 'muted') }),
+      voiceboxSetup(state, { isAdmin: admin, onChanged: redraw }),
+      row({ title: 'Another voice server', description: 'Any server on this computer that speaks the OpenAI speech API.', control: state.choice === 'compatible' ? pill('In use', 'ok') : pill('Not in use', 'muted') }),
+      compatibleSetup(state, { isAdmin: admin, onChanged: redraw }),
     ]);
+  }
+
+  // More options: the GPU runtime folder for recognition (the same setting Call settings offers; an admin sets it).
+  function drawRuntime(state) {
+    const folder = el('input', { type: 'text', placeholder: 'Installed whisper.cpp CUDA folder', 'aria-label': 'GPU runtime folder' });
+    const said = el('span', { class: 'meta', role: 'status', text: state.acceleration?.configured ? 'Connected. Recognition uses the graphics card when it can, else the processor.' : 'Not connected. Recognition runs on the processor.' });
+    const act = (text, run) => el('button', { type: 'button', class: 'btn quiet', text, onclick: async () => {
+      try { await run(); refreshSpeechStatus(); draw(); } catch (error) { said.textContent = error.message || 'That did not work.'; }
+    } });
+    const controls = isAdmin ? [folder, act('Use runtime', () => api('/api/speech/runtime', { method: 'POST', body: JSON.stringify({ folder: folder.value.trim() }) })),
+      ...(state.acceleration?.configured ? [act('Disconnect', () => api('/api/speech/runtime', { method: 'DELETE' }))] : [])] : [el('span', { class: 'meta', text: 'An admin can connect one' })];
+    return group({ title: 'Processor', cls: 'speech-runtime', description: 'Optional: a whisper.cpp CUDA build you installed makes recognition faster on an NVIDIA graphics card. Nothing downloads.' },
+      [row({ title: 'GPU runtime folder', description: said, control: el('div', { class: 'speech-model-actions' }, controls) })]);
   }
 
   // Free realtime voice (freeVoiceSetup.js): realtime speech-to-speech on a free Gemini key, set up in a few steps.
@@ -273,7 +302,7 @@ export async function renderSpeechPanel(content, status) {
     if (!state) return null;
     const { freeVoiceSetup } = await import('../freeVoiceSetup.js');
     const badge = state.configured ? pill('Connected', 'ok') : pill('Not set up', 'muted');
-    return group({ title: 'Free realtime voice', cls: 'speech-free-voice',
+    return group({ title: 'Realtime calls on a free key', cls: 'speech-free-voice',
       description: 'Realtime voice is the quickest, most natural way to talk with a bot. It needs a provider key; a free Gemini key from Google works. Realtime calls send your audio to Google, unlike dictation, which stays on this computer.' }, [
       row({ title: 'Gemini free key', description: state.configured ? `Realtime voice can use Gemini (${state.model}) at no cost.` : 'Not set up yet.', control: badge }),
       freeVoiceSetup({ configured: state.configured, onConnected: () => draw() }),

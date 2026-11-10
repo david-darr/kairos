@@ -59,16 +59,26 @@ export function pickSpeechModel(speech, savedModel = '') {
   return fallback ? { name: fallback.name, download: true } : null;
 }
 
-// Call mode: the bot's own setting from its panel ("live" is the older GPT-Live mode, now a realtime choice). Realtime
-// with no realtime connection, or in a group call, falls back to Local and says so.
-export function pickCallMode(agent = {}, realtimeChoices = [], room = false) {
-  const wanted = agent.call_mode === 'realtime' || agent.call_mode === 'live' ? 'realtime' : 'local';
-  if (wanted === 'realtime' && (room || !(Array.isArray(realtimeChoices) && realtimeChoices.length))) return { mode: 'local', fellBack: true };
-  return { mode: wanted, fellBack: false };
+// Call mode. A bot's own Local or Realtime (its panel) wins. A bot left on "Same as Settings" ("turns", the default)
+// follows the account's Voice (Settings > Speech, GET /api/voice-engines): GPT-Live there means a GPT-Live call, anything
+// else a local call. "live" is the older GPT-Live mode, now a realtime choice. Realtime with no realtime connection, or
+// in a group call, falls back to Local and says so. Returns { mode, fellBack, source: 'bot' | 'voice', endpoint }; endpoint
+// is the GPT-Live choice's id when GPT-Live was asked for and is there, else null (the bot's own realtime choice applies).
+export function pickCallMode(agent = {}, realtimeChoices = [], room = false, voice = '') {
+  const list = Array.isArray(realtimeChoices) ? realtimeChoices : [];
+  const own = agent.call_mode;
+  const follows = !['realtime', 'live', 'local'].includes(own);
+  const source = follows ? 'voice' : 'bot';
+  const wanted = own === 'realtime' || own === 'live' || (follows && voice === 'gpt_live') ? 'realtime' : 'local';
+  if (wanted === 'local') return { mode: 'local', fellBack: false, source, endpoint: null };
+  const live = list.find(choice => choice?.provider === 'openai_live');
+  if (room || !list.length || (follows && !live)) return { mode: 'local', fellBack: true, source, endpoint: null };
+  return { mode: 'realtime', fellBack: false, source, endpoint: follows || own === 'live' ? live?.id || null : null };
 }
 
-// The voice: the bot's saved voice (its panel's voice, then the call screen's last choice), else Kokoro when it is the
-// ready engine, else the device voice. `catalog` is GET /api/agent-calls/voices. Returns { provider, model, voice }.
+// The voice: the bot's saved voice (its panel's voice, then the call screen's last choice), else the account's Voice
+// engine when it is ready (`catalog` is GET /api/agent-calls/voices, which always describes that engine: Kokoro for
+// Kairos Voice, ElevenLabs, Voicebox), else the device voice. Returns { provider, model, voice }.
 export function pickVoice(agent = {}, saved = {}, catalog = null) {
   const voices = Array.isArray(catalog?.voices) ? catalog.voices : [];
   const models = Array.isArray(catalog?.models) ? catalog.models : [];
@@ -77,7 +87,7 @@ export function pickVoice(agent = {}, saved = {}, catalog = null) {
   if (ready && agent.voice_id && has(agent.voice_id)) return { provider: 'neural', model: models.includes(saved?.model) ? saved.model : models[0], voice: agent.voice_id };
   if (saved?.provider === 'device') return { provider: 'device', model: '', voice: '' };
   if (saved?.provider === 'neural' && ready && models.includes(saved.model) && has(saved.voice)) return { provider: 'neural', model: saved.model, voice: saved.voice };
-  if (ready && catalog.protocol === 'kokoro') return { provider: 'neural', model: models[0], voice: (voices.find(voice => voice.id === 'default') || voices[0]).id };
+  if (ready) return { provider: 'neural', model: models[0], voice: (voices.find(voice => voice.id === 'default') || voices[0]).id };
   return { provider: 'device', model: '', voice: '' };
 }
 

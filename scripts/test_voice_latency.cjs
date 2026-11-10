@@ -402,8 +402,9 @@ const load = async (file, prefix = '') => import('data:text/javascript;base64,' 
       api: async (path, options) => { calls.api.push({ path, body: JSON.parse(options?.body || '{}') }); return deps.api(path, options); },
       createPartialTranscriber: pt.createPartialTranscriber, createVoiceSpeaker: callVoice.createVoiceSpeaker, createVoiceTrace: vt.createVoiceTrace,
       createFillerGate: vf.createFillerGate, fetchFillerClip: (...args) => deps.filler(...args), isBackchannel: bc.isBackchannel, endsInQuestion: bc.endsInQuestion,
+      pickVoice: (await load('static/js/callDefaults.js')).pickVoice,
     };
-    const om = await load('static/js/openMic.js', 'const {createRecorder,createCallRecorder,isCallRecordingSupported,isSpeechOutputSupported,transcribeBlob,transcribePartial,getSpeechStatus,api,createPartialTranscriber,createVoiceSpeaker,createVoiceTrace,createFillerGate,fetchFillerClip,isBackchannel,endsInQuestion}=globalThis.__omDeps;\n');
+    const om = await load('static/js/openMic.js', 'const {createRecorder,createCallRecorder,isCallRecordingSupported,isSpeechOutputSupported,transcribeBlob,transcribePartial,getSpeechStatus,api,createPartialTranscriber,createVoiceSpeaker,createVoiceTrace,createFillerGate,fetchFillerClip,isBackchannel,endsInQuestion,pickVoice}=globalThis.__omDeps;\n');
     const reset = () => { calls.transcribe.length = calls.partial.length = calls.api.length = 0; deps.transcribe = async () => ''; deps.partial = async () => ({ text: '', segments: [] }); deps.status = async () => ({}); deps.api = async () => ({}); deps.filler = async () => null; };
     const quiet = Float32Array.from({ length: 16000 }, () => .01);       // a clip: 1 s of 16 kHz samples
     const harness = (options = {}) => {
@@ -579,7 +580,20 @@ const load = async (file, prefix = '') => import('data:text/javascript;base64,' 
         createCapture: os.factory, sendMessage: (text, handlers) => { handlers.onChunk(reply); return new Promise(() => {}); } });
       await micB.start(); os.cap.onSpeechStart(); os.cap.onSegment({ wav: 1 }, { endpoint_ms: 900 }, quiet); await wait(150);
       assert.deepEqual(spoken, ['Plain voice.', 'Second line.'], 'with no neural voice chosen the OS voice speaks the sentences'); assert.equal(streams.length, 0);
-      micB.stop(); delete global.window.speechSynthesis; delete global.window.SpeechSynthesisUtterance; delete global.SpeechSynthesisUtterance;
+      micB.stop();
+      // Nothing chosen for Open Mic: it follows the Voice in Settings > Speech (its engine when ready, else the device voice).
+      store.delete('kairos:neural-voice:openmic');
+      await om.primeOpenMicVoice(async path => (assert.equal(path, '/api/agent-calls/voices'), { protocol: 'kokoro', models: ['kokoro'], voices: [{ id: 'af_heart' }] }));
+      assert.deepEqual(om.openMicVoiceSelection(), { provider: 'neural', model: 'kokoro', voice: 'af_heart' }, 'Open Mic follows the Voice: Kokoro for Kairos Voice');
+      await om.primeOpenMicVoice(async () => ({ protocol: 'kokoro', models: [], voices: [], error: 'Kokoro is not downloaded. The device voice is used instead.' }));
+      assert.deepEqual(om.openMicVoiceSelection(), { provider: 'device' }, 'and the device voice until Kokoro is ready');
+      await om.primeOpenMicVoice(async () => ({ protocol: 'elevenlabs', models: ['eleven_flash_v2_5'], voices: [{ id: 'r1' }] }));
+      assert.equal(om.openMicVoiceSelection().voice, 'r1', 'ElevenLabs as the Voice speaks in Open Mic too');
+      store.set('kairos:neural-voice:openmic', JSON.stringify({ provider: 'auto' }));
+      assert.equal(om.openMicVoiceSelection().voice, 'r1', '"Same as the Voice" follows it');
+      store.set('kairos:neural-voice:openmic', JSON.stringify({ provider: 'device' }));
+      assert.deepEqual(om.openMicVoiceSelection(), { provider: 'device' }, 'a device voice picked for Open Mic stays');
+      delete global.window.speechSynthesis; delete global.window.SpeechSynthesisUtterance; delete global.SpeechSynthesisUtterance;
     }
   }
 

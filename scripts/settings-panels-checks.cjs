@@ -268,13 +268,31 @@ module.exports = async ({ js, win, waitFor, delay, navigate, demoState, writes, 
       localStorage.removeItem('jarvis:speech-input-device'); localStorage.removeItem('jarvis:speech-voice');
     })()`);
     await open('speech'); await waitFor("!!document.querySelector('#speech-input-device') && !!document.querySelector('#speech-voice')");
-    // Voice engines (voiceEnginesSetup.js): ElevenLabs and VoiceStudio, keys as password fields, a free Check, plain copy.
-    await waitFor("!!document.querySelector('.speech-voice-engines [data-voice-engine=\"voicestudio\"]')");
-    const engines = await js(`(() => { const g = document.querySelector('.speech-voice-engines'); return {
-      eleven: !!g.querySelector('[data-voice-engine="elevenlabs-key"][type="password"]') && !!g.querySelector('[data-voice-engine="elevenlabs-check"]'),
-      studio: g.querySelector('[data-voice-engine="voicestudio-url"]')?.value, studioKey: g.querySelector('[data-voice-engine="voicestudio-key"]')?.type,
-      cost: g.textContent.includes('per 1,000 characters'), privacy: g.textContent.includes('sent to ElevenLabs'), dash: /—/.test(g.textContent) }; })()`);
-    assert.deepEqual(engines, { eleven: true, studio: 'http://127.0.0.1:3900', studioKey: 'password', cost: true, privacy: true, dash: false }, 'Speech: voice engines offer ElevenLabs and VoiceStudio with a free Check and plain cost and privacy copy');
+    // The one Voice choice (voiceEnginesSetup.js, Locked shape 2026-11-10): Kairos Voice (default), GPT-Live, ElevenLabs,
+    // one short cost and privacy line each; everything technical under More options; VoiceStudio is gone.
+    await waitFor("!!document.querySelector('.speech-voice-choice [data-voice-choice=\"kairos\"]') && !!document.querySelector('.speech-more [data-voice-engine=\"voicebox\"]')");
+    const shape = await js(`(() => { const panel = document.querySelector('.speech-panel'), choice = panel.querySelector('.speech-voice-choice'), more = panel.querySelector('.speech-more');
+      const outside = [...panel.children].filter(n => n !== more).map(n => n.textContent).join(' ');
+      return { options: [...choice.querySelectorAll('[data-voice-choice]')].map(i => i.value), checked: choice.querySelector('[data-voice-choice]:checked')?.value,
+        lines: [...choice.querySelectorAll('.speech-voice-option-line')].map(n => n.textContent.split('.')[0]),
+        applies: choice.textContent.includes('Calls, Open Mic, replies read aloud, voice notes, phone calls and Discord voice') && choice.textContent.includes('its own voice or call mode'),
+        moreFirst: panel.children[0] === choice, moreClosed: !more.open, moreLabel: more.querySelector('summary').textContent,
+        technicalOutside: /Voicebox|Recognition model|GPU|runtime|model ID|Kokoro ·/i.test(outside),
+        inMore: ['Voicebox', 'Recognition model', 'Voice picker'].every(t => more.textContent.includes(t)) && !!more.querySelector('#speech-voice'),
+        voicebox: more.querySelector('[data-voice-engine="voicebox-url"]')?.value, studio: /VoiceStudio/i.test(panel.textContent), dash: /\u2014/.test(panel.textContent) }; })()`);
+    assert.deepEqual(shape, { options: ['kairos', 'gpt_live', 'elevenlabs'], checked: 'kairos',
+      lines: ['Free and private', 'About 5 cents a minute on your OpenAI key', 'About 4 cents a minute of speech on your ElevenLabs key'], applies: true,
+      moreFirst: true, moreClosed: true, moreLabel: 'More options', technicalOutside: false, inMore: true, voicebox: 'http://127.0.0.1:17493', studio: false, dash: false },
+      'Speech: one Voice choice on the main path (Kairos Voice by default), cost and privacy in one line each, the technical parts under More options, no VoiceStudio');
+    // Picking GPT-Live or ElevenLabs without a key shows its one-step key setup and saves nothing yet.
+    let picks = await mark();
+    await js("document.querySelector('[data-voice-choice=\"gpt_live\"]').click()");
+    await waitFor("!!document.querySelector('.speech-voice-choice [data-voice-engine=\"openai-key\"][type=\"password\"]')");
+    await js("document.querySelector('[data-voice-choice=\"elevenlabs\"]').click()");
+    await waitFor("!!document.querySelector('.speech-voice-choice [data-voice-engine=\"elevenlabs-key\"][type=\"password\"]') && !document.querySelector('[data-voice-engine=\"openai-key\"]')");
+    assert.ok(await js("document.querySelector('.speech-voice-choice').textContent.includes('per 1,000 characters') && document.querySelector('.speech-voice-choice').textContent.includes('sent to ElevenLabs')"), 'Speech: ElevenLabs shows its cost and privacy copy with the key');
+    await js("document.querySelector('[data-voice-choice=\"kairos\"]').click()");
+    countSaves('speech voice choice without a key (no saves)', await saves(picks), []);
     assert.equal(await value('#speech-input-device'), '', 'Speech: starts on the system default microphone');
     let from = await mark();
     await setValue('#speech-input-device', 'dev-head-222222', 'change');

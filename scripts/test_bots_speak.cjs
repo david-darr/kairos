@@ -60,6 +60,21 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   await tick(); assert.equal(nodes.length, 1, 'playback starts while the response is open');
   send({ done: true }); packets.close(); await tick(); nodes[0].onended(); await tick();
   assert.deepEqual(pcmErrors, []); reader.destroy();
+  // A bot with no voice of its own follows the Voice in Settings > Speech: its engine when ready (voice_id null, the
+  // server picks the engine's first voice), else the device voice; a 409 (no engine yet) falls back to the device voice.
+  for (const [catalog, status, expectEngine] of [[{ models: ['kokoro'], voices: [{ id: 'af' }] }, 200, true], [{ models: [], voices: [], error: 'Kokoro is not downloaded' }, 200, false], [{ models: ['kokoro'], voices: [{ id: 'af' }] }, 409, false]]) {
+    const posted = [], said = [];
+    global.__speechApi = async path => path === '/api/agent-calls/voices' ? catalog : ({ blocks: ['Follow the Voice.'], withheld: false });
+    global.fetch = async (path, options) => { posted.push(JSON.parse(options.body)); return status === 409 ? new Response('{}', { status: 409 }) : new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('{"sample_rate":24000}\n{"audio":"AAA="}\n')); c.close(); } })); };
+    global.__deviceSpeaker = (opts = {}) => ({ cancel() {}, feed(t) { said.push(t); }, finish() { opts.onEnd?.(); } });
+    const fresh = await import('data:text/javascript;base64,' + Buffer.from('const api=globalThis.__speechApi,createSpeaker=globalThis.__deviceSpeaker,_forSpeech=globalThis.__speechCleaner;\n' + source + `\n// ${status} ${catalog.error || ''}`).toString('base64'));
+    const follower = fresh.createReadAloud();
+    await follower.update('Follow the Voice.', true); await tick(); await tick(); await tick();
+    if (expectEngine) assert.deepEqual(posted, [{ text: 'Follow the Voice.', voice_id: null }], 'read-aloud uses the Voice engine');
+    else assert.ok(said.includes('Follow the Voice.'), `read-aloud falls back to the device voice (${status})`);
+    if (catalog.error) assert.deepEqual(posted, [], 'no engine: nothing is sent to it');
+    follower.destroy();
+  }
   global.fetch = oldFetch; global.AudioContext = oldContext; delete global.__speechApi; delete global.__deviceSpeaker; delete global.__speechCleaner;
   // Drive the transcript's actual live-turn lifecycle without browser speech.
   const oldDocument = global.document;

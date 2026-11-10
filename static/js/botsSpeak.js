@@ -55,26 +55,32 @@ export function createBlockQueue({ prepare, play, stop = () => {}, onError = () 
   };
 }
 
-export function createReadAloud({ voiceId = '', onError = () => {} } = {}) {
-  let context, source, request = 0, dead = false;
+// Reading a bot's replies aloud follows the Voice in Settings > Speech: the bot's own voice when it has one, else the
+// Voice's engine (Kokoro for Kairos Voice, ElevenLabs, Voicebox) when it is ready, else the device voice. A block the
+// engine cannot speak (no engine yet) is read by the device voice instead of failing.
+export function createReadAloud({ voiceId = '', onError = () => {}, request: ask = api } = {}) {
+  let context, source, request = 0, dead = false, engine = null;
   const sources = new Set();
   const device = createSpeaker();
   const requests = new AbortController();
+  const useEngine = () => engine ??= voiceId ? Promise.resolve(true)
+    : ask('/api/agent-calls/voices', { toast: false }).then(c => !c?.error && !!c?.voices?.length && !!c?.models?.length).catch(() => false);
   const queue = createBlockQueue({
     onError,
     stop() { device.cancel(); try { source?.stop(); } catch {} source = null; for (const node of sources) { try { node.stop(); } catch {} } sources.clear(); },
     async prepare(text, signal) {
-      if (!voiceId) return text;
-      text = _forSpeech(text);
-      if (!text) return null;
+      if (!await useEngine()) return text;
+      const spoken = _forSpeech(text);
+      if (!spoken) return null;
       const response = await fetch('/api/bot-voice/speak/block', { method: 'POST', credentials: 'same-origin', signal,
-        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, voice_id: voiceId }) });
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: spoken, voice_id: voiceId || null }) });
+      if (response.status === 409 && !voiceId) { engine = Promise.resolve(false); return text; }
       if (!response.ok) throw new Error('Speech could not load. Check the local voice engine.');
       return response.body;
     },
     async play(value, signal) {
-      if (voiceId) {
-        if (value === null) return;
+      if (value === null) return;
+      if (typeof value !== 'string') {
         // Same PCM16 protocol as the call speaker, with a three-response queue.
         // Playback starts at the first audio packet, while later breaths prefetch.
         context ||= new AudioContext(); await context.resume();

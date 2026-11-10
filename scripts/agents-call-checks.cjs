@@ -39,8 +39,9 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
       window.__callTest.urls.push(String(url));
       const t=window.__callTest, path=String(url), json=data=>new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json'}});
       if(path==='/api/agent-calls/choices')return json([{id:'fast',name:'Fast conversation',kind:'local',model:'llama3.2'}]);
-      if(path==='/api/agent-calls/realtime-choices')return json([]);
-      if(path==='/api/agent-calls/voices')return json({url:'',protocol:'voicestudio',models:[],voices:[]});
+      if(path==='/api/agent-calls/realtime-choices')return json(t.realtime||[]);
+      if(path==='/api/voice-engines')return json({choice:t.voiceChoice||'kairos'});
+      if(path==='/api/agent-calls/voices')return json({url:'',protocol:'kokoro',models:[],voices:[],error:'Kokoro is not downloaded. The device voice is used instead.'});
       if(path.startsWith('/api/agent-calls/pending/'))return json([]);
       if(path==='/api/agent-calls') {
         const make=()=>{const id=String(++t.callCounter).padStart(32,'0');const body=JSON.parse(options.body);(t.callBodies||=[]).push(body);const value={id,parent_id:body.parent_id,ended:false,summary_state:'open',jobs:[]};t.calls[id]=value;return json(value);};
@@ -370,6 +371,19 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   assert.equal(await js('window.__callTest.callTurns.length'),lateTurns,'Hangup during call creation cannot submit a late voice turn');
   assert.equal(await js('window.__callTest.opened'),lateOpened,'Late call creation cannot reopen the microphone');
   assert.ok(await js('Object.values(window.__callTest.calls).every(c=>c.ended)'),'Every call record is finalized after cancellation or navigation');
+  // The Voice in Settings > Speech comes before "Local if unset": GPT-Live there makes one tap a GPT-Live call, with the
+  // choice in Settings as the paid consent (no Continue step), on the GPT-Live connection.
+  if (await js("!!document.querySelector('.agent-call')?.open")) { await js("[...document.querySelectorAll('.agent-call .agent-call-action')].find(b=>b.textContent==='Close')?.click();true"); await waitFor("!document.querySelector('.agent-call').open"); }
+  await js(`(()=>{const t=window.__callTest;t.voiceChoice='gpt_live';t.realtime=[{id:'rt:fast',name:'OpenAI',provider:'openai',label:'OpenAI Realtime',voices:['cedar'],default_voice:'cedar',price_per_minute:0.06,model:'gpt-realtime',free_tier:false},{id:'live:fast',name:'OpenAI',provider:'openai_live',label:'GPT-Live',voices:['marin'],default_voice:'marin',price_per_minute:0.05,model:'gpt-live-1',free_tier:false}];
+    window.__sockets=[];window.__RealWebSocket=window.WebSocket;window.WebSocket=class{constructor(url){this.url=url;this.readyState=0;this.sent=[];window.__sockets.push(this);setTimeout(()=>{this.readyState=1;this.onopen?.()},0)}send(d){this.sent.push(d)}close(){this.readyState=3}};return true})()`);
+  await delay(1100);  // shared reads last 1 s (api.js)
+  await click('.agent-call-open'); await waitFor("document.querySelector('.agent-call').open");
+  await waitFor("window.__sockets.some(s=>s.sent.some(d=>typeof d==='string'&&d.includes('\"start\"')))").catch(async error=>{ console.log(await js("({blocker:document.querySelector('.agent-call-blocker').textContent,notice:document.querySelector('.agent-call-notice').textContent,error:document.querySelector('.agent-call-error').textContent,mode:document.querySelector('[aria-label=\"Call mode\"]').value})")); throw error; });
+  const liveStart = await js("JSON.parse(window.__sockets.at(-1).sent.find(d=>typeof d==='string'&&d.includes('\"start\"')))");
+  assert.deepEqual([liveStart.endpoint_id, liveStart.voice, liveStart.consent], ['live:fast', 'marin', true], 'GPT-Live as the Voice: the call is a GPT-Live call at once, on GPT-Live, consented in Settings');
+  assert.equal(await js("document.querySelector('.agent-call-blocker').hidden"), true, 'with no Continue step');
+  await js("[...document.querySelectorAll('.agent-call .agent-call-action')].find(b=>b.textContent==='Close')?.click();window.WebSocket=window.__RealWebSocket;const t=window.__callTest;t.voiceChoice='';t.realtime=[];true");
+  await waitFor("!document.querySelector('.agent-call').open");
   await navigate('home');
   await js(String.raw`(async()=>{
     const {neuralSpeaker}=await import('/static/js/callVoice.js');

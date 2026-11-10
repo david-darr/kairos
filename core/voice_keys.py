@@ -1,4 +1,4 @@
-"""Keys for voice engines (ElevenLabs, a VoiceStudio the person runs with OMNIVOICE_API_KEY), one file per account.
+"""Keys for voice engines (ElevenLabs today), one file per account.
 
 Sealed with that account's own key (core/secret_storage.py), like the Phone connection's secrets. Kept apart from the
 chosen engine (core/call_voices.py) so switching engines keeps a key. Values are never returned by any route: callers
@@ -13,7 +13,7 @@ from core.atomic_io import read_json, write_json_atomic
 from core.secret_storage import decrypt_for, encrypt_for
 
 FILE = "voice_engine_keys.json"
-NAMES = ("elevenlabs", "voicestudio")
+NAMES = ("elevenlabs",)
 _LOCK = threading.RLock()
 PATH: Optional[str] = None      # a test can point it at its own file
 

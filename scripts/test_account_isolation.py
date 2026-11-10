@@ -333,7 +333,7 @@ class AccountIsolation(unittest.TestCase):
         # tool setup, the browser computers, the Codex install and the store's publishing side.
         bea = self.accounts["bea"]
         for method, path, body in (
-                ("PUT", "/api/agent-calls/voices", {"url": "http://127.0.0.1:9", "protocol": "voicestudio"}),
+                ("PUT", "/api/agent-calls/voices", {"url": "http://127.0.0.1:9", "protocol": "voicebox"}),
                 ("PUT", "/api/agents/avatar-provider", {"provider": "openai", "api_key": "x"}),
                 ("POST", "/api/google/client", {"client_id": "x"}),
                 ("POST", "/api/settings/computer-use", {"enabled": True}),
