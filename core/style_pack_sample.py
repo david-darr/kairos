@@ -28,7 +28,9 @@ LINES = {
     "tilt": "Earth spins on a tilted axis, leaning about twenty-three degrees.",
     "toward": "When your half leans toward the Sun, its light hits you more directly.",
     "days": "Days get longer too, so the ground has more time to warm up.",
-    "end": "Six months later, your half leans away. That is winter.",
+    # A scene's line, on its own beat: on the end card it was captioned over "Seasons come from a tilt" (2026-11-10).
+    # The end card is silent; core/video_checks.card_narration_notes names a line on a card that is not its own words.
+    "winter": "Six months later, your half leans away. That is winter.",
 }
 _running: dict[tuple, asyncio.Task] = {}
 
@@ -56,7 +58,8 @@ def beats(data) -> list[dict]:
             {"id": "tilt", "kind": "big-number", "number": "23°", "text": "the tilt of Earth's axis", "camera": cam("pull", "still"), "transition": cut("zoom", "cut"), "say": LINES["tilt"]},
             {"id": "toward", "kind": "statement", "text": "Leaning in means direct light", "camera": cam("push", "still"), "transition": cut("wipe", "cut"), "say": LINES["toward"]},
             {"id": "days", "kind": "list", "text": "Summer brings", "items": ["More direct light", "Longer days"], "camera": cam("pan", "still"), "transition": cut("cut"), "say": LINES["days"]},
-            {"id": "end", "kind": "end", "text": "Seasons come from a tilt", "sub": "An original Kairos sample", "bars": 1.5, "say": LINES["end"]},
+            {"id": "winter", "kind": "big-number", "number": "6 months", "text": "later, your half leans away", "camera": cam("pull", "still"), "transition": cut("zoom", "cut"), "say": LINES["winter"]},
+            {"id": "end", "kind": "end", "text": "Seasons come from a tilt", "sub": "An original Kairos sample", "bars": 1.5},
         ]
     cast = [e["character"] for e in data["characters"]]
     a, b = cast[0], cast[1 % len(cast)]
@@ -87,7 +90,11 @@ def beats(data) -> list[dict]:
                    "cast": [{"character": a, "x": .3, "action": "jump", "expression": "happy", "speaking": True},
                             *([{"character": b, "x": .7, "action": "idle", "expression": "happy"}] if b != a else [])],
                    "props": _props(["clock", "sun", "leaf"], props, [{"x": .5, "y": .2, "size": .12}, {"x": .84, "y": .16, "size": .1}])}},
-        {"id": "end", "kind": "end", "text": "Seasons come from a tilt", "sub": "An original Kairos sample", "bars": 1.5, "say": LINES["end"]},
+        {"id": "winter", "kind": "scene", "camera": cam("pull", "still"), "transition": cut("zoom", "cut"), "say": LINES["winter"],
+         "scene": {"setting": setting("ocean", "city", "meadow"), "shot": shot("medium", "wide"),
+                   "cast": [{"character": b, "x": .4, "action": "shrug", "expression": "worried", "speaking": True}],
+                   "props": _props(["moon", "star", "cloud"], props, [{"x": .78, "y": .18, "size": .11}])}},
+        {"id": "end", "kind": "end", "text": "Seasons come from a tilt", "sub": "An original Kairos sample", "bars": 1.5},
     ]
     return out
 

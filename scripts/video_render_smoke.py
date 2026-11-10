@@ -58,7 +58,7 @@ SAMPLE = {
 }
 SMOKE = {
     "title": "Narration smoke", "look": "sport", "aspects": ["16:9"], "characters": ["round"], "palette": "mint",
-    "beats": [{"id": "one", "kind": "title", "text": "Narrated", "say": "One short line. And a second one, after a comma."},
+    "beats": [{"id": "one", "kind": "title", "text": "One short line", "say": "One short line. And a second one, after a comma."},
               {"id": "talk", "kind": "scene", "say": "Hello there. I am a character.",
                "scene": {"setting": "meadow", "shot": "medium", "cast": [{"character": 0, "action": "wave", "expression": "happy", "speaking": True}],
                          "props": [{"icon": "sun", "x": .8, "y": .2, "size": .12}]}},

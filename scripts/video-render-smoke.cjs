@@ -78,6 +78,9 @@ app.whenReady().then(async () => {
   // Captions stay clear of characters in every sampled moment, close shots included.
   const covered = (job.notes || []).filter(n => /caption covers a character/.test(n));
   if (covered.length) return finish(1, 'A caption covers a character: ' + covered.join(' '));
+  // A line stays on its own beat: no scene's narration captioned on a title or end card.
+  const spilled = (job.notes || []).filter(n => /card carries narration|runs onto the .* card|caption shows on the .* card/.test(n));
+  if (spilled.length) return finish(1, 'Narration lands on a title or end card: ' + spilled.join(' '));
   // A style pack's sample waits for the person's approval once rendered, and keeps to the pack's rules.
   if (args.includes('--style-pack')) {
     if (!result.pack || result.pack.step !== 'sample' || result.pack.status !== 'awaiting_approval') return finish(1, 'The style pack sample was not sent for approval.');

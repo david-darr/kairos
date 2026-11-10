@@ -811,9 +811,10 @@ assert(!allowedRequest('https://example.com/static/motion/engine.js', origin, ''
 
 def narrated(**changes):
     return {**project(beats=[
-        {"id": "hook", "kind": "title", "text": "Start here", "say": "Clouds are heavy. They still float, though, all day long."},
+        # A title or end card speaks its own words (core/video_checks.card_narration_notes).
+        {"id": "hook", "kind": "title", "text": "Clouds still float", "say": "Clouds are heavy. They still float, though, all day long."},
         {"id": "mid", "kind": "statement", "text": "No line here", "bars": 1},
-        {"id": "end", "kind": "end", "text": "Try it now", "say": "Look up today."}]),
+        {"id": "end", "kind": "end", "text": "Look up today", "say": "Look up today."}]),
         "narration": {"voice": "af_heart", "captions": True}, **changes}
 
 
@@ -1097,6 +1098,33 @@ class NarrationCheckTests(unittest.TestCase):
     def test_reading_speed_uses_the_measured_length(self):
         saved = self.measured()
         self.assertFalse(any("reads faster" in n for n in video_checks.check(saved)))
+
+    def test_a_line_on_a_title_or_end_card_is_named_unless_it_speaks_the_card(self):
+        # The style pack sample captioned a scene's line ("Six months later...") on its end card (2026-11-10).
+        saved = self.measured()
+        self.assertEqual(video_checks.card_narration_notes(saved), [], "lines that speak their cards are by design")
+        spilled = make(beats=[*narrated()["beats"][:2], {"id": "end", "kind": "end", "text": "Seasons come from a tilt",
+                                                          "sub": "An original Kairos sample", "say": "Six months later, your half leans away. That is winter."}],
+                       narration={"voice": "af_heart", "captions": True})
+        notes = video_checks.card_narration_notes(spilled)
+        self.assertTrue(len(notes) == 1 and "end card carries narration that is not its own words" in notes[0], notes)
+        self.assertIn(notes[0], video_checks.check(spilled))
+        for beat, ok in (({"kind": "title", "text": "Clouds weigh tons", "say": "That fluffy cloud above you weighs as much as elephants."}, True),
+                         ({"kind": "end", "text": "Look up today", "say": "Next time you look up, you'll know why."}, True),
+                         ({"kind": "end", "text": "Thanks", "sub": "Subscribe for more", "say": "Subscribe for more."}, True),
+                         ({"kind": "title", "text": "Narrated", "say": "One short line. And a second one, after a comma."}, False)):
+            self.assertEqual(video_checks.speaks_the_card(beat), ok, beat)
+        # In the sampled layouts: a caption on screen while the end card shows is named, whichever beat it belongs to.
+        seconds = [video_store.beat_seconds(b, 120) for b in saved["beats"]]
+        on_end = sum(seconds[:2]) + .5
+        caption = {"kind": "text", "role": "caption", "x": 200, "y": 870, "w": 1400, "h": 120, "color": "#ffffff", "bg": "#000000"}
+        stray = [{"time": on_end, "elements": [{**caption, "beat": "hook", "text": "They still float, though, all day long."}]}]
+        self.assertIn("Beat hook's caption runs onto the end card end; end the line inside its own beat.",
+                      video_checks.card_narration_notes(saved, stray))
+        own = [{"time": on_end, "elements": [{**caption, "beat": "end", "text": "Look up today."}]}]
+        self.assertEqual(video_checks.card_narration_notes(saved, own), [])
+        late = [{"time": sum(video_store.beat_seconds(b, 120) for b in spilled["beats"][:2]) + .5, "elements": [{**caption, "beat": "end", "text": "Six months later, your half leans away."}]}]
+        self.assertTrue(any("caption shows on the end card" in n for n in video_checks.card_narration_notes(spilled, late)))
 
 
 class NarrationToolTests(unittest.TestCase):

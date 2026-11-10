@@ -83,7 +83,71 @@ def narration_notes(project, voice=None):
     return notes
 
 
-CAPTION_OVERLAP_PX = 8   # a figure's anti-aliased edge or a foot's round cap may touch the band; a body may not
+CARD_KINDS = ("title", "end")
+_MINOR = {"the", "and", "for", "from", "with", "that", "this", "your", "you", "are", "was", "its", "it's", "our", "not", "but",
+          "into", "onto", "about", "what", "why", "how", "who", "has", "have", "had", "can", "will", "all", "out", "too"}
+
+
+def _content(text):
+    return [w for w in _words(text) if len(w) >= 3 and w not in _MINOR]
+
+
+def _same_word(a, b):
+    return a == b or (min(len(a), len(b)) >= 4 and (a.startswith(b) or b.startswith(a)))   # cloud/clouds, weigh/weighs
+
+
+def speaks_the_card(beat) -> bool:
+    """A title or end card carries narration by design when the line speaks the card: at least half of the headline's
+    words are in the line ("Look up today" / "Next time you look up..."), or every word of the line is on the card.
+    A line about something else is a scene's line that landed on the card."""
+    line = _content(beat.get("say", ""))
+    if not line:
+        return True
+    head = _content(beat.get("text", ""))
+    if head and 2 * sum(any(_same_word(h, w) for w in line) for h in head) >= len(head):
+        return True
+    shown = _content(" ".join(str(beat.get(k, "")) for k in ("text", "sub")))
+    return bool(shown) and all(any(_same_word(w, s) for s in shown) for w in line)
+
+
+def card_narration_notes(project, layouts=None):
+    """Narration and captions belong to the beats that show them. Named: a title or end card whose own line is not
+    its words (the style pack sample captioned "Six months later, your half leans away." on its end card, 2026-11-10),
+    and, in the sampled layouts, any caption on screen while a title or end card is the beat showing, unless the card
+    carries that line by design."""
+    notes, beats = [], project["beats"]
+    for b in beats:
+        if b["kind"] in CARD_KINDS and "say" in b and not speaks_the_card(b):
+            notes.append(f"Beat {b['id']}: the {b['kind']} card carries narration that is not its own words "
+                         f"(\"{' '.join(b['say'].split()[:8])}...\"); give the line its own scene or statement beat, "
+                         "or leave the card silent.")
+    if not layouts:
+        return notes
+    spans, start = [], 0.0
+    for b in beats:
+        end = start + beat_seconds(b, project.get("bpm", 120))
+        spans.append((start, end, b))
+        start = end
+    for sample in layouts or []:
+        t = sample.get("time")
+        if not isinstance(t, (int, float)):
+            continue
+        showing = next((b for s, e, b in spans if s <= t < e), None)
+        if not showing or showing["kind"] not in CARD_KINDS:
+            continue
+        for box in sample.get("elements", []):
+            if box.get("role") != "caption":
+                continue
+            if box.get("beat") != showing["id"]:
+                notes.append(f"Beat {box.get('beat', '?')}'s caption runs onto the {showing['kind']} card {showing['id']}; "
+                             "end the line inside its own beat.")
+            elif not speaks_the_card(showing):
+                notes.append(f"Beat {showing['id']}: a caption shows on the {showing['kind']} card that is not its own words; "
+                             "give the line its own scene or statement beat, or leave the card silent.")
+    return list(dict.fromkeys(notes))
+
+
+CAPTION_OVERLAP_PX = 8  # a figure's anti-aliased edge or a foot's round cap may touch the band; a body may not
 
 
 def caption_clear_notes(layouts):
@@ -137,6 +201,7 @@ def check(project, aspect="16:9", layouts=None, frames=None, loudness=None, voic
             if fg is not None and bg is not None and (max(fg, bg) + .05) / (min(fg, bg) + .05) < 4.5:
                 notes.append(f"Beat {label} has text contrast under 4.5:1; strengthen the text or background color.")
     notes += caption_clear_notes(layouts)
+    notes += card_narration_notes(project, layouts)
     # Use the worker's actual visible text too, since layout can reveal extra text.
     lengths = {b["id"]: beat_seconds(b, project["bpm"]) for b in project["beats"]}
     for sample in layouts or []:

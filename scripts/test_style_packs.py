@@ -261,8 +261,9 @@ class Videos(Accounts):
         self.assertTrue(settings <= set(data["scenes"]["settings"]))
         self.assertIn("close", {b["scene"]["shot"] for b in project["beats"] if b["kind"] == "scene"}, "covers the caption fix")
         self.assertEqual(project["narration"]["voice"], data["voice"]["voice"])
-        words = sum(len(b["say"].split()) for b in project["beats"])
-        estimate = sum(video_store.LEAD + video_store.estimate(b["say"]) + video_store.TAIL for b in project["beats"])
+        words = sum(len(b["say"].split()) for b in project["beats"] if "say" in b)
+        estimate = sum(video_store.LEAD + video_store.estimate(b["say"]) + video_store.TAIL if "say" in b
+                       else video_store.beat_seconds(b, project["bpm"]) for b in project["beats"])
         self.assertTrue(55 <= words <= 75 and 18 <= estimate <= 32, (words, estimate))
         stray = copy.deepcopy(project)
         stray["beats"][1]["camera"] = "shake"
@@ -272,6 +273,22 @@ class Videos(Accounts):
         motion = store.validate({**copy.deepcopy(store.STARTER), "base": "motion-type", "characters": [], "name": "Type only"})
         kinds = [b["kind"] for b in style_pack_sample.beats(motion)]
         self.assertNotIn("scene", kinds)
+
+    def test_the_samples_cards_carry_no_scene_line_and_one_light_per_sky(self):
+        # The 2026-11-10 sample captioned "Six months later, your half leans away." on its end card.
+        pack = approved_pack("Cards pack")
+        project = self.make_video(pack)
+        motion = store.validate({**copy.deepcopy(store.STARTER), "base": "motion-type", "characters": [], "name": "Type cards"})
+        for beats in (project["beats"], style_pack_sample.beats(motion)):
+            self.assertEqual(beats[-1]["kind"], "end")
+            self.assertNotIn("say", beats[-1], "the end card is silent")
+            self.assertIn(style_pack_sample.LINES["winter"], [b.get("say") for b in beats], "the winter line has its own beat")
+            self.assertEqual([b.get("say") for b in beats if "say" in b], list(style_pack_sample.LINES.values()))
+            self.assertEqual(video_checks.card_narration_notes({**project, "beats": beats}), [])
+        for b in project["beats"]:
+            if b["kind"] == "scene":
+                lights = [p["icon"] for p in b["scene"]["props"] if p["icon"] in ("sun", "moon")]
+                self.assertLessEqual(len(lights), 1, f"{b['id']}: one light prop per scene (the sky draws none beside it)")
 
     def test_the_player_gets_the_packs_look_as_numbers_only(self):
         pack = approved_pack("Player pack")

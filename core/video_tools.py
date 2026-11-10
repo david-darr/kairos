@@ -25,7 +25,8 @@ NARRATION = ("Narration: give a beat a say line (what the narrator speaks over i
              f"{video_store.SAY_LIMIT} characters, no clause over {video_store.CLAUSE_LIMIT} without a comma) and the video is "
              "voiced by Kokoro, locally and free. Each line's spoken length sets its beat's length (bars are ignored there); "
              "captions are burned in from the lines; the music ducks under the voice. narration={voice, captions} picks the "
-             "Kokoro voice (default af_heart; a channel keeps one voice) and captions on or off. Narrated videos may run to "
+             "Kokoro voice (default af_heart; a channel keeps one voice) and captions on or off. A title or end card speaks only its own "
+             "words (or stays silent); a line about something else gets its own scene or statement beat.Narrated videos may run to "
              f"{video_store.NARRATED_MAX_SECONDS} seconds and {video_store.NARRATED_MAX_BEATS} beats. Run video_narrate for the "
              "timestamped shot plan before rendering. ")
 PACKS = ("Style packs: style_pack names one of this account's approved user-made packs (content_studio_style_packs or the Styles tab "
