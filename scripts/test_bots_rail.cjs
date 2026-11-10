@@ -21,6 +21,17 @@ const bot = (id, name, extra = {}) => ({ id, name, enabled: true, status: 'idle'
   const R = await load('js/botsRail.js');
   const S = await load('js/botStatus.js');
 
+  check('the sidebar polls one slim route and asks only for the lists that changed (100-bot scale test)', () => {
+    assert.equal(R.pulsePath({}), '/api/bot-pulse', 'nothing held: every list comes back');
+    assert.equal(R.pulsePath({ agents: 'a1', team: 't 1', automations: '', junk: 'x' }), '/api/bot-pulse?agents=a1&team=t%201');
+    const held = { agents: 'a1', conversations: 'c1', team: 't1', automations: 'm1' };
+    // agents changed (its body came back), team unchanged, conversations unreadable, automations new.
+    const reply = { versions: { agents: 'a2', conversations: null, team: 't1', automations: 'm2' }, agents: [], automations: { automations: [] } };
+    assert.deepEqual(R.heldAfter(held, reply), { agents: 'a2', team: 't1', automations: 'm2' });
+    // A version that moved without its body (a lost reply) is not taken: the next poll asks again.
+    assert.deepEqual(R.heldAfter({ team: 't1' }, { versions: { team: 't2' } }), {});
+  });
+
   check('bots are ordered by `order`, then by name', () => {
     const list = [bot('d', 'Dune', { order: 2 }), bot('b', 'Birch', { order: 0 }), bot('c', 'Cedar', { order: 1 }), bot('a', 'Alder', { order: 2 })];
     assert.deepEqual(R.visibleBots(list).map(b => b.id), ['b', 'c', 'a', 'd'], 'order first, a tie by name');

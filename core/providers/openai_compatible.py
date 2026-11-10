@@ -308,6 +308,19 @@ def _record(working_messages: list[dict], rounds: Optional[list[dict]], message:
         rounds.append(message)
 
 
+_ssl_context = None
+
+
+def _client() -> httpx.AsyncClient:
+    """An HTTP client for one turn, on one shared TLS context. Building a client otherwise builds a TLS context
+    and loads the CA bundle, about 11 ms on the event loop for every model call (100-bot scale test,
+    2026-11-10). httpx.create_ssl_context() with no arguments is exactly what a default client builds."""
+    global _ssl_context
+    if _ssl_context is None:
+        _ssl_context = httpx.create_ssl_context()
+    return httpx.AsyncClient(timeout=TIMEOUT_SECONDS, verify=_ssl_context)
+
+
 async def _post_chat(client: httpx.AsyncClient, base_url: str, api_key: Optional[str], body: dict) -> dict:
     """The one place num_ctx capping actually gets applied — see module
     docstring. `body` may carry a `num_ctx` key; it's popped here rather
@@ -461,7 +474,7 @@ async def turn_events(base_url: str, model: str, api_key: Optional[str], message
             body = {"model": model, "messages": _request_messages(base_url, model, messages)}
             if num_ctx:
                 body["num_ctx"] = num_ctx
-            async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+            async with _client() as client:
                 data = await _post_chat(client, base_url, api_key, body)
             usage = account(data.get("usage"))
             if usage:
@@ -475,7 +488,7 @@ async def turn_events(base_url: str, model: str, api_key: Optional[str], message
         stream_body = {"model": model, "messages": _request_messages(base_url, model, messages), "stream": True,
                        "stream_options": {"include_usage": True}}
         reported = None
-        async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+        async with _client() as client:
             async with client.stream(
                 "POST", f"{base_url}/chat/completions", headers=_headers(api_key), json=stream_body,
             ) as resp:
@@ -502,7 +515,7 @@ async def turn_events(base_url: str, model: str, api_key: Optional[str], message
         return
 
     working_messages = list(messages)
-    async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+    async with _client() as client:
         for round_num in range(MAX_TOOL_ROUNDS):
             _trim_screenshots(working_messages)
             body = {"model": model, "messages": _request_messages(base_url, model, working_messages), "tools": tools}

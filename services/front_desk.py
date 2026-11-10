@@ -146,7 +146,8 @@ def ensure(*, restore=False):
                 name = f"Kip, front desk {suffix}"
                 suffix += 1
             agent = agent_service.create(name, role=FRONT_DESK_ROLE, soul=FRONT_DESK_SOUL, blurb=FRONT_DESK_BLURB,
-                                         daily_run_cap=100, approval_mode=front_desk_approval(), reply_style="conversational")
+                                         daily_run_cap=100, approval_mode=front_desk_approval(), reply_style="conversational",
+                                         front_desk=True)
             agent_service.mutate_bot(agent["id"], lambda a: a.update(builtin="front_desk", order=-1))
             # A team lead hands work to its teammates without asking each time; sends and deletes still ask.
             from services import bot_peers

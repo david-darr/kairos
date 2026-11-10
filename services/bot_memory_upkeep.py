@@ -463,7 +463,13 @@ async def tick(now: Optional[float] = None) -> dict:
         all_bots = agent_service.list_agents()
         bots = [b for b in all_bots if b.get("memory_upkeep") and b.get("memory_enabled", True) is not False]
         from services import bot_memory_capture
+        # The first pass after start reads every bot's review state through the link checks: 0.7 s at 100 bots
+        # in one go (100-bot scale test, 2026-11-10). It gives way to the loop every 20 ms.
+        slice_started = time.perf_counter()
         for bot in all_bots:
+            if time.perf_counter() - slice_started > 0.02:
+                await asyncio.sleep(0)
+                slice_started = time.perf_counter()
             key = f"capture:{bot['id']}"
             if bot in bots and not _busy(key) and bot_memory_capture.due_threads(bot["id"], now, quiet):
                 _start(key, _capture_job(bot["id"], now, quiet))

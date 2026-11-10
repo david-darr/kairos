@@ -131,7 +131,9 @@ async def complete(brain, prompt: str, task: dict, surface: str) -> str:
     finally:
         if endpoint_id and tally.usage is not None:
             try:
-                token_usage.record_usage(endpoint_id, tally.usage)
+                # Two small files read and rewritten: off the event loop, which a burst of routines all
+                # finishing at once otherwise queues behind (100-bot scale test, 2026-11-10).
+                await asyncio.to_thread(token_usage.record_usage, endpoint_id, tally.usage)
             except Exception:
                 logger.exception("record_usage failed for endpoint %s", endpoint_id)
     return outcome.text
@@ -303,7 +305,7 @@ async def _run_card(card: dict) -> None:
         prompt = task_service.card_prompt(card)
         if agent:
             prompt = agent_service.run_prompt(agent, prompt)
-        async with file_checkpoints.around_turn(f"card:{card['id']}"):
+        async with file_checkpoints.around_turn(f"card:{card['id']}", bot=bool(card.get("agent_id"))):
             output = await complete(brain, prompt, card, "card")
         task_service.finish_card(card["id"], output)
         events.emit("card.review", f"{card['name']} is ready for review", task_id=card["id"])
@@ -363,7 +365,7 @@ async def _run_goal(task: dict, agent: dict) -> None:
         await brain.connect()
         if task.get("taint") and hasattr(brain, "pending_reference_taint"):
             brain.pending_reference_taint = task["taint"]
-        async with file_checkpoints.around_turn(f"task:{task['id']}"):
+        async with file_checkpoints.around_turn(f"task:{task['id']}", bot=True):
             output = await complete(brain, agent_service.run_prompt(agent, task["prompt"], goal=task), task, "goal")
         task_service.record_run(task["id"], output=output)
         if task.get("report_when") == "always" or not is_silent(output):
@@ -382,11 +384,15 @@ async def _run_goal(task: dict, agent: dict) -> None:
 
 async def _run_task_tagged(task: dict, source: str) -> None:
     if task.get("schedule_kind") == "card":
+        await task_service.landed()  # the card's claim is on disk before its work starts
         await _run_card(task)
         return
     if source != "schedule":  # a scheduled run's start was stamped by its claim
         task_service.mark_started(task["id"], source)
     task_service.mark_running(task["id"])
+    # The claim and the run record are on disk before any work starts, so a crash from here on loses this
+    # occurrence rather than running it twice (saves are coalesced off the loop, core/store_writer.py).
+    await task_service.landed()
     if task.get("routine"):
         # A routine (Bots redesign phase 3): checks, a hidden run conversation,
         # classed failures and one result, in core/bot_routine_runner.py.

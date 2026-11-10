@@ -23,7 +23,7 @@ import threading
 import time
 from typing import Callable
 
-from core.atomic_io import read_json, write_json_atomic
+from core.atomic_io import read_json
 from core.constants import DATA_DIR
 
 logger = logging.getLogger(__name__)
@@ -39,19 +39,38 @@ def events_file() -> str:
 
 MAX_EVENTS_KEPT = 300
 
-_lock = threading.Lock()
+_lock = threading.RLock()
 _subscribers: list[Callable[[dict], None]] = []
+# Each feed as this process last read or wrote it; this module is the feed file's only writer. Saves go through
+# core/store_writer.py (coalesced, off the event loop): every routine run emits two or three events, and each
+# used to re-read and pretty-print the whole feed on the loop (100-bot scale test, 2026-11-10).
+_feeds: dict[str, list] = {}
+
+
+def _feed(path: str) -> list:
+    held = _feeds.get(path)
+    if held is None:
+        loaded = read_json(path, [])
+        held = _feeds[path] = loaded if isinstance(loaded, list) else []
+    return held
+
+
+def _snapshot(path: str) -> list:
+    with _lock:
+        return list(_feeds.get(path, []))
 
 
 def emit(event_type: str, message: str, level: str = "info", **extra) -> None:
     event = {"ts": time.time(), "type": event_type, "message": message, "level": level, **extra}
+    from core import store_writer
     from core.accounts import NoAccount
     try:
         with _lock:
             path = events_file()
-            events = read_json(path, [])
+            events = _feed(path)
             events.append(event)
-            write_json_atomic(path, events[-MAX_EVENTS_KEPT:])
+            del events[:-MAX_EVENTS_KEPT]
+            store_writer.save(path, lambda: _snapshot(path))
     except NoAccount:
         pass  # nobody signed in (a refused sign-in, say): there is no feed it belongs to
     except Exception:
@@ -68,5 +87,6 @@ def subscribe(fn: Callable[[dict], None]) -> None:
 
 
 def recent(limit: int = 50) -> list[dict]:
-    events = read_json(events_file(), [])
+    with _lock:
+        events = list(_feed(events_file()))
     return list(reversed(events[-limit:]))

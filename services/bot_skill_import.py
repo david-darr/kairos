@@ -243,7 +243,15 @@ CREDENTIAL_NAME = re.compile(r"(?i)(^\.env|\.pem\Z|\.key\Z|\.p12\Z|\.pfx\Z|id_rs
 
 
 def _linked(path):
-    return path.is_symlink() or bool(getattr(path.lstat(), "st_file_attributes", 0) & 0x400)
+    """A symlink or a Windows junction/reparse point. A path that is not there is not a link: a skills folder
+    without a SKILL.md made the setup preview answer 500 (100-bot scale test, 2026-11-10)."""
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True  # unreadable: treated as a link, so it is skipped, never followed
+    return path.is_symlink() or bool(getattr(info, "st_file_attributes", 0) & 0x400)
 
 
 def _skip_reason(path, relative):

@@ -53,12 +53,34 @@ class Conflict(Exception):
     pass
 
 
-def _atomic_write(path: Path, data: bytes) -> None:
+def _atomic_write(path: Path, data: bytes, *, same_if_present: bool = False) -> None:
+    """Write through a temp file. Turns running at once (a burst of bot routines) write the same objects and
+    the same new repository's HEAD: on Windows the second os.replace onto a file the first is placing fails
+    with access denied (WinError 5, 100-bot scale test, 2026-11-10). `same_if_present`: the content is fixed
+    by the name (an object, or HEAD and config), so a target that is already there is the same write."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as tmp:
         tmp.write(data)
         name = tmp.name
-    os.replace(name, path)
+    for attempt in range(10):
+        try:
+            os.replace(name, path)
+            return
+        except PermissionError:
+            if same_if_present and path.exists():
+                break
+            if attempt == 9:
+                _discard(name)
+                raise
+            time.sleep(0.05)
+    _discard(name)
+
+
+def _discard(name: str) -> None:
+    try:
+        os.remove(name)
+    except OSError:
+        pass
 
 
 def _repo(root: Path) -> Path:
@@ -75,7 +97,7 @@ def _object(repo: Path, kind: str, body: bytes) -> str:
     oid = hashlib.sha1(raw).hexdigest()
     target = repo / "objects" / oid[:2] / oid[2:]
     if not target.exists():
-        _atomic_write(target, zlib.compress(raw))
+        _atomic_write(target, zlib.compress(raw), same_if_present=True)
     return oid
 
 
@@ -268,7 +290,30 @@ def _save(event: dict) -> None:
     _atomic_write(_event_path(event["id"]), json.dumps(event, ensure_ascii=False).encode())
 
 
-def _roots(workspace: str | None = None) -> list[Path]:
+def _app_folder(root: Path, vault: Path) -> bool:
+    """The app's own source or data, or a folder holding either. The chosen vault is never one, even when it
+    sits in the data folder (the default vault does)."""
+    if root == vault:
+        return False
+    source, data = Path(BASE_DIR).resolve(), Path(DATA_DIR).resolve()
+    if any(root == app or app.is_relative_to(root) for app in (source, data)):
+        return True
+    return root.is_relative_to(source) or root.is_relative_to(data)
+
+
+def _bot_roots(workspace: str | None) -> list[Path]:
+    """A bot's turn changes only its working folder: the conversation's workspace, else the vault (the folder its
+    file tools are fenced to, core/brain.py fence_roots). Never the app's own source or data: a bot turn in a
+    source checkout snapshotted the whole tree, 418 MB and 27,000 files after 150 turns (100-bot scale test,
+    2026-11-10). A bot's own folder and generated files live in the data folder and are not checkpointed."""
+    vault = Path(resolve_vault_dir()).resolve()
+    folder = Path(workspace).resolve() if workspace else vault
+    return [folder] if folder.is_dir() and not _app_folder(folder, vault) else []
+
+
+def _roots(workspace: str | None = None, bot: bool = False) -> list[Path]:
+    if bot:
+        return _bot_roots(workspace)
     roots = [Path(resolve_vault_dir()).resolve()]
     source_root = Path(BASE_DIR).resolve()
     if (source_root / ".git").exists() and source_root not in roots:
@@ -287,10 +332,12 @@ def _snapshot_all(roots: list[Path]) -> list[tuple[str, dict[str, str], list[str
         return list(pool.map(_snapshot, roots))
 
 
-def _start(source: str, workspace: str | None) -> dict:
+def _start(source: str, workspace: str | None, bot: bool = False) -> dict | None:
+    roots = _roots(workspace, bot)
+    if bot and not roots:
+        return None  # nothing this bot turn can change is watched (no working folder outside the app's own)
     event = {"id": uuid.uuid4().hex, "created": time.time(), "source": source,
              "status": "running", "roots": []}
-    roots = _roots(workspace)
     for root, (tree, manifest, skipped) in zip(roots, _snapshot_all(roots)):
         repo = _repo(root)
         event["roots"].append({"path": str(root), "before": _commit(repo, tree, event["id"], "before"),
@@ -326,11 +373,12 @@ def _finish(event: dict) -> None:
 
 
 @asynccontextmanager
-async def around_turn(source: str, workspace: str | None = None):
-    """Snapshot both roots without making a checkpoint failure break a chat."""
+async def around_turn(source: str, workspace: str | None = None, *, bot: bool = False):
+    """Snapshot the turn's roots without making a checkpoint failure break a chat. `bot`: a bot's turn (chat,
+    routine, card or goal), which watches only its working folder (_bot_roots)."""
     event = None
     try:
-        event = await asyncio.to_thread(_start, source, workspace)
+        event = await asyncio.to_thread(_start, source, workspace, bot)
     except Exception:
         logger.exception("could not start file checkpoint for %s", source)
     try:

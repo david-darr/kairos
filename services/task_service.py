@@ -64,7 +64,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from core import bot_schedules
+from core import bot_schedules, store_writer
 from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
 import os
@@ -117,6 +117,9 @@ class TaskService:
     def __init__(self, file: str = None) -> None:
         self._file = file or tasks_file()
         self._runs_file = runs_file(self._file)
+        # A save of an earlier instance may still be waiting (core/store_writer.py): land it before reading.
+        store_writer.flush(self._file)
+        store_writer.flush(self._runs_file)
         self._tasks: dict = read_json(self._file, {})
         self._runs: list = read_json(self._runs_file, [])
         # Builds through 1.15 wrote run records without an id; everything
@@ -129,9 +132,16 @@ class TaskService:
             write_json_atomic(self._runs_file, self._runs)
 
     def _save_tasks(self) -> None:
-        write_json_atomic(self._file, self._tasks)
+        # Coalesced and written off the event loop (core/store_writer.py): a routine run saves about ten times,
+        # and 100 routines due in one minute froze the app while each save rewrote the file (2026-11-10).
+        store_writer.save(self._file, lambda: self._tasks)
 
     def _save_runs(self) -> None:
+        # Kept to MAX_RUNS_PER_TASK when the store is written, not on every save: with a month of history the
+        # trim walked 3,200 records about ten times a run (2026-11-10).
+        store_writer.save(self._runs_file, self._trimmed_runs)
+
+    def _trimmed_runs(self) -> list:
         counts: dict = {}
         kept = []
         # A missed receipt can arrive while a run is live. Keep that run's
@@ -145,7 +155,11 @@ class TaskService:
                 if run["id"] not in active:
                     counts[run["task_id"]] = seen + 1
         self._runs = kept[::-1]
-        write_json_atomic(self._runs_file, self._runs)
+        return self._runs
+
+    async def landed(self) -> None:
+        """Until this store's tasks and run records are on disk (core/store_writer.py)."""
+        await store_writer.landed(self._file, self._runs_file)
 
     def list_tasks(self) -> list[dict]:
         return sorted(self._tasks.values(), key=lambda t: t["created_at"], reverse=True)

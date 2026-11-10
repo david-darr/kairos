@@ -187,7 +187,8 @@ def _scratch():
 def make_backup(target: str, include_keys: bool = False) -> dict:
     """Write the whole data folder to the zip at `target`. Returns its
     manifest."""
-    from core import session_manager_store
+    from core import session_manager_store, store_writer
+    store_writer.flush()  # saves still waiting to be written belong in the backup
     data_dir = _data_dir()
     count = 0
     with _scratch() as scratch, \

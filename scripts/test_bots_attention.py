@@ -85,6 +85,40 @@ class InboxProjection(AttentionCase):
         self.assertEqual(data["count"], 2)
         self.assertEqual(web.get(f"{BASE}/inbox").json()["rows"][0]["id"], data["rows"][0]["id"], "ids are stable across reads")
 
+    def test_reading_the_inbox_and_notifications_never_loads_a_transcript_and_reads_each_conversation_once(self):
+        # 100-bot scale test, 2026-11-10: every row looked up its bot's conversations again, each with its whole
+        # transcript, and every notification re-read its conversation: 240 to 460 ms with a month of routines.
+        others = []
+        for n in range(5):
+            sid = session_manager.create_session(f"Run {n}", owner_user="david")["id"]
+            session_manager.set_agent(sid, self.bot["id"], "frozen")
+            others.append(sid)
+        self.addCleanup(lambda: [session_manager.delete_session(s) for s in others if session_manager.get_session(s)])
+        for n in range(30):
+            report = agent_service.add_item(self.bot["id"], "report", f"Report {n}", "All quiet.")
+            report["session_id"] = others[n % 5]
+        self.question()
+        from core import session_manager_store
+        real_header = session_manager_store.get_session_header
+        loads, headers = [], []
+
+        def counted_header(sid):
+            headers.append(sid)
+            return real_header(sid)
+        with patch.object(session_manager, "get_session", side_effect=lambda sid: loads.append(sid)), \
+                patch.object(session_manager_store, "get_session_header", side_effect=counted_header):
+            rows = bot_attention.inbox("david")["rows"]
+            self.assertEqual(len(rows), 31)
+            self.assertEqual(loads, [], "no transcript is loaded to build the inbox")
+            self.assertEqual(sorted(headers), sorted([self.session, *others]), "each conversation is read once")
+            headers.clear()
+            feed = bot_attention.notifications("david")["rows"]
+        self.assertEqual(len(feed), 31)
+        self.assertEqual(loads, [])
+        self.assertLessEqual(len(headers), 2 * 6, "the inbox once, then each conversation once for the feed")
+        target = next(r for r in rows if r["subject"] == "Report 3")["target"]
+        self.assertEqual(target, {"tab": "botsShell", "agentId": self.bot["id"], "sessionId": others[3]})
+
     def test_reports_are_news_and_do_not_count_as_needs_you(self):
         agent_service.add_item(self.bot["id"], "report", "Weekly roundup", "All quiet")
         data = web.get(f"{BASE}/inbox").json()

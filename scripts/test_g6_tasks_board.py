@@ -56,7 +56,7 @@ class Routes(Base):
         self.web = client_for_users()
 
         @asynccontextmanager
-        async def no_snapshot(source, workspace=None):
+        async def no_snapshot(source, workspace=None, **_):
             # Every run snapshots the vault and the repo twice (~1.5 s here);
             # see the EFFICIENCY finding. Not what these tests are about.
             yield

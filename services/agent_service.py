@@ -355,13 +355,14 @@ class AgentService:
                keep_signed_in: bool = False, memory_upkeep: bool = False,
                blurb: str = "", soul: Optional[str] = None, peers: Optional[list[str]] = None,
                avatar: Optional[dict] = None, model_override: Optional[str] = None,
-               model_effort: Optional[str] = None, **extra) -> dict:
+               model_effort: Optional[str] = None, front_desk: bool = False, **extra) -> dict:
         """extra: the Bots-mode fields (services/bot_record.py BOT_EDITABLE),
         checked there. `instructions` is a synonym of `soul` (the one standing-
-        instruction field, 2026-10-28): `soul` wins when both arrive."""
+        instruction field, 2026-10-28): `soul` wins when both arrive.
+        front_desk: Kip being made (services/front_desk.py), which sits outside the bot cap."""
         name = _clean_name(name)
         self._check_unique(name, None)
-        if len(self._agents) >= bot_record.MAX_BOTS:
+        if not front_desk and bot_record.capped_count(self._agents.values()) >= bot_record.MAX_BOTS:
             raise bot_record.BotConflict(f"you can have up to {bot_record.MAX_BOTS} bots; delete or archive one first")
         unknown = sorted(set(extra) - set(bot_record.BOT_EDITABLE))
         if unknown:

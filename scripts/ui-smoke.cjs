@@ -239,6 +239,8 @@ const server = http.createServer(async (req, res) => {
         : botsRead === undefined && url.pathname === '/api/bot-attention/notifications' ? { rows: [], unread: 0 }
         // The Bots sidebar's Inbox count (2026-11-02).
         : botsRead === undefined && url.pathname === '/api/bot-attention/needs-you' ? { rows: [] }
+        // The sidebar's one poll (routes/bot_pulse_routes.py, 2026-11-10): no versions here, so the rail reads each list whole.
+        : botsRead === undefined && url.pathname === '/api/bot-pulse' ? {}
         : botsRead === undefined && url.pathname === '/api/bot-automations' ? { items: [] }
         : botsRead === undefined && url.pathname === '/api/bot-limit-resets' ? { endpoints: [] }
         // The rail's team map and the templates page can still be reading when a check leaves Bots mode (Phases 4 and 6).

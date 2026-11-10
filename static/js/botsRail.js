@@ -103,6 +103,25 @@ export function openBot(agentId) { go({ tab: 'botsShell', agentId }); }
 export function openThread(agentId, sessionId) { go({ tab: 'botsShell', agentId, ...(targetId(sessionId) ? { sessionId } : {}) }); }
 
 const lazyApi = async (path, init) => (await import('./api.js')).api(path, init);
+
+// The sidebar's one poll (routes/bot_pulse_routes.py): each big list's version, the needs-you count, and only
+// the lists whose version differs from the ones held. Before it, every 10 s re-fetched the bot list, the team
+// map and the automations whether or not they had changed: 2.5 MB a minute at 100 bots (2026-11-10).
+export const PULSE_PARTS = ['agents', 'conversations', 'team', 'automations'];
+export function pulsePath(held = {}) {
+  const query = PULSE_PARTS.filter(part => typeof held[part] === 'string' && held[part]).map(part => `${part}=${encodeURIComponent(held[part])}`).join('&');
+  return '/api/bot-pulse' + (query ? `?${query}` : '');
+}
+// The versions held after a reply: a list that came back (or was unchanged) takes the reply's version; a list
+// the server could not read (null) is dropped, so the next poll asks for it whole.
+export function heldAfter(held = {}, reply = {}) {
+  const next = {};
+  for (const part of PULSE_PARTS) {
+    const version = reply.versions?.[part];
+    if (typeof version === 'string' && (part in reply || held[part] === version)) next[part] = version;
+  }
+  return next;
+}
 const say = async (message, type = 'error') => { try { (await import('./api.js')).toast(message, type); } catch { /* nothing to tell */ } };
 
 export function mountBotsRail(nav) {
@@ -110,7 +129,7 @@ export function mountBotsRail(nav) {
   const styled = Promise.all([loadBotsCss(SHELL_CSS), loadBotsCss(SIDEBAR_CSS)]);
   const api = botsThreadApi(lazyApi);
   const root = document.documentElement;
-  let disposed = false, version = 0, agents = [], pinnedIds = new Set(), signature = '';
+  let disposed = false, version = 0, agents = [], pinnedIds = new Set(), signature = '', held = {};
   let departments = [], rooms = [];
   let prefs = sidebarPreferences(), user = 'local', query = '', searchTimer = 0, selection = null;
   const threads = new Map();   // agent id -> { rows, folders, main_id, at }
@@ -694,26 +713,45 @@ export function mountBotsRail(nav) {
     for (const circle of list.querySelectorAll('.bots-pin-circle')) circle.classList.toggle('active', !!open && circle.dataset.agentId === open);
   };
 
-  async function refresh() {
+  // Every list whole, one route each: what the rail read before the pulse, kept for a backend without it.
+  async function readWhole(request) {
+    const [next, convos, teamData] = await Promise.all([request('/api/agents'), request('/api/agents/conversations').catch(() => null), request('/api/bot-team/map', { toast: false }).catch(() => null)]);
+    const automationData = await request('/api/bot-automations').catch(() => ({ items: [] }));  // a missing count never stops the roster refresh
+    const waiting = await request('/api/bot-attention/needs-you', { toast: false }).then(r => (r?.rows || []).length).catch(() => null);
+    return { agents: next, conversations: convos, team: teamData, automations: automationData, needs_you: waiting };
+  }
+
+  // force: read every list whole (a change this window made, or the first read).
+  async function refresh(force = false) {
     const at = ++version;
     try {
       const { api: request } = await import('./api.js');
-      const [next, convos, teamData] = await Promise.all([request('/api/agents'), request('/api/agents/conversations').catch(() => null), request('/api/bot-team/map', { toast: false }).catch(() => null)]);
-      if (disposed || at !== version || !Array.isArray(next)) return;
-      agents = next;
-      if (teamData) { departments = teamData.departments || teamData.teams || []; rooms = teamData.rooms || []; }
-      const automationData = await request('/api/bot-automations').catch(() => ({ items: [] }));  // a missing count never stops the roster refresh
+      if (force === true || (force && force.type)) held = {};
+      let reply = await request(pulsePath(held), { toast: false }).catch(() => null);
       if (disposed || at !== version) return;
-      const needs = needsYouCount(buildItems(automationData.items || automationData.automations || []));
-      automationBadge.hidden = needs === 0;
-      automations.setAttribute('aria-label', needs ? `Automations, ${needs} need you` : 'Automations');
+      if (reply?.versions) held = heldAfter(held, reply);
+      else { held = {}; reply = await readWhole(request); }
+      if (disposed || at !== version) return;
+      if ('agents' in reply) {
+        if (!Array.isArray(reply.agents)) return;
+        agents = reply.agents;
+      } else if (!agents.length) throw new Error('the bot list could not be read');
+      const teamData = reply.team;
+      if (teamData) { departments = teamData.departments || teamData.teams || []; rooms = teamData.rooms || []; }
+      if (reply.automations) {
+        const automationData = reply.automations;
+        const needs = needsYouCount(buildItems(automationData.items || automationData.automations || []));
+        automationBadge.hidden = needs === 0;
+        automations.setAttribute('aria-label', needs ? `Automations, ${needs} need you` : 'Automations');
+      }
       // The Inbox row's count: what is waiting on the person and not marked done (bot_attention.needs_you).
-      const waiting = await request('/api/bot-attention/needs-you', { toast: false }).then(r => (r?.rows || []).length).catch(() => null);
+      const waiting = typeof reply.needs_you === 'number' ? reply.needs_you : null;
       if (!disposed && waiting !== null) {
         const count = inboxRow.querySelector('.bots-rail-inbox-count');
         count.hidden = !waiting; count.textContent = waiting > 99 ? '99+' : String(waiting);
         inboxRow.setAttribute('aria-label', waiting ? `Inbox, ${waiting} need you` : 'Inbox');
       }
+      const convos = reply.conversations;
       if (convos?.agents) pinnedIds = new Set(convos.agents.filter(item => item.pinned).map(item => item.id));
       // A bot's folders ride on the bot record; keep each loaded list in step with it.
       for (const [id, data] of threads) { const bot = botById(id); if (bot && Array.isArray(bot.folders)) data.folders = bot.folders; }

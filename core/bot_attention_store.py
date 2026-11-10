@@ -77,6 +77,27 @@ def publish(owner, source, row):
     return data
 
 
+def publish_many(owner, items):
+    """publish() for many (source, row) pairs in one transaction. Returns the rows newly receipted."""
+    if not items:
+        return []
+    made = []
+    with database() as db:
+        for source, row in items:
+            ident = stable_id(owner, source)
+            at = float(row.get("at") or time.time())
+            if not db.execute("INSERT OR IGNORE INTO receipts VALUES(?,?,?)", (owner, source, at)).rowcount:
+                continue
+            data = {**row, "id": ident, "source_id": source, "at": at}
+            db.execute("INSERT INTO notifications(owner,id,at,data) VALUES(?,?,?,?)",
+                       (owner, ident, at, json.dumps(data, ensure_ascii=False)))
+            made.append(data)
+        if made:
+            db.execute("DELETE FROM notifications WHERE owner=? AND id NOT IN "
+                       "(SELECT id FROM notifications WHERE owner=? ORDER BY at DESC,id DESC LIMIT 500)", (owner, owner))
+    return made
+
+
 def notifications(owner):
     with database() as db:
         rows = db.execute("SELECT * FROM notifications WHERE owner=? ORDER BY pinned DESC,at DESC,id DESC",

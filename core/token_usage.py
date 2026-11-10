@@ -10,6 +10,7 @@ JSON-backed running totals, one integer per endpoint id, same atomic-write
 convention as every other simple counter store in this project.
 """
 import os
+import threading
 import time
 from datetime import date, timedelta
 
@@ -136,6 +137,15 @@ def record_usage(endpoint_id: str, usage: "Usage | dict | None") -> None:
     normalized = usage if isinstance(usage, Usage) else normalize_usage(usage)
     if normalized is None or normalized.total_tokens <= 0:
         return
+    # One read-modify-write at a time: background runs record from a worker thread (core/task_scheduler.py).
+    with _RECORD_LOCK:
+        _record(endpoint_id, normalized)
+
+
+_RECORD_LOCK = threading.Lock()
+
+
+def _record(endpoint_id: str, normalized: Usage) -> None:
     total = normalized.total_tokens
     cache_read = normalized.cache_read_tokens or 0
     data = read_json(usage_file(), {})

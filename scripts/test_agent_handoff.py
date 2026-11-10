@@ -460,7 +460,7 @@ class CoordinationTests(unittest.TestCase):
         seen = {"sources": [], "inside": False, "ran_inside": None}
 
         @asynccontextmanager
-        async def recording(source, workspace=None):
+        async def recording(source, workspace=None, **_):
             seen["sources"].append(source)
             seen["inside"] = True
             try:

@@ -66,23 +66,41 @@ def require_thread(ident, user):
     return session
 
 
+def _session_doc(sid):
+    """A conversation's document without its transcript. Every caller here needs its id, owner, bot, thread and
+    dates, never the messages: loading each transcript made the inbox and notifications cost the sum of every
+    bot conversation's length (240 to 460 ms with a month of routines, 100-bot scale test, 2026-11-10)."""
+    from core import session_manager_store
+    found = session_manager_store.get_session_header(sid)
+    return found[0] if found else None
+
+
 def _sessions(user, agent_id=None):
     from core.session_manager import session_manager
     result = []
     for header in session_manager.list_sessions(agent_id=agent_id, include_agents=True):
         if not header.get("agent_id"):
             continue
-        session = session_manager.get_session(header["id"])
+        session = _session_doc(header["id"])
         if session and owns(session, user):
             result.append(session)
     return result
 
 
-def _source_visible(source, user, agent=None):
+def _by_agent(sessions):
+    """The person's bot conversations by bot, in list order: read once a request, not once a row."""
+    grouped = {}
+    for session in sessions:
+        grouped.setdefault(session["agent_id"], []).append(session)
+    return grouped
+
+
+def _source_visible(source, user, agent=None, docs=None):
     """A linked foreign task/session wins over a legacy ownerless record. An
-    ownerless source inherits its bot's owner when the bot has one."""
-    from core.session_manager import session_manager
+    ownerless source inherits its bot's owner when the bot has one. docs: conversations already read this
+    request, by id (filled as it goes)."""
     from services.task_service import task_service
+    docs = {} if docs is None else docs
     scopes = [source] if owner_of(source) else []
     if agent and owner_of(agent):
         scopes.append(agent)
@@ -93,14 +111,17 @@ def _source_visible(source, user, agent=None):
                 scopes.append(task)
     for key in ("session_id", "origin_session_id", "reply_to"):
         if source.get(key):
-            session = session_manager.get_session(source[key])
+            if source[key] not in docs:
+                docs[source[key]] = _session_doc(source[key])
+            session = docs[source[key]]
             if session:
                 scopes.append(session)
     explicit = [r for r in scopes if owner_of(r)]
     return all(owns(r, user) for r in explicit) if explicit else owns(source, user)
 
 
-def target_for(agent_id, user, source=None):
+def target_for(agent_id, user, source=None, sessions=None):
+    """sessions: the person's conversations by bot (_by_agent), when the caller already read them."""
     source = source or {}
     direct = source.get("session_id") or source.get("origin_session_id") or source.get("reply_to")
     # A room member asks in its seat session, which only the room shows: open the room (services/bot_rooms.py).
@@ -113,7 +134,7 @@ def target_for(agent_id, user, source=None):
             found = None
         if found:
             return {"tab": "botsRoom", "roomId": found[0]}
-    sessions = _sessions(user, agent_id)
+    sessions = sessions.get(agent_id, []) if sessions is not None else _sessions(user, agent_id)
     chosen = next((s for s in sessions if s["id"] == direct), None)
     if not chosen:
         chosen = next((s for s in sessions if (s.get("thread") or {}).get("main")), None)
@@ -128,7 +149,7 @@ def target_for(agent_id, user, source=None):
     return result
 
 
-def _row(user, source_id, kind, source, agent, *, actions, open=True):
+def _row(user, source_id, kind, source, agent, *, actions, open=True, sessions=None):
     subject = clean(source.get("title") or source.get("name") or "Waiting for you", 200)
     body = source.get("body") or source.get("description") or ""
     if kind == "review":
@@ -138,7 +159,7 @@ def _row(user, source_id, kind, source, agent, *, actions, open=True):
     return {"id": source_id, "source_id": source_id, "kind": kind, "sender": {"id": agent["id"], "name": clean(agent.get("name"), 100)},
             "subject": subject, "snippet": clean(" ".join(str(body).split()), 240), "body": clean(body, 16000),
             "at": source.get("created_at") or source.get("updated_at") or 0, "status": "open" if open else "resolved",
-            "target": target_for(agent["id"], user, source), "actions": actions if open else [], "revision": revision,
+            "target": target_for(agent["id"], user, source, sessions), "actions": actions if open else [], "revision": revision,
             "answer": clean(source.get("answer"), 4000) or None, "questions": source.get("questions") or []}
 
 
@@ -151,9 +172,12 @@ def inbox(user):
     rows = []
     visible_open = {i["id"] for i in person_inbox()}
     cutoff = time.time() - 30 * 86400
+    mine = _sessions(user)
+    by_agent = _by_agent(mine)
+    docs = {session["id"]: session for session in mine}
     for item in agent_service.inbox(status=None):
         agent = agent_service.get(item.get("agent_id"))
-        if not agent or (owner_of(agent) and not owns(agent, user)) or not _source_visible(item, user, agent):
+        if not agent or (owner_of(agent) and not owns(agent, user)) or not _source_visible(item, user, agent, docs):
             continue
         is_open = item.get("status") == "open"
         if is_open and item["id"] not in visible_open:
@@ -161,16 +185,17 @@ def inbox(user):
         if (item.get("created_at") or 0) < cutoff and not (is_open and item.get("kind") == "question"):
             continue
         actions = ["reply", "close"] if item.get("kind") == "question" else ["reply", "open"]
-        rows.append(_row(user, "item:" + item["id"], item["kind"], item, agent, actions=actions, open=is_open))
+        rows.append(_row(user, "item:" + item["id"], item["kind"], item, agent, actions=actions, open=is_open,
+                         sessions=by_agent))
     for card in task_service.list_tasks():
         agent = agent_service.get(card.get("agent_id"))
-        if not agent or (owner_of(agent) and not owns(agent, user)) or card.get("schedule_kind") != "card" or not _source_visible(card, user, agent):
+        if not agent or (owner_of(agent) and not owns(agent, user)) or card.get("schedule_kind") != "card" or not _source_visible(card, user, agent, docs):
             continue
         if card.get("status") not in ("review", "done") or (card.get("updated_at") or card.get("created_at") or 0) < cutoff:
             continue
         rows.append(_row(user, "review:" + card["id"], "review", card, agent,
-                         actions=["approve", "reply", "open"], open=card.get("status") == "review"))
-    for session in _sessions(user):
+                         actions=["approve", "reply", "open"], open=card.get("status") == "review", sessions=by_agent))
+    for session in mine:
         agent = agent_service.get(session["agent_id"])
         if not agent or (owner_of(agent) and not owns(agent, user)):
             continue
@@ -181,7 +206,7 @@ def inbox(user):
                           else permissions.DEFAULT_TIMEOUT_SECONDS)}
             kind = "question" if request.get("kind") == "question" else "approval"
             row = _row(user, "permission:" + request["id"], kind, source, agent,
-                       actions=["respond", "skip"] if kind == "question" else ["allow", "deny"])
+                       actions=["respond", "skip"] if kind == "question" else ["allow", "deny"], sessions=by_agent)
             row["questions"] = json.loads(clean(json.dumps(request.get("questions") or []), 32000))
             rows.append(row)
     for row in rows:
@@ -192,7 +217,8 @@ def inbox(user):
     # Never let a news backlog hide live requests. The sources still own older
     # unresolved questions; retain them ahead of ordinary historical rows.
     live = [r for r in rows if r["status"] == "open" and r["kind"] != "report"]
-    ordinary = [r for r in rows if r not in live]
+    live_ids = {id(r) for r in live}
+    ordinary = [r for r in rows if id(r) not in live_ids]  # by identity: comparing whole rows was O(rows x live)
     rows = (live + ordinary)[:2000]
     counts = {key: sum(r["bucket"] == key for r in rows) for key in ("needs-you", "news", "done")}
     return {"rows": rows, "counts": counts, "count": counts["needs-you"]}
@@ -255,32 +281,51 @@ def respond(user, ident, *, action, text="", expected_revision, answers=None, re
 
 
 def rebuild(user):
-    """Repair feed projections from sources, without delivering old alerts."""
+    """Repair feed projections from sources, without delivering old alerts. One database transaction for all of
+    them (it was a connection a row, on every notifications read)."""
+    items = []
     for row in inbox(user)["rows"]:
         if row["status"] != "open":
             continue
         kind = "approval" if row["kind"] == "review" else "done" if row["kind"] == "report" else row["kind"]
         source = row["source_id"]
-        store.publish(user, source, {"kind": kind, "agent_id": row["sender"]["id"], "title": row["subject"],
-                                    "body": row["snippet"], "target": row["target"], "at": row["at"],
-                                    "inbox_id": source, "backlog": True})
+        items.append((source, {"kind": kind, "agent_id": row["sender"]["id"], "title": row["subject"],
+                               "body": row["snippet"], "target": row["target"], "at": row["at"],
+                               "inbox_id": source, "backlog": True}))
+    store.publish_many(user, items)
 
 
 def notifications(user):
     rebuild(user)
     rows = store.notifications(user)
-    # Deleted/foreign bots and reassigned sessions never leak retained text.
-    allowed = []
+    # Deleted/foreign bots and reassigned sessions never leak retained text. The same checks as require_bot and
+    # require_thread, each conversation read once (without its transcript), not once a row.
+    allowed, threads = [], {}
     for row in rows:
         try:
             require_bot(row.get("agent_id"), user)
-            sid = (row.get("target") or {}).get("sessionId")
-            if sid:
-                require_thread(sid, user)
         except HTTPException:
             continue
+        sid = (row.get("target") or {}).get("sessionId")
+        if sid:
+            if sid not in threads:
+                threads[sid] = _thread_visible(sid, user)
+            if not threads[sid]:
+                continue
         allowed.append(row)
     return {"rows": allowed, "unread": sum(not r["read"] for r in allowed)}
+
+
+def _thread_visible(sid, user):
+    """require_thread's answer, from the conversation's document alone."""
+    session = _session_doc(sid)
+    if not session or not session.get("agent_id") or not owns(session, user):
+        return False
+    try:
+        require_bot(session["agent_id"], user)
+    except HTTPException:
+        return False
+    return True
 
 
 def mark_thread_read(owner, sid, message_id):

@@ -39,7 +39,7 @@ class Fast:
 
 
 @asynccontextmanager
-async def no_snapshot(source, workspace=None):
+async def no_snapshot(source, workspace=None, **_):
     yield
 
 

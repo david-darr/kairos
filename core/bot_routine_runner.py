@@ -36,8 +36,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import time
 import uuid
+import weakref
 from contextvars import ContextVar
 from datetime import datetime
 from typing import Callable, Optional
@@ -66,10 +68,64 @@ POST_BOUND = 4000
 
 _now: Callable[[], float] = time.time
 _inflight: set = set()
+# Routines whose scheduled worker has started but not yet claimed the occurrence (waiting for a start slot, or
+# between start_run and the claim). The lane must leave that occurrence to it: seeing the run "in progress"
+# there and skipping it as an overlap lost runs once starts were paced (2026-11-10).
+_claiming: set = set()
 _active: dict[str, dict] = {}
 _end_hooks: list[Callable] = []
 _started_up: set = set()  # accounts whose start-up runs this process has launched
 _current: ContextVar = ContextVar("routine_run", default=None)
+# Paced runs (100-bot scale test, 2026-11-10): 100 routines due in one minute all started at once and their
+# start-up work (claims, run records, the tool list, connecting) froze the app for up to 45 s. At most
+# START_CONCURRENCY runs are in a busy phase at a time: starting (until the model call begins, or the run ends
+# without one) or finishing (posting the result and recording the run, once the model has answered). A start
+# that finds every slot taken first waits a random 0 to START_JITTER_SECONDS, so a burst spreads out. Waiting on
+# the model holds no slot. One routine due alone starts at once, as before.
+START_CONCURRENCY = 2
+TICK_SLICE_SECONDS = 0.02
+START_JITTER_SECONDS = 3.0
+_gates: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()  # event loop -> its start semaphore
+_slot: ContextVar = ContextVar("routine_start_slot", default=None)
+
+
+class _StartSlot:
+    """One run's place among the starting runs; released once, by whichever comes first."""
+
+    def __init__(self, gate: asyncio.Semaphore) -> None:
+        self.gate, self.held = gate, False
+
+    async def take(self) -> None:
+        await self.gate.acquire()
+        self.held = True
+
+    def release(self) -> None:
+        if self.held:
+            self.held = False
+            self.gate.release()
+
+
+def _start_gate() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    gate = _gates.get(loop)
+    if gate is None:
+        gate = _gates[loop] = asyncio.Semaphore(START_CONCURRENCY)
+    return gate
+
+
+def start_finished() -> None:
+    """The run in this context reached its model call: the next waiting routine may start."""
+    slot = _slot.get()
+    if slot is not None:
+        slot.release()
+
+
+async def _busy_phase():
+    """Take a slot again for the run's finishing work; returns the slot to release."""
+    slot = _slot.get()
+    if slot is not None and not slot.held:
+        await slot.take()
+    return slot
 
 
 class RunTimeout(Exception):
@@ -218,9 +274,16 @@ def _spawn(task: dict, source: str) -> None:
     if key in _inflight:
         return
     _inflight.add(key)
+    if source == "schedule":
+        _claiming.add(task["id"])
 
     async def go():
+        slot = _StartSlot(_start_gate())
         try:
+            if slot.gate.locked():
+                await asyncio.sleep(random.uniform(0, START_JITTER_SECONDS))
+            await slot.take()
+            _slot.set(slot)  # copied into the run's own task by start_run, so execute() can release it
             await task_scheduler.start_run(task, source, wait=source != "schedule")
         except AdmissionDenied as exc:
             _count_skip(task, "admission")
@@ -229,7 +292,10 @@ def _spawn(task: dict, source: str) -> None:
         except Exception:
             logger.exception("routine %s could not start", task["id"])
         finally:
+            slot.release()
             _inflight.discard(key)
+            if source == "schedule":
+                _claiming.discard(task["id"])
 
     asyncio.get_running_loop().create_task(go())
 
@@ -240,8 +306,8 @@ def _dispatch_scheduled(task: dict, now: float) -> None:
     config = bot_routines.config_of(task)
     tid, agent_id = task["id"], task["agent_id"]
     running = task_scheduler.run_in_progress(tid)
-    if f"{tid}:schedule" in _inflight and not running:
-        return  # its worker is still starting
+    if tid in _claiming or (f"{tid}:schedule" in _inflight and not running):
+        return  # its worker is still starting, and will claim this occurrence
     # 1. overlap
     if running:
         if is_waiting(tid):
@@ -372,7 +438,12 @@ async def tick(now: Optional[float] = None) -> None:
     if account_id not in _started_up:  # once per account per process (Multi-Account group 5)
         _started_up.add(account_id)
         _startup_runs()
+    # A pass deciding 100 due routines at once held the loop for about 0.3 s: it gives way every TICK_SLICE.
+    slice_started = time.perf_counter()
     for task in list(task_service.list_tasks()):
+        if time.perf_counter() - slice_started > TICK_SLICE_SECONDS:
+            await asyncio.sleep(0)
+            slice_started = time.perf_counter()
         routine = task.get("routine")
         if not routine or not task.get("agent_id") or task.get("schedule_kind") == "card":
             continue
@@ -582,6 +653,8 @@ async def execute(task: dict, source: str) -> None:
     config = bot_routines.config_of(task)
     status = _status(task)
     tid = task["id"]
+    if source == "schedule":
+        _claiming.discard(tid)  # claimed: a later occurrence meets the overlap rules again
     batch = status.pop("current_batch", None) if source == "event" else None
     retry = status.pop("retry", None) if source == "retry" else None
     trigger = {"schedule": "schedule", "manual": "manual", "startup": "startup", "retry": "retry",
@@ -616,6 +689,7 @@ async def execute(task: dict, source: str) -> None:
         # "Check now" runs them too; other routines skip checks when started by hand.
         if config["checks"] and (source in ("schedule", "retry", "startup") or
                                  (source == "manual" and checks_module.has_sink(config["deliver"]))):
+            start_finished()  # checks wait on mail, calendars and the like, not on this loop: no start slot held
             round_ = await checks_module.run_checks(tid, task["agent_id"], context["owner"], config["checks"],
                                                     status.get("check_state") or {})
             status["check_state"] = round_.state
@@ -647,16 +721,20 @@ async def execute(task: dict, source: str) -> None:
                 session_manager.append_message(session_id, "user", prompt)
             full = agent_service.run_prompt(agent, prompt, goal={**task, "report_when": config["report_when"]})
             from core import file_checkpoints
-            async with file_checkpoints.around_turn(f"task:{tid}"):
+            async with file_checkpoints.around_turn(f"task:{tid}", bot=True):
+                start_finished()
                 work = asyncio.ensure_future(task_scheduler.complete(brain, full, task, "goal"))
                 reply = await _guarded(work, tid, config["timeout_minutes"])
         finally:
             await brain.disconnect()
+        await _busy_phase()  # never while being stopped: a cancel goes straight to the clean-up below
         await _finish_ok(task, config, run_id, reply, session_id, trigger, source)
         session_id = None
     except Exception as error:
+        await _busy_phase()
         await _finish_failed(task, config, run_id, error, source, retry)
     finally:
+        start_finished()
         _active.pop(tid, None)
         _current.reset(token)
         context["active"] = False

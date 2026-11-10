@@ -221,6 +221,22 @@ class SetupImport(ImportCase):
         with self.assertRaises(SkillError):
             imp.apply_setup_skills(self.bot, [], home=home)
 
+    def test_a_skills_folder_without_skill_md_is_left_out_not_an_error(self):
+        # GET /api/bots/setup-import answered 500 here: the link check lstat'ed the missing SKILL.md
+        # (100-bot scale test, 2026-11-10).
+        home = self.make_home()
+        empty = home / ".claude" / "skills" / "notes-only"
+        empty.mkdir()
+        (empty / "README.md").write_text("no skill here", encoding="utf-8")
+        (home / ".claude" / "skills" / "bare").mkdir()
+        with patch.dict(os.environ, {"CODEX_HOME": ""}):
+            found = imp.scan_setup_skills(home)
+        folders = [s["folder"] for s in found["skills"]]
+        self.assertNotIn("notes-only", folders)
+        self.assertNotIn("bare", folders)
+        self.assertIn("pdf-tools", folders)
+        self.assertFalse(imp._linked(empty / "SKILL.md"))
+
     def test_links_and_time_box(self):
         home = self.make_home()
         outside = Path(tempfile.mkdtemp(prefix="outside-", dir=_DATA.name))

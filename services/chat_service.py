@@ -655,7 +655,8 @@ async def _send_message(session_id: str, text: str, attachment_ids: list[str] | 
     session = session_manager.get_session(session_id) or {}
     usage = None
     try:
-        async with file_checkpoints.around_turn(f"chat:{session_id}", session.get("workspace_dir")):
+        async with file_checkpoints.around_turn(f"chat:{session_id}", session.get("workspace_dir"),
+                                                 bot=bool(session.get("agent_id"))):
             outcome = await runs.complete(brain, full_text, context)
         reply, usage = outcome.text, outcome.usage
     except CLIJSONDecodeError:
@@ -871,7 +872,8 @@ async def _stream_message(session_id: str, text: str, attachment_ids: list[str] 
         prepared = await _turn_resources(scope, text, endpoint, just_created, brain)
         full_text = _vision_input(endpoint, bot_turn_context.apply(prepared, primed), image_ids)
         session = session_manager.get_session(session_id) or {}
-        async with file_checkpoints.around_turn(f"chat:{session_id}", session.get("workspace_dir")):
+        async with file_checkpoints.around_turn(f"chat:{session_id}", session.get("workspace_dir"),
+                                                 bot=bool(session.get("agent_id"))):
             # Closed here, not left to garbage collection, so a stopped turn
             # has finished stopping before the code below judges the stop.
             async with contextlib.aclosing(_stream_with_permission_prompts(session_id, brain, full_text, tally)) as stream:

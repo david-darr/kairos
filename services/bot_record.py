@@ -38,6 +38,12 @@ def presets_file() -> str:
 BACKUP_SUFFIX = ".pre-bots"
 
 MAX_BOTS = 100
+
+
+def capped_count(agents) -> int:
+    """How many bots count toward MAX_BOTS. Kip, the system front desk, does not: with 100 bots of the person's
+    own, Kip is still there (decided by Kairos under David's trust, 100-bot scale test, 2026-11-10)."""
+    return sum(1 for agent in agents if agent.get("builtin") != "front_desk")
 MAX_PRESETS = 200
 MAX_DEFAULTS_BYTES = 200 * 1024
 MAX_MEMORY_SEED_CHARS = 8000
@@ -646,7 +652,7 @@ def create_configured(payload: dict, owner_user: Optional[str] = None) -> dict:
     profile = dict(payload.get("profile") or {})
     model = dict(payload.get("model") or {})
     try:
-        if len(agent_service.list_agents()) >= MAX_BOTS:
+        if capped_count(agent_service.list_agents()) >= MAX_BOTS:
             raise BotConflict(f"you can have up to {MAX_BOTS} bots; delete or archive one first")
         approval = check_approval(payload.get("approval_mode", default_approval()))
         base = read_defaults() if payload.get("use_defaults") else {}
@@ -748,7 +754,7 @@ def duplicate(agent_id: str, name: Optional[str] = None) -> dict:
     source = agent_service.get(agent_id)
     if source is None:
         raise KeyError(agent_id)
-    if len(agent_service.list_agents()) >= MAX_BOTS:
+    if capped_count(agent_service.list_agents()) >= MAX_BOTS:
         raise BotConflict(f"you can have up to {MAX_BOTS} bots; delete or archive one first")
     taken = [a["name"] for a in agent_service.list_agents()]
     chosen = name if name else duplicate_name(source["name"], taken)

@@ -64,6 +64,26 @@ class FrontDeskCase(unittest.TestCase):
         self.assertEqual(len(front_desk.read_state()["morning"]), 3)
         self.assertTrue(front_desk.read_state()["welcome_posted"])
 
+    def test_kip_sits_outside_the_bot_cap(self):
+        # 100-bot scale test, 2026-11-10: with a full roster Kip could not be made and every start logged an error.
+        # Decided by Kairos under David's trust: the system front desk does not count toward the cap.
+        with patch.object(bot_record, "MAX_BOTS", 3):
+            for n in range(3):
+                web.post("/api/agents", json={"name": f"Own {n}"}).raise_for_status()
+            with self.assertNoLogs("services.front_desk", level="ERROR"):
+                front_desk.ensure_all()
+            kip = agent_service.get(front_desk.bot_id())
+            self.assertIsNotNone(kip, "Kip is made beside a full roster")
+            self.assertEqual(kip["builtin"], "front_desk")
+            self.assertEqual(len(agent_service.list_agents()), 4)
+            # Kip takes no seat: the person's own cap is unchanged either way.
+            full = web.post("/api/agents", json={"name": "One too many"})
+            self.assertEqual(full.status_code, 409, full.text)
+            own = next(a for a in agent_service.list_agents() if a["name"] == "Own 0")
+            agent_service._agents.pop(own["id"])
+            self.assertEqual(web.post("/api/agents", json={"name": "Room again"}).status_code, 200)
+            self.assertEqual(bot_record.capped_count(agent_service.list_agents()), 3)
+
     def test_seed_uses_first_claude_connection(self):
         with patch("core.model_endpoints.list_endpoints", return_value=[
                 {"id": "api", "kind": "openai"}, {"id": "claude-one", "kind": "claude_cli"},

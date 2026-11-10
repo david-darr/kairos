@@ -114,9 +114,26 @@ def classify_name(name: str) -> str:
 
 # -- native tools ----------------------------------------------------------------------------
 
+_native_memo: dict = {}
+
+
 def native_entries() -> dict[str, dict]:
-    """Every native tool Kairos knows, by name: the registry plus Claude's own."""
+    """Every native tool Kairos knows, by name: the registry plus Claude's own. Rebuilt only when the registry
+    changes: native_effect() asks for it on every grant judgement, some 400 times a bot turn (2026-11-10)."""
+    return {name: dict(entry) for name, entry in _native_table().items()}
+
+
+def _native_table() -> dict[str, dict]:
+    """The shared table behind native_entries(); callers here only read it."""
     from core import tool_registry as registry
+    key = tuple(registry._REGISTRY.values())  # holds the specs, so a replaced one can never look the same
+    held = _native_memo.get("value")
+    if held is None or held[0] != key:
+        held = _native_memo["value"] = (key, _build_native_entries(registry))
+    return held[1]
+
+
+def _build_native_entries(registry) -> dict[str, dict]:
     entries: dict[str, dict] = {}
     for spec in registry._REGISTRY.values():
         entries[spec.name] = {"name": spec.name, "description": spec.description.split(". ")[0][:200],
@@ -135,7 +152,7 @@ def native_effect(name: str, args: Optional[dict] = None) -> str:
     if name in READ_ACTIONS:
         action = (args or {}).get("action") if isinstance(args, dict) else None
         return READ if isinstance(action, str) and action in READ_ACTIONS[name] else WRITE
-    entry = native_entries().get(name)
+    entry = _native_table().get(name)
     return entry["effect"] if entry else UNKNOWN
 
 

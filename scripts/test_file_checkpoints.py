@@ -70,6 +70,58 @@ class FileCheckpointTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(cp.Conflict, "Already restored"):
             cp.restore(event["id"], choices[:1])
 
+    async def test_a_bot_turn_watches_only_its_working_folder_never_the_app(self):
+        # 100-bot scale test, 2026-11-10: every bot turn in a source checkout snapshotted the whole tree.
+        data = Path(self.temp.name) / "appdata"
+        (data / "agents" / "bot1").mkdir(parents=True)
+        (self.repo / "app.py").write_text("print('app')\n")
+        (self.vault / "note.md").write_text("note\n")
+        with patch.object(cp, "DATA_DIR", str(data)):
+            self.assertEqual(cp._roots(None, bot=True), [self.vault.resolve()])
+            self.assertEqual(cp._roots(str(self.work), bot=True), [self.work.resolve()])
+            for inside in (self.repo, data, data / "agents" / "bot1", self.repo.parent):
+                self.assertEqual(cp._roots(str(inside), bot=True), [], inside)
+            # The default vault lives in the data folder: still the bot's folder.
+            default_vault = data / "accounts" / "local" / "vault"
+            default_vault.mkdir(parents=True)
+            with patch.object(cp, "resolve_vault_dir", return_value=str(default_vault)):
+                self.assertEqual(cp._roots(None, bot=True), [default_vault.resolve()])
+            # A person's own chat in a source checkout keeps watching the source, as before.
+            self.assertIn(self.repo.resolve(), cp._roots(None))
+            async with cp.around_turn("chat:bot", bot=True):
+                (self.vault / "note.md").write_text("bot edit\n")
+                (self.repo / "app.py").write_text("print('changed')\n")
+            async with cp.around_turn("task:nothing", str(data), bot=True):
+                pass
+        events = cp.list_events()
+        self.assertEqual(len(events), 1, "a turn with nothing to watch records no checkpoint")
+        self.assertEqual([r["path"] for r in events[0]["roots"]], [str(self.vault.resolve())])
+        self.assertEqual([c["path"] for c in events[0]["roots"][0]["changes"]], ["note.md"])
+
+    def test_turns_writing_the_same_objects_at_once_lose_nothing(self):
+        # Two turns snapshotting one folder write the same objects; on Windows the loser's replace failed with
+        # WinError 5 and the file was dropped from its checkpoint (100-bot scale test, 2026-11-10).
+        for n in range(20):
+            (self.vault / f"n{n}.md").write_text(f"note {n}\n")
+        real = os.replace
+
+        def contended(src, dst):
+            if "objects" in str(dst) and not os.path.exists(dst):
+                with open(dst, "wb") as other:  # the other turn's identical object lands first
+                    other.write(Path(src).read_bytes())
+                raise PermissionError(5, "Access is denied")
+            return real(src, dst)
+        with patch.object(cp.os, "replace", contended), self.assertNoLogs("core.file_checkpoints", level="WARNING"):
+            tree, manifest, skipped = cp._snapshot(self.vault.resolve())
+        self.assertEqual(len(manifest), 20)
+        self.assertEqual(skipped, [])
+        self.assertEqual([p.name for p in Path(cp._repo(self.vault.resolve()) / "objects").rglob("tmp*")], [],
+                         "no temp files are left behind")
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            events = list(pool.map(lambda _: cp._start("chat:many", None, True), range(8)))
+        self.assertTrue(all(e and e["roots"][0]["before_skipped"] == [] for e in events))
+
     async def test_existing_restore_is_recognized_without_saved_status(self):
         async with cp.around_turn("chat:abc"):
             (self.vault / "note.md").write_text("test")

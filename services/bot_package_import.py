@@ -74,7 +74,7 @@ def apply(package, selection=None, *, owner_user=None):
     from services.agent_service import agent_service
     from services.task_service import task_service
     chosen = selected(package, selection)
-    if len(agent_service.list_agents()) + len(chosen["bots"]) > bot_record.MAX_BOTS:
+    if bot_record.capped_count(agent_service.list_agents()) + len(chosen["bots"]) > bot_record.MAX_BOTS:
         raise ValueError("The workspace allows at most 100 bots")
     journal, created = [], []
     taken = [a["name"] for a in agent_service.list_agents()]

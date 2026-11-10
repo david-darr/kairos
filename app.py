@@ -267,6 +267,9 @@ async def lifespan(_app: FastAPI):
             llamacpp_engine.stop()
             from core import speech_acceleration
             speech_acceleration.stop()
+            # Saves still waiting to be written (tasks and run history, core/store_writer.py) land now.
+            from core import store_writer
+            store_writer.flush()
 
 
 app = FastAPI(title="Kairos", lifespan=lifespan)
@@ -322,9 +325,10 @@ app.include_router(sandbox_routes.router)
 app.include_router(checkpoint_routes.router)
 # Bots Phase 1 routers (conversations at /api/bot-chat, attention at /api/bot-attention), declared
 # before the generic /api/agents routes; /api/notifications stays device enrollment.
-from routes import bot_chat_routes, bot_attention_routes
+from routes import bot_chat_routes, bot_attention_routes, bot_pulse_routes
 app.include_router(bot_chat_routes.router)
 app.include_router(bot_attention_routes.router)
+app.include_router(bot_pulse_routes.router)  # the Bots sidebar's one poll
 # A missing optional Bots module leaves its UI's visible recovery in place.
 from importlib import import_module as _bots_import_module
 for _bots_extra_name in ("routes.bot_voice_routes", "routes.bot_onboarding_routes"):

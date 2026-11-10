@@ -1614,6 +1614,7 @@
         status: { state: "down", tools: null, checked_at: now - 60, error: "FileNotFoundError: npx" }, pinned: false, held_tools: [] }]);
     if (route === "/api/integrations/contacts") return [];
     if (route === "/api/bot-attention/needs-you") return { rows: [] };  // the Bots sidebar's Inbox count
+    if (route === "/api/bot-pulse") return {};  // the sidebar's one poll: no versions, so the rail reads each list whole
     if (route === "/api/sandbox/changes") return [
       { id: "c0ffee000001", session_id: null, created: 1790200000, applicable: true,
         changes: [{ path: "core/a_rather_long_module_name_for_wrapping.py", status: "modified" }, { path: "notes/new.txt", status: "added" }] },

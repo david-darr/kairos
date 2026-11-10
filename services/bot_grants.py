@@ -388,11 +388,23 @@ def native_hidden(scope, names, surface: Optional[str] = None) -> set:
         scope = scope_from(scope)
     except ScopeError:
         return set(names)
-    # One verdict a name, not two: each re-reads the bot, its grants state and the settings, and every bot
-    # turn's tool list asks this for some 200 tools (100-bot scale test, 2026-11-10).
+    # The bot and its grant revision once for the whole list, then one judgement a name: verdict() re-reads the
+    # bot, its grants state file and the settings for every name, and every bot turn's tool list asks this for
+    # some 200 tools, twice (100-bot scale test, 2026-11-10: 0.15 s of each routine start). Same verdicts: a
+    # missing bot or an unreadable revision hides nothing, as verdict()'s "scope" refusal never did.
+    try:
+        record = _bot(scope.bot_id)
+        if record is None:
+            return set()
+        rev = revision(scope)
+    except Exception:
+        return set()
     hidden = set()
     for n in names:
-        judged = verdict(scope, n, {})
+        try:
+            judged = _evaluate(scope, record, identify(n), {}, rev)
+        except Exception:
+            continue  # verdict()'s "error" refusal, which never hid a tool
         if not judged.allowed and judged.code in ("denied", "not_selected", "unavailable", "unknown"):
             hidden.add(n)
     return hidden

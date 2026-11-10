@@ -566,7 +566,8 @@ class LaneTests(Base):
             with patch.object(task_scheduler, "_task_brain", brain_for):
                 await task_scheduler._tick()
                 for _ in range(100):
-                    if task_service.list_runs(task["id"]):
+                    # The card's model call has begun too (its claim lands on disk first, 2026-11-10).
+                    if task_service.list_runs(task["id"]) and "card" in gates:
                         break
                     await asyncio.sleep(0.02)
                 self.assertTrue(task_service.list_runs(task["id"]), "the brief ran while the card was still running")

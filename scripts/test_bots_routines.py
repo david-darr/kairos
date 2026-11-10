@@ -471,6 +471,80 @@ class OverlapPolicies(RoutineCase):
         self.assertEqual(FakeBrain.started, 2)
 
 
+class BurstPacing(RoutineCase):
+    """100-bot scale test, 2026-11-10: 100 routines due in one minute all started at once and froze the app for
+    up to 45 s. Starts are now paced: a few at a time, each until its model call begins."""
+
+    async def test_a_burst_starts_a_few_at_a_time_and_runs_every_routine_exactly_once(self):
+        from core import bot_routine_runner as runner
+        tasks = []
+        for n in range(10):
+            bot = self.make_bot()
+            made = bot_routines.create_for_owner("local", bot["id"], {
+                "name": f"Burst {n}", "instructions": "Check in.", "schedule": {"kind": "interval", "every_minutes": 60}})
+            tasks.append(self.make_due(made["id"]))
+        starting, peak = set(), [0]
+        real_run = task_scheduler._run_task
+
+        async def run_task(task, source="manual"):
+            starting.add(task["id"])
+            peak[0] = max(peak[0], len(starting))
+            try:
+                await asyncio.sleep(0.1)  # the run is "in progress" but has not claimed its occurrence yet
+                return await real_run(task, source)
+            finally:
+                starting.discard(task["id"])
+
+        class Brain(FakeBrain):
+            async def events(self, prompt, stream=True):
+                starting.discard(runner.current_run()["routine_id"])  # its start is over: the model call began
+                async for item in FakeBrain.events(self, prompt, stream):
+                    yield item
+
+        FakeBrain.gate = asyncio.Event()  # every reply waits, so started runs pile up behind the model call
+        with patch.object(runner, "START_CONCURRENCY", 3), patch.object(runner, "START_JITTER_SECONDS", 0.05), \
+                patch.object(task_scheduler, "_run_task", run_task), \
+                patch.object(task_scheduler, "_task_brain", lambda task: Brain()):
+            runner._gates.clear()
+            for _ in range(12):  # later passes while the burst starts must neither repeat nor skip an occurrence
+                await runner.tick()
+                await asyncio.sleep(0.05)
+            await self.until(lambda: FakeBrain.started == 10)
+            self.assertLessEqual(peak[0], 3, "never more than three routines starting at once")
+            FakeBrain.gate.set()
+            await self.settle()
+            await runner.tick()
+            await self.settle()
+        runner._gates.clear()
+        self.assertEqual(FakeBrain.started, 10)
+        for task in tasks:
+            self.assertEqual(len(self.runs_of(task["id"])), 1, task["name"])
+            self.assertNotIn("skipped", task_service.get_task(task["id"])["routine"].get("status") or {})
+
+
+class DurableClaim(RoutineCase):
+    async def test_the_claim_and_the_run_record_are_on_disk_before_the_model_starts(self):
+        # Saves are coalesced off the loop now (core/store_writer.py); a crash once the model has started must
+        # still lose the occurrence rather than run it twice, so the claim lands first (2026-11-10).
+        import json as _json
+        task = self.routine("Durable", {"kind": "interval", "every_minutes": 60})
+        due = self.make_due(task["id"])["next_run_at"]
+        seen = {}
+
+        class Brain(FakeBrain):
+            async def events(self, prompt, stream=True):
+                with open(task_service._file, encoding="utf-8") as handle:
+                    seen["task"] = _json.load(handle)[task["id"]]
+                with open(task_service._runs_file, encoding="utf-8") as handle:
+                    seen["runs"] = [r for r in _json.load(handle) if r["task_id"] == task["id"]]
+                async for item in FakeBrain.events(self, prompt, stream):
+                    yield item
+        with patch.object(task_scheduler, "_task_brain", lambda t: Brain()):
+            await self.tick(task_id=task["id"])
+        self.assertNotEqual(seen["task"]["next_run_at"], due, "the occurrence was claimed on disk")
+        self.assertEqual([r["outcome"] for r in seen["runs"]], ["running"], "its run record was on disk")
+
+
 async def runner_tick_only():
     from core import bot_routine_runner
     await bot_routine_runner.tick()
