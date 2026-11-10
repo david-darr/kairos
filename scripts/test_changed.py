@@ -27,6 +27,7 @@ import fnmatch
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -375,16 +376,27 @@ def run(cmd, timeout=1800):
 
 
 def take_lock():
+    # 2026-11-10: owner.json names this process, so run-electron-test.cjs can tell a live
+    # lock from one left by a killed run (it clears the latter).
     for _ in range(720):
         try:
             LOCK.mkdir(parents=True, exist_ok=False)
+            (LOCK / "owner.json").write_text(json.dumps({"pid": os.getpid(), "started": time.strftime("%Y-%m-%dT%H:%M:%S")}), encoding="utf-8")
             return True
         except FileExistsError:
             time.sleep(5)
     return False
 
 
+def release_lock():
+    # Someone may already have cleared it; that must not crash the summary.
+    shutil.rmtree(LOCK, ignore_errors=True)
+
+
 def electron(args, timeout=2400):
+    # 2026-11-10: this script already holds the lock, so the runner must not wait on it.
+    # Without this flag every Electron run here waited forever on its own parent's lock.
+    os.environ["JARVIS_ELECTRON_LOCK_HELD"] = "1"
     if args[0] == "bg-tasks-smoke":
         return bg_tasks(args[1:], timeout)
     return run(["node", "scripts/run-electron-test.cjs", *args], timeout)
@@ -440,7 +452,7 @@ def refresh_coverage(units):
             out[name] = files
             print(f"{'ok  ' if code == 0 else 'FAIL'} {name:24} {secs:6}s {len(files):4} files", flush=True)
     finally:
-        LOCK.rmdir()
+        release_lock()
     out["_files"] = sorted(f for f in git("ls-files", "static", "tabs", "demo", "docs").split() if not f.startswith("docs/demo/"))
     COVERAGE.write_text(json.dumps(out, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     print("wrote", COVERAGE.relative_to(ROOT))
@@ -523,7 +535,7 @@ def main():
                 if code != 0:
                     failures.append((name, out[-1500:]))
         finally:
-            LOCK.rmdir()
+            release_lock()
     print(f"\n{'PASS' if not failures else 'FAIL'}: {len(failures)} failure(s) in {round((time.time() - t0) / 60, 1)} min")
     for name, out in failures:
         print(f"\n--- {name}\n{out}")
