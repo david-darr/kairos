@@ -1,7 +1,7 @@
 {
  "built": {
-  "app.js": "8e1143235042282ea3fcc23f62e84a74723bdf149f4d9de825230e7b3c6f2ac9",
-  "fixtures.js": "b137d6d7586b7059984b39c1c3b37447c746559f29f997ced25fc220dcc665e9",
+  "app.js": "9877fa9c814b62862923743e98abdcd5f3f76e117e799ad616453f2d11d5f18b",
+  "fixtures.js": "67d97bbe9d7176e875c624fd99abe71c2c6e8aecf6a9d8e0940880d332a9c8ba",
   "index.html": "c2d216301aae8fa4b2c0bd67aa81b0bedd2fc114251448f7c1de1e54cf4a143a",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
   "static/css/agent-ecosystem.css": "b40994f8cd2083cc7dbbce7b6ef625dfaef1013079488f5ca9caafb6d80ebad4",
@@ -1113,7 +1113,7 @@
   "tabs/studio/view.css": "8a0ccf87630e1d16eacdaa7dc9cc2d0ebcaae0aaabf9751b01a254a3de955c68"
  },
  "sources": {
-  "demo/fixtures.js": "b137d6d7586b7059984b39c1c3b37447c746559f29f997ced25fc220dcc665e9",
+  "demo/fixtures.js": "67d97bbe9d7176e875c624fd99abe71c2c6e8aecf6a9d8e0940880d332a9c8ba",
   "demo/shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
   "scripts/build_site_demo.py": "62293abd875c0ee4ec573ea4a9c2c6539e6950af04230804345d6d5576183e0e",
   "static/css/agent-ecosystem.css": "b40994f8cd2083cc7dbbce7b6ef625dfaef1013079488f5ca9caafb6d80ebad4",
@@ -1336,7 +1336,7 @@
   "static/js/botsPrefs.js": "fa9197534de49d8c8c9d8674257abfc4bf46c7b69b3861a42746e3a91c94566b",
   "static/js/botsProfileDiff.js": "e999f7e9d609b4c6ee114b1e188d78a33c4049930efd6e8692a6baf207ae9ad5",
   "static/js/botsQuotaCard.js": "2adb736636b64113050b5a15441ab37c41fc6883ee5de9ebc714ddec7042891c",
-  "static/js/botsRail.js": "44f9996af9ac2dff131013a279ea14bd7949952b43fe5aa6a8a0a742778b1be4",
+  "static/js/botsRail.js": "f5e5aa034318e1dbdee4c069d4802b77a20d528b3956a64b5ed34536b3bfebef",
   "static/js/botsReport.js": "3729f8c8e0a327b92d415596dd0f7f6d333a1fb2be56eb963a363f43d9b00d84",
   "static/js/botsRichRows.js": "6ef74f550187fa598db049745909fb344ce73f371ae0a2886438174daccbc1fe",
   "static/js/botsRoomMembers.js": "ff9c8f3f51714b73f7749aded57656d216fb44eff43173f3dc3496f89f8f8309",
@@ -1782,7 +1782,7 @@
   "static/js/views/agents.js": "44430989e4790cb5aa646907003c7395eae6429193010710364c08793655e63c",
   "static/js/views/appearancePanel.js": "d459ff3e52b5d6e92eb22aa2693f90d6042e39ccedd3f961cb0ef42dce96cf29",
   "static/js/views/botsAutomations.js": "d6e218d7ec4edb86f794b79a5f95bf081e9a91de52c5c44417443c533808f320",
-  "static/js/views/botsHome.js": "37357ce6e5f6fdbcf40235e30bf6b38a8ee18bfabc0775cddc4ac62dd990bd57",
+  "static/js/views/botsHome.js": "d4cbac9ad97291d5d216eceb667bc3a15a4d91322646f9a66a91c1c7d0479239",
   "static/js/views/botsRoom.js": "ceaced1cca8288cad1d7063180a6df8220bed3c8b1b5818423a97ad6eb8fcf04",
   "static/js/views/botsShell.js": "838cbb467584c6abab7d64e42fd1ac22c3712ab8bb8e9edfde9ffb3153b7baa2",
   "static/js/views/botsTeamMap.js": "4568709d075e7c98c448c0f459fc341bbc5baacbfbc19376fbd96854c38910c7",
