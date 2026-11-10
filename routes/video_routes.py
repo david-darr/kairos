@@ -21,11 +21,12 @@ class VideoBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str = Field(min_length=1, max_length=120)
     look: str = Field(min_length=1, max_length=60)
-    beats: list[dict[str, Any]] = Field(min_length=1, max_length=40)
+    beats: list[dict[str, Any]] = Field(min_length=1, max_length=video_store.NARRATED_MAX_BEATS)
     bpm: float = 120
     fps: int = 30
     aspects: list[str] = Field(default=["16:9"], min_length=1, max_length=3)
     music: dict[str, Any] = Field(default={"mood": "energetic", "volume": .7})
+    narration: Optional[dict[str, Any]] = None
     id: Optional[str] = None
     owner: Optional[str] = None
     chat_ids: list[str] = []
@@ -35,7 +36,7 @@ class VideoBody(BaseModel):
     updated: Optional[float] = None
 
     def project(self):
-        return {k: v for k, v in self.model_dump().items() if k in video_store.FIELDS and (k != "id" or v is not None)}
+        return {k: v for k, v in self.model_dump().items() if k in video_store.FIELDS and (k not in ("id", "narration") or v is not None)}
 
 
 class RenderBody(BaseModel):

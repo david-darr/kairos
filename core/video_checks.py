@@ -6,7 +6,7 @@ import io
 import math
 import re
 from PIL import Image, ImageColor, ImageStat
-from core.video_store import ASPECTS
+from core.video_store import ASPECTS, beat_seconds
 
 
 def _luminance(color):
@@ -55,29 +55,60 @@ def credit_notes(project):
     return []
 
 
-def check(project, aspect="16:9", layouts=None, frames=None, loudness=None):
+def _words(text):
+    return re.findall(r"[a-z0-9']+", str(text).lower().replace("’", "'"))
+
+
+def narration_notes(project, voice=None):
+    """Quality checks for the narration track (build spec section 5): the captions are the script's own words in
+    order, every line was spoken, and the voice neither clipped nor sank into the music."""
+    notes = []
+    for b in project["beats"]:
+        if "say" not in b:
+            continue
+        spoken = b.get("spoken")
+        if not spoken:
+            notes.append(f"Beat {b['id']}'s line is not narrated yet; run video_narrate.")
+            continue
+        if _words(" ".join(part[2] for part in spoken["parts"])) != _words(b["say"]):
+            notes.append(f"Beat {b['id']}'s captions do not match its script line; narrate it again.")
+    if voice:
+        if voice.get("voice_clipped_samples"):
+            notes.append(f"The narration clipped in {voice['voice_clipped_samples']} samples; reword or split the loudest line.")
+        if voice.get("mix_peak_dbfs") is not None and voice["mix_peak_dbfs"] > -1:
+            notes.append("The narration mix peaks above -1 dBFS; it may clip after encoding.")
+        margin = voice.get("voice_over_music_db")
+        if margin is not None and margin < 15:
+            notes.append(f"The voice is only {margin:g} dB over the music; lower the music volume.")
+    return notes
+
+
+def check(project, aspect="16:9", layouts=None, frames=None, loudness=None, voice=None):
     """Accept samples as {time, elements: kdLayout(t)}; deduplicate repeated notes."""
     w, h = ASPECTS[aspect]
     left, right = w * .05, w * .95
     top, bottom = h * (.08 if aspect == "9:16" else .05), h * (.88 if aspect == "9:16" else .95)
     notes = []
-    seconds_per_bar = 240 / project["bpm"]
     for b in project["beats"]:
-        seconds = b["bars"] * seconds_per_bar
+        seconds = beat_seconds(b, project["bpm"])
         words = len(" ".join([str(b.get(k, "")) for k in ("text", "sub", "number")] + b.get("items", [])).split())
         if seconds < 1:
             notes.append(f"Beat {b['id']} is under 1 second; give it more time.")
         if words / seconds > 3.5:
             notes.append(f"Beat {b['id']} reads faster than 3.5 words/s; shorten the copy or add bars.")
-    if project["beats"][-1]["kind"] == "end" and project["beats"][-1]["bars"] * seconds_per_bar < 1.5:
+    if project["beats"][-1]["kind"] == "end" and beat_seconds(project["beats"][-1], project["bpm"]) < 1.5:
         notes.append("The end card is held under 1.5 seconds; give the call to action longer.")
     notes += variety(project)
     notes += credit_notes(project)
+    notes += narration_notes(project, voice)
+    said = {b["id"]: _words(b.get("say", "")) for b in project["beats"]}
     for sample in layouts or []:
         for box in sample.get("elements", []):
             if not box.get("text"):
                 continue
             label = box.get("beat", "?")
+            if box.get("truncated"):
+                notes.append(f"Beat {label}'s text is cut off with an ellipsis; shorten it.")
             if (box.get("x", 0) < left or box.get("y", 0) < top or
                     box.get("x", 0) + box.get("w", 0) > right or box.get("y", 0) + box.get("h", 0) > bottom):
                 notes.append(f"Beat {label} has text outside the safe area; move it inward.")
@@ -85,10 +116,15 @@ def check(project, aspect="16:9", layouts=None, frames=None, loudness=None):
             if fg is not None and bg is not None and (max(fg, bg) + .05) / (min(fg, bg) + .05) < 4.5:
                 notes.append(f"Beat {label} has text contrast under 4.5:1; strengthen the text or background color.")
     # Use the worker's actual visible text too, since layout can reveal extra text.
-    lengths = {b["id"]: b["bars"] * seconds_per_bar for b in project["beats"]}
+    lengths = {b["id"]: beat_seconds(b, project["bpm"]) for b in project["beats"]}
     for sample in layouts or []:
         groups = {}
         for box in sample.get("elements", []):
+            if box.get("role") == "caption":
+                words, line = _words(box.get("text", "")), said.get(box.get("beat"), [])
+                if not words or not any(line[i:i + len(words)] == words for i in range(len(line) - len(words) + 1)):
+                    notes.append(f"A caption in beat {box.get('beat', '?')} is not the script's words; narrate it again.")
+                continue
             if box.get("text"):
                 groups.setdefault(box.get("beat"), []).append(str(box["text"]))
         for beat, texts in groups.items():

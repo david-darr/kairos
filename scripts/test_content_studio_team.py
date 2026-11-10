@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core import accounts, bot_rooms_store
 from core import tool_registry
 from core.tool_registry import ToolContext
-from services.content_studio import delivery, pipeline, report, review, studio, team as studio_roles, close_all
+from services.content_studio import StudioError, delivery, pipeline, policy, report, review, studio, team as studio_roles, close_all
 from services import bot_package as pkg, bot_departments, bot_rooms, bot_usage, studio_team_package as team
 from services.agent_service import agent_service
 from services.task_service import task_service
@@ -223,12 +223,13 @@ class StudioToolTests(unittest.TestCase):
 
     def test_tools_are_registered_agent_only_and_none_approves_or_posts(self):
         names = sorted(n for n in tool_registry._REGISTRY if n.startswith("content_studio_"))
-        self.assertEqual(names, ["content_studio_add_topic", "content_studio_confirm_decision", "content_studio_mark_posted",
-                                 "content_studio_pick_topic", "content_studio_pipeline", "content_studio_propose_niche",
+        self.assertEqual(names, ["content_studio_add_topic", "content_studio_check_post", "content_studio_confirm_decision",
+                                 "content_studio_mark_posted", "content_studio_pick_topic", "content_studio_pipeline",
+                                 "content_studio_post_evidence", "content_studio_propose_niche",
                                  "content_studio_publish_youtube", "content_studio_record_metrics", "content_studio_record_render",
                                  "content_studio_record_warning", "content_studio_reject_decision", "content_studio_run_review",
-                                 "content_studio_save_script", "content_studio_send_report", "content_studio_submit_post",
-                                 "content_studio_watch", "content_studio_youtube_trending"])
+                                 "content_studio_save_script", "content_studio_save_shot_plan", "content_studio_send_report",
+                                 "content_studio_submit_post", "content_studio_watch", "content_studio_youtube_trending"])
         for name in names:
             self.assertTrue(tool_registry._REGISTRY[name].agent_only)
         self.assertFalse(any("approve" in n for n in names), "no tool approves a post")
@@ -268,6 +269,11 @@ class StudioToolTests(unittest.TestCase):
         self.assertIn("needs its render_ref", call("content_studio_record_render", bots["Editor"], post_id=post["id"], status="ok"))
         self.assertIn("watch sees the failure", call("content_studio_record_render", bots["Editor"], post_id=post["id"], status="failed"))
         self.assertEqual(pipeline.pipeline(studio)[0]["status"], "failed")
+        self.assertIn("record the shot plan first", call("content_studio_record_render", bots["Editor"], post_id=post["id"], status="ok",
+                                                          render_ref="/generated-files/a_b.mp4"))
+        self.assertIn("Only the Script Writer or Editor", call("content_studio_save_shot_plan", bots["Researcher"], post_id=post["id"], plan="x"))
+        self.assertIn("Shot plan recorded", call("content_studio_save_shot_plan", bots["Editor"], post_id=post["id"],
+                                                 plan="00:00.0-00:03.2 hook title: \"What a black hole hides\""))
         out = call("content_studio_record_render", bots["Editor"], post_id=post["id"], status="ok", render_ref="/generated-files/a_b.mp4", tags="space, physics")
         self.assertIn("content_studio_submit_post", out)
         call("content_studio_submit_post", bots["Editor"], post_id=post["id"])
@@ -467,6 +473,196 @@ class StudioToolTests(unittest.TestCase):
             self.assertEqual(len(studio.list_topics()), 1)
         finally:
             close_all()
+
+
+SCRIPT = ("Hook: clouds weigh tons. Say: That fluffy cloud above you weighs about as much as a hundred elephants. "
+          "Beat two: droplets are tiny. Say: The water is split into countless droplets that fall very slowly. "
+          "End: look up. Say: Rising warm air holds them up until they merge into rain.")
+
+
+class PolicyTests(unittest.TestCase):
+    """The Evaluator's policy checks (Video Styles build spec section 7) and the appeal evidence kept per post."""
+
+    def setUp(self):
+        clean()
+        wipe_studio()
+        with patch.object(agent_service, "chat_endpoint", return_value={"id": "x"}, create=True):
+            pkg.import_(pkg.inspect(pkg.canonical(team.build()))["token"])
+        self.bots = {a["name"]: a["id"] for a in agent_service.list_agents()}
+        self.patch = patch.object(delivery, "inbox_notifier", Fake())
+        self.patch.start()
+        self.niche = studio.create_niche("Weather")
+        self.channel = studio.create_channel(self.niche["id"], "youtube", "@weather")
+
+    def tearDown(self):
+        self.patch.stop()
+        clean()
+        wipe_studio()
+        bot_usage.update_settings(budget={"monthly_usd": None, "warn_percent": 80})
+
+    def post(self, title, script, channel=None, render="", fmt=None):
+        post = studio.create_post((channel or self.channel)["id"], title, script_ref=script, format=fmt)
+        if render:
+            studio.edit_post(post["id"], render_ref=render, render_status="ok")
+        return studio.get_post(post["id"])
+
+    def test_sameness_against_the_channels_last_30_posts(self):
+        first = self.post("Why clouds float", SCRIPT)
+        near = self.post("How clouds stay up", SCRIPT.replace("tons", "tonnes"))
+        result = policy.check(studio, near["id"])
+        self.assertFalse(result["ok"])
+        self.assertIn(f"near-copy of post {first['id']}", policy.reasons(result))
+        same_title = self.post("Why Clouds Float", "A completely different script about frost on windows and how ice ferns grow.")
+        self.assertIn("title is the same", policy.reasons(policy.check(studio, same_title["id"])))
+        opening = self.post("Frost ferns", "Hook: clouds weigh tons. Say: That fluffy cloud, though, is not today's subject; "
+                                           "today we talk about frost ferns on cold windows and how they branch.")
+        self.assertIn("opens with the same line", policy.reasons(policy.check(studio, opening["id"])))
+        fresh = self.post("Ice ferns on windows", "Frost on a window grows like a fern because water vapour freezes onto tiny scratches first.")
+        self.assertTrue(policy.check(studio, fresh["id"])["ok"], policy.check(studio, fresh["id"]))
+        # Only the last 30 posts count: a post 31 back no longer blocks a near-copy.
+        for n in range(30):
+            self.post(f"Filler {n}", f"Unrelated filler script number {n} about topic {n * 7} and nothing else at all {n}.")
+        late = self.post("Clouds again", SCRIPT)
+        self.assertNotIn(f"post {first['id']}", policy.reasons(policy.check(studio, late["id"])))
+
+    def test_one_format_filling_the_channel_is_a_warning(self):
+        for n in range(10):
+            self.post(f"List {n}", f"Distinct list script {n} with its own words {n * 3}.", fmt="list")
+        draft = self.post("Another list", "A fresh list about sea fog and coastal mornings.", fmt="list")
+        result = policy.check(studio, draft["id"])
+        self.assertTrue(result["ok"])
+        self.assertTrue(any(f["result"] == "warn" and "format" in f["reason"] for f in result["findings"]))
+
+    def test_ai_persona_and_distress_hooks_are_rejected(self):
+        for script in ("As a licensed financial advisor, I can tell you where to put your savings.",
+                       "I'm a doctor, and this is what you should take for a cold.",
+                       "Dr. Reyes here with today's health tip.", "Meet your new legal expert, here to fix your case.",
+                       "This is financial advice: buy now."):
+            draft = self.post("Tips", script)
+            result = policy.check(studio, draft["id"])
+            self.assertFalse(result["ok"], script)
+            self.assertEqual(result["findings"][0]["check"], "ai_persona", script)
+        for title, script in (("Abandoned puppy rescued from a storm drain", "Watch what happens next."),
+                              ("Watch this", "This kitten was trapped in the rain for hours before anyone came."),
+                              ("Brave hiker", "We saved a dog from the frozen lake this morning.")):
+            draft = self.post(title, script)
+            result = policy.check(studio, draft["id"])
+            self.assertFalse(result["ok"], title)
+            self.assertTrue(any(f["check"] == "distress_hook" for f in result["findings"]), title)
+        for title, script in (("Money basics", "This is general information, not financial advice. Ask your doctor or adviser."),
+                              ("Apollo 13", "The rescue of the Apollo 13 crew took four days."),
+                              ("Clouds", "Experts such as doctors and meteorologists study air.")):
+            self.assertTrue(policy.check(studio, self.post(title, script)["id"])["ok"], title)
+
+    def test_save_script_and_pick_refuse_with_the_reason(self):
+        topic = studio.add_topic(self.niche["id"], "Rescued kitten stuck in a drain", "https://t.example.test")
+        out = call("content_studio_pick_topic", self.bots["Evaluator"], channel_id=self.channel["id"], topic_id=topic["id"], reason="Hot.")
+        self.assertIn("distress or rescue hook", out)
+        self.assertEqual(studio.list_posts(), [])
+        topic = studio.add_topic(self.niche["id"], "Why fog forms", "https://t.example.test")
+        call("content_studio_pick_topic", self.bots["Evaluator"], channel_id=self.channel["id"], topic_id=topic["id"], reason="Seasonal.")
+        post = studio.list_posts()[0]
+        out = call("content_studio_save_script", self.bots["Script Writer"], post_id=post["id"],
+                   script="I'm a certified financial planner and fog is a great investment.")
+        self.assertIn("policy checks stopped this", out)
+        self.assertIsNone(studio.get_post(post["id"])["script_ref"], "a refused script is not saved")
+        self.assertEqual(studio.evidence(post["id"], "policy_check")[-1]["body"]["ok"], False, "the refusal is on record")
+        out = call("content_studio_save_script", self.bots["Script Writer"], post_id=post["id"], script=SCRIPT,
+                   shot_plan="00:00.0-00:04.2 hook title: Clouds weigh tons | says: ...",
+                   sources=[{"url": "https://www.usgs.gov/water-science-school", "supports": "cloud weight", "date": "2026-11-10"}])
+        self.assertIn("Editor renders it next", out)
+        kinds = [e["kind"] for e in studio.evidence(post["id"])]
+        self.assertEqual(kinds, ["policy_check", "policy_check", "shot_plan", "sources"])
+        self.assertIn("Not run", call("content_studio_save_script", self.bots["Script Writer"], post_id=post["id"], script=SCRIPT,
+                                      sources=[{"url": "not a link"}]))
+        checked = call("content_studio_check_post", self.bots["Evaluator"], post_id=post["id"])
+        self.assertIn('"ok": true', checked)
+        self.assertIn("Only the Evaluator or Producer", call("content_studio_check_post", self.bots["Editor"], post_id=post["id"]))
+        self.assertIn("usgs.gov", call("content_studio_post_evidence", self.bots["Producer"], post_id=post["id"]))
+
+    def test_no_cross_posting_between_our_own_channels(self):
+        other_niche = studio.create_niche("Space")
+        other = studio.create_channel(other_niche["id"], "youtube", "@space")
+        tiktok = studio.create_channel(self.niche["id"], "tiktok", "@weather")
+        first = self.post("Why clouds float", SCRIPT, render="/generated-files/clouds.mp4")
+        studio.submit_for_approval(first["id"])
+        same_niche_tiktok = self.post("Why clouds float", SCRIPT, channel=tiktok, render="/generated-files/clouds.mp4")
+        studio.submit_for_approval(same_niche_tiktok["id"])     # one niche's platforms share the video by design
+        copied = self.post("Clouds explained", "A brand new script about something else.", channel=other,
+                           render="/generated-files/clouds.mp4")
+        with self.assertRaises(StudioError) as caught:
+            studio.submit_for_approval(copied["id"])
+        self.assertIn("never posts one video on two of its own channels", caught.exception.detail)
+        self.assertEqual(studio.get_post(copied["id"])["state"], "drafted")
+        studio.approve(first["id"], "david")
+        studio.mark_posted(first["id"], "https://youtu.be/abcdefghijk")
+        fresh = self.post("Comets", "Comets are dirty snowballs that grow tails near the Sun.", channel=other, render="/generated-files/comets.mp4")
+        studio.submit_for_approval(fresh["id"])
+        studio.approve(fresh["id"], "david")
+        with self.assertRaises(StudioError):
+            studio.mark_posted(fresh["id"], "https://youtu.be/abcdefghijk")
+
+    def test_ai_label_stays_on_and_approval_is_kept_as_evidence(self):
+        post = self.post("Why clouds float", SCRIPT, render="/generated-files/clouds.mp4")
+        self.assertEqual(post["ai_label"], 1)
+        with self.assertRaises(StudioError):
+            studio.edit_post(post["id"], ai_label=False)
+        studio.edit_post(post["id"], ai_label=True)
+        studio.submit_for_approval(post["id"])
+        studio.approve(post["id"], "david")
+        approval = studio.evidence(post["id"], "approval")[0]["body"]
+        self.assertEqual((approval["by"], approval["title"], approval["render_ref"], approval["ai_label"]),
+                         ("david", "Why clouds float", "/generated-files/clouds.mp4", True))
+        self.assertEqual(len(approval["script_sha256"]), 64)
+        self.assertEqual(studio.evidence(post["id"], "policy_check")[0]["body"]["step"], "submit")
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from core.middleware import require_user
+        from routes import content_studio_routes
+        app = FastAPI()
+        app.include_router(content_studio_routes.router)
+        app.dependency_overrides[require_user] = lambda: "david"
+        client = TestClient(app)
+        kinds = [e["kind"] for e in client.get(f"/api/content-studio/posts/{post['id']}/evidence").json()["evidence"]]
+        self.assertEqual(kinds, ["policy_check", "approval"])
+        self.assertEqual(len(client.get(f"/api/content-studio/posts/{post['id']}").json()["evidence"]), 2)
+        changed = client.post(f"/api/content-studio/channels/{self.channel['id']}/edit", json={"voice": "bm_george"})
+        self.assertEqual(changed.json()["voice"], "bm_george")
+        self.assertEqual(client.post(f"/api/content-studio/channels/{self.channel['id']}/edit", json={"voice": "Bad Voice"}).status_code, 400)
+
+    def test_a_channel_keeps_one_narrator_voice(self):
+        from core import video_store
+        def narrated(voice):
+            p = video_store.create("Clouds", look="sport", owner="david", narration={"voice": voice, "captions": True},
+                                   beats=[{"id": "a", "kind": "title", "text": "Clouds", "say": "Clouds float."}])
+            return f"/api/videos/{p['id']}/renders/9-16-v1.mp4"
+        first = self.post("Why clouds float", SCRIPT)
+        studio.add_evidence(first["id"], "shot_plan", {"plan": "00:00-00:02 a"})
+        out = call("content_studio_record_render", self.bots["Editor"], post_id=first["id"], status="ok", render_ref=narrated("af_heart"))
+        self.assertIn("narrator voice is now af_heart", out)
+        self.assertEqual(studio.get_channel(self.channel["id"])["voice"], "af_heart")
+        second = self.post("Ice ferns", "Frost grows like ferns on windows.")
+        studio.add_evidence(second["id"], "shot_plan", {"plan": "00:00-00:02 a"})
+        out = call("content_studio_record_render", self.bots["Editor"], post_id=second["id"], status="ok", render_ref=narrated("bm_george"))
+        self.assertIn("this channel's narrator is af_heart", out)
+        self.assertEqual(studio.get_post(second["id"])["render_status"], "pending")
+        self.assertIn("content_studio_submit_post", call("content_studio_record_render", self.bots["Editor"], post_id=second["id"],
+                                                         status="ok", render_ref=narrated("af_heart")))
+
+    def test_instructions_carry_the_narration_and_policy_rules(self):
+        souls = {b["name"]: b["soul"] for b in team.build()["bots"]}
+        for soul in souls.values():
+            for phrase in ("doctor, lawyer, financial adviser or political expert", "No distress or rescue hooks",
+                           "never post it on two of the team's own channels", "the label stays on every post"):
+                self.assertIn(phrase, soul)
+        self.assertIn("content_studio_check_post", souls["Evaluator"])
+        self.assertIn("last 30 posts", souls["Evaluator"])
+        self.assertIn("video_narrate", souls["Editor"])
+        self.assertIn("content_studio_save_shot_plan", souls["Editor"])
+        self.assertIn("narration.voice", souls["Editor"])
+        self.assertIn("narration line", souls["Script Writer"])
+        self.assertIn("shot plan", souls["Script Writer"])
+        self.assertIn("content_studio_post_evidence", souls["Producer"])
 
 
 if __name__ == "__main__":

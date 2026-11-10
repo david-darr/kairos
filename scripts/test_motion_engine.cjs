@@ -33,7 +33,7 @@ const path = require('node:path');
   assert.equal(bad.beats[0].number.length, L.LIMITS.number); assert.equal(bad.beats[0].items.length, 5);
   assert.equal(bad.beats[0].items[0].length, 100); assert.notEqual(bad.beats[0].id, bad.beats[1].id);
   assert.equal(L.normalizeProject({ bpm: -5 }).bpm, 40);
-  assert.equal(L.normalizeProject({ beats: Array(90).fill({}) }).beats.length, 64);
+  assert.equal(L.normalizeProject({ beats: Array(130).fill({}) }).beats.length, 100);
   for (const value of [null, {}, { beats: [] }]) assert.ok(L.normalizeProject(value).duration > 0);
   assert.equal(L.assetName('assets/abc-123.jpg'), 'abc-123.jpg');
   for (const name of ['https://x/y', '/etc/passwd', 'assets/../x', 'a%2fb.png', 'x?rt=bad']) assert.equal(L.assetName(name), '');
@@ -57,7 +57,9 @@ const path = require('node:path');
       assert.ok(box.x >= safe.x - 1e-6 && box.y >= safe.y - 1e-6);
       assert.ok(box.x + box.w <= safe.x + safe.w + 1e-6 && box.y + box.h <= safe.y + safe.h + 1e-6);
       const floor = box.role === 'number' ? 525 : box.role === 'body' ? (kind === 'list' ? 59.4 : kind === 'big-number' ? 54 : kind === 'end' ? 59.4 : 45.36) : L.TYPE[kind][0];
-      assert.ok(box.size >= floor - .01, `${kind}/${aspect}/${box.role}: ${box.size} < ${floor}`);
+      // Below the floor only a short figure or heading that would otherwise be cut off with "..." (layout.js).
+      const short = box.role === 'number' || box.text.split(/\s+/u).length <= 4;
+      assert.ok(box.size >= floor - .01 || (short && !box.truncated), `${kind}/${aspect}/${box.role}: ${box.size} < ${floor}`);
       assert.equal(box.minSize, floor);
       if (box.role === 'title' && !['split'].includes(kind)) assert.ok(box.w >= safe.w * .60);
       if (box.role === 'title' && !long && ['title', 'end'].includes(kind)) {

@@ -11,7 +11,7 @@ import secrets
 from urllib.parse import quote
 import weakref
 from PIL import Image
-from core import accounts, design_render, design_render_bridge, ffmpeg_tools, video_audio, video_checks, video_store
+from core import accounts, design_render, design_render_bridge, ffmpeg_tools, video_audio, video_checks, video_narration, video_store
 
 _jobs = {}
 _owners = {}  # job id -> the account that started it; a job is only visible to that account
@@ -28,7 +28,7 @@ def _machine():
 def outline(project):
     start, out = 0., []
     for beat in project["beats"]:
-        end = start + beat["bars"] * 240 / project["bpm"]
+        end = start + video_store.beat_seconds(beat, project["bpm"])
         out.append({**beat, "start": start, "end": end})
         start = end
     return out
@@ -61,6 +61,12 @@ def _job(project, aspect, job_id, times=None):
             "w": w, "h": h, "look": project["look"], "fps": 30,
             "frames": math.ceil(video_store.duration(project) * 30 - 1e-7),
             "preview": times is not None, "times": times or [], "layoutTimes": samples}
+
+
+def wait_seconds(project):
+    """How long a caller waits for one render: the capture budget plus narration and encoding."""
+    frames = math.ceil(video_store.duration(project) * 30 - 1e-7)
+    return design_render_bridge.video_seconds({"frames": frames}) + 120
 
 
 def status(job_id):
@@ -130,9 +136,17 @@ async def _render(project, aspect, job_id):
     try:
         await lock.acquire()
         acquired = True
+        if video_store.narrated(project):
+            # Audio first: speak and measure the lines, which sets each shot's length, before any frame is drawn.
+            state["status"] = "narrating"
+            project = await _thread_done(video_narration.prepare, project["id"])
+            if project["aspects"] and aspect not in project["aspects"]:
+                raise ValueError("aspect: the video no longer has this aspect.")
+            state["version"] = project["version"]
         folder = video_store._folder(project["id"]) / "renders"
         wav = folder / "soundtrack.wav"
-        await _thread_done(video_audio.write_wav, wav, project)
+        voice = {}
+        await _thread_done(video_audio.write_wav, wav, project, voice)
         slug = aspect.replace(":", "-")
         n = 1
         while (folder / f"{slug}-v{n}.mp4").exists():
@@ -169,7 +183,7 @@ async def _render(project, aspect, job_id):
         await asyncio.to_thread(encoder.finish)
         encoder = None
         measured = await _thread_done(ffmpeg_tools.loudness, temp)
-        notes = video_checks.check(project, aspect, layouts, samples, measured)
+        notes = video_checks.check(project, aspect, layouts, samples, measured, voice or None)
         sheet = folder / f"sheet-{slug}.png"
         sheet.write_bytes(ffmpeg_tools.contact_sheet(samples, 4))
         thumb_path = folder / f"thumb-{slug}.png"
@@ -178,7 +192,8 @@ async def _render(project, aspect, job_id):
                 image.thumbnail((480, 480))
                 image.save(thumb_path, "PNG")
         temp.replace(out)
-        state.update(status="ready", file=out.name, path=str(out), loudness=measured, notes=notes,
+        state.update(status="ready", file=out.name, path=str(out), loudness=measured, notes=notes, narration=voice or None,
+                     seconds=round(video_store.duration(project), 2),
                      url=f"/api/videos/{project['id']}/renders/{out.name}", sheet=sheet.name, thumbnail=thumb_path.name)
     except asyncio.CancelledError:
         state["status"] = "failed: cancelled"
@@ -195,9 +210,17 @@ async def _render(project, aspect, job_id):
                 lock.release()
 
 
-async def preview(video_id, aspect, times):
+async def preview(video_id, aspect, times=None):
+    """Sample frames at `times`, or (None) at each shot's middle once the narration has set the timeline."""
     project = video_store.get(video_id)
     _aspect(project, aspect)
+    if video_store.narrated(project):
+        project = await asyncio.to_thread(video_narration.prepare, video_id)
+    if times is None:
+        beats = outline(project)
+        count = min(6, len(beats))
+        picks = [round(i * (len(beats) - 1) / max(1, count - 1)) for i in range(count)]
+        times = [(beats[i]["start"] + beats[i]["end"]) / 2 for i in picks]
     seconds = video_store.duration(project)
     if (not isinstance(times, list) or not 1 <= len(times) <= 12 or
             any(isinstance(t, bool) or not isinstance(t, (int, float)) or not math.isfinite(t) or not 0 <= t < seconds for t in times)):

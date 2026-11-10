@@ -47,8 +47,9 @@ def posted(store, channel_id, title, at, views, avd=5.0, length=10.0, likes=0, c
            script=None, evaluator=None, format=None):
     """A post taken all the way to posted, with a 7 day snapshot."""
     post = store.create_post(channel_id, title, script_strategy_id=script, evaluator_strategy_id=evaluator, format=format,
-                             script_ref="script", now=at - 7200)
-    store.edit_post(post["id"], now=at - 3600, render_ref="render.mp4", render_status="ok")
+                             script_ref=f"The script of {title}", now=at - 7200)
+    # Each post is its own video: the policy checks refuse one video on two of the team's channels.
+    store.edit_post(post["id"], now=at - 3600, render_ref=f"render-{post['id']}.mp4", render_status="ok")
     store.submit_for_approval(post["id"], now=at - 1800)
     store.approve(post["id"], "david", now=at - 900)
     store.mark_posted(post["id"], f"https://example.test/{post['id']}", posted_at=at, now=at)

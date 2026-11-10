@@ -3,15 +3,23 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
-from core import creative_direction, design_store, design_systems, design_tools, ffmpeg_tools, image_gen, video_render, video_store
+from core import (creative_direction, design_store, design_systems, design_tools, ffmpeg_tools, image_gen, video_narration,
+                  video_render, video_store)
 from core.tool_registry import ALL, READ, WRITE, ToolResult, _object, _str, register
 from core.untrusted import wrap_untrusted
 
-LINKED_TOOLS = frozenset({"video_outline", "video_edit", "video_add_image", "video_preview", "video_render"})
+LINKED_TOOLS = frozenset({"video_outline", "video_edit", "video_add_image", "video_preview", "video_render", "video_narrate"})
 FLOW = ("Workflow: creative_direction(type=video) -> video_create with a beat sheet (one idea per beat, "
         "3 to 8 words on screen, 1 to 2 bars each, end card last; vary the kinds: at most half statements, a big-number "
         "for a figure, a list, a quote, and an image or split beat with a photo from image_search) -> video_preview -> "
         "fix with video_edit -> video_render. ")
+NARRATION = ("Narration: give a beat a say line (what the narrator speaks over it, one or two short sentences, at most "
+             f"{video_store.SAY_LIMIT} characters, no clause over {video_store.CLAUSE_LIMIT} without a comma) and the video is "
+             "voiced by Kokoro, locally and free. Each line's spoken length sets its beat's length (bars are ignored there); "
+             "captions are burned in from the lines; the music ducks under the voice. narration={voice, captions} picks the "
+             "Kokoro voice (default af_heart; a channel keeps one voice) and captions on or off. Narrated videos may run to "
+             f"{video_store.NARRATED_MAX_SECONDS} seconds and {video_store.NARRATED_MAX_BEATS} beats. Run video_narrate for the "
+             "timestamped shot plan before rendering. ")
 _ID = _str("Video id; optional when this chat has one linked video")
 _ASPECT = {"type": "string", "enum": list(video_store.ASPECTS)}
 
@@ -61,14 +69,25 @@ def _guard(handler):
 
 def _outline(project):
     beats = video_render.outline(project)
-    lines = [f"Video {project['id']}: {project['title']} ({video_store.duration(project):g}s, version {project['version']})"]
-    lines += [f"- {b['id']} {b['start']:g}–{b['end']:g}s {b['kind']}: {b.get('text', b.get('number', ''))}" for b in beats]
+    voice = project.get("narration", {}).get("voice") if video_store.narrated(project) else None
+    lines = [f"Video {project['id']}: {project['title']} ({round(video_store.duration(project), 2):g}s, version {project['version']}"
+             + (f", narrated by {voice}" if voice else "") + ")"]
+    for b in beats:
+        line = f"- {b['id']} {round(b['start'], 2):g}-{round(b['end'], 2):g}s {b['kind']}: {b.get('text', b.get('number', ''))}"
+        if "say" in b:
+            line += f" | says: {b['say']}" + ("" if "spoken" in b else " (length estimated until video_narrate)")
+        lines.append(line)
     return "\n".join(lines)
 
 
-@register("video_create", FLOW + "Create a video project with a chosen look and beats; returns a Studio link. Pick a look with creative_direction(type=video) first.",
+_NARRATION = {"type": "object", "properties": {"voice": _str("Kokoro voice id, e.g. af_heart, am_michael, bf_emma, bm_george"),
+                                               "captions": {"type": "boolean"}}}
+
+
+@register("video_create", FLOW + NARRATION + "Create a video project with a chosen look and beats; returns a Studio link. Pick a look with creative_direction(type=video) first.",
           _object({"title": _str("Video title"), "look": _str("Look id from creative_direction"),
-                   "beats": {"type": "array", "items": {"type": "object"}, "minItems": 1, "maxItems": 40},
+                   "beats": {"type": "array", "items": {"type": "object"}, "minItems": 1, "maxItems": video_store.NARRATED_MAX_BEATS},
+                   "narration": _NARRATION,
                    "aspects": {"type": "array", "items": _ASPECT}, "bpm": {"type": "number", "minimum": 60, "maximum": 180},
                    "music": {"type": "object", "properties": {"mood": {"type": "string", "enum": list(video_store.MOODS)},
                                                               "volume": {"type": "number", "minimum": 0, "maximum": 1}}}},
@@ -89,10 +108,11 @@ async def _create(args, ctx):
         for i, beat in enumerate(beats):
             if isinstance(beat, dict):
                 beat.setdefault("id", f"b{i + 1}")
-    options = {k: args[k] for k in ("aspects", "bpm", "music") if k in args}
+    options = {k: args[k] for k in ("aspects", "bpm", "music", "narration") if k in args}
     project = video_store.create(args.get("title"), look=look, beats=beats, owner=owner, chat_key_=key, **options)
     title = project["title"].replace("[", "").replace("]", "").replace("\n", " ")
-    return _safe(ctx, _outline(project) + f"\n[Video: {title}](/videos/{project['id']})\nNext: video_preview, fix with video_edit, then video_render.")
+    step = "video_narrate for the shot plan, " if video_store.narrated(project) else ""
+    return _safe(ctx, _outline(project) + f"\n[Video: {title}](/videos/{project['id']})\nNext: {step}video_preview, fix with video_edit, then video_render.")
 
 
 @register("video_outline", "Read beat ids, timing and text before making small changes with video_edit.",
@@ -117,13 +137,16 @@ def edit(project, ops):
             raise ValueError(f"ops[{n}]: give an operation object.")
         kind = op.get("op")
         if kind == "project":
-            if op.get("field") not in ("title", "look", "bpm", "aspects", "music") or "value" not in op:
-                raise ValueError(f"ops[{n}].field: project edits title, look, bpm, aspects or music with value.")
+            if op.get("field") not in ("title", "look", "bpm", "aspects", "music", "narration") or "value" not in op:
+                raise ValueError(f"ops[{n}].field: project edits title, look, bpm, aspects, music or narration with value.")
             draft[op["field"]] = op["value"]
         elif kind == "set":
-            if op.get("field") not in ("kind", "bars", "text", "sub", "number", "items", "image", "camera", "transition", "treatment") or "value" not in op:
+            if op.get("field") not in ("kind", "bars", "text", "sub", "number", "items", "image", "camera", "transition", "treatment", "say") or "value" not in op:
                 raise ValueError(f"ops[{n}].field: choose a beat field from video_outline and give value.")
-            draft["beats"][index(op.get("id"))][op["field"]] = op["value"]
+            if op["field"] == "say" and op["value"] in (None, ""):
+                draft["beats"][index(op.get("id"))].pop("say", None)   # an empty line takes the narration off that beat
+            else:
+                draft["beats"][index(op.get("id"))][op["field"]] = op["value"]
         elif kind == "remove":
             draft["beats"].pop(index(op.get("id")))
         elif kind in ("insert", "move"):
@@ -146,8 +169,9 @@ def edit(project, ops):
     return video_store.validate(draft)
 
 
-@register("video_edit", "Change a video atomically. ops: set {op:set,id,field,value}; insert {op:insert,before|after,beat}; "
-          "remove {op:remove,id}; move {op:move,id,before|after}; project {op:project,field,value} for title,look,bpm,aspects,music. "
+@register("video_edit", "Change a video atomically. ops: set {op:set,id,field,value} (field say sets or, with an empty value, removes a narration line); "
+          "insert {op:insert,before|after,beat}; remove {op:remove,id}; move {op:move,id,before|after}; "
+          "project {op:project,field,value} for title,look,bpm,aspects,music,narration. "
           "Use beat ids from video_outline. A bad operation changes nothing. Preview again after edits.",
           _object({"video_id": _ID, "ops": {"type": "array", "items": {"type": "object"}}}, ("ops",)), surfaces=ALL, effect=WRITE)
 @_guard
@@ -178,23 +202,36 @@ async def _image(args, ctx):
     return _safe(ctx, f"Image copied: {asset}. Set a beat's image to this path with video_edit.")
 
 
-@register("video_preview", FLOW + "Render up to six beat midpoint samples into a contact sheet, with readability and safe-area notes. Needs the desktop app; works without FFmpeg.",
+@register("video_narrate", NARRATION + "Speak every say line with Kokoro (local, free), measure it, set each beat's length from it "
+          "and return the timestamped shot plan with the narration checks. Lines already spoken in the same voice are reused. "
+          "Run it before video_preview and video_render on a narrated video; bring the shot plan with the post for approval.",
+          _object({"video_id": _ID}), surfaces=ALL, effect=WRITE)
+@_guard
+async def _narrate(args, ctx):
+    project = _video(args, ctx)
+    if not video_store.narrated(project):
+        return "Not run: no beat has a say line yet. Add narration with video_edit (op set, field say) first."
+    saved = await asyncio.to_thread(video_narration.prepare, project["id"])
+    from core import video_checks
+    notes = video_checks.narration_notes(saved)
+    return _safe(ctx, video_narration.plan_text(saved) + ("\nNarration notes:\n" + "\n".join(notes) if notes else
+                                                          "\nEvery line is spoken and measured; captions match the script."))
+
+
+@register("video_preview", FLOW + "Render up to six beat midpoint samples into a contact sheet, with readability and safe-area notes. "
+          "A narrated video is narrated first so the samples sit on the real timeline. Needs the desktop app; works without FFmpeg.",
           _object({"video_id": _ID, "aspect": _ASPECT}), surfaces=ALL, effect=READ)
 @_guard
 async def _preview(args, ctx):
     project = _video(args, ctx)
-    beats = video_render.outline(project)
-    count = min(6, len(beats))
-    indices = [round(i * (len(beats) - 1) / max(1, count - 1)) for i in range(count)]
-    times = [(beats[i]["start"] + beats[i]["end"]) / 2 for i in indices]
-    frames = await video_render.preview(project["id"], args.get("aspect") or project["aspects"][0], times)
+    frames = await video_render.preview(project["id"], args.get("aspect") or project["aspects"][0])
     notes = video_render._last_preview.get(project["id"], {}).get("notes", [])
     return ToolResult(_safe(ctx, "Video preview.\n" + ("\n".join(notes) or "No automatic issues in these samples. Inspect the sheet before rendering.")),
                       [ffmpeg_tools.contact_sheet(frames, 3)], image_fallback="")
 
 
-@register("video_render", FLOW + "Encode the video to MP4 with original music. aspect may be all. "
-          "Queues a job visible in Studio, waits up to 10 minutes per aspect, then returns the real download link, loudness and checks.",
+@register("video_render", FLOW + "Encode the video to MP4 with original music, and the narration and captions when beats have say lines. aspect may be all. "
+          "Queues a job visible in Studio, waits for it (about 10 minutes per aspect, longer for a long narrated video), then returns the real download link, loudness and checks.",
           _object({"video_id": _ID, "aspect": {"type": "string", "enum": list(video_store.ASPECTS) + ["all"]}}), surfaces=ALL, effect=WRITE)
 @_guard
 async def _render(args, ctx):
@@ -205,7 +242,7 @@ async def _render(args, ctx):
         job = video_render.start(project["id"], aspect)
         lines.append(f"Job {job['id']} ({aspect}); watch progress in [Studio](/videos/{project['id']}).")
         try:
-            await asyncio.wait_for(asyncio.shield(video_render._tasks[job["id"]]), timeout=600)
+            await asyncio.wait_for(asyncio.shield(video_render._tasks[job["id"]]), timeout=video_render.wait_seconds(project))
         except asyncio.TimeoutError:
             lines.append("Still working; watch progress in Studio and download there when ready.")
             continue

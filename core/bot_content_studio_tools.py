@@ -8,15 +8,23 @@ niche goes to `awaiting_user`, and approval stays with the person (/api/content-
 Publisher's direct YouTube upload only ever sends a post the person approved, through their own Google project.
 
 The daily cycle, one tool per step: Researcher add_topic (and propose_niche, youtube_trending), Evaluator
-pick_topic, Script Writer save_script, Editor record_render then submit_post, the person approves, Publisher
-publish_youtube or mark_posted, Executor record_metrics and run_review, Producer watch, confirm and send_report.
+pick_topic, Script Writer save_script (with the shot plan and sources), Editor record_render then submit_post, the
+person approves, Publisher publish_youtube or mark_posted, Executor record_metrics and run_review, Producer watch,
+confirm and send_report.
+
+Policy checks (services/content_studio/policy.py) run at the pick, when a script is saved and when a post is queued:
+sameness against the channel's last 30 posts, no narrator presented as a health, legal, money or political expert, no
+distress or rescue hooks, no cross-posting between the team's own channels, and the AI label on every post. The
+Evaluator and Producer can run them on demand (check_post). Each post keeps its approval, shot plan, sources and check
+results as appeal evidence (post_evidence).
 """
 import json
+import re
 from urllib.parse import urlsplit
 
 from core.tool_registry import READ, WRITE, register
 from core.untrusted import wrap_untrusted
-from services.content_studio import StudioError, delivery, pipeline, review, studio, team, youtube, youtube_publish
+from services.content_studio import StudioError, delivery, pipeline, policy, review, studio, team, youtube, youtube_publish
 
 
 def _obj(properties, required=()):
@@ -80,7 +88,7 @@ def _pipeline(args, ctx, bot, role):
     active strategies (the default first) and any open request for a replacement niche."""
     channels = [{"id": c["id"], "niche_id": c["niche_id"], "niche": c["niche_name"], "platform": c["platform"], "handle": c["handle"],
                  "paused": bool(c["paused"]), "look": c["look"], "aspect": c["aspect"] or "9:16",
-                 "notes": c["notes"]} for c in studio.list_channels(status="live")]
+                 "notes": c["notes"], "voice": c["voice"]} for c in studio.list_channels(status="live")]
     strategies = {r: [{"id": s["id"], "name": s["name"], "default": bool(s["is_default"])}
                       for s in sorted(studio.list_strategies(r, "active"), key=lambda s: not s["is_default"])]
                   for r in ("script_writer", "evaluator")}
@@ -99,26 +107,102 @@ def _drafted(post_id):
     return post
 
 
+def _refuse_if_rejected(post_id, result, step):
+    studio.add_evidence(post_id, "policy_check", {"step": step, **result})
+    if not result["ok"]:
+        raise StudioError("the policy checks stopped this: " + policy.reasons(result))
+
+
 def _pick(args, ctx, bot, role):
     topic = studio.get_topic(args["topic_id"])
     strategy = team.strategy_by_name(studio, "evaluator", args.get("strategy"))
     if any(p["topic_id"] == topic["id"] and p["channel_id"] == args["channel_id"] for p in studio.list_posts()):
         raise StudioError("that topic is already picked for this channel")
+    title = args.get("title") or topic["title"]
+    early = (policy.persona_findings(title) + policy.hook_findings(title, "") +
+             policy.sameness_findings(studio, args["channel_id"], title, "", args.get("format")))
+    if any(f["result"] == "reject" for f in early):
+        raise StudioError("the policy checks stopped this pick: " + policy.reasons({"findings": early}))
     post = studio.create_post(args["channel_id"], args.get("title") or topic["title"], topic_id=topic["id"],
                               evaluator_strategy_id=strategy["id"] if strategy else None, format=args.get("format"),
                               pick_reason=args["reason"])
     return _data(ctx, "content studio post", post) + " The Script Writer writes it next."
 
 
+_URL = re.compile(r"^https?://[^\s]+$")
+
+
+def _sources(raw):
+    """The sources behind the script's facts: each a link with what it supports and the date it was read."""
+    out = []
+    for n, item in enumerate(raw or []):
+        if not isinstance(item, dict) or not isinstance(item.get("url"), str) or not _URL.match(item["url"].strip()):
+            raise StudioError(f"sources[{n}] needs the https link it came from")
+        out.append({"url": item["url"].strip()[:500], "supports": str(item.get("supports") or "")[:300],
+                    "date": str(item.get("date") or "")[:40]})
+    return out
+
+
 def _script(args, ctx, bot, role):
-    _drafted(args["post_id"])
+    post = _drafted(args["post_id"])
     strategy = team.strategy_by_name(studio, "script_writer", args.get("strategy"))
+    title = args.get("title") or post["title"]
+    _refuse_if_rejected(args["post_id"], policy.check(studio, args["post_id"], title=title, script=args["script"]), "script")
+    sources = _sources(args.get("sources"))
     fields = {"script_ref": args["script"], "script_strategy_id": strategy["id"] if strategy else None}
     for key in ("title", "caption"):
         if args.get(key):
             fields[key] = args[key]
     post = studio.edit_post(args["post_id"], **fields)
-    return _data(ctx, "content studio post", post) + " The Editor renders it next."
+    if args.get("shot_plan"):
+        studio.add_evidence(args["post_id"], "shot_plan", {"plan": args["shot_plan"], "by": bot["name"]})
+    if sources:
+        studio.add_evidence(args["post_id"], "sources", {"sources": sources, "by": bot["name"]})
+    tail = " The Editor renders it next."
+    if not args.get("shot_plan") and not studio.evidence(args["post_id"], "shot_plan"):
+        tail += " It has no shot plan yet: the Editor records it (video_narrate gives the timed plan) before rendering."
+    return _data(ctx, "content studio post", post) + tail
+
+
+def _shot_plan(args, ctx, bot, role):
+    _drafted(args["post_id"])
+    studio.add_evidence(args["post_id"], "shot_plan", {"plan": args["plan"], "by": bot["name"]})
+    return "Shot plan recorded on the post; the Producer brings it with the post for approval."
+
+
+def _check(args, ctx, bot, role):
+    result = policy.check(studio, args["post_id"], title=args.get("title"), script=args.get("script"), fmt=args.get("format"))
+    studio.add_evidence(args["post_id"], "policy_check", {"step": "check", "by": bot["name"], **result})
+    return _data(ctx, "content studio policy check", result)
+
+
+def _evidence(args, ctx, bot, role):
+    return _data(ctx, "content studio evidence", studio.evidence(args["post_id"]))
+
+
+_STUDIO_RENDER = re.compile(r"^/api/videos/([a-f0-9]{12})/renders/[A-Za-z0-9._-]+\.mp4$")
+
+
+def _channel_voice(post, render_ref):
+    """A channel keeps one narrator voice: the first narrated render sets it, later ones must match it."""
+    match = _STUDIO_RENDER.match((render_ref or "").strip())
+    if not match:
+        return ""
+    from core import video_store
+    try:
+        project = video_store.get(match.group(1))
+    except LookupError:
+        raise StudioError("that Studio render's video is not in this account")
+    if not video_store.narrated(project):
+        return ""
+    voice, channel = project["narration"]["voice"], studio.get_channel(post["channel_id"])
+    if channel["voice"] and channel["voice"] != voice:
+        raise StudioError(f"this channel's narrator is {channel['voice']}, but the video is narrated by {voice}; "
+                          f"set narration.voice to {channel['voice']} and render again")
+    if not channel["voice"]:
+        studio.edit_channel(channel["id"], voice=voice)
+        return f" The channel's narrator voice is now {voice}; its later videos use the same voice."
+    return ""
 
 
 def _render(args, ctx, bot, role):
@@ -126,16 +210,21 @@ def _render(args, ctx, bot, role):
     if not post["script_ref"]:
         raise StudioError("the post has no script yet; the Script Writer writes it first")
     fields = {"render_status": args["status"]}
+    note = ""
     if args.get("render_ref"):
         fields["render_ref"] = args["render_ref"]
     elif args["status"] == "ok":
         raise StudioError("a finished render needs its render_ref (the Studio render or file link)")
+    if args["status"] == "ok":
+        if not studio.evidence(args["post_id"], "shot_plan"):
+            raise StudioError("record the shot plan first (content_studio_save_shot_plan with the plan video_narrate returned)")
+        note = _channel_voice(post, args.get("render_ref"))
     for key in ("tags", "caption"):
         if args.get(key) is not None:
             fields[key] = args[key]
     post = studio.edit_post(args["post_id"], **fields)
     tail = " Put it in the approval queue with content_studio_submit_post." if args["status"] == "ok" else " The Producer's watch sees the failure."
-    return _data(ctx, "content studio post", post) + tail
+    return _data(ctx, "content studio post", post) + tail + note
 
 
 PLATFORM_HOSTS = {"youtube": ("youtube.com", "youtu.be"), "tiktok": ("tiktok.com",), "instagram": ("instagram.com",)}
@@ -226,12 +315,29 @@ _add("content_studio_pick_topic", "Evaluator: pick a topic candidate for one cha
            "strategy": _str(80), "title": _str(200, "Working title; the topic's title when left out"),
            "format": _str(80, "The format, for example 'list' or 'explainer'")}, ("channel_id", "topic_id", "reason")),
      WRITE, ("evaluator",), _pick)
-_add("content_studio_save_script", "Script Writer: save the script with its beat outline for a drafted post, and optionally its title and caption draft. "
-     "strategy is your script strategy's name (the default when left out); it is recorded on the post.",
-     _obj({"post_id": _int(), "script": _str(20000), "strategy": _str(80), "title": _str(200), "caption": _str(5000)}, ("post_id", "script")),
+_add("content_studio_save_script", "Script Writer: save the script with its beat outline and narration lines for a drafted post, and optionally its "
+     "title, caption draft, timestamped shot plan and the sources behind its facts (each {url, supports, date}). strategy is your script "
+     "strategy's name (the default when left out); it is recorded on the post. The policy checks run first: a near-copy of a recent post, "
+     "a narrator presented as a health, legal, money or political expert, or a distress or rescue hook is refused with the reason.",
+     _obj({"post_id": _int(), "script": _str(20000), "strategy": _str(80), "title": _str(200), "caption": _str(5000),
+           "shot_plan": _str(20000, "Timestamped shot plan: each shot's time, what is on screen and the narration line"),
+           "sources": {"type": "array", "maxItems": 20, "items": _obj({"url": _str(500), "supports": _str(300, "Which claim it backs"),
+                                                                       "date": _str(40, "When it was read")}, ("url",))}},
+          ("post_id", "script")),
      WRITE, ("script_writer",), _script)
+_add("content_studio_save_shot_plan", "Script Writer or Editor: record the timestamped shot plan of a drafted post (video_narrate returns it with "
+     "measured times). It goes to the person with the post, and a render cannot be recorded without one.",
+     _obj({"post_id": _int(), "plan": _str(20000)}, ("post_id", "plan")), WRITE, ("script_writer", "editor"), _shot_plan)
+_add("content_studio_check_post", "Evaluator or Producer: run the policy checks on a post, or on a draft of its title, script or format: sameness "
+     "against the channel's last 30 posts, AI personas posing as experts on health, law, money or politics, distress or rescue hooks, "
+     "cross-posting between the team's own channels, and the AI label. The result is kept on the post as evidence.",
+     _obj({"post_id": _int(), "title": _str(200), "script": _str(20000), "format": _str(80)}, ("post_id",)),
+     WRITE, ("evaluator", "producer"), _check)
+_add("content_studio_post_evidence", "Read a post's appeal evidence: the person's approval, the shot plan, the sources and the policy checks.",
+     _obj({"post_id": _int()}, ("post_id",)), READ, ANY, _evidence)
 _add("content_studio_record_render", "Editor: record the render of a scripted post: status ok with render_ref (the link video_render returned, "
-     "or the Studio video id), or failed. Optionally the tags (comma separated) and the final caption.",
+     "or the Studio video id), or failed. Optionally the tags (comma separated) and the final caption. Needs the shot plan on record. "
+     "A narrated render must use the channel's narrator voice; the first one sets it.",
      _obj({"post_id": _int(), "status": {"type": "string", "enum": ["ok", "failed"]}, "render_ref": _str(500), "tags": _str(500),
            "caption": _str(5000)}, ("post_id", "status")),
      WRITE, ("editor",), _render)

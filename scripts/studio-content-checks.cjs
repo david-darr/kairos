@@ -252,10 +252,10 @@ app.whenReady().then(async () => {
     assert.ok(await js("document.querySelector('[data-channel-id=\"1\"]').textContent.includes('No look set')"));
     await js("document.querySelector('button[aria-label=\"Look for YouTube @cooks\"]').click()");
     await wait("!!document.querySelector('[aria-label=\"Look id\"]')");
-    await fill('Look id', 'sport'); await fill('Aspect', '16:9'); await fill('Voice notes', 'Calm, curious.');
+    await fill('Look id', 'sport'); await fill('Aspect', '16:9'); await fill('Voice notes', 'Calm, curious.'); await fill('Narrator voice', 'af_heart');
     await click('.sc-dialog-panel button', 'Save look');
     await wait("!document.querySelector('[aria-label=\"Look id\"]')");
-    assert.deepEqual(last('/channels/1/edit').body, { look: 'sport', aspect: '16:9', notes: 'Calm, curious.' });
+    assert.deepEqual(last('/channels/1/edit').body, { look: 'sport', aspect: '16:9', notes: 'Calm, curious.', voice: 'af_heart' });
     await wait("document.querySelector('[data-channel-id=\"1\"]').textContent.includes('look sport, 16:9, voice notes set')");
     await noOverflow(); await labels();
 

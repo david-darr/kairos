@@ -174,7 +174,9 @@ def describe(brief: str, kind: Optional[str] = None, *, owner: Optional[str] = N
                      "read_skill pdf-document. Exactly one printed page is format print.")
     if kind == "video":
         lines.append("Use video_create with a beat sheet: one idea per beat, 3 to 8 words on screen, 1 to 2 bars; "
-                     "hook first, end card last. Then video_preview, fix with video_edit and video_render.")
+                     "hook first, end card last. Then video_preview, fix with video_edit and video_render. "
+                     "For a narrated video, give each beat a say line (what the voice says over it); run video_narrate "
+                     "for the timed shot plan before previewing.")
     if kind == "slides":
         lines.append("Mix the ten slide archetypes in the design-canvas skill, one idea per slide; charts are tables in "
                      "<figure data-chart>.")

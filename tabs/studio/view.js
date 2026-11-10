@@ -10,7 +10,10 @@ const CAMERAS = ['still', 'push', 'pull', 'pan', 'shake'];
 const TRANSITIONS = ['cut', 'whip', 'zoom', 'flip', 'dither', 'mosaic', 'wipe'];
 const MOODS = ['energetic', 'calm', 'warm', 'dark', 'playful'];
 const clone = value => structuredClone(value);
-const duration = p => p.beats.reduce((s, b) => s + Number(b.bars), 0) * 240 / p.bpm;
+// A narrated beat lasts as long as its spoken line (the server measures it into `seconds`); others last their bars.
+const beatSeconds = (b, p) => Number.isFinite(b.seconds) && b.seconds > 0 ? b.seconds : Number(b.bars) * 240 / p.bpm;
+const duration = p => p.beats.reduce((s, b) => s + beatSeconds(b, p), 0);
+const maxBeats = p => p.beats.some(b => b.say) ? 100 : 40;
 const seconds = n => `${Number(n || 0).toFixed(1)} s`;
 const beatId = () => 'b' + crypto.randomUUID().replaceAll('-', '').slice(0, 20);
 const jobLabel = status => {
@@ -296,7 +299,7 @@ async function editor(host, id, looks, back, parentDisposed) {
     list.replaceChildren();
     state.p.beats.forEach((beat, index) => {
       const row = el('div', { class: 'studio-beat' + (index === selected ? ' selected' : ''), draggable: true, role: 'listitem', 'data-index': index });
-      row.append(button(`${index + 1}. ${beat.kind}: ${beat.text || beat.number || (beat.items || []).filter(Boolean).join(', ') || 'No text'} (${seconds(beat.bars * 240 / state.p.bpm)})`, () => { selected = index; drawBeats(); drawInspector(); }, { 'aria-pressed': String(index === selected) }),
+      row.append(button(`${index + 1}. ${beat.kind}: ${beat.text || beat.number || (beat.items || []).filter(Boolean).join(', ') || 'No text'} (${seconds(beatSeconds(beat, state.p))})`, () => { selected = index; drawBeats(); drawInspector(); }, { 'aria-pressed': String(index === selected) }),
         el('div', { class: 'studio-actions' }, [button('Move up', () => move(index, index - 1), { disabled: index === 0, 'aria-label': `Move beat ${index + 1} up` }), button('Move down', () => move(index, index + 1), { disabled: index === state.p.beats.length - 1, 'aria-label': `Move beat ${index + 1} down` })]));
       row.addEventListener('dragstart', event => event.dataTransfer.setData('text/plain', String(index)));
       row.addEventListener('dragover', event => event.preventDefault());
@@ -310,8 +313,8 @@ async function editor(host, id, looks, back, parentDisposed) {
     let start = 0; markers.replaceChildren();
     for (const [index, beat] of state.p.beats.entries()) {
       const at = start;
-      markers.append(button(String(index + 1), () => { time = at; selected = index; drawBeats(); drawInspector(); drawFrame(); }, { 'aria-label': `Seek to beat ${index + 1}`, style: `flex:${beat.bars}` }));
-      start += beat.bars * 240 / state.p.bpm;
+      markers.append(button(String(index + 1), () => { time = at; selected = index; drawBeats(); drawInspector(); drawFrame(); }, { 'aria-label': `Seek to beat ${index + 1}`, style: `flex:${beatSeconds(beat, state.p)}` }));
+      start += beatSeconds(beat, state.p);
     }
     time = Math.min(time, total); drawFrame();
   }
@@ -341,7 +344,7 @@ async function editor(host, id, looks, back, parentDisposed) {
   function drawInspector() {
     inspector.replaceChildren();
     const beat = state.p.beats[selected], path = `beats[${selected}]`;
-    const setBeat = (key, value) => changed(p => { if (key === 'image' && !value) delete p.beats[selected][key]; else p.beats[selected][key] = value; });
+    const setBeat = (key, value) => changed(p => { if ((key === 'image' || key === 'say') && !value) delete p.beats[selected][key]; else p.beats[selected][key] = value; });
     const textField = (label, key, limit, multiline = false) => {
       const input = el(multiline ? 'textarea' : 'input', { value: beat[key] ?? '', 'aria-label': label, maxlength: limit, ...(multiline ? { rows: 3 } : {}) });
       input.value = beat[key] ?? '';
@@ -360,9 +363,10 @@ async function editor(host, id, looks, back, parentDisposed) {
     items.value = (beat.items || []).join('\n');
     const itemField = field('List items, one per line', items, path + '.items', `${(beat.items || []).length}/5 items; 60 characters each`);
     items.addEventListener('input', () => { const lines = items.value ? items.value.split('\n') : []; setBeat('items', lines); itemField.querySelector('.meta').textContent = `${lines.length}/5 items; ${lines.map(s => s.length + '/60').join(', ')} characters`; });
-    inspector.append(only(itemField, kind === 'list'));
+    inspector.append(only(itemField, kind === 'list'), textField('Narration (the line spoken over this beat)', 'say', 400, true));
     const bars = el('input', { type: 'number', min: .5, max: 8, step: .5, value: beat.bars, 'aria-label': 'Beat bars', oninput: event => setBeat('bars', Number(event.target.value)) });
-    inspector.append(field('Bars', bars, path + '.bars', '0.5 to 8, in half-bar steps. Total video: at most 120 seconds.'),
+    inspector.append(field('Bars', bars, path + '.bars', beat.say ? 'This beat is narrated, so it lasts as long as its spoken line; bars do not change it.'
+      : '0.5 to 8, in half-bar steps. Total video: at most 120 seconds, or 480 when narrated.'),
       field('Camera', select('Camera', CAMERAS, beat.camera || 'still', v => setBeat('camera', v)), path + '.camera'),
       field('Transition to next beat', select('Transition', TRANSITIONS, beat.transition || 'cut', v => setBeat('transition', v)), path + '.transition'), only(textField('Image treatment', 'treatment', 80), pictured));
     inspector.append(only(field('Image', select('Video image', [['', 'No image'], ...resources.assets.map(a => [a, a.slice(7, 23) + '…'])], beat.image || '', v => setBeat('image', v)), path + '.image'), pictured));
@@ -395,7 +399,7 @@ async function editor(host, id, looks, back, parentDisposed) {
       });
       inspector.append(field('Design images', designPicker), assetsHost); designPicker.focus();
     }), pictured), el('div', { class: 'studio-actions' }, [button('Duplicate beat', () => {
-      if (state.p.beats.length >= 40) throw Error('A video can have at most 40 beats.');
+      if (state.p.beats.length >= maxBeats(state.p)) throw Error(`A video can have at most ${maxBeats(state.p)} beats.`);
       changed(p => p.beats.splice(selected + 1, 0, { ...clone(p.beats[selected]), id: beatId() })); selected++; drawBeats(); drawInspector();
     }), button('Delete beat', () => {
       if (state.p.beats.length === 1) throw Error('Keep at least one beat.');
@@ -468,7 +472,7 @@ async function editor(host, id, looks, back, parentDisposed) {
   shell.append(el('div', { class: 'studio-editor-top studio-actions' }, [button('Projects', async () => { if (await save()) await back(); }), undo, redo, status, button('Save now', save)]), summaryError,
     el('div', { class: 'studio-columns' }, [el('aside', { 'aria-label': 'Beat sequence' }, [el('h3', { text: 'Beats' }), el('p', { class: 'meta', text: 'Drag to reorder, use Move buttons, or Alt + Arrow keys.' }), list,
       field('Add beat by kind', addKind), button('Add beat', () => {
-        if (state.p.beats.length >= 40) throw Error('A video can have at most 40 beats.');
+        if (state.p.beats.length >= maxBeats(state.p)) throw Error(`A video can have at most ${maxBeats(state.p)} beats.`);
         changed(p => p.beats.push({ id: beatId(), kind: addKind.value, text: '', bars: 1 })); selected = state.p.beats.length - 1; drawBeats(); drawInspector();
       })]), el('section', { class: 'studio-centre', 'aria-label': 'Preview and rendering' }, [
       field('Preview aspect', select('Preview aspect', ASPECTS, aspect, value => { aspect = value; remount(); })), stage, previewError,

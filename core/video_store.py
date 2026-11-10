@@ -1,6 +1,12 @@
 """Versioned video beat sheets, isolated by owner and explicit chat links.
 
 Validation returns a copy so failed edits never change the stored project.
+
+Narration (Video Styles build spec, unit 1): a beat's `say` is the line the narrator speaks over it. The timeline is
+audio-first: core/video_narration.py speaks each line with Kokoro and writes the measurement into the beat's
+`spoken` (the speech key, its length and the caption parts with their times). `seconds` is never taken from the
+caller: validation derives it, from the measured speech when `spoken` matches the line and voice, else from an
+estimate that the next narration pass replaces. A beat without `say` keeps its length in bars.
 """
 from __future__ import annotations
 
@@ -33,7 +39,14 @@ CAMERAS = ("still", "push", "pull", "pan", "shake")
 TRANSITIONS = ("cut", "whip", "zoom", "flip", "dither", "mosaic", "wipe")
 MOODS = ("energetic", "calm", "warm", "dark", "playful")
 ASSET = re.compile(r"assets/[a-f0-9]{64}\.(?:png|jpg|gif|webp)")
-FIELDS = {"id", "title", "look", "bpm", "fps", "aspects", "beats", "music"}
+FIELDS = {"id", "title", "look", "bpm", "fps", "aspects", "beats", "music", "narration"}
+MAX_SECONDS = 120               # a video with music only
+NARRATED_MAX_SECONDS = 480      # a narrated Short or mid-length video; long-form chapters are a later unit
+MAX_BEATS, NARRATED_MAX_BEATS = 40, 100
+LEAD, TAIL = .25, .45           # seconds of picture before a line starts and after it ends
+SAY_LIMIT, CLAUSE_LIMIT = 400, 100
+DEFAULT_VOICE = "af_heart"
+VOICE_ID = re.compile(r"[a-z]{2}_[a-z0-9]{1,30}")
 META = {"owner", "chat_ids", "visible_to", "version", "created", "updated"}
 AccessError = design_store.AccessError
 chat_key = design_store.chat_key
@@ -85,10 +98,13 @@ def validate(project: dict) -> dict:
             len(set(p["aspects"])) != len(p["aspects"])):
         _error("aspects", "choose a non-empty subset of 16:9, 9:16, 1:1 without duplicates.")
     beats = p.get("beats")
-    if not isinstance(beats, list) or not 1 <= len(beats) <= 40:
-        _error("beats", "give 1 to 40 beats.")
+    is_narrated = isinstance(beats, list) and any(isinstance(b, dict) and "say" in b for b in beats)
+    most = NARRATED_MAX_BEATS if is_narrated else MAX_BEATS
+    if not isinstance(beats, list) or not 1 <= len(beats) <= most:
+        _error("beats", f"give 1 to {most} beats.")
     ids = set()
-    allowed = {"id", "kind", "bars", "text", "sub", "number", "items", "image", "camera", "transition", "treatment"}
+    allowed = {"id", "kind", "bars", "text", "sub", "number", "items", "image", "camera", "transition", "treatment",
+               "say", "spoken", "seconds"}
     for i, b in enumerate(beats):
         path = f"beats[{i}]"
         if not isinstance(b, dict):
@@ -108,6 +124,9 @@ def validate(project: dict) -> dict:
             _error(path + ".kind", "choose " + ", ".join(KINDS) + ".")
         if b["kind"] == "big-number" and str(b.get("number", "")).strip() == "":
             _error(path + ".number", 'a big-number beat needs its number, e.g. "312" or "30s"; or use kind statement.')
+        if "say" in b:
+            _say(b["say"], path + ".say")
+            b.setdefault("bars", 1)   # a narrated beat lasts as long as its line; bars only matter without one
         _number(b.get("bars"), path + ".bars", .5, 8)
         if b["bars"] * 2 != int(b["bars"] * 2):
             _error(path + ".bars", "use half-bar steps (0.5, 1, 1.5...).")
@@ -129,8 +148,14 @@ def validate(project: dict) -> dict:
         for field, choices in (("camera", CAMERAS), ("transition", TRANSITIONS)):
             if field in b and b[field] not in choices:
                 _error(path + "." + field, "choose " + ", ".join(choices) + ".")
-    if duration(p) > 120:
-        _error("beats", "total duration must be at most 120 seconds; reduce bars or raise bpm.")
+    if is_narrated or "narration" in p:
+        p["narration"] = _narration(p.get("narration"))
+    for i, b in enumerate(beats):
+        _timing(b, p.get("narration"), f"beats[{i}]")
+    limit = NARRATED_MAX_SECONDS if is_narrated else MAX_SECONDS
+    if duration(p) > limit:
+        _error("beats", f"total duration must be at most {limit} seconds; " +
+               ("shorten or remove narration lines." if is_narrated else "reduce bars or raise bpm."))
     p.setdefault("music", {"mood": "energetic", "volume": .7})
     music = p["music"]
     if not isinstance(music, dict):
@@ -143,8 +168,93 @@ def validate(project: dict) -> dict:
     return p
 
 
+def clauses(text):
+    """The caption parts of a line: its sentences, a long one cut at its commas, semicolons or colons. Each part
+    is spoken and measured on its own, so every caption's time is measured, never guessed."""
+    out = []
+    for sentence in re.split(r"(?<=[.!?\u2026])\s+", " ".join(str(text).split())):
+        if len(sentence) <= CLAUSE_LIMIT:
+            out.append(sentence)
+            continue
+        part = ""
+        for piece in re.split(r"(?<=[,;:])\s+", sentence):
+            if part and len(part) + 1 + len(piece) > CLAUSE_LIMIT:
+                out.append(part)
+                part = piece
+            else:
+                part = (part + " " + piece).strip()
+        out.append(part)
+    return [c for c in out if c]
+
+
+def _say(value, path):
+    _text(value, path, SAY_LIMIT, True)
+    if not re.search(r"[A-Za-z0-9]", value):
+        _error(path, "give a line with words to speak.")
+    for part in clauses(value):
+        if len(part) > CLAUSE_LIMIT:
+            _error(path, f"a sentence without a comma runs past {CLAUSE_LIMIT} characters; split it or add punctuation "
+                         "so each caption fits on screen.")
+
+
+def _narration(value):
+    value = {"voice": DEFAULT_VOICE, "captions": True} if value is None else value
+    if not isinstance(value, dict):
+        _error("narration", "give voice and captions.")
+    for key in value.keys() - {"voice", "captions"}:
+        _error("narration." + key, "unknown narration field; use voice or captions.")
+    out = {"voice": value.get("voice", DEFAULT_VOICE), "captions": value.get("captions", True)}
+    if not isinstance(out["voice"], str) or not VOICE_ID.fullmatch(out["voice"]):
+        _error("narration.voice", "use a Kokoro voice id such as af_heart or bm_george.")
+    if not isinstance(out["captions"], bool):
+        _error("narration.captions", "use true or false.")
+    return out
+
+
+def speech_key(voice, say):
+    return hashlib.sha256(f"kokoro|{voice}|{' '.join(say.split())}".encode("utf-8")).hexdigest()[:16]
+
+
+def _timing(b, narration, path):
+    """Derive the beat's seconds; keep `spoken` only while it still measures this line in this voice."""
+    b.pop("seconds", None)
+    if "say" not in b:
+        b.pop("spoken", None)
+        return
+    spoken = b.get("spoken")
+    if spoken is not None:
+        ok = (isinstance(spoken, dict) and set(spoken) == {"key", "seconds", "parts"} and isinstance(spoken["key"], str)
+              and isinstance(spoken["parts"], list) and isinstance(spoken["seconds"], (int, float))
+              and not isinstance(spoken["seconds"], bool) and math.isfinite(spoken["seconds"])
+              and 0 < spoken["seconds"] <= 60 and 1 <= len(spoken["parts"]) <= 40)
+        if ok:
+            for part in spoken["parts"]:
+                ok = ok and (isinstance(part, list) and len(part) == 3 and isinstance(part[2], str) and len(part[2]) <= SAY_LIMIT
+                             and all(isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) for x in part[:2])
+                             and 0 <= part[0] < part[1] <= LEAD + spoken["seconds"] + 1e-6)
+        if not ok:
+            _error(path + ".spoken", "leave spoken to the narration step (video_narrate); it is measured, not written.")
+        if spoken["key"] != speech_key(narration["voice"], b["say"]):
+            b.pop("spoken")       # the line or the voice changed: the next narration pass measures it again
+    speech = b["spoken"]["seconds"] if "spoken" in b else estimate(b["say"])
+    b["seconds"] = math.ceil((LEAD + speech + TAIL) * 30 - 1e-6) / 30
+
+
+def estimate(say):
+    """Seconds of speech before it is measured (about 2.6 words a second); replaced by the measured length."""
+    return round(len(say.split()) / 2.6 + .2 * max(0, len(clauses(say)) - 1), 3)
+
+
+def narrated(project) -> bool:
+    return any("say" in b for b in project["beats"])
+
+
+def beat_seconds(beat, bpm) -> float:
+    return beat["seconds"] if "seconds" in beat else beat["bars"] * 240 / bpm
+
+
 def duration(project) -> float:
-    return sum(b["bars"] for b in project["beats"]) * 240 / project.get("bpm", 120)
+    return sum(beat_seconds(b, project.get("bpm", 120)) for b in project["beats"])
 
 
 def get(video_id) -> dict:

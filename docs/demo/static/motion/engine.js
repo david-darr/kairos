@@ -1,5 +1,5 @@
 import { clamp, expoOut, pop, inOut, hash, seededRandom, zoomAbout, scrim, card, windowReveal, BAYER, contrast, readable, luminance, rgb } from './kit.js';
-import { normalizeProject, dimensions, safeArea, frameTime, beatAt, transitionAt, beatLayout, cameraAt, beatElapsed, transitionTransform, visibleBox, compositionAt, revealElapsed, listMarker } from './layout.js';
+import { normalizeProject, dimensions, safeArea, captionBand, captionAt, fitText, frameTime, beatAt, transitionAt, beatLayout, cameraAt, beatElapsed, transitionTransform, visibleBox, compositionAt, revealElapsed, listMarker } from './layout.js';
 
 function lookTokens(canvas, supplied) {
   const doc = canvas.ownerDocument, root = getComputedStyle(doc.documentElement), probe = doc.createElement('span');
@@ -71,14 +71,14 @@ export function mount(canvas, input, options = {}) {
   if (!canvas?.getContext) throw new TypeError('mount requires a canvas');
   const project = normalizeProject(input), { width: w, height: h, aspect } = dimensions(options.aspect || project.aspects[0]);
   canvas.width = w; canvas.height = h;
-  const doc = canvas.ownerDocument, ctx = canvas.getContext('2d'), style = lookTokens(canvas, options.tokens), safe = safeArea(aspect);
+  const doc = canvas.ownerDocument, ctx = canvas.getContext('2d'), style = lookTokens(canvas, options.tokens), safe = safeArea(aspect, project.captioned);
   const measureCtx = buffer(doc, 1, 1).getContext('2d');
   const measure = (text, size, role) => { measureCtx.font = font(style, size, role); return measureCtx.measureText(text).width; };
   const images = new Map(), samples = new Map(), plans = new Map();
   const layers = Array.from({ length: 2 }, () => ({ bg: buffer(doc, w, h), fg: buffer(doc, w, h) }));
   let loaded = false;
   const plan = beat => {
-    if (!plans.has(beat.id)) plans.set(beat.id, beatLayout(beat, aspect, measure, { ...style, composition: compositionAt(project.beats, project.beats.indexOf(beat)) }));
+    if (!plans.has(beat.id)) plans.set(beat.id, beatLayout(beat, aspect, measure, { ...style, captioned: project.captioned, composition: compositionAt(project.beats, project.beats.indexOf(beat)) }));
     return plans.get(beat.id);
   };
   const assetURL = name => {
@@ -286,13 +286,33 @@ export function mount(canvas, input, options = {}) {
     }
     ctx.restore();
   }
+  // Captions burn in from the script's measured parts, in a band below the beat's copy, over every transition.
+  const band = captionBand(aspect), captionFits = new Map();
+  const [capMin, capMax] = aspect === '16:9' ? [44, 62] : [46, 64], capPad = 20;
+  function caption(t) {
+    const part = project.captioned ? captionAt(project, t) : null;
+    if (!part) return null;
+    if (!captionFits.has(part.text)) captionFits.set(part.text, fitText(part.text, { w: band.w - capPad * 2, h: band.h - capPad * 2 }, { min: capMin, max: capMax, measure: (v, size) => measure(v, size, 'body') }));
+    const fit = captionFits.get(part.text), lineW = Math.max(...fit.lines.map(line => measure(line, fit.size, 'body')));
+    const boxW = Math.min(band.w, lineW + capPad * 2), boxH = fit.lines.length * fit.lineHeight + capPad * 2;
+    return { part, fit, x: band.x + (band.w - boxW) / 2, y: band.y + (band.h - boxH) / 2, w: boxW, h: boxH,
+      color: readable(style.text, style.bg, style.palette) };
+  }
+  function drawCaption(t) {
+    const c = caption(t);
+    if (!c) return;
+    ctx.save(); ctx.globalAlpha = .9; card(ctx, c.x, c.y, c.w, c.h, style.bg, Math.min(style.radius, 24), style.bg); ctx.globalAlpha = 1;
+    ctx.font = font(style, c.fit.size, 'body'); ctx.fillStyle = c.color; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    c.fit.lines.forEach((line, row) => ctx.fillText(line, c.x + c.w / 2, c.y + capPad + row * c.fit.lineHeight + c.fit.size * .88));
+    ctx.restore();
+  }
   function drawFrame(time) {
     if (!loaded) throw new Error('Await mount.ready before drawing');
     const { t, beat, transition: tr } = active(time);
     ctx.resetTransform(); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; ctx.filter = 'none';
     ctx.fillStyle = style.bg; ctx.fillRect(0, 0, w, h);
     if (!tr) {
-      const layer = renderLayer(beat, t, 0); ctx.drawImage(layer.bg, 0, 0); ctx.drawImage(layer.fg, 0, 0); return;
+      const layer = renderLayer(beat, t, 0); ctx.drawImage(layer.bg, 0, 0); ctx.drawImage(layer.fg, 0, 0); drawCaption(t); return;
     }
     const a = renderLayer(project.beats[tr.from], t, 0), b = renderLayer(project.beats[tr.to], t, 1);
     // Paint scene pairs in order so an incoming background covers outgoing copy.
@@ -302,6 +322,7 @@ export function mount(canvas, input, options = {}) {
     if (tr.kind === 'wipe') {
       ctx.fillStyle = style.accent; ctx.fillRect(w * inOut(tr.p) - 10, 0, 20, h);
     }
+    drawCaption(t);
   }
   function layout(time) {
     if (!loaded) throw new Error('Await mount.ready before requesting layout');
@@ -331,6 +352,9 @@ export function mount(canvas, input, options = {}) {
         result.push(publicBox);
       }
     }
+    const c = caption(t);
+    if (c) result.push({ beat: c.part.beat, kind: 'text', role: 'caption', text: c.part.text, fontSize: c.fit.size, x: c.x, y: c.y, w: c.w, h: c.h,
+      color: c.color, bg: style.bg, truncated: c.fit.truncated });
     return result;
   }
   return { ready, duration: project.duration, drawFrame, layout,

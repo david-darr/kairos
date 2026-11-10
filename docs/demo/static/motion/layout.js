@@ -4,7 +4,7 @@ export const SIZES = { '16:9': [1920, 1080], '9:16': [1080, 1920], '1:1': [1080,
 export const KINDS = ['title', 'statement', 'big-number', 'list', 'image', 'quote', 'split', 'logo', 'end'];
 export const CAMERAS = ['still', 'push', 'pull', 'pan', 'shake'];
 export const TRANSITIONS = ['cut', 'whip', 'zoom', 'flip', 'dither', 'mosaic', 'wipe'];
-export const LIMITS = { beats: 64, text: 180, sub: 160, number: 24, item: 100, items: 5, minBpm: 40, maxBpm: 240, minBars: .25, maxBars: 16 };
+export const LIMITS = { beats: 100, text: 180, sub: 160, number: 24, item: 100, items: 5, minBpm: 40, maxBpm: 240, minBars: .25, maxBars: 16 };
 const str = (v, n) => typeof v === 'string' || typeof v === 'number' ? Array.from(String(v).replace(/\s+/gu, ' ').trim()).slice(0, n).join('') : '';
 const finite = (v, fallback) => Number.isFinite(Number(v)) && v !== null && v !== '' ? Number(v) : fallback;
 // Names stay relative to the project's assets directory, never remote URLs.
@@ -17,14 +17,16 @@ export function normalizeProject(input = {}) {
   input = input && typeof input === 'object' ? input : {};
   const bpm = clamp(finite(input.bpm, 120), LIMITS.minBpm, LIMITS.maxBpm), bar = 240 / bpm;
   let start = 0;
-  const ids = new Set();
+  const ids = new Set(), captionsOn = input.narration?.captions !== false;
   const raw = Array.isArray(input.beats) && input.beats.length ? input.beats : [{ kind: 'end', text: input.title || 'Untitled', bars: 1 }];
   const beats = raw.slice(0, LIMITS.beats).map((value, i) => {
     const b = value && typeof value === 'object' ? value : {};
     let id = str(b.id, 64) || `b${i + 1}`;
     while (ids.has(id)) id += `-${i + 1}`;
     ids.add(id);
-    const bars = clamp(finite(b.bars, 1), LIMITS.minBars, LIMITS.maxBars), end = start + bars * bar;
+    // A narrated beat's length is its measured line (the server derives `seconds`); other beats keep bars.
+    const bars = clamp(finite(b.bars, 1), LIMITS.minBars, LIMITS.maxBars);
+    const seconds = Number.isFinite(b.seconds) && b.seconds > 0 ? clamp(b.seconds, .25, 120) : bars * bar, end = start + seconds;
     // A big-number with no number would draw "0": it becomes a statement instead.
     const kind = KINDS.includes(b.kind) && !(b.kind === 'big-number' && !str(b.number, LIMITS.number)) ? b.kind : 'statement';
     const result = { id, kind, bars, start, end,
@@ -32,18 +34,36 @@ export function normalizeProject(input = {}) {
       items: (Array.isArray(b.items) ? b.items : []).slice(0, 5).map(v => str(v, LIMITS.item)).filter(Boolean),
       image: assetName(b.image), camera: CAMERAS.includes(b.camera) ? b.camera : 'still',
       transition: TRANSITIONS.includes(b.transition) ? b.transition : 'cut',
-      treatment: ['halftone', 'dither'].includes(b.treatment) ? b.treatment : 'none' };
+      treatment: ['halftone', 'dither'].includes(b.treatment) ? b.treatment : 'none',
+      captions: captionsOn && Array.isArray(b.spoken?.parts) ? b.spoken.parts.filter(part => Array.isArray(part) && Number.isFinite(part[0]) && Number.isFinite(part[1]) && part[1] > part[0])
+        .map(([from, to, text]) => ({ start: start + from, end: start + to, text: str(text, 160) })).filter(c => c.text) : [] };
     start = end; return result;
   });
   return { id: str(input.id, 64), title: str(input.title, 180), look: str(input.look, 64), bpm, bar, fps: 30,
-    aspects: (Array.isArray(input.aspects) ? input.aspects : ['16:9']).filter(a => SIZES[a]), beats, duration: start };
+    aspects: (Array.isArray(input.aspects) ? input.aspects : ['16:9']).filter(a => SIZES[a]), beats, duration: start,
+    captioned: beats.some(b => b.captions.length) };
 }
 export function dimensions(aspect) {
   const [width, height] = SIZES[aspect] || SIZES['16:9']; return { width, height, aspect: SIZES[aspect] ? aspect : '16:9' };
 }
-export function safeArea(aspect) {
+// A captioned (narrated) video keeps a band at the bottom for its captions; the beat's own copy stays above it.
+export function safeArea(aspect, captioned = false) {
   const { width: w, height: h } = dimensions(aspect), portrait = aspect === '9:16';
+  if (captioned) return { x: w * .05, y: h * (portrait ? .13 : .05), w: w * .9, h: h * (portrait ? .56 : aspect === '1:1' ? .70 : .73) };
   return { x: w * .05, y: h * (portrait ? .13 : .05), w: w * .9, h: h * (portrait ? .70 : .90) };
+}
+export function captionBand(aspect) {
+  const { width: w, height: h } = dimensions(aspect), portrait = aspect === '9:16';
+  return portrait ? { x: w * .05, y: h * .70, w: w * .9, h: h * .13 } : { x: w * .05, y: h * (aspect === '1:1' ? .77 : .80), w: w * .9, h: h * (aspect === '1:1' ? .18 : .15) };
+}
+// The caption on screen at t: a part shows from its start until a moment after it ends, or until the next part.
+export function captionAt(project, t) {
+  const all = project.beats.flatMap(b => b.captions.map(c => ({ ...c, beat: b.id })));
+  for (let i = 0; i < all.length; i++) {
+    const until = Math.min(all[i].end + .3, all[i + 1]?.start ?? Infinity);
+    if (t >= all[i].start && t < until) return all[i];
+  }
+  return null;
 }
 export const frameTime = (project, t) => clamp(Number.isFinite(t) ? t : 0, 0, project.duration);
 export function beatAt(project, t) {
@@ -174,7 +194,7 @@ export function revealElapsed(beat, t, first = false) {
   return beatElapsed(beat, t) + (first ? beat.camera === 'still' ? beat.end - beat.start : .28 : 0);
 }
 export function beatLayout(beat, aspect, measure, style = {}) {
-  const s = safeArea(aspect), portrait = aspect === '9:16', boxes = [];
+  const s = safeArea(aspect, style.captioned), portrait = aspect === '9:16', boxes = [];
   const composition = style.composition || compositionAt([beat], 0);
   const align = composition === 'center' ? 'center' : 'left';
   const add = (text, x, y, w, h, role = 'title', delay = 0, bounds) => {
@@ -184,6 +204,13 @@ export function beatLayout(beat, aspect, measure, style = {}) {
     const [min, max] = bounds || (role === 'body' ? [45.36, 60] : TYPE[beat.kind]);
     const fitter = beat.kind === 'statement' && role === 'title' ? fitStatement : fitText;
     let fit = fitter(source, box, { min, max, measure: (v, size) => measure(v, size, role) });
+    // A short figure or heading that cannot fit at the kind's smallest size is set smaller rather than cut off
+    // with "..." (a narrated 9:16 sample cut "500 t" to "5..." and a list heading mid-word, 2026-11-10). Long copy
+    // keeps the size floor; video_checks names any text still cut off.
+    if (fit.truncated && (role === 'number' || source.split(/\s+/u).length <= 4)) {
+      const smaller = fitText(source, box, { min: Math.round(min * (role === 'number' ? .35 : .6)), max: min, measure: (v, size) => measure(v, size, role) });
+      if (!smaller.truncated) fit = smaller;
+    }
     // Avoid a larger font wrapping into two narrow lines when a slightly
     // smaller, still in-range setting can occupy the intended headline width.
     if (beat.kind !== 'statement' && role === 'title' && box.w >= s.w * .60 && Math.max(...fit.lines.map(v => measure(v, fit.size, role))) < s.w * .60) {

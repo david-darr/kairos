@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "046577e12097b4855bfcfc103f9c51b26c97e43e54365ba32e46ba17ddf677f2",
+  "app.js": "fa3f6f89e82c0152c224135c0e84405f86d6415a09c73a3a36496e26592f2154",
   "fixtures.js": "e43a2a6208cb5d8f266340f7bf757fd10b00d52fc7eefd1c3f58f2f81fbebdfe",
   "index.html": "765d80b018d722a27e29860be2ae3b86e889fe704be8a9dfdc0752e78379ad19",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -80,7 +80,7 @@
   "static/css/swarm.css": "c5416a3f3d94b736f53563f341e61d10cc538766e6cf6809e3004e567c7ef93f",
   "static/css/vault.css": "d65c61ab5fd0195217de837009a06bb037c0cbc27d5bab2808d5cc9937e210a3",
   "static/data/bots-ready.json": "441cf99da3a0ef69d0994ed012cd5323078287b406967f4e2e9fc18857673844",
-  "static/data/bots-teams.json": "b8991f0abc23a51d8a1609d152d997097a30db3214069fc566ee6c6a6f3ea1f2",
+  "static/data/bots-teams.json": "4c7b08cf86be24e83cfca55b80d8eff9df4f383b8b6907ae7d22ba32df7a71c5",
   "static/fonts/CormorantGaramond-Italic-Variable.woff2": "d7caff90bca006d6cf4a46f2d7a5710a8db4b3c36220a6e1a03aa61fe1143eb7",
   "static/fonts/CormorantGaramond-OFL.txt": "6f5a41d57400577a50aae88475b11f292f3d7de78ee7d5113c69577331d8ad31",
   "static/fonts/Geist-OFL.txt": "c683bfbcc7e087f5d37a54ef628f10387c451a83ddc459b151403a164ac46c90",
@@ -331,9 +331,9 @@
   "static/js/vendor/xterm.css": "854a7c0fb70e8b1a083c16797ab827299fb18744f5ad34f227b48337e33293c6",
   "static/manifest.webmanifest": "9b0d25a3b31f5617025bf1abf6202832ef03664c1fd08239d22b00c3764590dd",
   "static/motion/README.md": "2aefdc9f1d57a78087438c3d04e12de46a110b93e4d7856f75d99cc365787ec2",
-  "static/motion/engine.js": "fba9ca11754663c061c0db1886ae2d1feebb71f8e56638621f816aac50eb43de",
+  "static/motion/engine.js": "42a1f8c52831a047ece73bd546e6f5eced9a079197006aa83b86a7852ef02aa9",
   "static/motion/kit.js": "8a2eccc3fd73d4051fd2bd01eefc4f3874ab001ce586c305ab9b7c5f1da3ce9c",
-  "static/motion/layout.js": "377bf9815295a9cd67e2ec8d348662e060beb1b0db9d081b46091adfe7f1f8ca",
+  "static/motion/layout.js": "2f1122d78a6051d72107ab40cb0920e4d72285fd21b29eb722b0b89e46bb06f2",
   "static/motion/player.html": "e93af7f6f221b9358ac17639d30b53c1cf659e206da6d2b25873a6e2d9e17ff9",
   "static/sw.js": "805f68936b6faea07d055075a38ffdd07c37d69084999d92440dfb46e4a4e4fb",
   "static/vendor/ascii-magic/LICENSE": "ab46447f1fe9f5e3c5f20367870a58997b2d0c85b2da34a877b4705196561a26",
@@ -1161,7 +1161,7 @@
   "static/css/swarm.css": "c5416a3f3d94b736f53563f341e61d10cc538766e6cf6809e3004e567c7ef93f",
   "static/css/vault.css": "d65c61ab5fd0195217de837009a06bb037c0cbc27d5bab2808d5cc9937e210a3",
   "static/data/bots-ready.json": "441cf99da3a0ef69d0994ed012cd5323078287b406967f4e2e9fc18857673844",
-  "static/data/bots-teams.json": "b8991f0abc23a51d8a1609d152d997097a30db3214069fc566ee6c6a6f3ea1f2",
+  "static/data/bots-teams.json": "4c7b08cf86be24e83cfca55b80d8eff9df4f383b8b6907ae7d22ba32df7a71c5",
   "static/fonts/CormorantGaramond-Italic-Variable.woff2": "d7caff90bca006d6cf4a46f2d7a5710a8db4b3c36220a6e1a03aa61fe1143eb7",
   "static/fonts/CormorantGaramond-OFL.txt": "6f5a41d57400577a50aae88475b11f292f3d7de78ee7d5113c69577331d8ad31",
   "static/fonts/Geist-OFL.txt": "c683bfbcc7e087f5d37a54ef628f10387c451a83ddc459b151403a164ac46c90",
@@ -1521,7 +1521,7 @@
   "static/js/slashCommands.js": "904e661c5119014068b4774ea060cd812771386654065be20a4813b5fd398263",
   "static/js/speechSegments.js": "b76625563cb913b6bba00a3f5a8c2284b0ee62c76a59615bd2e82b0d7e75032d",
   "static/js/storePublish.js": "58ddd702fef6e0bc429428ff7ee635cb19e5ba11c56f1c70aa71dcaacaeb4cf7",
-  "static/js/studioContent.js": "ce947630d7eb5343cfbcaf79587d5ab997c4f27de06187a9f9c4606c3c7080ce",
+  "static/js/studioContent.js": "09dfe90b69d15996cc654b69d72900fc190e2801fa40289b78757830ac38d639",
   "static/js/studioContentModel.js": "f2aa61a030f4260c909685f6f8b59958ca2d4e6e16afaa3a93c54f82a33c8471",
   "static/js/swarmBoard.js": "699d24aaaf8f84e12fb7365b598fae373f4c0e1b4696cf3425b5406eeea9a596",
   "static/js/swarmEvents.js": "513eb95038447edc16840b73b046cf89b528202f633abec89f56aa908130b3f4",
@@ -1784,9 +1784,9 @@
   "static/js/workspaceProfile.js": "f13a1b438abadbc3965e51398dfa0e16e4770c0b4aa9f725c23292883e1362d1",
   "static/manifest.webmanifest": "9b0d25a3b31f5617025bf1abf6202832ef03664c1fd08239d22b00c3764590dd",
   "static/motion/README.md": "2aefdc9f1d57a78087438c3d04e12de46a110b93e4d7856f75d99cc365787ec2",
-  "static/motion/engine.js": "fba9ca11754663c061c0db1886ae2d1feebb71f8e56638621f816aac50eb43de",
+  "static/motion/engine.js": "42a1f8c52831a047ece73bd546e6f5eced9a079197006aa83b86a7852ef02aa9",
   "static/motion/kit.js": "8a2eccc3fd73d4051fd2bd01eefc4f3874ab001ce586c305ab9b7c5f1da3ce9c",
-  "static/motion/layout.js": "377bf9815295a9cd67e2ec8d348662e060beb1b0db9d081b46091adfe7f1f8ca",
+  "static/motion/layout.js": "2f1122d78a6051d72107ab40cb0920e4d72285fd21b29eb722b0b89e46bb06f2",
   "static/motion/player.html": "e93af7f6f221b9358ac17639d30b53c1cf659e206da6d2b25873a6e2d9e17ff9",
   "static/sw.js": "805f68936b6faea07d055075a38ffdd07c37d69084999d92440dfb46e4a4e4fb",
   "static/vendor/ascii-magic/LICENSE": "ab46447f1fe9f5e3c5f20367870a58997b2d0c85b2da34a877b4705196561a26",
@@ -2538,6 +2538,6 @@
   "tabs/school/view.js": "ebdc4818f6ca446e2aae949af7ea3f08a7f46eaa6dc0320e7da1e4d1befc6399",
   "tabs/studio/tab.json": "28f1e091d41cb463851b41c3aeb27e8bf66adbcc98844f63423d09bada77b837",
   "tabs/studio/view.css": "63a9b5f0cdcd469c37fa0ef88080198d3fceb57e2a582e931ceb07109e451adb",
-  "tabs/studio/view.js": "eee65e5ca98a1a99060dcafb3f6f597c60d7a92974b217f8ce2455274acfe690"
+  "tabs/studio/view.js": "07ec6a943f198147399198ca07548431e30474e4f6b154b9a201478e7b151736"
  }
 }

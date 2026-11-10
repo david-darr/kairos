@@ -34,6 +34,7 @@ class ChannelEditBody(Body):
     look: Optional[str] = Field(None, max_length=80)
     aspect: Optional[str] = Field(None, max_length=5)
     notes: Optional[str] = Field(None, max_length=1000)
+    voice: Optional[str] = Field(None, max_length=40)
 
 
 class BatchBody(Body):
@@ -175,7 +176,7 @@ def archive_channel(channel_id: int, body: ReasonBody = ReasonBody(), user: str 
 
 @router.post("/channels/{channel_id}/edit")
 def edit_channel(channel_id: int, body: ChannelEditBody, user: str = Depends(require_user)):
-    """The channel's look, aspect and voice notes, which the Script Writer and Editor follow."""
+    """The channel's look, aspect, voice notes and narrator voice, which the Script Writer and Editor follow."""
     return _run(studio.edit_channel, channel_id, **_given(body))
 
 
@@ -241,7 +242,13 @@ def add_post(body: PostBody, user: str = Depends(require_user)):
 def get_post(post_id: int, user: str = Depends(require_user)):
     post = _run(studio.get_post, post_id)
     direct = youtube_publish.check(studio, post_id) if post["state"] == "approved" and post["platform"] == "youtube" else None
-    return {**post, "metrics": studio.snapshots(post_id), "direct_post_blocker": direct}
+    return {**post, "metrics": studio.snapshots(post_id), "direct_post_blocker": direct, "evidence": studio.evidence(post_id)}
+
+
+@router.get("/posts/{post_id}/evidence")
+def post_evidence(post_id: int, user: str = Depends(require_user)):
+    """What the post keeps for an appeal: the approval, the shot plan, the sources and the policy checks."""
+    return {"evidence": _run(studio.evidence, post_id)}
 
 
 @router.post("/posts/{post_id}/edit")

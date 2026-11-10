@@ -1,18 +1,87 @@
-"""Deterministic original music on the project's bar grid, with AAC headroom.
+"""Deterministic original music on the project's bar grid, with AAC headroom, and the narration mixed over it.
 
 The starter's kick, high-pass hats, detuned chords and rising noise are mixed
 in floating point before normalization, soft clipping and PCM conversion.
+
+A narrated video (core/video_narration.py) puts the voice on top: the voice is levelled, the music sits under it and
+ducks a further DUCK_DB while a line is spoken (the duck opens slightly before each line, since the whole timeline is
+known), and the mix keeps headroom below -1 dBFS with no clipping. The encoder's loudness pass then brings the file to
+-16 LUFS (core/ffmpeg_tools.LOUDNORM).
 """
 from pathlib import Path
 import wave
 import numpy as np
-from core.video_store import duration, validate
+from core.video_store import beat_seconds, duration, narrated, validate
 
 SR = 48000
+VOICE_RMS_DB = -20.0      # the voice's level while speaking, before the loudness pass
+BED_DB = -9.0             # music between lines, relative to the speaking voice
+DUCK_DB = -12.0           # further down while a line is spoken
+MIX_PEAK = 10 ** (-1.5 / 20)
 
 
-def synthesize(project):
+def synthesize(project, report=None):
+    """Stereo float32 at 48 kHz. `report`, when given, is filled with the narration levels for the checks."""
     p = validate(project)
+    music = _music(p)
+    if not narrated(p):
+        return music
+    from core import video_narration
+    voice, stats = video_narration.track(p, SR)
+    return _mix(music, voice, stats, p["music"]["volume"], report)
+
+
+def _envelope(active, frame):
+    """Gain per sample from per-frame speech activity: opens 120 ms early, releases over 400 ms, never steps."""
+    ahead, hold = int(.12 * SR / frame), int(.4 * SR / frame)
+    near = active.copy()
+    for shift in range(1, ahead + 1):
+        near[:-shift] |= active[shift:]
+    for shift in range(1, hold + 1):
+        near[shift:] |= active[:-shift]
+    target = np.where(near, 10 ** (DUCK_DB / 20), 1.0)
+    width = max(1, int(.08 * SR / frame))
+    smooth = np.convolve(np.pad(target, (width, width), mode="edge"), np.ones(2 * width + 1) / (2 * width + 1), mode="same")[width:-width]
+    return np.repeat(smooth, frame)
+
+
+def _mix(music, voice, stats, volume, report):
+    frame = SR // 100
+    n = len(music)
+    voice = np.pad(voice[:n], (0, max(0, n - len(voice))))
+    frames = len(voice) // frame
+    level = np.sqrt((voice[:frames * frame].reshape(frames, frame) ** 2).mean(axis=1) + 1e-12)
+    active = level > (level.max() * 10 ** (-40 / 20) if frames else 1)
+    speaking = float(np.sqrt(np.mean(level[active] ** 2))) if active.any() else 0.
+    if speaking > 0:
+        gain = 10 ** (VOICE_RMS_DB / 20) / speaking
+        if stats["peak"] * gain > 10 ** (-3 / 20):        # never push the voice's own peaks past -3 dBFS
+            gain = 10 ** (-3 / 20) / stats["peak"]
+        voice = voice * gain
+        speaking *= gain
+    m_level = float(np.sqrt(np.mean(music.astype(np.float64) ** 2))) if n else 0.
+    bed = 0.
+    if m_level > 0 and speaking > 0:
+        bed = speaking * 10 ** (BED_DB / 20) * (volume / .7) / m_level
+    duck = _envelope(active, frame)
+    duck = np.pad(duck[:n], (0, max(0, n - len(duck))), constant_values=1.0)
+    mix = music * (bed * duck)[:, None] + voice[:, None]
+    peak = float(np.max(np.abs(mix))) if n else 0.
+    if peak > MIX_PEAK:
+        mix *= MIX_PEAK / peak
+    if report is not None:
+        under = active.any() and bed > 0
+        m_frames = (music[:frames * frame].astype(np.float64) * (bed * duck[:frames * frame])[:, None])
+        m_rms = np.sqrt((m_frames.reshape(frames, frame, 2) ** 2).mean(axis=(1, 2)) + 1e-12) if frames else np.zeros(0)
+        report.update({"lines": stats["lines"], "voice_clipped_samples": stats["clipped_samples"],
+                       "voice_peak_dbfs": round(float(20 * np.log10(max(stats["peak"], 1e-9))), 1),
+                       "mix_peak_dbfs": round(float(20 * np.log10(max(float(np.max(np.abs(mix))) if n else 0., 1e-9))), 1),
+                       "voice_over_music_db": round(float(20 * np.log10(speaking / float(np.sqrt(np.mean(m_rms[active] ** 2))))), 1)
+                       if under else None})
+    return mix.astype(np.float32)
+
+
+def _music(p):
     seconds = duration(p)
     count = round(seconds * SR)
     mix = np.zeros((count, 2), dtype=np.float32)
@@ -90,7 +159,7 @@ def synthesize(project):
                 return low * np.sin(np.pi * x) * x * .45
             voice(boundary - .35, .35, whoosh, .25)
             kick(boundary, .85)
-        boundary += b["bars"] * bar
+        boundary += beat_seconds(b, p["bpm"])
     peak = float(np.max(np.abs(mix)))
     if peak:
         mix = np.tanh(mix * (1.1 / peak))
@@ -103,9 +172,9 @@ def synthesize(project):
     return mix.astype(np.float32)
 
 
-def write_wav(path, project):
+def write_wav(path, project, report=None):
     """Write byte-identical stereo 48 kHz PCM for the same project."""
-    samples = synthesize(project)
+    samples = synthesize(project, report)
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(path), "wb") as wav:
         wav.setnchannels(2)

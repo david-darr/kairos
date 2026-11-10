@@ -4,8 +4,10 @@ Niches, channels (made by the user, never by bots), topics with evidence, posts,
 series, strategies and decisions. Plain storage and the rules that protect it (caps, state changes); the
 selection maths is in scoring.py and review.py. Every time-dependent call takes `now` so tests can move the clock.
 """
+import hashlib
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -35,8 +37,13 @@ TEAM_ROLES = ("producer", "researcher", "evaluator", "script_writer", "editor", 
 ASPECTS = ("9:16", "16:9", "1:1")
 # Columns added after the first release; a store made before them gains them when it opens.
 LATER_COLUMNS = {"snapshots": {"source": "TEXT NOT NULL DEFAULT 'manual'"},
-                 "channels": {"look": "TEXT", "aspect": "TEXT", "notes": "TEXT NOT NULL DEFAULT ''"},
-                 "posts": {"pick_reason": "TEXT NOT NULL DEFAULT ''", "tags": "TEXT NOT NULL DEFAULT ''"}}
+                 "channels": {"look": "TEXT", "aspect": "TEXT", "notes": "TEXT NOT NULL DEFAULT ''", "voice": "TEXT"},
+                 "posts": {"pick_reason": "TEXT NOT NULL DEFAULT ''", "tags": "TEXT NOT NULL DEFAULT ''",
+                           "ai_label": "INTEGER NOT NULL DEFAULT 1"}}
+# What a post keeps as appeal evidence (Video Styles build spec section 7): the person's approval, the shot plan,
+# the sources behind its facts, and the policy checks it passed.
+EVIDENCE_KINDS = ("approval", "shot_plan", "sources", "policy_check")
+VOICE_ID = re.compile(r"^[a-z]{2}_[a-z0-9]{1,30}$")
 
 
 class StudioError(Exception):
@@ -87,6 +94,10 @@ CREATE TABLE IF NOT EXISTS snapshots (
   source TEXT NOT NULL DEFAULT 'manual');
 CREATE INDEX IF NOT EXISTS snapshots_post ON snapshots(post_id, taken_at);
 CREATE TABLE IF NOT EXISTS reviews (id INTEGER PRIMARY KEY, at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS post_evidence (
+  id INTEGER PRIMARY KEY, post_id INTEGER NOT NULL REFERENCES posts(id), kind TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '{}', at REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS post_evidence_post ON post_evidence(post_id, id);
 CREATE TABLE IF NOT EXISTS review_marks (
   review_id INTEGER NOT NULL REFERENCES reviews(id), subject_type TEXT NOT NULL, subject_id INTEGER NOT NULL,
   score REAL NOT NULL, median REAL, behind INTEGER NOT NULL);
@@ -96,7 +107,7 @@ CREATE TABLE IF NOT EXISTS decisions (
   payload TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL, proposed_by TEXT NOT NULL,
   confirmed_by TEXT, user_ok_by TEXT, at REAL NOT NULL, resolved_at REAL);
 """
-JSON_COLS = {"numbers", "payload"}
+JSON_COLS = {"numbers", "payload", "body"}
 
 
 def _clean_text(value, what, limit=300, required=True):
@@ -306,11 +317,17 @@ class Store:
         return self._rows(f"SELECT c.*, n.name AS niche_name FROM channels c JOIN niches n ON n.id = c.niche_id {clause} "
                           "ORDER BY c.id", tuple(args))
 
-    def edit_channel(self, channel_id, look=None, aspect=None, notes=None):
-        """The channel's own look (a Studio video look id), aspect and voice notes, so the Editor and Script
-        Writer make each channel's posts in its own style. None leaves a field as it is; "" clears it."""
+    def edit_channel(self, channel_id, look=None, aspect=None, notes=None, voice=None):
+        """The channel's own look (a Studio video look id), aspect, voice notes and narrator voice (a Kokoro voice id),
+        so the Editor and Script Writer make each channel's posts in its own style and the channel keeps one voice.
+        None leaves a field as it is; "" clears it."""
         self.get_channel(channel_id)
         changes = {}
+        if voice is not None:
+            voice = _clean_text(voice, "voice", 40, False)
+            if voice and not VOICE_ID.match(voice):
+                raise StudioError("the narrator voice is a Kokoro voice id, for example af_heart or bm_george")
+            changes["voice"] = voice or None
         if look is not None:
             look = _clean_text(look, "look", 80, False)
             if look and not all(ch.isalnum() or ch in "-_" for ch in look):
@@ -498,7 +515,11 @@ class Store:
             raise conflict(f"a {post['state']} post can no longer be edited")
         changes = {}
         for key, value in fields.items():
-            if key == "render_status":
+            if key == "ai_label":
+                if value is not True:
+                    raise StudioError("every post carries the AI label; it cannot be turned off")
+                changes[key] = 1
+            elif key == "render_status":
                 if value not in ("pending", "ok", "failed"):
                     raise StudioError("render_status must be pending, ok or failed")
                 changes[key] = value
@@ -527,19 +548,33 @@ class Store:
         return self.get_post(post_id)
 
     def submit_for_approval(self, post_id, now=None):
+        """Into the approval queue, only past the policy checks (policy.py); the result is kept as evidence."""
+        from . import policy
         now = time.time() if now is None else now
         post = self.get_post(post_id)
         if post["render_status"] != "ok" or not post["render_ref"]:
             raise conflict("the video is not rendered yet")
+        result = policy.check(self, post_id)
+        self.add_evidence(post_id, "policy_check", {"step": "submit", **result}, now=now)
+        if not result["ok"]:
+            raise conflict("the policy checks stopped this post: " + policy.reasons(result))
         return self._move(post_id, ("drafted",), "awaiting_approval", now)
 
     def approve(self, post_id, by, now=None):
-        """Approval only marks the post approved. Handing it to the platform is the Publisher's later step."""
+        """Approval only marks the post approved. Handing it to the platform is the Publisher's later step.
+        What the person approved is kept as evidence: title, caption, tags, the render and the script's hash."""
         now = time.time() if now is None else now
-        channel = self.get_channel(self.get_post(post_id)["channel_id"])
+        post = self.get_post(post_id)
+        channel = self.get_channel(post["channel_id"])
         if channel["status"] != "live" or channel["paused"]:
             raise conflict("that channel is archived or paused")
-        return self._move(post_id, ("awaiting_approval",), "approved", now, approved_by=by, approved_at=now)
+        approved = self._move(post_id, ("awaiting_approval",), "approved", now, approved_by=by, approved_at=now)
+        self.add_evidence(post_id, "approval", {
+            "by": by, "at": now, "title": post["title"], "caption": post["caption"], "tags": post["tags"],
+            "render_ref": post["render_ref"], "ai_label": bool(post["ai_label"]), "channel": channel["handle"],
+            "platform": channel["platform"],
+            "script_sha256": hashlib.sha256((post["script_ref"] or "").encode("utf-8")).hexdigest()}, now=now)
+        return approved
 
     def reject(self, post_id, reason="", now=None):
         now = time.time() if now is None else now
@@ -572,8 +607,31 @@ class Store:
     def mark_posted(self, post_id, url, posted_at=None, now=None):
         now = time.time() if now is None else now
         url = _clean_text(url, "posted link", 500)
+        post = self.get_post(post_id)
+        if any(other["posted_url"] == url and other["channel_id"] != post["channel_id"] for other in self.list_posts()):
+            raise conflict("that link is already recorded on another of the team's channels; one video is never "
+                           "posted on two of its own channels")
         return self._move(post_id, ("approved",), "posted", now, posted_url=url,
                           posted_at=now if posted_at is None else _num(posted_at, "posted_at"))
+
+    # -- appeal evidence ------------------------------------------------------------------------
+
+    def add_evidence(self, post_id, kind, body, now=None):
+        """Append-only: evidence is never edited, so it shows what was true when it was recorded."""
+        now = time.time() if now is None else now
+        self.get_post(post_id)
+        if kind not in EVIDENCE_KINDS:
+            raise StudioError(f"evidence is one of {', '.join(EVIDENCE_KINDS)}")
+        if not isinstance(body, dict) or len(json.dumps(body, default=str)) > 60000:
+            raise StudioError("evidence is an object under 60 KB")
+        eid = self._insert("post_evidence", post_id=post_id, kind=kind, body=json.loads(json.dumps(body, default=str)), at=now)
+        return self._row("SELECT * FROM post_evidence WHERE id = ?", (eid,))
+
+    def evidence(self, post_id, kind=None):
+        self.get_post(post_id)
+        if kind:
+            return self._rows("SELECT * FROM post_evidence WHERE post_id = ? AND kind = ? ORDER BY id", (post_id, kind))
+        return self._rows("SELECT * FROM post_evidence WHERE post_id = ? ORDER BY id", (post_id,))
 
     # -- metrics --------------------------------------------------------------------------------
 

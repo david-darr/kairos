@@ -14,8 +14,9 @@
 const { BrowserWindow, session } = require('electron');
 
 const PARTITION = 'persist:design-render';
-const JOB_PATH = /^\/api\/designs\/([a-f0-9]{12})\/boards\/([a-z0-9][a-z0-9-]{0,47})\/render\?rt=[0-9]{10}\.[A-Za-z0-9_-]{24}(?:&v=\d{1,6})?$/;
-const VIDEO_PATH = /^\/api\/videos\/([a-f0-9]{12})\/player\?aspect=(16%3A9|9%3A16|1%3A1)&rt=[0-9]{10}\.[A-Za-z0-9_-]{24}&v=[1-9][0-9]*$/;
+// Render tokens name the account they were made for (core/design_render.sign): expiry.mac.account.mac.
+const JOB_PATH = /^\/api\/designs\/([a-f0-9]{12})\/boards\/([a-z0-9][a-z0-9-]{0,47})\/render\?rt=[0-9]{10}\.[A-Za-z0-9_-]{24}\.[a-z0-9]{1,32}\.[A-Za-z0-9_-]{24}(?:&v=\d{1,6})?$/;
+const VIDEO_PATH = /^\/api\/videos\/([a-f0-9]{12})\/player\?aspect=(16%3A9|9%3A16|1%3A1)&rt=[0-9]{10}\.[A-Za-z0-9_-]{24}\.[a-z0-9]{1,32}\.[A-Za-z0-9_-]{24}&v=[1-9][0-9]*$/;
 let activeWindow = null, activeJob = '';
 let running = false, stopped = false, controller = null, configured = false;
 // The content's height: the bottom of the body's last child (the viewer script measures the same way).
@@ -112,7 +113,7 @@ async function renderJob(origin, job, backendUrl, token) {
   current.videoId = video ? match[1] : '';
   current.path = String(job.path);
   current.look = String(job.look || '');
-  if (video && (!/^[a-z0-9_-]{1,60}$/.test(current.look) || job.fps !== 30 || !Number.isInteger(job.frames) || job.frames < 1 || job.frames > 3600)) throw new Error('refused invalid video timing');
+  if (video && (!/^[a-z0-9_-]{1,60}$/.test(current.look) || job.fps !== 30 || !Number.isInteger(job.frames) || job.frames < 1 || job.frames > 14400)) throw new Error('refused invalid video timing');
   const isolated = configure(origin);
   const win = new BrowserWindow({
     show: false, width: w, height: h, useContentSize: true, frame: false, paintWhenInitiallyHidden: true,

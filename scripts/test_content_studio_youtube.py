@@ -125,8 +125,8 @@ def metrics(views, avd, likes=0, comments=0, shares=0, subs=0):
 
 
 def make_posted(store, channel_id, title, url, posted_at):
-    post = store.create_post(channel_id, title, script_ref="s", now=posted_at - 7200)
-    store.edit_post(post["id"], now=posted_at - 3600, render_ref="r.mp4", render_status="ok")
+    post = store.create_post(channel_id, title, script_ref=f"The script of {title}", now=posted_at - 7200)
+    store.edit_post(post["id"], now=posted_at - 3600, render_ref=f"r-{post['id']}.mp4", render_status="ok")
     store.submit_for_approval(post["id"], now=posted_at - 1800)
     store.approve(post["id"], "david", now=posted_at - 900)
     store.mark_posted(post["id"], url, posted_at=posted_at, now=posted_at)
@@ -170,6 +170,7 @@ class YouTubeAnalytics(unittest.TestCase):
                 youtube_publish.disconnect()
                 for snap in studio.snapshots():
                     studio._write("DELETE FROM snapshots WHERE id = ?", (snap["id"],))
+                studio._write("DELETE FROM post_evidence")
                 studio._write("DELETE FROM posts")
                 studio._write("DELETE FROM channel_warnings")
                 studio._write("DELETE FROM channels")
@@ -491,10 +492,11 @@ class YouTubePostingAndTrends(YouTubeAnalytics):
         with accounts.as_account(acct):
             folder = image_gen.generated_files_dir()
             os.makedirs(folder, exist_ok=True)
-            with open(os.path.join(folder, "abc123_black-holes.mp4"), "wb") as f:
+            # One file per channel: the policy checks refuse one video on two of the team's channels.
+            with open(os.path.join(folder, f"abc123_black-holes-{channel_id}.mp4"), "wb") as f:
                 f.write(video)
             post = studio.create_post(channel_id, "Black <holes> explained", script_ref="beats", caption="Why light cannot escape.")
-            studio.edit_post(post["id"], render_ref="/generated-files/abc123_black-holes.mp4", render_status="ok", tags=tags)
+            studio.edit_post(post["id"], render_ref=f"/generated-files/abc123_black-holes-{channel_id}.mp4", render_status="ok", tags=tags)
             studio.submit_for_approval(post["id"])
             return post["id"]
 
@@ -577,7 +579,7 @@ class YouTubePostingAndTrends(YouTubeAnalytics):
         with accounts.as_account(self.david_id):
             studio.resume_channel(ids["@alpha"])
             from core import image_gen
-            os.remove(os.path.join(image_gen.generated_files_dir(), "abc123_black-holes.mp4"))
+            os.remove(os.path.join(image_gen.generated_files_dir(), f"abc123_black-holes-{ids['@alpha']}.mp4"))
         self.assertIn("missing", self.d.post(f"{P}/posts/{mine}/publish-youtube").json()["detail"])
         for ref in ("r.mp4", "/generated-files/..%2F..%2Fsecret.mp4", "/generated-files/notes.txt", "https://cdn.example.test/v.mp4"):
             with self.subTest(ref=ref):

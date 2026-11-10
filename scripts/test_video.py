@@ -22,8 +22,8 @@ from PIL import Image, ImageDraw
 import numpy as np
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from core import (creative_direction, design_render, design_render_bridge as bridge, design_store,
-                  ffmpeg_tools, settings, tool_registry, video_audio, video_checks, video_render,
+from core import (creative_direction, design_render, design_render_bridge as bridge, design_store, design_systems,
+                  ffmpeg_tools, settings, tool_registry, video_audio, video_checks, video_narration, video_render,
                   video_store, video_tools)
 from core.middleware import SecurityHeadersMiddleware, require_user
 from core import accounts, middleware
@@ -777,10 +777,13 @@ class WorkerStaticTests(unittest.TestCase):
 const fs = require('fs'), vm = require('vm'), assert = require('assert');
 const sandbox = { require: () => ({}), module: { exports: {} }, URL };
 vm.runInNewContext(fs.readFileSync('electron/designRender.js', 'utf8'), sandbox);
-const { allowedRequest, VIDEO_PATH } = sandbox.module.exports;
+const { allowedRequest, VIDEO_PATH, JOB_PATH } = sandbox.module.exports;
 const id = '012345abcdef', origin = 'http://localhost:9999';
-const path = `/api/videos/${id}/player?aspect=16%3A9&rt=1999999999.AAAAAAAAAAAAAAAAAAAAAAAA&v=1`;
+const path = `/api/videos/${id}/player?aspect=16%3A9&rt=1999999999.AAAAAAAAAAAAAAAAAAAAAAAA.local.BBBBBBBBBBBBBBBBBBBBBBBB&v=1`;
 assert(VIDEO_PATH.test(path));
+// The account-carrying token core/design_render.sign makes since multi-account; the old two-part one is refused.
+assert(!VIDEO_PATH.test(`/api/videos/${id}/player?aspect=16%3A9&rt=1999999999.AAAAAAAAAAAAAAAAAAAAAAAA&v=1`));
+assert(JOB_PATH.test(`/api/designs/${id}/boards/main/render?rt=1999999999.AAAAAAAAAAAAAAAAAAAAAAAA.acct01.BBBBBBBBBBBBBBBBBBBBBBBB&v=3`));
 const ok = value => allowedRequest(origin + value, origin, '', id, path, 'sport');
 assert(ok(path)); assert(ok('/static/motion/engine.js')); assert(ok('/api/design-fonts/sport/test.ttf'));
 assert(ok(`/api/videos/${id}/assets/${'a'.repeat(64)}.png`));
@@ -799,6 +802,334 @@ assert(!allowedRequest('https://example.com/static/motion/engine.js', origin, ''
         self.assertNotIn(b"\r", raw)
         self.assertFalse(raw.startswith(b"\xef\xbb\xbf"))
         self.assertIn(b'version: "2.1.0"', raw)
+
+
+def narrated(**changes):
+    return {**project(beats=[
+        {"id": "hook", "kind": "title", "text": "Start here", "say": "Clouds are heavy. They still float, though, all day long."},
+        {"id": "mid", "kind": "statement", "text": "No line here", "bars": 1},
+        {"id": "end", "kind": "end", "text": "Try it now", "say": "Look up today."}]),
+        "narration": {"voice": "af_heart", "captions": True}, **changes}
+
+
+class FakeVoice:
+    """Kokoro's synthesize(text, voice) -> 24 kHz PCM16: a tone a quarter second per word, so lengths are known."""
+    def __init__(self, amplitude=.3):
+        self.calls, self.amplitude = [], amplitude
+
+    def __call__(self, text, voice):
+        self.calls.append((text, voice))
+        n = int(.25 * len(text.split()) * 24000)
+        t = np.arange(n) / 24000
+        return (np.sin(2 * np.pi * 220 * t) * self.amplitude * 32767).astype("<i2").tobytes()
+
+
+class NarrationValidationTests(unittest.TestCase):
+    def bad(self, p, path, words=""):
+        with self.assertRaises(ValueError) as caught:
+            video_store.validate(p)
+        self.assertIn(path + ":", str(caught.exception))
+        self.assertIn(words, str(caught.exception))
+
+    def test_a_line_sets_its_beat_length_and_bars_do_not(self):
+        out = video_store.validate(narrated())
+        self.assertEqual(out["narration"], {"voice": "af_heart", "captions": True})
+        hook = out["beats"][0]
+        estimate = video_store.estimate(hook["say"])
+        self.assertAlmostEqual(hook["seconds"], math.ceil((video_store.LEAD + estimate + video_store.TAIL) * 30 - 1e-6) / 30)
+        self.assertNotIn("seconds", out["beats"][1], "a beat without a line keeps its bars")
+        p = narrated()
+        p["beats"][0]["bars"] = 8
+        p["beats"][0]["seconds"] = 99
+        self.assertEqual(video_store.validate(p)["beats"][0]["seconds"], hook["seconds"], "bars and a written seconds are ignored")
+        self.assertAlmostEqual(video_store.duration(out), hook["seconds"] + 2 + out["beats"][2]["seconds"])
+        p = narrated()
+        p.pop("narration")
+        self.assertEqual(video_store.validate(p)["narration"], {"voice": "af_heart", "captions": True}, "a line brings the default voice")
+
+    def test_narration_fields(self):
+        for value, path in [("af_heart", "narration"), ({"voice": "Heart"}, "narration.voice"), ({"voice": "../x"}, "narration.voice"),
+                            ({"voice": "af_heart", "captions": "yes"}, "narration.captions"), ({"speed": 2}, "narration.speed")]:
+            self.bad(narrated(narration=value), path)
+        for value, words in [("", "non-empty"), ("x" * 401, "400"), ("...", "words to speak"), (5, "text"),
+                             ("word " * 30 + "and on without a single comma until it runs long", "100 characters")]:
+            p = narrated()
+            p["beats"][0]["say"] = value
+            self.bad(p, "beats[0].say", words)
+
+    def test_clauses_are_the_caption_parts(self):
+        self.assertEqual(video_store.clauses("One. Two!  Three?"), ["One.", "Two!", "Three?"])
+        long = "This sentence is long enough, with a comma in the middle of it, that it must be cut into parts so each fits on screen."
+        parts = video_store.clauses(long)
+        self.assertGreater(len(parts), 1)
+        self.assertTrue(all(len(x) <= video_store.CLAUSE_LIMIT for x in parts))
+        self.assertEqual(" ".join(parts), long)
+
+    def test_spoken_is_measured_never_written(self):
+        p = narrated()
+        key = video_store.speech_key("af_heart", p["beats"][0]["say"])
+        p["beats"][0]["spoken"] = {"key": key, "seconds": 3.0, "parts": [[.25, 1.5, "Clouds are heavy."], [1.6, 3.25, "They still float, though, all day long."]]}
+        out = video_store.validate(p)
+        self.assertEqual(out["beats"][0]["seconds"], math.ceil((video_store.LEAD + 3 + video_store.TAIL) * 30 - 1e-6) / 30)
+        for bad in ({"key": key}, {"key": key, "seconds": -1, "parts": [[0, 1, "x"]]}, {"key": key, "seconds": 3, "parts": []},
+                    {"key": key, "seconds": 3, "parts": [[2, 1, "x"]]}, {"key": key, "seconds": 3, "parts": [[0, 9, "x"]]}, "x"):
+            q = copy.deepcopy(p)
+            q["beats"][0]["spoken"] = bad
+            self.bad(q, "beats[0].spoken")
+        q = copy.deepcopy(p)
+        q["narration"]["voice"] = "bm_george"
+        self.assertNotIn("spoken", video_store.validate(q)["beats"][0], "another voice must be spoken again")
+        q = copy.deepcopy(p)
+        q["beats"][0]["say"] = "A different line."
+        self.assertNotIn("spoken", video_store.validate(q)["beats"][0], "another line must be spoken again")
+        q = copy.deepcopy(out)
+        q["beats"][0].pop("say")
+        self.assertNotIn("spoken", video_store.validate(q)["beats"][0], "a beat whose line is removed keeps its bars, not the old measurement")
+
+    def test_the_cap_rises_for_narrated_videos_only(self):
+        line = "This line is spoken by the narrator, and it runs for a while so the video gets long."
+        beats = [{"id": f"b{i}", "kind": "statement", "text": "Words", "say": line} for i in range(40)]
+        p = project(beats=beats)
+        seconds = video_store.duration(video_store.validate(p))
+        self.assertGreater(seconds, video_store.MAX_SECONDS)
+        self.assertLessEqual(seconds, video_store.NARRATED_MAX_SECONDS)
+        self.bad(project(beats=[{"id": f"b{i}", "kind": "title", "bars": 1} for i in range(41)]), "beats", "1 to 40")
+        many = [{"id": f"b{i}", "kind": "statement", "text": "x", "say": "One two three."} for i in range(100)]
+        video_store.validate(project(beats=many))
+        self.bad(project(beats=many + [{"id": "extra", "kind": "end", "bars": 1}]), "beats", "1 to 100")
+        too_long = [{"id": f"b{i}", "kind": "statement", "text": "x", "say": (line + " ") * 4} for i in range(60)]
+        self.bad(project(beats=too_long), "beats", "480 seconds")
+        self.bad(project(bpm=60, beats=[{"id": f"b{i}", "kind": "title", "bars": 1} for i in range(31)]), "beats", "120 seconds")
+
+
+class NarrationTrackTests(unittest.TestCase):
+    def test_lines_are_spoken_measured_cached_and_set_the_timeline(self):
+        p = make(**{k: v for k, v in narrated().items() if k not in ("id", "title", "look", "beats")}, beats=narrated()["beats"])
+        voice = FakeVoice()
+        saved = video_narration.prepare(p["id"], voice)
+        self.assertEqual(saved["version"], 2)
+        self.assertEqual([c[0] for c in voice.calls], ["Clouds are heavy.", "They still float, though, all day long.", "Look up today."])
+        hook = saved["beats"][0]
+        speech = .25 * 3 + video_narration.SENTENCE_GAP + .25 * 7
+        self.assertAlmostEqual(hook["spoken"]["seconds"], speech, places=2)
+        self.assertEqual(hook["seconds"], math.ceil((video_store.LEAD + hook["spoken"]["seconds"] + video_store.TAIL) * 30 - 1e-6) / 30)
+        (s1, e1, t1), (s2, e2, t2) = hook["spoken"]["parts"]
+        self.assertEqual((s1, t1, t2), (video_store.LEAD, "Clouds are heavy.", "They still float, though, all day long."))
+        self.assertAlmostEqual(e1 - s1, .75, places=2)
+        self.assertAlmostEqual(s2 - e1, video_narration.SENTENCE_GAP, places=2)
+        self.assertTrue(video_narration.clip_path(p["id"], hook["spoken"]["key"]).is_file())
+        self.assertEqual(video_narration.missing(saved), [])
+        again = video_narration.prepare(p["id"], voice)
+        self.assertEqual((again["version"], len(voice.calls)), (2, 3), "measured lines are reused")
+        saved["beats"][2]["say"] = "Look up tonight instead."
+        saved = video_store.save(p["id"], saved)
+        video_narration.prepare(p["id"], voice)
+        self.assertEqual(voice.calls[-1][0], "Look up tonight instead.")
+        self.assertEqual(len(voice.calls), 4, "only the changed line is spoken again")
+        plan = video_narration.plan_text(video_store.get(p["id"]))
+        self.assertIn("narrated by Kokoro voice af_heart, captions on", plan)
+        self.assertIn('00:00.0-00:0', plan)
+        self.assertIn('says: "Clouds are heavy. They still float, though, all day long."', plan)
+        self.assertNotIn("estimated", plan)
+
+    def test_an_edit_made_while_speaking_wins(self):
+        p = make(beats=narrated()["beats"])
+        def edit_midway(text, voice):
+            if text == "Look up today.":
+                current = video_store.get(p["id"])
+                current["beats"][2]["say"] = "Changed while speaking."
+                video_store.save(p["id"], current)
+            return FakeVoice()(text, voice)
+        saved = video_narration.prepare(p["id"], edit_midway)
+        self.assertIn("spoken", saved["beats"][0])
+        self.assertNotIn("spoken", saved["beats"][2], "a measurement of the old line is not stored")
+        self.assertEqual(video_narration.missing(saved), ["end"])
+
+    def test_kokoro_not_ready_says_why(self):
+        p = make(beats=narrated()["beats"])
+        from core import kokoro_voice
+        with patch.object(kokoro_voice, "ready", return_value=(False, "Kokoro is not downloaded")):
+            with self.assertRaises(video_narration.NarrationUnavailable) as caught:
+                video_narration.prepare(p["id"])
+        self.assertIn("Kokoro is not downloaded", str(caught.exception))
+        self.assertIn("Settings > Speech", str(caught.exception))
+        with patch.object(kokoro_voice, "ready", return_value=(True, None)), \
+                patch.object(kokoro_voice, "voices", return_value=[{"id": "bm_george", "name": "bm_george"}]):
+            with self.assertRaises(video_narration.NarrationUnavailable) as caught:
+                video_narration.prepare(p["id"])
+        self.assertIn("no voice af_heart", str(caught.exception))
+        self.assertEqual(video_store.get(p["id"])["version"], 1, "nothing changes")
+
+    def test_upsample_keeps_a_tone_and_doubles_the_rate(self):
+        t = np.arange(2400) / 24000
+        tone = (np.sin(2 * np.pi * 440 * t) * 16000).astype("<i2")
+        up = video_narration._upsample(tone)
+        self.assertEqual(len(up), 4800)
+        ref = np.sin(2 * np.pi * 440 * np.arange(4800) / 48000) * 16000 / 32768
+        self.assertLess(float(np.max(np.abs(up[200:-200] - ref[200:-200]))), .01)
+
+    def mixed(self, volume=.7, amplitude=.3):
+        p = make(beats=narrated()["beats"], music={"mood": "calm", "volume": volume})
+        saved = video_narration.prepare(p["id"], FakeVoice(amplitude))
+        report = {}
+        return saved, video_audio.synthesize(saved, report), report
+
+    def test_music_ducks_under_the_voice_with_headroom(self):
+        saved, mix, report = self.mixed()
+        self.assertEqual(mix.shape, (round(video_store.duration(saved) * 48000), 2))
+        self.assertLessEqual(float(np.max(np.abs(mix))), 10 ** (-1.5 / 20) + 1e-6, "no clipping: the mix keeps -1.5 dBFS headroom")
+        self.assertEqual((report["lines"], report["voice_clipped_samples"]), (2, 0))
+        self.assertGreaterEqual(report["voice_over_music_db"], 15)
+        voice, _ = video_narration.track(saved)
+        music = video_audio._music(video_store.validate(saved))
+        rate = 48000
+        hook = saved["beats"][0]
+        onset = int(video_store.LEAD * rate)
+        self.assertLess(float(np.max(np.abs(voice[:onset - 10]))), 1e-4, "the line starts LEAD seconds into its beat")
+        self.assertGreater(float(np.max(np.abs(voice[onset:onset + 2400]))), .1)
+        # Music alone: between the hook line's end and the next line (the "mid" beat has no narration).
+        gap_start = hook["seconds"] + .6
+        gap_end = hook["seconds"] + 1.6
+        speaking = (onset / rate + .5, onset / rate + 1.0)
+        bed = float(np.sqrt(np.mean(music[int(gap_start * rate):int(gap_end * rate)].astype(np.float64) ** 2)))
+        self.assertGreater(bed, 0)
+        # Gain the mix applied to the music: under the voice it is at least 10 dB lower than between lines.
+        def music_gain(a, b):
+            seg = slice(int(a * rate), int(b * rate))
+            residual = mix[seg].astype(np.float64) - voice[seg, None].astype(np.float64) * self.voice_gain(mix, voice, saved)
+            return float(np.sqrt(np.mean(residual ** 2))) / max(1e-12, float(np.sqrt(np.mean(music[seg].astype(np.float64) ** 2))))
+        under, between = music_gain(*speaking), music_gain(gap_start, gap_end)
+        self.assertLess(20 * math.log10(under / between), -10)
+
+    @staticmethod
+    def voice_gain(mix, voice, saved):
+        """The voice's gain in the mix, from a stretch where it speaks: least squares of mix against voice."""
+        rate, a = 48000, int((video_store.LEAD + .3) * 48000)
+        v, m = voice[a:a + 9600].astype(np.float64), mix[a:a + 9600, 0].astype(np.float64)
+        return float(np.dot(v, m) / np.dot(v, v))
+
+    def test_quiet_music_volume_and_clipped_voice_are_reported(self):
+        _, mix, report = self.mixed(volume=0)
+        self.assertIsNone(report["voice_over_music_db"])
+        self.assertTrue(np.isfinite(mix).all())
+        _, _, report = self.mixed(amplitude=1.2)
+        self.assertGreater(report["voice_clipped_samples"], 0)
+        notes = video_checks.narration_notes(narrated(), report)
+        self.assertTrue(any("clipped" in n for n in notes))
+
+    def test_a_music_only_video_is_unchanged(self):
+        p = video_store.validate(project())
+        self.assertTrue(np.array_equal(video_audio.synthesize(p), video_audio._music(p)))
+
+
+class NarrationCheckTests(unittest.TestCase):
+    def measured(self):
+        p = make(beats=narrated()["beats"])
+        return video_narration.prepare(p["id"], FakeVoice())
+
+    def test_captions_match_the_script_and_every_line_is_spoken(self):
+        saved = self.measured()
+        self.assertEqual(video_checks.narration_notes(saved), [])
+        unspoken = make(beats=narrated()["beats"])
+        self.assertIn("Beat hook's line is not narrated yet; run video_narrate.", video_checks.narration_notes(unspoken))
+        tampered = copy.deepcopy(saved)
+        tampered["beats"][0]["spoken"]["parts"][1][2] = "Something else entirely."
+        self.assertIn("Beat hook's captions do not match its script line; narrate it again.", video_checks.narration_notes(tampered))
+        caption = {"beat": "hook", "kind": "text", "role": "caption", "x": 200, "y": 870, "w": 1400, "h": 120,
+                   "color": "#ffffff", "bg": "#000000"}
+        good = [{"time": 1, "elements": [{**caption, "text": "They still float, though, all day long."}]}]
+        bad = [{"time": 1, "elements": [{**caption, "text": "Words nobody wrote."}]}]
+        self.assertFalse(any("caption" in n for n in video_checks.check(saved, "16:9", good)))
+        self.assertIn("A caption in beat hook is not the script's words; narrate it again.", video_checks.check(saved, "16:9", bad))
+        loud = video_checks.narration_notes(saved, {"voice_clipped_samples": 0, "mix_peak_dbfs": -.2, "voice_over_music_db": 9})
+        self.assertTrue(any("peaks above -1 dBFS" in n for n in loud))
+        self.assertTrue(any("only 9 dB over the music" in n for n in loud))
+
+    def test_text_cut_off_is_named(self):
+        box = {"beat": "hook", "kind": "text", "role": "title", "x": 200, "y": 200, "w": 800, "h": 300, "text": "5...",
+               "color": "#ffffff", "bg": "#000000", "truncated": True}
+        self.assertIn("Beat hook's text is cut off with an ellipsis; shorten it.",
+                      video_checks.check(video_store.validate(project()), "16:9", [{"time": 1, "elements": [box]}]))
+
+    def test_reading_speed_uses_the_measured_length(self):
+        saved = self.measured()
+        self.assertFalse(any("reads faster" in n for n in video_checks.check(saved)))
+
+
+class NarrationToolTests(unittest.TestCase):
+    def setUp(self):
+        self.session = "narration-" + self._testMethodName
+        self.ctx = tool_registry.ToolContext(session_id=self.session, agent_id=None, turn_taint=TurnTaint())
+
+    def call(self, name, args):
+        return run(tool_registry._REGISTRY[name].handler(args, self.ctx))
+
+    def test_create_narrate_outline_and_edit(self):
+        with patch.object(design_systems, "visible", return_value=True):
+            created = self.call("video_create", {"title": "Clouds", "look": "sport", "beats": narrated()["beats"],
+                                                 "narration": {"voice": "af_heart"}})
+        self.assertIn("narrated by af_heart", created)
+        self.assertIn("says: Clouds are heavy.", created)
+        self.assertIn("length estimated until video_narrate", created)
+        self.assertIn("Next: video_narrate for the shot plan", created)
+        with patch.object(video_narration, "_ready", return_value=type("K", (), {"synthesize": staticmethod(FakeVoice())})):
+            plan = self.call("video_narrate", {})
+        self.assertIn("Shot plan for \"Clouds\"", plan)
+        self.assertIn("Every line is spoken and measured; captions match the script.", plan)
+        self.assertNotIn("estimated", self.call("video_outline", {}))
+        with patch.object(design_systems, "visible", return_value=True):
+            edited = self.call("video_edit", {"ops": [{"op": "set", "id": "mid", "field": "say", "value": "Now this beat speaks too."},
+                                                      {"op": "set", "id": "end", "field": "say", "value": ""},
+                                                      {"op": "project", "field": "narration", "value": {"voice": "af_heart", "captions": False}}]})
+        self.assertIn("says: Now this beat speaks too. (length estimated", edited)
+        current = video_store.videos_for_chat(design_store.chat_key(self.session, None))[0]
+        self.assertNotIn("say", current["beats"][2])
+        self.assertFalse(current["narration"]["captions"])
+        self.assertIn("Not run", self.call("video_narrate", {"video_id": "000000000000"}))
+
+    def test_narrate_without_lines_and_long_render_wait(self):
+        with patch.object(design_systems, "visible", return_value=True):
+            self.call("video_create", {"title": "Plain", "look": "sport", "beats": project()["beats"]})
+        self.assertIn("no beat has a say line yet", self.call("video_narrate", {}))
+        short = video_store.validate(project())
+        self.assertEqual(video_render.wait_seconds(short), 720)
+        line = "This line is spoken by the narrator, and it runs for a while so the video gets long."
+        long = video_store.validate(project(beats=[{"id": f"b{i}", "kind": "statement", "text": "x", "say": line} for i in range(60)]))
+        frames = math.ceil(video_store.duration(long) * 30 - 1e-7)
+        self.assertEqual(bridge.video_seconds({"frames": frames}), max(600, 60 + frames * bridge.FRAME_SECONDS))
+        self.assertEqual(bridge.video_seconds({"frames": frames, "preview": True}), 600)
+
+
+class EngineNarrationTests(unittest.TestCase):
+    def test_layout_reads_seconds_and_captions(self):
+        source = r'''
+const L = await import('./static/motion/layout.js');
+const assert = (await import('node:assert')).default;
+const project = { bpm: 120, narration: { voice: 'af_heart', captions: true }, beats: [
+  { id: 'a', kind: 'title', text: 'Hi', say: 'One. Two.', seconds: 3.2, spoken: { key: 'k', seconds: 2.5, parts: [[0.25, 1.2, 'One.'], [1.4, 2.75, 'Two.']] } },
+  { id: 'e', kind: 'end', bars: 1, text: 'Bye' }] };
+const p = L.normalizeProject(project);
+assert.equal(p.duration, 5.2); assert.equal(p.captioned, true);
+assert.equal(L.captionAt(p, 1.3).text, 'One.'); assert.equal(L.captionAt(p, 1.45).text, 'Two.');
+assert.equal(L.captionAt(p, 3.1), null); assert.equal(L.captionAt(p, .1), null);
+const off = L.normalizeProject({ ...project, narration: { voice: 'af_heart', captions: false } });
+assert.equal(off.captioned, false); assert.equal(L.captionAt(off, 1.3), null);
+for (const aspect of ['16:9', '9:16', '1:1']) {
+  const safe = L.safeArea(aspect, true), band = L.captionBand(aspect);
+  assert.ok(safe.y + safe.h <= band.y, aspect + ' copy stays above the caption band');
+  assert.ok(band.y + band.h <= L.dimensions(aspect).height * (aspect === '9:16' ? .88 : .95), aspect + ' band inside the safe frame');
+}
+assert.equal(L.LIMITS.beats, 100);
+'''
+        subprocess.run(["node", "--input-type=module", "-e", source], cwd=ROOT, check=True, capture_output=True)
+
+    def test_engine_burns_captions_in_and_reports_them(self):
+        engine = (ROOT / "static/motion/engine.js").read_text(encoding="utf-8")
+        for needle in ("drawCaption(t); return;", "drawCaption(t);\n  }", "role: 'caption'", "safeArea(aspect, project.captioned)"):
+            self.assertIn(needle, engine)
+        worker = (ROOT / "electron/designRender.js").read_text(encoding="utf-8")
+        self.assertIn("job.frames > 14400", worker, "the worker takes a 480-second video")
+        self.assertEqual(video_store.NARRATED_MAX_SECONDS * 30, 14400)
 
 
 if __name__ == "__main__":

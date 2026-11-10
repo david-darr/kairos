@@ -260,6 +260,14 @@ design_store.on_change(_refresh)
 _video_parts: dict[str, dict] = {}
 
 
+FRAME_SECONDS = .2   # the slowest capture rate allowed before a render counts as stuck (5 frames a second)
+
+
+def video_seconds(job: dict) -> float:
+    """How long one video job may take: ten minutes, or longer for a long narrated video."""
+    return 600. if job.get("preview") else max(600., 60 + job["frames"] * FRAME_SECONDS)
+
+
 async def video(job: dict, consumer) -> dict:
     """Queue one signed player job and consume each acknowledged part in order."""
     if not available():
@@ -271,10 +279,11 @@ async def video(job: dict, consumer) -> dict:
              "layouts": 0, "lock": asyncio.Lock(), "account": accounts.effective_account()}
     _video_parts[job_id] = state
     await _q().put({**job, "kind": "video"})
+    limit = video_seconds(job)
     try:
-        return await asyncio.wait_for(future, timeout=600)
+        return await asyncio.wait_for(future, timeout=limit)
     except asyncio.TimeoutError:
-        raise Unavailable("The desktop app did not finish the video within 10 minutes. Try a shorter video.") from None
+        raise Unavailable(f"The desktop app did not finish the video within {round(limit / 60)} minutes. Try a shorter video.") from None
     finally:
         _pending.pop(job_id, None)
         _video_parts.pop(job_id, None)

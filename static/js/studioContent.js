@@ -207,14 +207,16 @@ export async function mountContent(host, { signal } = {}) {
     const aspect = selectOf('Aspect', M.ASPECTS, channel.aspect || '');
     const notes = el('textarea', { rows: 4, 'aria-label': 'Voice notes', maxlength: '1000', placeholder: 'How this channel talks. For example, calm and curious, no hype.' });
     notes.value = channel.notes || '';
+    const voice = textInput('Narrator voice', { value: channel.voice || '', maxlength: '40', placeholder: 'For example, af_heart' });
     const status = el('p', { class: 'set-error', role: 'alert' });
     const body = el('div', { class: 'sc-dialog' }, [
       note('The Editor renders this channel\'s videos in its look and aspect, and the Script Writer follows its voice notes.'),
       group({}, [row({ title: 'Look', description: 'A Studio video look id. Leave it empty to let the Editor choose.', control: look, stack: true }),
-        row({ title: 'Aspect', control: aspect }), row({ title: 'Voice notes', control: notes, stack: true })]), status]);
+        row({ title: 'Aspect', control: aspect }), row({ title: 'Voice notes', control: notes, stack: true }),
+        row({ title: 'Narrator voice', description: 'The Kokoro voice that narrates every video on this channel. Left empty, the first narrated video sets it.', control: voice, stack: true })]), status]);
     const save = btn('Save look', async () => {
       status.textContent = '';
-      try { await send(`/channels/${channel.id}/edit`, { look: look.value.trim(), aspect: aspect.value, notes: notes.value.trim() }); }
+      try { await send(`/channels/${channel.id}/edit`, { look: look.value.trim(), aspect: aspect.value, notes: notes.value.trim(), voice: voice.value.trim() }); }
       catch (error) { status.textContent = M.loadFailure(error); return; }
       dialog.close(); toast('Look saved.'); await reload();
     }, 'primary');

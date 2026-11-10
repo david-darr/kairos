@@ -91,6 +91,12 @@ ELECTRON_SUITES = {
     "crm-smoke": ["tabs/crm/*", "scripts/crm-smoke.cjs"],
     "usage-overlay-smoke": ["electron/usage-overlay*", "static/js/usage-overlay*.js", "static/css/usage-overlay*", "scripts/usage-overlay-smoke.cjs"],
     "roblox-smoke": ["tabs/roblox/*", "static/js/roblox*.js", "scripts/roblox-smoke.cjs"],
+    "video-render-smoke": ["electron/designRender.js", "static/motion/*", "core/video_*.py", "core/ffmpeg_tools.py",
+                           "core/design_render_bridge.py", "routes/video_routes.py", "scripts/video_render_smoke.py",
+                           "scripts/video-render-smoke.cjs"],
+    "studio-checks": ["tabs/studio/*", "static/motion/*", "scripts/studio-checks.cjs"],
+    "studio-content-checks": ["static/js/studioContent*.js", "scripts/studio-content-checks.cjs"],
+    "motion-engine-checks": ["static/motion/*", "scripts/motion-engine-checks.cjs"],
 }
 
 
