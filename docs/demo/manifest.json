@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "7e2636db93518960e580e6cb99c465cc26bafb2162733f56190b461de6fc9aaa",
+  "app.js": "f707d17a26aa90d1d465cb1ebf7e2306bb5fa26cd6cd59a468d51cf8d8abf657",
   "fixtures.js": "67d97bbe9d7176e875c624fd99abe71c2c6e8aecf6a9d8e0940880d332a9c8ba",
   "index.html": "c2d216301aae8fa4b2c0bd67aa81b0bedd2fc114251448f7c1de1e54cf4a143a",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -1252,7 +1252,7 @@
   "static/js/agentProfile.js": "b0f9f570f3851f6414fd3ecbbb23ac41c28c5354be7d35c89634c72768837c24",
   "static/js/agentsMessenger.js": "38b24c0e6a33bc166572f4bfbfb1208fe86dcc05029a765d5cdc2d3e2e887d70",
   "static/js/api.js": "926d5a1f429e25067d0d84acc3b1aa12346738942e67cbf0773d00b870339dbf",
-  "static/js/app.js": "7f63e428e771adc4eb56d190a763ba8bba2110f27b33d70b83e152242816734d",
+  "static/js/app.js": "64cb552b57ee293175b58299b145d52ae297dacade718c456cbdbba50f4e5dea",
   "static/js/appModes.js": "a3b2415b73c44c34226a97a3a6aa182fc3fca4be14295f994d754ac813c8f1b3",
   "static/js/appTour.js": "9fbb54e77520eecbf75e64b3978bc276a6702003ecd9b8ddf46bf6129c191a49",
   "static/js/appearance.js": "3c138d27cf69f1982748da26d38344641fdb375d8043ba311961e2575a7cbbfc",
