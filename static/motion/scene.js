@@ -1,7 +1,7 @@
 // Pack A scenes (Video Styles build spec, unit 3): flat layered settings with parallax (sky, far, mid, near), simple
 // icon props and the cast, drawn by the rig. DOM-free; deterministic in (beat, t). The `scene` beat's data is
 // checked by core/video_store.py; this file only draws it.
-import { clamp, hash, inOut, seededRandom } from './kit.js';
+import { clamp, contrast, hash, inOut, rgb, seededRandom } from './kit.js';
 import { blinkAt, drawCharacter, figureBox, mouthAt, poseAt, viewAt } from './rig.js';
 import { cameraAt } from './layout.js';
 
@@ -60,12 +60,22 @@ function soft(g, color, x, y, w, h, alpha = .14, light = 1) {
   g.save(); g.globalAlpha *= alpha; g.fillStyle = grad; g.fillRect(x, y, w, h); g.restore();
 }
 
-function layer(g, name, setting, pal, w, h, ground, seed, seconds) {
+// The sky's own body: a soft sun disc over a meadow, city or ocean, a far planet in space, none indoors. A scene that
+// brings its own sun or moon (a prop) has its light already, so the sky draws none: one light source, and a second
+// body only when the scene asks for a moon beside its sun (the why-summer-is-warm sample drew a pale disc beside the
+// rayed sun prop, 2026-11-10).
+export const LIGHT_PROPS = ['sun', 'moon'];
+export function skyBody(setting, props = []) {
+  if ((props || []).some(p => LIGHT_PROPS.includes(p?.icon))) return null;
+  return setting === 'space' ? 'planet' : setting === 'room' || setting === 'lab' ? null : 'glow';
+}
+
+function layer(g, name, setting, pal, w, h, ground, seed, seconds, body) {
   const random = seededRandom(`${seed}:${name}`);
   if (name === 'sky') {
     const grad = g.createLinearGradient(0, 0, 0, ground); grad.addColorStop(0, pal.sky[0]); grad.addColorStop(1, pal.sky[1]);
     g.fillStyle = grad; g.fillRect(-w, -h, w * 3, h * 3);
-    if (setting === 'space' || setting === 'room' || setting === 'lab') return;
+    if (body !== 'glow') return;
     g.save(); g.globalAlpha = .5; g.fillStyle = pal.glow; g.beginPath(); g.arc(w * .78, h * .2, Math.min(w, h) * .12, 0, TAU); g.fill(); g.restore();
     return;
   }
@@ -100,6 +110,8 @@ function layer(g, name, setting, pal, w, h, ground, seed, seconds) {
     if (name === 'far') {
       g.fillStyle = pal.glow;
       for (let i = 0; i < 140; i++) { g.globalAlpha = .3 + random() * .6; g.beginPath(); g.arc(random() * w * 1.4 - w * .2, random() * ground, 1 + random() * 2.2, 0, TAU); g.fill(); }
+      g.globalAlpha = 1;
+      if (body !== 'planet') return;
       // A far planet, its soft light kept inside its own disc (a square of light showed around it before).
       const r = Math.min(w, h) * .1, px = w * .2, py = h * .24;
       g.globalAlpha = 1; g.fillStyle = pal.far; g.beginPath(); g.arc(px, py, r, 0, TAU); g.fill();
@@ -186,11 +198,11 @@ const clipped = (box, clip) => clip == null ? box : { ...box, h: Math.max(0, Mat
 // Draws the whole scene beat into `g` (w x h). Returns what layout reports: characters and props in frame pixels.
 export function drawScene(g, beat, project, w, h, ground, t, p) {
   const pal = paletteOf(project), scene = beat.scene || {}, setting = SETTINGS.includes(scene.setting) ? scene.setting : 'meadow';
-  const seed = hash(beat.id) % 100, boxes = [];
+  const seed = hash(beat.id) % 100, boxes = [], body = skyBody(setting, scene.props);
   for (const name of ['sky', 'far', 'mid', 'near']) {
     const tf = layerTransform(beat.camera, p, seed, DEPTH[name], w, h, ground * .85);
     g.save(); g.translate(tf.dx + tf.ax * (1 - tf.s), tf.dy + tf.ay * (1 - tf.s)); g.scale(tf.s, tf.s);
-    layer(g, name, setting, pal, w, h, ground, `${beat.id}:${setting}`, t);
+    layer(g, name, setting, pal, w, h, ground, `${beat.id}:${setting}`, t, body);
     g.restore();
   }
   const castTf = layerTransform(beat.camera, p, seed, DEPTH.cast, w, h, ground * .85), short = Math.min(w, h);
@@ -214,6 +226,58 @@ export function drawScene(g, beat, project, w, h, ground, t, p) {
   }
   g.restore();
   return boxes;
+}
+
+// -- A style pack's cards ----------------------------------------------------------------------------------------
+// Inside a style pack, title, statement, end and the other copy beats are drawn in the pack's world, not the design
+// look's plain background (the starter pack's end card came out as a white card between deep-blue scenes,
+// 2026-11-10): its sky gradient, its light (a soft glow whose strength is the pack's lighting) and its pale ground
+// under the copy. The type keeps the look's fonts; its colours come from the pack, chosen so every colour that copy
+// can sit on keeps 4.5:1. Pure: the same pack gives the same card.
+const mix = (a, b, k) => `rgb(${rgb(a).map((v, i) => Math.round(v * (1 - k) + rgb(b)[i] * k)).join(' ')})`;
+const worst = (color, grounds) => Math.min(...grounds.map(bg => contrast(color, bg)));
+export const CARD_GLOW = .16;   // the light's strongest blend over the sky, at soft lighting (glow is 1.8 times this)
+export function packCard(pack) {
+  const pal = pack.palette, light = LIGHTING[pack.lighting] ?? 1, top = pal.sky[0];
+  // The headline colour: the pack's light colours first, the darkest last, plain white or ink only when none reads.
+  const inks = [pal.glow, pal.near, pal.ink, pal.ground, pal.prop];
+  const text = [...inks, '#ffffff', '#111111'].find(c => contrast(c, top) >= 4.5)
+    || [...inks, '#ffffff', '#111111'].sort((a, b) => contrast(b, top) - contrast(a, top))[0];
+  // The light first (it is the pack's lighting): it blends over the sky up to CARD_GLOW x lighting, less only if the
+  // headline would drop under 4.6:1 on it. Then the sky runs toward its second colour as far as the headline still
+  // keeps 4.6:1 under that light.
+  const reads = (end, glow) => worst(text, [mix(top, pal.glow, glow), mix(end, pal.glow, glow), end]) >= 4.6;
+  let glow = Math.round(CARD_GLOW * light * 100) / 100;
+  while (glow > 0 && !reads(top, glow)) glow = Math.round((glow - .01) * 100) / 100;
+  glow = Math.max(0, glow);
+  let backdrop = top;
+  for (let k = 1; k > 0; k = Math.round((k - .05) * 100) / 100) { const end = mix(top, pal.sky[1], k); if (reads(end, glow)) { backdrop = end; break; } }
+  const grounds = [top, backdrop, mix(top, pal.glow, glow), mix(backdrop, pal.glow, glow)];
+  // Sub copy and the highlighted word take another pack colour only where it reads on every one of those grounds.
+  const pick = list => list.find(c => c !== text && worst(c, grounds) >= 4.5) || text;
+  const bg = [...grounds].sort((a, b) => contrast(text, a) - contrast(text, b))[0];
+  return { bg: top, backdrop, text, dim: pick([pal.near, pal.glow, pal.ground, pal.ink]), accent: pick([pal.prop, pal.near, pal.glow, pal.far]),
+    rule: pal.prop, second: pal.far, surface: pal.mid, onAccent: pal.ink, glow, light, worstBg: bg, palette: pal };
+}
+// The card's sky, full frame (outside the camera).
+export function drawCardSky(g, card, w, h, floor) {
+  const grad = g.createLinearGradient(0, 0, 0, floor); grad.addColorStop(0, card.bg); grad.addColorStop(1, card.backdrop);
+  g.fillStyle = grad; g.fillRect(0, 0, w, h);
+}
+// The card's light and ground, inside the camera: a soft glow from the upper right (none for flat lighting) drifting
+// slowly, and the pack's hills and pale ground below `floor` (the copy's safe area ends there, so copy never sits on them).
+export function drawCardWorld(g, card, w, h, floor, seconds) {
+  const pal = card.palette, short = Math.min(w, h);
+  if (card.glow > 0) {
+    const x = w * (.8 + .015 * Math.sin(seconds * .25)), y = h * .14, r = Math.max(w, h) * .6, [cr, cg, cb] = rgb(pal.glow);
+    const rg = g.createRadialGradient(x, y, 0, x, y, r); rg.addColorStop(0, `rgb(${cr} ${cg} ${cb} / 1)`); rg.addColorStop(1, `rgb(${cr} ${cg} ${cb} / 0)`);
+    g.save(); g.globalAlpha = card.glow; g.fillStyle = rg; g.fillRect(-w, -h, w * 3, h * 3); g.restore();
+  }
+  const random = seededRandom(`card:${pal.far}:${pal.mid}`);
+  hills(g, floor + h * .03, h * .012, 260, random() * 9, pal.far, w, h);
+  hills(g, floor + h * .055, h * .01, 170, random() * 9, pal.mid, w, h);
+  g.fillStyle = pal.near; g.fillRect(-w, floor + h * .075, w * 3, h * 2);
+  soft(g, pal.glow, -w, floor + h * .075, w * 3, short * .05, .14, card.light);
 }
 
 // The boxes drawScene would report, without drawing (layout()).

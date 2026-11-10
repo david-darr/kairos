@@ -1,5 +1,5 @@
 import { clamp, expoOut, pop, inOut, hash, seededRandom, zoomAbout, scrim, card, windowReveal, BAYER, contrast, readable, luminance, rgb } from './kit.js';
-import { drawScene, sceneBoxes, groundLine } from './scene.js';
+import { drawScene, sceneBoxes, groundLine, packCard, drawCardSky, drawCardWorld } from './scene.js';
 import { normalizeProject, dimensions, safeArea, captionBand, captionAt, fitText, frameTime, beatAt, transitionAt, beatLayout, cameraAt, beatElapsed, transitionTransform, visibleBox, compositionAt, revealElapsed, listMarker } from './layout.js';
 
 function lookTokens(canvas, supplied) {
@@ -73,6 +73,12 @@ export function mount(canvas, input, options = {}) {
   const project = normalizeProject(input), { width: w, height: h, aspect } = dimensions(options.aspect || project.aspects[0]);
   canvas.width = w; canvas.height = h;
   const doc = canvas.ownerDocument, ctx = canvas.getContext('2d'), style = lookTokens(canvas, options.tokens), safe = safeArea(aspect, project.captioned);
+  // A style pack draws its copy beats in its own world (scene.js packCard); scenes and captions keep their own colours.
+  const packLook = project.pack?.palette ? packCard(project.pack) : null;
+  const cardStyle = packLook ? { ...style, bg: packLook.bg, backdrop: packLook.backdrop, text: packLook.text, dim: packLook.dim, accent: packLook.accent,
+    second: packLook.second, surface: packLook.surface, onAccent: packLook.onAccent, rule: packLook.rule, pattern: 'flat', reportBg: packLook.worstBg,
+    palette: [packLook.text, packLook.dim, packLook.accent] } : style;
+  const styleOf = beat => beat.kind === 'scene' ? style : cardStyle;
   const measureCtx = buffer(doc, 1, 1).getContext('2d');
   const measure = (text, size, role) => { measureCtx.font = font(style, size, role); return measureCtx.measureText(text).width; };
   const images = new Map(), samples = new Map(), plans = new Map();
@@ -107,16 +113,22 @@ export function mount(canvas, input, options = {}) {
   })();
 
   function background(g, beat, p) {
+    const style = styleOf(beat);
     g.fillStyle = style.bg; g.fillRect(0, 0, w, h);
     const seconds = p * (beat.end - beat.start);
     // A Pack A scene draws its own layered setting, props and cast (scene.js); the look keeps the type.
     if (beat.kind === 'scene') { drawScene(g, beat, project, w, h, groundLine(h, band, project.captioned), seconds, p); return; }
-    const gradient = g.createLinearGradient(0, 0, w, h);
-    gradient.addColorStop(0, style.bg); gradient.addColorStop(1, style.backdrop);
-    g.fillStyle = gradient; g.fillRect(0, 0, w, h);
+    if (packLook) drawCardSky(g, packLook, w, h, safe.y + safe.h);
+    else {
+      const gradient = g.createLinearGradient(0, 0, w, h);
+      gradient.addColorStop(0, style.bg); gradient.addColorStop(1, style.backdrop);
+      g.fillStyle = gradient; g.fillRect(0, 0, w, h);
+    }
     const camera = cameraAt(beat.camera, p, hash(beat.id) % 100);
     g.save(); g.translate(camera.dx * w, camera.dy * h);
     zoomAbout(g, w / 2, h / 2, camera.scale, () => {
+      if (packLook) drawCardWorld(g, packLook, w, h, safe.y + safe.h, seconds);
+      else {
       g.save(); g.translate(Math.sin(seconds * .21) * 22, Math.sin(seconds * .17) * 22); g.globalAlpha = .06; g.fillStyle = style.accent; g.strokeStyle = style.second; g.lineWidth = 2;
       if (style.pattern === 'dots' || style.pattern === 'confetti') {
         for (let y = -44; y < h + 44; y += 44) for (let x = -44; x < w + 44; x += 44) { g.beginPath(); g.arc(x, y, style.radius > 10 ? 1.5 : 2.5, 0, Math.PI * 2); g.fill(); }
@@ -139,12 +151,13 @@ export function mount(canvas, input, options = {}) {
         g.stroke();
       }
       g.restore();
+      }
       for (const box of plan(beat).filter(b => b.kind === 'image')) {
         const img = images.get(beat.image);
         if (img) {
           const paint = () => {
             if (beat.treatment === 'none' || box.contain) cover(g, img, box, box.contain);
-            else treatment(g, img, box, beat.treatment, beat.image);
+            else treatment(g, img, box, beat.treatment, beat.image, style);
           };
           if (beat.kind === 'logo' || beat.kind === 'split') windowReveal(g, p * (beat.end - beat.start) / .45, box, paint);
           else paint();
@@ -160,7 +173,7 @@ export function mount(canvas, input, options = {}) {
     g.restore();
     if (beat.kind === 'image') scrim(g, w, h, style.bg, .55);
   }
-  function treatment(g, img, box, kind, name) {
+  function treatment(g, img, box, kind, name, style) {
     const cols = Math.ceil(box.w / 9), rows = Math.ceil(box.h / 9), key = `${name}:${cols}:${rows}`;
     if (!samples.has(key)) {
       const c = buffer(doc, cols, rows), cg = c.getContext('2d', { willReadFrequently: true });
@@ -190,6 +203,7 @@ export function mount(canvas, input, options = {}) {
     return { local, step, delay, length: Math.min(.38, Math.max(.05, (beat.end - beat.start) * .18)), words };
   }
   function foreground(g, beat, t) {
+    const style = styleOf(beat);
     if (beat.kind === 'image') {
       g.fillStyle = style.bg; g.fillRect(safe.x, safe.y + safe.h * .50, safe.w, safe.h * .50);
     }
@@ -233,7 +247,7 @@ export function mount(canvas, input, options = {}) {
       });
       g.restore();
       if (box.role !== 'body' && beat.kind !== 'scene') {
-        g.fillStyle = style.accent;
+        g.fillStyle = style.rule || style.accent;   // the rule is decoration: a pack's prop colour even where it would not read as text
         const k = expoOut(state.local / state.length);
         g.fillRect(box.x, Math.min(safe.y + safe.h - 8, box.y + box.h + 8), Math.min(box.w * .24, 240) * k, 6);
       }
@@ -357,11 +371,13 @@ export function mount(canvas, input, options = {}) {
         if (!visible) continue;
         const { lines, lineHeight, delay, role, contain, image, ...publicBox } = visible;
         if (box.kind === 'text') {
+          const s = styleOf(b);
           publicBox.role = role; publicBox.fontSize = box.size;
           publicBox.text = state.words.filter((_, i) => state.local > state.delay + i * state.step).join(' ');
-          publicBox.color = readable(role === 'number' ? style.accent : role === 'body' ? style.dim : style.text, style.bg, style.palette);
-          publicBox.bg = style.bg;
-          publicBox.highlightColor = readable(style.accent, style.bg, style.palette);
+          publicBox.color = readable(role === 'number' ? s.accent : role === 'body' ? s.dim : s.text, s.bg, s.palette);
+          // A pack card reports the lightest sky its copy can sit on (sky gradient and glow), so the check is honest.
+          publicBox.bg = s.reportBg || s.bg;
+          publicBox.highlightColor = readable(s.accent, s.bg, s.palette);
         }
         result.push(publicBox);
       }

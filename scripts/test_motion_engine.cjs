@@ -236,5 +236,29 @@ const path = require('node:path');
   assert.equal(S.paletteOf({ palette: 'dusk', pack: pack }).near, '#dfe6f5');
   assert.equal(S.paletteOf({ palette: 'dusk', pack: pack }).light, S.LIGHTING.glow);
   assert.equal(S.paletteOf({ palette: 'dusk', pack: null }).near, S.PALETTES.dusk.near);
+  // One light per sky: the sky's own disc (or far planet in space) only when the scene brings no sun or moon of its own
+  // (the 2026-11-10 pack sample drew a pale disc beside its rayed sun).
+  assert.equal(S.skyBody('meadow', []), 'glow');
+  assert.equal(S.skyBody('space', [{ icon: 'planet' }]), 'planet');
+  assert.equal(S.skyBody('room', []), null);
+  for (const setting of ['meadow', 'city', 'ocean', 'space']) {
+    assert.equal(S.skyBody(setting, [{ icon: 'sun' }]), null, `${setting}: a sun prop is the only light`);
+    assert.equal(S.skyBody(setting, [{ icon: 'moon' }, { icon: 'star' }]), null, `${setting}: a moon prop is the only light`);
+  }
+  // A pack's cards (title, statement, end...) are drawn in its sky, light and ground, never the look's plain card, and
+  // every colour copy can sit on keeps 4.5:1 (the 2026-11-10 sample's end card was plain white).
+  const lit = S.packCard(pack);
+  assert.deepEqual([lit.bg, lit.palette.near, lit.rule, lit.text], ['#173d7a', '#dfe6f5', '#ffd166', '#ffffff']);
+  assert.ok(lit.glow > S.packCard({ ...pack, lighting: 'soft' }).glow * 1.5 && S.packCard({ ...pack, lighting: 'flat' }).glow === 0, 'lighting sets the light');
+  assert.deepEqual(S.packCard(pack), lit, 'deterministic');
+  for (const [name, palette] of Object.entries({ ...S.PALETTES, starter: pack.palette })) {
+    for (const lighting of ['flat', 'soft', 'glow']) {
+      const c = S.packCard({ palette, lighting });
+      const grounds = [c.bg, c.backdrop, c.worstBg];
+      for (const [role, color] of Object.entries({ text: c.text, dim: c.dim, accent: c.accent })) {
+        assert.ok(grounds.every(g => K.contrast(color, g) >= 4.5), `${name}/${lighting}: ${role} ${color} reads on its card`);
+      }
+    }
+  }
   console.log(`Motion engine pure checks passed (${boxesChecked} fitted text boxes; all kinds/aspects/cameras/transitions; Pack A rig and scenes; style packs and close shots).`);
 })().catch(error => { console.error(error); process.exitCode = 1; });

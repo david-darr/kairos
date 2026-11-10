@@ -119,6 +119,21 @@ strong the soft light gradients on the flat layers are) and its caption case. `n
 only those; a malformed palette is dropped and the named palette is used. Nothing else of a pack
 reaches the page, and nothing in a pack runs.
 
+Inside a pack, every beat that is not a scene (title, statement, end and the other copy kinds) is a
+card in the pack's world, not the design look's plain background: `packCard` gives its sky gradient,
+its light (a soft glow from the upper right, CARD_GLOW times the lighting, none when flat) and its
+hills and pale ground below the copy's safe area. The type keeps the look's fonts; its colours come
+from the pack and are chosen so every colour copy can sit on (sky, gradient end, glow) keeps 4.5:1,
+and `kdLayout` reports that lightest ground as the box's `bg`. The rule under a headline is the
+pack's prop colour. Captions keep their own card.
+
+One light per sky: a meadow, city or ocean sky draws a soft sun disc and space a far planet only
+when the scene has no sun or moon prop (`skyBody`); a scene's own sun or moon is its light, and two
+bodies show only when the scene asks for a moon beside its sun.
+
+A title or end card speaks only its own words. The render notes (core/video_checks.card_narration_notes)
+name a card whose line is about something else and any caption on screen while a card shows.
+
 Captions stay clear of characters: a captioned scene stands its figures 3% of the height above the
 caption band, and a close shot cuts the cast at the near ground layer (`castClip`), so a close
 figure is framed from the chest up and its box in `layout()` carries that `clip`. The render notes
