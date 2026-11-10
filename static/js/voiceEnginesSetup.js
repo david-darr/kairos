@@ -68,7 +68,7 @@ export function elevenLabsSetup(state, { onChanged = () => {}, request = api } =
     actions.push(forget);
   }
   return el('div', { class: 'free-voice-setup voice-engine-setup', 'data-voice-engine': 'elevenlabs' }, [
-    el('p', { class: 'meta', text: active ? 'In use: ElevenLabs reads replies aloud.' : own.has_key ? 'Key saved. Not in use right now.' : 'Not set up.' }),
+    ...(active || own.has_key ? [el('p', { class: 'meta', text: active ? 'In use: ElevenLabs reads replies aloud.' : 'Key saved. Not in use right now.' })] : []),
     el('ol', { class: 'free-voice-steps' }, [
       el('li', {}, ['Sign in at ElevenLabs and open API keys. ', el('a', { href: own.key_page || 'https://elevenlabs.io/app/settings/api-keys', target: '_blank', rel: 'noopener', class: 'set-link', text: 'Open ElevenLabs API keys' })]),
       el('li', { text: 'Create a key with Text to Speech and Voices access, copy it and paste it here.' }),
@@ -115,7 +115,7 @@ export function voiceStudioSetup(state, { isAdmin = false, onChanged = () => {},
     ? [el('div', { class: 'free-voice-key' }, [url, input, check, save]), said]
     : [el('p', { class: 'meta', text: 'An admin can connect VoiceStudio.' })];
   return el('div', { class: 'free-voice-setup voice-engine-setup', 'data-voice-engine': 'voicestudio' }, [
-    el('p', { class: 'meta', text: active ? `In use: VoiceStudio at ${own.url}.` : 'Not in use.' }),
+    ...(active ? [el('p', { class: 'meta', text: `In use: VoiceStudio at ${own.url}.` })] : []),
     el('p', { class: 'free-voice-limits' }, [VOICESTUDIO_NOTE, ' ', el('a', { href: own.repo || 'https://github.com/debpalash/VoiceStudio', target: '_blank', rel: 'noopener', class: 'set-link', text: 'VoiceStudio on GitHub' })]),
     ...controls,
     el('p', { class: 'free-voice-limits', text: 'Not checked against a running VoiceStudio yet: built from its published Local API.' }),

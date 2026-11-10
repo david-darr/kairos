@@ -268,6 +268,13 @@ module.exports = async ({ js, win, waitFor, delay, navigate, demoState, writes, 
       localStorage.removeItem('jarvis:speech-input-device'); localStorage.removeItem('jarvis:speech-voice');
     })()`);
     await open('speech'); await waitFor("!!document.querySelector('#speech-input-device') && !!document.querySelector('#speech-voice')");
+    // Voice engines (voiceEnginesSetup.js): ElevenLabs and VoiceStudio, keys as password fields, a free Check, plain copy.
+    await waitFor("!!document.querySelector('.speech-voice-engines [data-voice-engine=\"voicestudio\"]')");
+    const engines = await js(`(() => { const g = document.querySelector('.speech-voice-engines'); return {
+      eleven: !!g.querySelector('[data-voice-engine="elevenlabs-key"][type="password"]') && !!g.querySelector('[data-voice-engine="elevenlabs-check"]'),
+      studio: g.querySelector('[data-voice-engine="voicestudio-url"]')?.value, studioKey: g.querySelector('[data-voice-engine="voicestudio-key"]')?.type,
+      cost: g.textContent.includes('per 1,000 characters'), privacy: g.textContent.includes('sent to ElevenLabs'), dash: /—/.test(g.textContent) }; })()`);
+    assert.deepEqual(engines, { eleven: true, studio: 'http://127.0.0.1:3900', studioKey: 'password', cost: true, privacy: true, dash: false }, 'Speech: voice engines offer ElevenLabs and VoiceStudio with a free Check and plain cost and privacy copy');
     assert.equal(await value('#speech-input-device'), '', 'Speech: starts on the system default microphone');
     let from = await mark();
     await setValue('#speech-input-device', 'dev-head-222222', 'change');
