@@ -22,20 +22,34 @@ function lockPath() {
   } catch { return path.join(__dirname, '..', 'data', 'electron.lock'); }
 }
 let heldLock = null;
+// The owner's process id is in owner.json. A lock without one (made by an older copy of
+// this runner in another worktree, or a crash between the two steps) counts as stale only
+// after 35 minutes, longer than the longest run's 30-minute timeout.
+function lockIsStale(lock) {
+  try {
+    const { pid } = JSON.parse(fs.readFileSync(path.join(lock, 'owner.json'), 'utf8'));
+    try { process.kill(pid, 0); return false; } catch (error) { return error.code === 'ESRCH'; }
+  } catch {
+    try { return Date.now() - fs.statSync(lock).mtimeMs > 35 * 60000; } catch { return false; }
+  }
+}
 function takeLock() {
   if (heldLock || process.env.JARVIS_ELECTRON_LOCK_HELD) return;
   const lock = lockPath();
   fs.mkdirSync(path.dirname(lock), { recursive: true });
   let told = false;
   for (;;) {
-    try { fs.mkdirSync(lock); heldLock = lock; break; }
+    try { fs.mkdirSync(lock); heldLock = lock; fs.writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({ pid: process.pid, started: new Date().toISOString() })); break; }
     catch (error) {
       if (error.code !== 'EEXIST') throw error;
+      // 2026-11-10: a runner that is force-killed never runs its exit handler, so its lock
+      // stayed forever (three times on 2026-11-09). Clear a lock whose owner is gone.
+      if (lockIsStale(lock)) { console.log('Clearing a stale Electron lock (its run is no longer going).'); try { fs.rmSync(lock, { recursive: true, force: true }); } catch {} continue; }
       if (!told) { console.log('Waiting for another Electron test run to finish (' + lock + ' exists; remove it only if no run is going).'); told = true; }
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3000);
     }
   }
-  const release = () => { if (heldLock) { try { fs.rmdirSync(heldLock); } catch {} heldLock = null; } };
+  const release = () => { if (heldLock) { try { fs.rmSync(heldLock, { recursive: true, force: true }); } catch {} heldLock = null; } };
   process.on('exit', release);
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGBREAK']) process.on(signal, () => { release(); process.exit(130); });
 }
