@@ -166,7 +166,9 @@ class RealtimeSession:
             task.cancel()
         await asyncio.gather(*others, return_exceptions=True)
         if self.ready_at is not None:
-            seconds = self.billed_seconds if self.billed_seconds is not None else self.clock() - self.ready_at
+            # The provider's own final count when it confirmed one (GPT-Live's session.closed), else the clock.
+            final = self._final.is_set() and self.billed_seconds is not None
+            seconds = self.billed_seconds if final else self.clock() - self.ready_at
             self.call["realtime"] = {**(self.call.get("realtime") or {}), "seconds": round(seconds, 1),
                                      "cost_estimate": 0.0 if self.free_tier else realtime_voice.cost_estimate(self.provider, seconds)}
             calls._save(self.call)
