@@ -1,19 +1,26 @@
 import { api, el, toast } from '../api.js';
 import { refreshSpeechStatus, listInputDevices, getInputDevice, setInputDevice, requestMicrophoneAccess, isRecordingSupported } from '../voiceInput.js';
 import { isSpeechOutputSupported, whenVoicesReady, resolveVoice, getPreferredVoice, setPreferredVoice } from '../voiceOutput.js';
-import { group, row, note, pill } from '../settingsKit.js';
+import { group, row, pill } from '../settingsKit.js';
 import { voiceSettings } from '../callVoice.js';
 
 // Settings > Workspace > Speech (David's ask 2026-09-15). Since 2026-11-10 (Locked shape) the main path is one plain
-// Voice choice (voiceEnginesSetup.js) and the microphone; everything technical (Voicebox, the voice picker, the
-// recognition model, optional downloads, the GPU runtime folder, realtime keys) sits under More options.
+// Voice choice (voiceEnginesSetup.js) and the microphone. More options was reorganised the same day (David: "clean up
+// the extended voice settings") into a few named groups, each with a one-line purpose:
+//   Voice quality and voice  - the Standard voice download (Kokoro), HD voice on an NVIDIA card, the fallback device
+//                              voice and the Open Mic voice
+//   Pronunciations           - words Kairos Voice says wrong
+//   Listening                - the recognition model and Smart Turn (when you have finished speaking)
+//   Voice servers on this computer - Voicebox and another OpenAI-compatible server, each set up behind its own button
+//   Realtime on a free Gemini key
+//   Advanced (one disclosure) - the whisper.cpp GPU folder, where each voice runs, the HD voice's files
+// Removed as duplicates: the Open Mic voice's own "Connect local voices" (the same as Voice servers) and the separate
+// "Optional voice features" and "Processor" groups (their rows live in the groups above now).
 //
-// Dictation ships with the engine but no model, so without this panel there
-// is no way to obtain one and the mic button can only ever refuse. Models are
-// several hundred megabytes and land in the shared data directory, so
-// downloading is admin-gated the same way adding a model endpoint is; the
-// status itself is readable by anyone, since a non-admin still needs to know
-// why dictation is unavailable.
+// Dictation ships with the engine but no model, so without this panel there is no way to obtain one and the mic button
+// can only ever refuse. Models are several hundred megabytes and land in the shared data directory, so downloading is
+// admin-gated the same way adding a model endpoint is; the status itself is readable by anyone, since a non-admin
+// still needs to know why dictation is unavailable.
 
 const POLL_MS = 700;
 
@@ -61,11 +68,11 @@ export async function renderSpeechPanel(content, status) {
     return group({ title: 'Microphone', cls: 'speech-devices' }, rows);
   }
 
-  // -- voice -----------------------------------------------------------------
-  async function drawVoice() {
-    if (!isSpeechOutputSupported()) return null;
+  // -- the device voice and the Open Mic voice (rows of Voice quality and voice) --------------------------------------
+  async function voiceRows() {
+    if (!isSpeechOutputSupported()) return [];
     const voices = await whenVoicesReady();
-    if (!root.isConnected) return null;
+    if (!root.isConnected) return [];
     const automatic = resolveVoice(voices);
     const select = el('select', { id: 'speech-voice', 'aria-label': 'Voice' });
     select.append(el('option', {
@@ -97,63 +104,66 @@ export async function renderSpeechPanel(content, status) {
       toast(select.value ? 'Voice updated' : 'Using the best available voice', 'success');
     });
 
-    const rows = [row({ title: 'Device voice', description: 'The voice this device speaks with when no other voice is ready.', control: [preview, select] })];
-    if (!voices.some(v => /^en[-_]GB/i.test(v.lang))) {
-      // David asked for a British voice. None is installed, and quietly
-      // offering a list of American ones would look like the request was
-      // ignored. This says what is missing and exactly how to fix it.
-      rows.push(row({ title: 'No British English voice installed', description:
-        'Only the American voices are listed. Add one in Windows Settings under Time & language, Speech, Manage voices, Add voices, '
-        + 'English (United Kingdom). It appears here after a restart and is then chosen automatically.' }));
-    }
+    // David asked for a British voice. When none is installed, quietly offering a list of American ones would look
+    // like the request was ignored, so the row says what is missing and how to add one.
+    const british = voices.some(v => /^en[-_]GB/i.test(v.lang)) ? '' : ' No British English voice is installed: add one in Windows Settings, Time & language, Speech, Manage voices.';
+    const rows = [row({ title: 'Backup voice', description: `This device's own voice. Kairos uses it only when no other voice is ready.${british}`, control: [preview, select] })];
     // Open Mic speaks through the same sentence speaker a call uses. By default it follows the Voice above; a voice
     // picked here is used for Open Mic instead. Saved as kairos:neural-voice:openmic (openMic.js OPEN_MIC_VOICE_KEY).
-    const neural = voiceSettings({ id: 'openmic' }, select, {}, { follow: true });
+    // The engine's own servers are set up under Voice servers, so the call screen's "Connect local voices" is hidden.
+    const neural = voiceSettings({ id: 'openmic' }, select, {}, { follow: true, connect: false });
     neural.sync();
     let neuralLoaded = false;
     const loadNeural = () => { if (neuralLoaded) return; neuralLoaded = true; neural.load(); };
     neural.node.addEventListener('change', () => { if (neural.selection().provider === 'neural') loadNeural(); });
     if (neural.selection().provider === 'neural') loadNeural();
-    rows.push(row({ title: 'Open Mic voice', description: 'Same as the Voice follows your choice above. Or pick a voice from its engine, or the device voice, for Open Mic only.', control: [neural.node] }));
-    // Stated here because this is exactly where someone looks for it, and
-    // silence would read as an oversight rather than a real constraint.
-    rows.push(row({ title: 'Output device', description:
-      'Spoken replies always play through your system default output. The browser speech engine provides no way to choose a device, so change it in your operating system sound settings.' }));
-    // speech-voice is its own hook, so a test can target this group rather
-    // than whichever speech-devices group matched first.
-    return group({ title: 'Voice picker', cls: 'speech-devices speech-voice' }, rows);
+    rows.push(row({ title: 'Open Mic voice', description: 'Same as the Voice, unless you pick another voice for Open Mic only.', control: [neural.node], stack: true, cls: 'speech-openmic-voice' }));
+    // Stated here, next to the voice, because that is where someone looks for it (speechSynthesis has no output choice).
+    rows.push(row({ title: 'Output device', description: 'Spoken replies play through your system default output. Change it in your operating system sound settings.' }));
+    return rows;
   }
 
-  async function draw() {
-    let state;
-    try {
-      state = await api('/api/speech/status');
-    } catch {
-      root.replaceChildren(el('p', { class: 'meta', text: 'Speech status could not be loaded.' }));
-      return;
+  // An optional download row (Kokoro, Smart Turn): its state in plain words, Download with progress, Remove.
+  function optionalRow(item, title, description) {
+    const said = el('span', { class: 'meta', role: 'status', text: item.state === 'ready' ? '' : item.status });
+    const parts = [said];
+    if (item.state === 'ready') parts.unshift(pill('Ready', 'ok'));
+    if (item.downloaded && isAdmin) {
+      parts.push(el('button', { type: 'button', class: 'btn quiet', text: 'Remove', onclick: async () => {
+        try { await api(`/api/speech/optional/${item.name}`, { method: 'DELETE' }); refreshSpeechStatus(); draw(); }
+        catch (error) { toast(error.message || 'Could not remove it.', 'error'); }
+      } }));
+    } else if (!item.downloaded && item.pinned && item.state !== 'downloading') {
+      if (!isAdmin) parts.push(el('span', { class: 'meta', text: 'An admin can download this' }));
+      else {
+        const button = el('button', { type: 'button', class: 'btn', text: `Download · ${item.size_mb} MB`, 'data-speech-download': item.name });
+        button.addEventListener('click', async () => {
+          button.disabled = true; said.textContent = 'Starting…';
+          try { await api(`/api/speech/optional/${item.name}/download`, { method: 'POST' }); }
+          catch (error) { said.textContent = item.status; button.disabled = false; toast(error.message || 'Download could not be started.', 'error'); return; }
+          const timer = setInterval(async () => {
+            if (!root.isConnected) { clearInterval(timer); timers.delete(timer); return; }
+            let info; try { info = await api(`/api/speech/optional/${item.name}/progress`); } catch { return; }
+            if (info.total) said.textContent = `${Math.min(100, Math.round((info.completed / info.total) * 100))}%`;
+            if (info.done) {
+              clearInterval(timer); timers.delete(timer);
+              if (info.error) { said.textContent = item.status; button.disabled = false; toast(`Download failed: ${info.error}`, 'error'); return; }
+              refreshSpeechStatus(); toast(`${item.label} downloaded`, 'success'); draw();
+            }
+          }, POLL_MS);
+          timers.add(timer);
+        });
+        parts.push(button);
+      }
     }
-    if (!root.isConnected) return;
+    // Not yet downloaded but the runtime is also missing: say so up front rather than after a long download.
+    const needs = !item.downloaded && item.missing_runtime?.length ? ` Also needs ${item.missing_runtime_text || item.missing_runtime.join(', ')}.` : '';
+    return row({ title, description: description + needs, control: el('div', { class: 'speech-model-actions' }, parts), cls: 'speech-optional', attrs: { 'data-optional': item.name } });
+  }
 
-    // The main path: the Voice and the microphone. `parts` collects More options.
-    const main = [], parts = [];
-    const kokoroReady = (state.optional || []).some(item => item.name === 'kokoro' && item.state === 'ready');
-    const choice = await drawVoiceChoice(kokoroReady, () => draw());
-    if (choice && root.isConnected) main.push(choice);
-
-    if (state.vc_runtime?.missing) {
-      // Windows without Microsoft's C++ runtime (the installer normally adds it): one plain line, not a DLL error.
-      main.push(group({}, [row({ title: state.vc_runtime.message || 'Install the Microsoft Visual C++ runtime',
-        description: 'Microsoft download: aka.ms/vs/17/release/vc_redist.x64.exe. Restart Kairos afterwards.' })]));
-    }
-    if (!state.engine_available) {
-      // A missing binding is a broken build, not something a download fixes,
-      // so this deliberately does not offer one.
-      main.push(group({}, [row({ title: 'Speech recognition is unavailable in this build.',
-        description: 'The speech engine could not be loaded, so dictation cannot run. Reinstalling the latest release usually resolves it.' })]));
-    }
-
-    const modelRows = [];
-    for (const model of state.engine_available ? state.models : []) {
+  // -- the recognition models (rows of Listening) ---------------------------------------------------------------------
+  function recognitionRows(state) {
+    return (state.engine_available ? state.models : []).map(model => {
       let control;
       if (model.downloaded) {
         control = model.name === state.active_model ? pill('In use', 'ok') : pill('Downloaded', 'muted');
@@ -177,9 +187,7 @@ export async function renderSpeechPanel(content, status) {
             if (!root.isConnected) { clearInterval(timer); timers.delete(timer); return; }
             let info;
             try { info = await api(`/api/speech/models/${model.name}/progress`); } catch { return; }
-            if (info.total) {
-              progress.textContent = `${Math.round((info.completed / info.total) * 100)}%`;
-            }
+            if (info.total) progress.textContent = `${Math.round((info.completed / info.total) * 100)}%`;
             if (info.done) {
               clearInterval(timer);
               timers.delete(timer);
@@ -189,9 +197,8 @@ export async function renderSpeechPanel(content, status) {
                 toast(`Download failed: ${info.error}`, 'error');
                 return;
               }
-              // The cached status drives whether the mic button works at all,
-              // so it has to be invalidated here or dictation keeps refusing
-              // until the page is reloaded.
+              // The cached status drives whether the mic button works at all, so it has to be invalidated here or
+              // dictation keeps refusing until the page is reloaded.
               refreshSpeechStatus();
               toast(`${model.label} speech model ready`, 'success');
               draw();
@@ -201,66 +208,68 @@ export async function renderSpeechPanel(content, status) {
         });
         control = el('div', { class: 'speech-model-actions' }, [progress, button]);
       }
-      modelRows.push(row({ title: `${model.label} · ${model.size_mb} MB`, description: model.description || '', control, cls: 'speech-model' }));
-    }
-    if (state.engine_available) parts.push(group({ title: 'Recognition model', description: state.active_model
-      ? `Using the ${state.active_model} model.`
-      : 'No model downloaded yet. Dictation stays unavailable until one is.' }, modelRows));
-
-    // Optional ONNX downloads. Each row says plainly what is missing; nothing downloads unless Download is pressed.
-    const optionalRows = (state.optional || []).map(item => {
-      const status = el('span', { class: 'meta', role: 'status', text: item.status });
-      const parts = [status];
-      if (item.state === 'ready') parts.unshift(pill('Ready', 'ok'));
-      if (item.downloaded && isAdmin) {
-        parts.push(el('button', { type: 'button', class: 'btn quiet', text: 'Remove', onclick: async () => {
-          try { await api(`/api/speech/optional/${item.name}`, { method: 'DELETE' }); refreshSpeechStatus(); draw(); }
-          catch (error) { toast(error.message || 'Could not remove it.', 'error'); }
-        } }));
-      } else if (!item.downloaded && item.pinned && item.state !== 'downloading') {
-        if (!isAdmin) parts.push(el('span', { class: 'meta', text: 'An admin can download this' }));
-        else {
-          const button = el('button', { type: 'button', class: 'btn', text: 'Download' });
-          button.addEventListener('click', async () => {
-            button.disabled = true; status.textContent = 'Starting…';
-            try { await api(`/api/speech/optional/${item.name}/download`, { method: 'POST' }); }
-            catch (error) { status.textContent = item.status; button.disabled = false; toast(error.message || 'Download could not be started.', 'error'); return; }
-            const timer = setInterval(async () => {
-              if (!root.isConnected) { clearInterval(timer); timers.delete(timer); return; }
-              let info; try { info = await api(`/api/speech/optional/${item.name}/progress`); } catch { return; }
-              if (info.total) status.textContent = `${Math.min(100, Math.round((info.completed / info.total) * 100))}%`;
-              if (info.done) {
-                clearInterval(timer); timers.delete(timer);
-                if (info.error) { status.textContent = item.status; button.disabled = false; toast(`Download failed: ${info.error}`, 'error'); return; }
-                refreshSpeechStatus(); toast(`${item.label} downloaded`, 'success'); draw();
-              }
-            }, POLL_MS);
-            timers.add(timer);
-          });
-          parts.push(button);
-        }
-      }
-      // Not yet downloaded but the runtime is also missing: say so up front rather than after a long download.
-      const needs = !item.downloaded && item.missing_runtime?.length ? ` Also needs ${item.missing_runtime_text || item.missing_runtime.join(', ')}.` : '';
-      // Once usable, say which part of the computer runs it (Kokoro: the graphics card when it can, else the processor).
-      const runsOn = item.runs_on ? ` ${item.runs_on}` : '';
-      return row({ title: `${item.label} · ${item.size_mb} MB`, description: (item.description || '') + needs + runsOn, control: el('div', { class: 'speech-model-actions' }, parts), cls: 'speech-optional' });
+      return row({ title: `Recognition: ${model.label} · ${model.size_mb} MB`, description: model.description || '', control, cls: 'speech-model' });
     });
-    if (optionalRows.length) parts.push(group({ title: 'Optional voice features', description: 'Not needed for dictation. They need the ONNX runtime and stay off until you download them.', cls: 'speech-optional-group' }, optionalRows));
+  }
 
-    const deviceSection = await drawDevices();
-    if (deviceSection && root.isConnected) main.push(deviceSection);
-    const engines = await drawVoiceServers(isAdmin, () => draw());
-    if (engines && root.isConnected) parts.unshift(engines);
-    const voiceSection = await drawVoice();
-    if (voiceSection && root.isConnected) parts.splice(engines ? 1 : 0, 0, voiceSection);
-    const sayings = await drawPronunciations();
-    if (sayings && root.isConnected) parts.splice((engines ? 1 : 0) + (voiceSection ? 1 : 0), 0, sayings);
-    if (state.engine_available && state.acceleration?.supported) parts.push(drawRuntime(state));
+  async function draw() {
+    let state;
+    try {
+      state = await api('/api/speech/status');
+    } catch {
+      root.replaceChildren(el('p', { class: 'meta', text: 'Speech status could not be loaded.' }));
+      return;
+    }
+    if (!root.isConnected) return;
+    const engines = await api('/api/voice-engines', { toast: false }).catch(() => null);
+    if (!root.isConnected) return;
+    const setup = await import('../voiceEnginesSetup.js');
+    const optional = Object.fromEntries((state.optional || []).map(item => [item.name, item]));
+
+    // The main path: the Voice and the microphone.
+    const main = [];
+    if (engines) main.push(group({ title: 'Voice', cls: 'speech-voice-choice', description: setup.APPLIES },
+      [setup.voiceChoice(engines, { kokoroReady: optional.kokoro?.state === 'ready', isAdmin, onChanged: () => draw() })]));
+    if (state.vc_runtime?.missing) {
+      // Windows without Microsoft's C++ runtime (the installer normally adds it): one plain line, not a DLL error.
+      main.push(group({}, [row({ title: state.vc_runtime.message || 'Install the Microsoft Visual C++ runtime',
+        description: 'Microsoft download: aka.ms/vs/17/release/vc_redist.x64.exe. Restart Kairos afterwards.' })]));
+    }
+    if (!state.engine_available) {
+      // A missing binding is a broken build, not something a download fixes, so this deliberately does not offer one.
+      main.push(group({}, [row({ title: 'Speech recognition is unavailable in this build.',
+        description: 'The speech engine could not be loaded, so dictation cannot run. Reinstalling the latest release usually resolves it.' })]));
+    }
+    const devices = await drawDevices();
+    if (devices && root.isConnected) main.push(devices);
+
+    // More options, in named groups.
+    const parts = [];
+    const quality = [];
+    if (optional.kokoro) quality.push(optionalRow(optional.kokoro, 'Standard voice (Kokoro)', 'The voice Kairos Voice speaks with on any computer. One download, then it runs on this computer.'));
+    const hdNode = engines ? setup.hdVoiceSetup(engines, { isAdmin, onChanged: () => draw() }) : null;
+    if (hdNode) quality.push(row({ title: 'HD voice (NVIDIA)', description: engines.hd?.installed ? 'Pick the HD voice and play a short sample.' : '', below: hdNode, cls: 'speech-hd-row' }));
+    quality.push(...await voiceRows());
+    if (!root.isConnected) return;
+    parts.push(group({ title: 'Voice quality and voice', cls: 'speech-voice-quality speech-voice', description: 'What Kairos Voice sounds like and which voice speaks.' }, quality));
+
+    const sayings = await api('/api/voice-engines/pronunciations', { toast: false }).catch(() => null);
+    if (sayings) parts.push(group({ title: 'Pronunciations', cls: 'speech-pronunciations-group',
+      description: 'Words Kairos Voice says wrong, like a name. Write how to say it with hyphens between syllables and the stressed one in capitals, like shi-VAWN for Siobhan.' + (engines?.hd?.offered ? ' HD voice uses these spellings; phonemes apply to the Standard voice only.' : '') },
+      [setup.pronunciationsSetup(sayings.items || [])]));
+
+    const listening = recognitionRows(state);
+    if (optional['smart-turn']) listening.push(optionalRow(optional['smart-turn'], 'Know when you have finished (Smart Turn)', 'Answers sooner without cutting you off mid-sentence. Runs on the processor in about 12 ms.'));
+    if (listening.length) parts.push(group({ title: 'Listening', cls: 'speech-listening', description: state.active_model
+      ? `How Kairos hears you, on this computer. Using the ${state.active_model} model; larger models are more accurate and slower.`
+      : 'How Kairos hears you, on this computer. Dictation stays unavailable until a recognition model is downloaded.' }, listening));
+
+    if (engines) parts.push(drawVoiceServers(engines));
     const freeVoice = await drawFreeVoice();
     if (freeVoice && root.isConnected) parts.push(freeVoice);
+    const advanced = drawAdvanced(state, optional, engines);
+    if (advanced) parts.push(advanced);
 
-    parts.push(note('Larger recognition models are more accurate and slower. Recognition runs on the processor unless a GPU runtime is connected, so a long recording on a modest machine takes a few seconds.'));
     const more = el('details', { class: 'speech-more' }, [el('summary', { class: 'speech-more-summary', text: 'More options' }), ...parts]);
     if (moreOpen) more.open = true;
     more.addEventListener('toggle', () => { moreOpen = more.open; });
@@ -268,63 +277,61 @@ export async function renderSpeechPanel(content, status) {
   }
   let moreOpen = false;
 
-  // The one Voice choice (voiceEnginesSetup.js): Kairos Voice, GPT-Live, ElevenLabs.
-  async function drawVoiceChoice(kokoroReady, redraw) {
-    const state = await api('/api/voice-engines', { toast: false }).catch(() => null);
-    if (!state) return null;
-    const { voiceChoice, APPLIES } = await import('../voiceEnginesSetup.js');
-    return group({ title: 'Voice', cls: 'speech-voice-choice', description: APPLIES }, [voiceChoice(state, { kokoroReady, onChanged: redraw })]);
+  // A server's or key's setup sits behind one button, open only while it is in use or being set up.
+  function behind(label, node, open = false) {
+    const box = el('details', { class: 'speech-setup' }, [el('summary', { text: label }), node]);
+    box.open = open;
+    return box;
   }
 
   // More options: Voicebox, or another voice server on this computer (an admin connects them).
-  async function drawVoiceServers(admin, redraw) {
-    const state = await api('/api/voice-engines', { toast: false }).catch(() => null);
-    if (!state) return null;
-    const { voiceboxSetup, compatibleSetup } = await import('../voiceEnginesSetup.js');
+  function drawVoiceServers(state) {
+    const { voiceboxSetup, compatibleSetup } = setupModule;
+    const voicebox = state.choice === 'voicebox', compatible = state.choice === 'compatible';
     return group({ title: 'Voice servers on this computer', cls: 'speech-voice-engines',
-      description: 'For people who already run their own voice server. If it fails, Kokoro (when downloaded) or the device voice takes over.' }, [
-      row({ title: 'Voicebox', description: 'Free, open source, with cloned and designed voices. You install and open it yourself.', control: state.choice === 'voicebox' ? pill('In use', 'ok') : pill('Not in use', 'muted') }),
-      voiceboxSetup(state, { isAdmin: admin, onChanged: redraw }),
-      row({ title: 'Another voice server', description: 'Any server on this computer that speaks the OpenAI speech API.', control: state.choice === 'compatible' ? pill('In use', 'ok') : pill('Not in use', 'muted') }),
-      compatibleSetup(state, { isAdmin: admin, onChanged: redraw }),
+      description: 'For people who already run their own voice server. If it fails, the Standard voice or the backup voice takes over.' }, [
+      row({ title: 'Voicebox', description: 'Free and open source, with cloned and designed voices. You install and open it yourself.', control: voicebox ? pill('In use', 'ok') : pill('Not in use', 'muted'),
+        below: behind(voicebox ? 'Change' : 'Set up', voiceboxSetup(state, { isAdmin, onChanged: () => draw() }), voicebox) }),
+      row({ title: 'Another voice server', description: 'Any server on this computer that speaks the OpenAI speech API.', control: compatible ? pill('In use', 'ok') : pill('Not in use', 'muted'),
+        below: behind(compatible ? 'Change' : 'Set up', compatibleSetup(state, { isAdmin, onChanged: () => draw() }), compatible) }),
     ]);
   }
 
-  // More options: how Kairos Voice says particular words (names it gets wrong).
-  async function drawPronunciations() {
-    const found = await api('/api/voice-engines/pronunciations', { toast: false }).catch(() => null);
-    if (!found) return null;
-    const { pronunciationsSetup } = await import('../voiceEnginesSetup.js');
-    return group({ title: 'Pronunciations', cls: 'speech-pronunciations-group',
-      description: 'Words Kairos Voice says wrong, like a name. Write how to say it with hyphens between syllables and the stressed one in capitals, like shi-VAWN for Siobhan.' },
-      [pronunciationsSetup(found.items || [])]);
-  }
-
-  // More options: the GPU runtime folder for recognition (the same setting Call settings offers; an admin sets it).
-  function drawRuntime(state) {
-    const folder = el('input', { type: 'text', placeholder: 'Installed whisper.cpp CUDA folder', 'aria-label': 'GPU runtime folder' });
-    const said = el('span', { class: 'meta', role: 'status', text: state.acceleration?.configured ? 'Connected. Recognition uses the graphics card when it can, else the processor.' : 'Not connected. Recognition runs on the processor.' });
-    const act = (text, run) => el('button', { type: 'button', class: 'btn quiet', text, onclick: async () => {
-      try { await run(); refreshSpeechStatus(); draw(); } catch (error) { said.textContent = error.message || 'That did not work.'; }
-    } });
-    const controls = isAdmin ? [folder, act('Use runtime', () => api('/api/speech/runtime', { method: 'POST', body: JSON.stringify({ folder: folder.value.trim() }) })),
-      ...(state.acceleration?.configured ? [act('Disconnect', () => api('/api/speech/runtime', { method: 'DELETE' }))] : [])] : [el('span', { class: 'meta', text: 'An admin can connect one' })];
-    return group({ title: 'Processor', cls: 'speech-runtime', description: 'Optional: a whisper.cpp CUDA build you installed makes recognition faster on an NVIDIA graphics card. Nothing downloads.' },
-      [row({ title: 'GPU runtime folder', description: said, control: el('div', { class: 'speech-model-actions' }, controls) })]);
-  }
-
-  // Free realtime voice (freeVoiceSetup.js): realtime speech-to-speech on a free Gemini key, set up in a few steps.
+  // More options: realtime speech-to-speech on a free Gemini key (freeVoiceSetup.js), set up in a few steps.
   async function drawFreeVoice() {
     const state = await api('/api/models/free-voice', { toast: false }).catch(() => null);
     if (!state) return null;
     const { freeVoiceSetup } = await import('../freeVoiceSetup.js');
     const badge = state.configured ? pill('Connected', 'ok') : pill('Not set up', 'muted');
-    return group({ title: 'Realtime calls on a free key', cls: 'speech-free-voice',
-      description: 'Realtime voice is the quickest, most natural way to talk with a bot. It needs a provider key; a free Gemini key from Google works. Realtime calls send your audio to Google, unlike dictation, which stays on this computer.' }, [
-      row({ title: 'Gemini free key', description: state.configured ? `Realtime voice can use Gemini (${state.model}) at no cost.` : 'Not set up yet.', control: badge }),
-      freeVoiceSetup({ configured: state.configured, onConnected: () => draw() }),
+    return group({ title: 'Realtime on a free Gemini key', cls: 'speech-free-voice',
+      description: 'The quickest, most natural way to talk with a bot. Realtime calls send your audio to Google; dictation stays on this computer.' }, [
+      row({ title: 'Gemini free key', description: state.configured ? `Realtime voice can use Gemini (${state.model}) at no cost.` : 'Not set up yet.', control: badge,
+        below: behind(state.configured ? 'Replace the key' : 'Set up', freeVoiceSetup({ configured: state.configured, onConnected: () => draw() })) }),
     ]);
   }
 
+  // More options > Advanced: engineering details, one disclosure.
+  function drawAdvanced(state, optional, engines) {
+    const rows = [];
+    if (state.engine_available && state.acceleration?.supported) {
+      const folder = el('input', { type: 'text', placeholder: 'Installed whisper.cpp CUDA folder', 'aria-label': 'GPU runtime folder' });
+      const said = el('span', { class: 'meta', role: 'status', text: state.acceleration?.configured ? 'Connected. Recognition uses the graphics card when it can, else the processor.' : 'Not connected. Recognition runs on the processor.' });
+      const act = (text, run) => el('button', { type: 'button', class: 'btn quiet', text, onclick: async () => {
+        try { await run(); refreshSpeechStatus(); draw(); } catch (error) { said.textContent = error.message || 'That did not work.'; }
+      } });
+      const controls = isAdmin ? [folder, act('Use runtime', () => api('/api/speech/runtime', { method: 'POST', body: JSON.stringify({ folder: folder.value.trim() }) })),
+        ...(state.acceleration?.configured ? [act('Disconnect', () => api('/api/speech/runtime', { method: 'DELETE' }))] : [])] : [el('span', { class: 'meta', text: 'An admin can connect one' })];
+      rows.push(row({ title: 'Recognition on the graphics card', description: [said, ' A whisper.cpp CUDA build you installed makes recognition faster on an NVIDIA card. Nothing downloads.'],
+        control: el('div', { class: 'speech-model-actions' }, controls), stack: true, cls: 'speech-runtime' }));
+    }
+    const where = [optional.kokoro?.runs_on ? `Standard voice: ${optional.kokoro.runs_on}` : '', engines?.hd?.installed ? `HD voice: on the ${engines.hd.card || 'NVIDIA card'}, in its own process, stopped after 5 minutes unused.` : '']
+      .filter(Boolean).join(' ');
+    if (where) rows.push(row({ title: 'Where the voices run', description: where }));
+    if (engines?.hd?.installed) rows.push(row({ title: 'HD voice files', description: (engines.hd.sources || []).map(s => `${s.name} (${s.licence}, from ${s.from})`).join('; ') + '.' }));
+    if (!rows.length) return null;
+    return el('details', { class: 'speech-advanced' }, [el('summary', { text: 'Advanced' }), group({ cls: 'speech-advanced-group' }, rows)]);
+  }
+
+  const setupModule = await import('../voiceEnginesSetup.js');
   await draw();
 }

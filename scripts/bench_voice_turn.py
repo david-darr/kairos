@@ -7,6 +7,8 @@
     .venv\\Scripts\\python.exe -X utf8 scripts\\bench_voice_turn.py --backend none --kokoro-bench 10    Kokoro on its own
     .venv\\Scripts\\python.exe -X utf8 scripts\\bench_voice_turn.py --backend none --kokoro-bench 10 --kokoro-gap 4   plus idle gaps
     ... --voice-engine kokoro --kokoro-provider CPU      pin Kokoro's provider in the turns (default: what the app picks)
+    ... --voice-engine hd --hd-voice iris                HD voice (Qwen3-TTS on an NVIDIA card, core/hd_voice.py), read
+                                                         from --hd-dir (default: this checkout's data\\speech_models\\hd_voice)
 
 The optional ONNX models (Smart Turn, Kokoro) are read, never written, from --onnx-dir: by default the `onnx` folder
 beside the whisper model (--models-dir), else the dev profile's speech_models\\onnx. They run through the app's own
@@ -26,6 +28,8 @@ What runs for real (full mode)
   voice            Windows SAPI; "first audio" is the moment the engine first writes audio, plus the 25 ms scheduling lead.
                    --voice-engine kokoro: core/kokoro_voice.synthesize (the whole sentence is rendered before the first
                    100 ms piece goes out, as core/call_voices.py does), so its first audio is the sentence's render time
+                   --voice-engine hd: core/hd_voice.stream (the sidecar streams each sentence; first audio is the first
+                   trimmed piece, so the model's leading silence is not counted as sound)
   barge-in         the app's own BargeIn fed the user's voice over an attenuated copy of the reply (the echo canceller's residue)
 
 What is modelled, not measured: the language model (a scripted stand-in), the browser's audio output buffer (20 ms added to
@@ -217,6 +221,23 @@ def resample(samples, rate_in, rate_out=RATE):
     return np.interp(np.arange(count) * (rate_in / rate_out), np.arange(len(samples)), samples).astype(np.float32)
 
 
+def hd_render(text, voice="iris"):
+    """One sentence through the app's HD path: the spoken-text clean-up, then core/hd_voice.stream (sidecar, edge trim).
+    -> (ms to the first audio piece, total ms, 24 kHz PCM16 bytes). Raises if HD could not speak it (the app would
+    have used Kokoro: a bench must not hide that)."""
+    import asyncio
+    from core import hd_voice, voice_style
+
+    async def go():
+        started, first, pcm = time.perf_counter(), None, bytearray()
+        async for item in hd_voice.stream(voice_style.strip_for_speech(text), voice):
+            if "audio" in item:
+                first = first if first is not None else (time.perf_counter() - started) * 1000
+                pcm += item["audio"]
+        return first, (time.perf_counter() - started) * 1000, bytes(pcm)
+    return asyncio.run(go())
+
+
 def kokoro_render(text, voice="default"):
     """One sentence through the app's Kokoro path: the spoken-text clean-up, then core/kokoro_voice.synthesize.
     -> (render ms, 24 kHz PCM16 bytes)."""
@@ -271,11 +292,12 @@ def use_onnx_dir(folder):
 class Services:
     """STT, TTS and the end-of-turn model over loopback HTTP. Real (whisper, SAPI or Kokoro, Smart Turn) or fake (CI-light)."""
 
-    def __init__(self, light, backend, model, sapi=None, texts=None, light_stt_ms=150, light_tts_ms=50, voice_engine="sapi", kokoro_voice_name="default"):
+    def __init__(self, light, backend, model, sapi=None, texts=None, light_stt_ms=150, light_tts_ms=50, voice_engine="sapi", kokoro_voice_name="default", hd_voice_name="iris"):
         self.light, self.backend, self.model, self.sapi = light, backend, model, sapi
         self.texts = texts or {}
         self.light_stt_ms, self.light_tts_ms = light_stt_ms, light_tts_ms
-        self.voice_engine, self.kokoro_voice_name = voice_engine, kokoro_voice_name
+        self.voice_engine, self.kokoro_voice_name, self.hd_voice_name = voice_engine, kokoro_voice_name, hd_voice_name
+        self.hd_first = []
         self.calls = {"final": 0, "partial": 0, "tts": 0, "turn": 0}
         self.turn_ms = []          # Smart Turn's own time per verdict, inside the service (the rest is transport and waiting)
         owner = self
@@ -322,6 +344,12 @@ class Services:
         if path == "/tts":
             self.calls["tts"] += 1
             text = json.loads(body)["text"]
+            if self.voice_engine == "hd":
+                first_ms, total_ms, pcm = hd_render(text, self.hd_voice_name)
+                self.hd_first.append(first_ms)
+                audio = resample(pcm_to_float(pcm), 24000)          # the harness's echo model works at 16 kHz
+                return {"first_write_ms": first_ms, "total_ms": total_ms, "audio_ms": round(len(audio) / 16),
+                        "audio": base64.b64encode((audio * 32767).astype("<i2").tobytes()).decode()}
             if self.voice_engine == "kokoro":
                 render_ms, pcm = kokoro_render(text, self.kokoro_voice_name)
                 audio = resample(pcm_to_float(pcm), 24000)          # the harness's echo model works at 16 kHz
@@ -510,11 +538,18 @@ def detect_runtime():
     return None
 
 
-def warm_models(smart, kokoro):
+def warm_models(smart, kokoro, hd=None):
     """What a call start does (routes/speech_routes.py prepare): load the optional models and run them once, so the
     first turn does not pay the load. Returns {name: ms}."""
     from core import kokoro_voice, turn_detect
     spent = {}
+    if hd:
+        import asyncio
+        from core import hd_voice
+        started = time.perf_counter()
+        if not asyncio.run(hd_voice.warm(hd)):
+            raise SystemExit("HD voice could not load: " + " | ".join(list(hd_voice._sidecar.stderr)[-3:]))
+        spent["hd_warm_ms"] = round((time.perf_counter() - started) * 1000)
     if smart:
         started = time.perf_counter(); turn_detect.warm(); spent["smart_turn_warm_ms"] = round((time.perf_counter() - started) * 1000)
     if kokoro:
@@ -588,7 +623,7 @@ def scenario_list(args):
     """(label, backend, ttft, smart turn mode, voice engine) for the full run."""
     smart_modes = {"off": [], "oracle": ["oracle"], "real": ["real"], "all": ["oracle", "real"]}[args.smart_turn]
     engines = ["sapi", "kokoro"] if args.voice_engine == "both" else [args.voice_engine]
-    tag = lambda engine: "" if engine == "sapi" else "+Kokoro"   # noqa: E731
+    tag = lambda engine: {"sapi": "", "kokoro": "+Kokoro", "hd": "+HD"}[engine]   # noqa: E731
     out = []
     if args.backend in ("cuda", "both"):
         for engine in engines:
@@ -646,8 +681,14 @@ def run(args):
         # full mode: the data directory is a throwaway; the existing speech models and GPU runtime are only read
         os.environ["JARVIS_DATA_DIR"] = str(work / "data")
         os.makedirs(work / "data", exist_ok=True)
-        from core import kokoro_voice, speech, speech_acceleration, turn_detect
+        from core import hd_voice, kokoro_voice, speech, speech_acceleration, turn_detect
         scenarios = scenario_list(args)
+        wants_hd = any(s[4] == "hd" for s in scenarios)
+        if wants_hd:
+            hd_voice.HD_DIR = args.hd_dir or str(ROOT / "data" / "speech_models" / "hd_voice")
+            ok, reason = hd_voice.ready()
+            if not ok:
+                raise SystemExit(f"HD voice is not usable from {hd_voice.HD_DIR}: {reason}")
         wants_smart = any(s[3] == "real" for s in scenarios)
         wants_kokoro = any(s[4] == "kokoro" for s in scenarios) or args.kokoro_bench
         models = args.models_dir or detect_models_dir()
@@ -671,8 +712,11 @@ def run(args):
             # The live turns: Kokoro on the provider the app would pick, or the one --kokoro-provider pins.
             kokoro_voice.FORCE_PROVIDER = dict(PROVIDERS).get(args.kokoro_provider) if args.kokoro_provider != "auto" else None
             if args.warm:
-                warm = warm_models(wants_smart, any(s[4] == "kokoro" for s in scenarios))
+                warm = warm_models(wants_smart, any(s[4] == "kokoro" for s in scenarios), args.hd_voice if wants_hd else None)
                 say(f"warmed {warm}")
+        elif wants_hd and args.warm:
+            warm = warm_models(False, False, args.hd_voice)
+            say(f"warmed {warm}")
         if not scenarios:
             return [], extra.strip()
         sapi = SapiWorker(args.voice)
@@ -699,11 +743,13 @@ def run(args):
                     speech.prepare_call("small.en", "cpu")
                     hardware.append(f"CPU: pywhispercpp small.en, {os.cpu_count()} logical cores")
                 active = backend
-            services = Services(False, backend, "small.en", sapi=sapi, voice_engine=engine, kokoro_voice_name=args.kokoro_voice)
+            services = Services(False, backend, "small.en", sapi=sapi, voice_engine=engine, kokoro_voice_name=args.kokoro_voice, hd_voice_name=args.hd_voice)
             try:
                 say(f"running {label} ({args.repeats} x {len(fixtures)} turns, real time) ...")
                 result = run_harness(harness_config(services, fixtures, barge, backend, args, filler=filler_ms, ttft=ttft, smart=smart), work)
                 summaries.append(summarize(result, fixtures, label))
+                if services.hd_first:
+                    summaries[-1]["hd_first_audio"] = {"p50": percentile(services.hd_first, 0.5), "p95": percentile(services.hd_first, 0.95), "n": len(services.hd_first)}
                 if services.turn_ms and summaries[-1].get("smart"):
                     summaries[-1]["smart"]["model_p50"] = percentile(services.turn_ms, 0.5)
                     summaries[-1]["smart"]["model_p95"] = percentile(services.turn_ms, 0.95)
@@ -714,7 +760,10 @@ def run(args):
                 services.close()
         speech_acceleration.stop()
         sapi.close()
-        voices = f"SAPI voice '{args.voice}'" + (f", Kokoro voice '{args.kokoro_voice}' on {kokoro_voice.device()['provider']}" if wants_kokoro else "")
+        voices = f"SAPI voice '{args.voice}'" + (f", Kokoro voice '{args.kokoro_voice}' on {kokoro_voice.device()['provider']}" if wants_kokoro else "") \
+            + (f", HD voice '{args.hd_voice}' (Qwen3-TTS 0.6B, sidecar, {hd_voice.gpu()['card']['name']})" if wants_hd else "")
+        if wants_hd:
+            hd_voice.stop()
         meta = (f"{'; '.join(hardware)}; {voices}; scripted model first token {args.ttft} ms at {args.tokens_per_s} tokens/s; {args.repeats} x {len(fixtures)} turns"
                 + (f"; warmed at call start {warm}" if warm else ""))
         return summaries, table(summaries, meta) + ("\n" + extra if extra else "")
@@ -815,7 +864,9 @@ def parser():
     p.add_argument("--smart-turn", choices=["off", "oracle", "real", "all"], default="oracle",
                    help="end of turn by meaning on the GPU path: oracle = a perfect stand-in, real = the Smart Turn model through "
                         "core/turn_detect.py (also used on the CPU path), all = both; the plain silence wait always runs too")
-    p.add_argument("--voice-engine", choices=["sapi", "kokoro", "both"], default="sapi", help="the reply's voice: Windows SAPI, or Kokoro through core/kokoro_voice.py")
+    p.add_argument("--voice-engine", choices=["sapi", "kokoro", "both", "hd"], default="sapi", help="the reply's voice: Windows SAPI, Kokoro through core/kokoro_voice.py, or HD through core/hd_voice.py")
+    p.add_argument("--hd-voice", default="iris", choices=["iris", "ryan", "aiden"], help="HD voice id")
+    p.add_argument("--hd-dir", default=None, help="an installed HD voice folder (read-only; default: this checkout's data\\speech_models\\hd_voice)")
     p.add_argument("--kokoro-voice", default="default", help="Kokoro voice id (default: the app's default voice)")
     p.add_argument("--kokoro-bench", type=int, default=0, help="also time Kokoro on its own: renders per sentence on each available provider; 0 = skip")
     p.add_argument("--kokoro-gap", type=int, default=0, help="with --kokoro-bench: also render 'Sure thing.' this many times after each idle gap (2, 5, 8 s); 0 = skip")

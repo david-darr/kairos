@@ -83,14 +83,20 @@ _warming = set()
 
 def _warm_optional() -> None:
     """A call or Open Mic is starting: get Smart Turn, and Kokoro when it is the call voice, loaded and run once now,
-    so the first turn does not pay their cold start. Best effort; each module reports its own failures."""
-    from core import call_voices, kokoro_voice, turn_detect
+    so the first turn does not pay their cold start. With HD voice its model loads too (several seconds, in its own
+    thread), and Kokoro is warmed beside it because Kokoro speaks the first sentences until HD is ready. Best effort;
+    each module reports its own failures."""
+    import threading
+    from core import call_voices, hd_voice, kokoro_voice, turn_detect
     turn_detect.warm()
     try:
-        uses_kokoro = call_voices.configuration().get('protocol') == 'kokoro'
+        protocol = call_voices.configuration().get('protocol')
     except Exception:
-        uses_kokoro = False
-    if uses_kokoro:
+        protocol = None
+    if protocol == 'hd':
+        voice = call_voices.stored().get('hd_voice') or hd_voice.DEFAULT_VOICE
+        threading.Thread(target=lambda: asyncio.run(hd_voice.warm(voice)), daemon=True, name='hd-voice-warm').start()
+    if protocol in ('kokoro', 'hd'):
         kokoro_voice.warm()
 
 

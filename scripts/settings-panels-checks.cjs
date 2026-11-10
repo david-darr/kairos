@@ -44,6 +44,14 @@ module.exports = async ({ js, win, waitFor, delay, navigate, demoState, writes, 
       if (key === 'POST /api/auth/totp/enroll') return reply({ provisioning_uri: 'otpauth://totp/Kairos:Alex?secret=ABCDEF' });
       if (key === 'POST /api/auth/totp/confirm') { if (body.code !== '123456') return reply({ detail: 'That code did not match.' }, 400); S.totp = true; persist(); return reply({ ok: true }); }
       if (key === 'POST /api/auth/totp/disable') { S.totp = false; persist(); return reply({ ok: true }); }
+      // HD voice (an NVIDIA card in this test only): merged into the real fixture's Voice state.
+      const voiceState = async () => ({ ...(await (await real('/api/voice-engines')).json()), hd: S.hd, quality: S.quality || 'standard', hd_voice: S.hdVoice || 'iris' });
+      if (S.hd && key === 'GET /api/voice-engines') return reply(await voiceState());
+      if (S.hd && key === 'GET /api/voice-engines/hd') return reply(S.hd);
+      if (S.hd && key === 'POST /api/voice-engines/hd/install') { S.hd = { ...S.hd, state: 'installing', progress: { status: 'running', stage: 'Downloading', done_bytes: 1500000000, total_bytes: S.hd.download_bytes } }; persist(); return reply(S.hd); }
+      if (S.hd && key === 'POST /api/voice-engines/hd/pause') return reply(S.hd);
+      if (S.hd && key === 'PUT /api/voice-engines/quality') { S.quality = body.quality; persist(); return reply(await voiceState()); }
+      if (S.hd && key === 'PUT /api/voice-engines/hd/voice') { S.hdVoice = body.voice; persist(); return reply(await voiceState()); }
       return real(input, options);
     };
   })()`);
@@ -66,6 +74,69 @@ module.exports = async ({ js, win, waitFor, delay, navigate, demoState, writes, 
     await delay(60);
   };
   const reopen = async (id) => { await close(); await open(id); };
+  // Screenshots of Settings > Speech with every disclosure open, page by page (KAIROS_SPEECH_SHOT=<folder prefix>), for
+  // before/after reviews of the panel's layout. The disclosures are closed again afterwards, so the checks are unchanged.
+  // HD voice on an NVIDIA card (core/hd_voice.py), through the page-side stub: the quality choice appears under Kairos
+  // Voice; picking HD shows one consent step with the size and saves nothing; the download shows progress; once
+  // installed, More options lists the voices with a sample button each, and choosing one saves it.
+  const HD = { offered: true, nvidia: true, reason: '', card: 'NVIDIA GeForce RTX 4090', installed: false, ready: false, not_ready_reason: 'HD voice is not installed', state: 'not_installed',
+    progress: {}, partial_bytes: 0, runtime_bytes: 2901762237, models_bytes: 4328212420, download_bytes: 7229974657, disk_bytes: 9038212420, default_voice: 'iris', running: false,
+    sources: [{ name: 'PyTorch 2.9.1 (CUDA 12.8)', licence: 'BSD-3-Clause', from: 'download.pytorch.org' }],
+    voices: [{ id: 'iris', name: 'Iris', description: 'Warm female voice, cloned from a donated clip (CC0).' }, { id: 'ryan', name: 'Ryan', description: 'Male voice built into Qwen3-TTS.' }, { id: 'aiden', name: 'Aiden', description: 'Male voice built into Qwen3-TTS.' }] };
+  const q = (selector) => JSON.stringify(selector);
+  const hdChecks = async () => {
+    await stub({ hd: HD, quality: 'standard' });
+    await reopen('speech'); await waitFor(`!!document.querySelector(${q('[data-voice-quality="hd"]')})`);
+    assert.deepEqual(await js(`[...document.querySelectorAll(${q('.speech-voice-choice [data-voice-quality]')})].map(i => i.value + (i.checked ? '*' : ''))`), ['standard*', 'hd'], 'HD: Standard and HD appear under Kairos Voice on an NVIDIA card, Standard chosen');
+    assert.ok(await js("document.querySelector('.speech-more').textContent.includes('Not installed. Choose HD under Kairos Voice above')"), 'HD: More options says where to get it');
+    let from = await mark();
+    await js(`document.querySelector(${q('[data-voice-quality="hd"]')}).click()`);
+    await waitFor(`!!document.querySelector(${q('[data-voice-engine="hd-consent"]')})`);
+    const consent = await js(`document.querySelector(${q('[data-voice-engine="hd-consent"]')}).textContent`);
+    for (const words of ['7.2 GB', '2.9 GB', '4.3 GB', '9.0 GB', 'on this computer', 'never sent anywhere', 'official source', 'remove it here']) assert.ok(consent.includes(words), `HD consent states: ${words}`);
+    countSaves('HD picked before install (consent only, no saves)', await saves(from), []);
+    if (process.env.KAIROS_SPEECH_SHOT) await speechShots(process.env.KAIROS_SPEECH_SHOT + '-hd-consent', '.none');
+    await js(`document.querySelector(${q('[data-voice-engine="hd-not-now"]')}).click()`);
+    assert.equal(await js(`document.querySelector(${q('[data-voice-quality]:checked')}).value + '|' + !!document.querySelector(${q('[data-voice-engine="hd-consent"]')})`), 'standard|false', 'HD: Not now goes back to Standard and closes the step');
+    from = await mark();
+    await js(`document.querySelector(${q('[data-voice-quality="hd"]')}).click()`);
+    await waitFor(`!!document.querySelector(${q('[data-voice-engine="hd-install"]')})`);
+    await js(`document.querySelector(${q('[data-voice-engine="hd-install"]')}).click()`);
+    await waitFor(`/Downloading 1.5 GB of 7.2 GB/.test(document.querySelector(${q('[data-voice-engine="hd-progress"]')})?.textContent || '') && !!document.querySelector(${q('[data-voice-engine="hd-pause"]')})`);
+    assert.deepEqual(await saves(from), ['POST /api/voice-engines/hd/install'], 'HD: Download starts the install once, then shows progress and Pause');
+    // Installed: the voice picker with samples in More options; picking a voice saves it.
+    await stub({ hd: { ...HD, installed: true, ready: true, state: 'ready', not_ready_reason: '' }, quality: 'hd', hdVoice: 'iris' });
+    await reopen('speech'); await waitFor(`!!document.querySelector(${q('[data-hd-voice="ryan"]')})`);
+    assert.deepEqual(await js("[...document.querySelectorAll('[data-hd-preview]')].map(b => b.dataset.hdPreview)"), ['iris', 'ryan', 'aiden'], 'HD: each voice has a sample button');
+    assert.ok(await js("document.querySelector('.speech-voice-choice').textContent.includes('Speaking in HD on your graphics card')"), 'HD: Kairos Voice says it speaks in HD');
+    from = await mark();
+    await js(`document.querySelector(${q('[data-hd-voice="ryan"]')}).click()`);
+    await waitFor("window.__net.some(r => r.key === 'PUT /api/voice-engines/hd/voice')");
+    assert.deepEqual(await saves(from), ['PUT /api/voice-engines/hd/voice {"voice":"ryan"}'], 'HD: picking a voice saves it');
+    if (process.env.KAIROS_SPEECH_SHOT) await speechShots(process.env.KAIROS_SPEECH_SHOT + '-hd-installed');
+    // An NVIDIA card that falls short: one plain line, no choice.
+    await stub({ hd: { ...HD, offered: false, reason: 'HD voice needs an NVIDIA RTX 30 series card or newer; the NVIDIA GeForce GTX 1080 is too old for it.' }, quality: 'standard' });
+    await reopen('speech'); await waitFor(`!!document.querySelector(${q('[data-voice-engine="hd-unavailable"]')})`);
+    assert.equal(await js("document.querySelectorAll('[data-voice-quality]').length"), 0, 'HD: no quality choice on a card that cannot run it');
+    await stub({ hd: null, quality: null, hdVoice: null });
+    await reopen('speech'); await waitFor(`!!document.querySelector(${q('.speech-voice-choice [data-voice-choice="kairos"]')}) && !!document.querySelector('#speech-voice')`);
+  };
+  const speechShots = async (prefix, selector = '.speech-more, .speech-advanced') => {
+    const fs = require('node:fs'), path = require('node:path');
+    fs.mkdirSync(path.dirname(prefix), { recursive: true });
+    await js(`document.querySelectorAll('.speech-panel details').forEach(d => { d.dataset.shot = d.open ? 'open' : ''; if (d.matches(${JSON.stringify(selector)})) d.open = true; })`);
+    await delay(400);
+    const pages = await js(`(() => { let n = document.querySelector('.speech-panel'); while (n && n.scrollHeight <= n.clientHeight + 4) n = n.parentElement;
+      window.__shotScroller = n; return n ? Math.ceil(n.scrollHeight / Math.max(1, n.clientHeight - 40)) : 1; })()`);
+    for (let page = 0; page < Math.min(pages, 12); page += 1) {
+      await js(`window.__shotScroller && (window.__shotScroller.scrollTop = ${page} * (window.__shotScroller.clientHeight - 40))`);
+      await delay(250);
+      const image = await win.webContents.capturePage();
+      fs.writeFileSync(`${prefix}-${String(page + 1).padStart(2, '0')}.png`, image.toPNG());
+    }
+    await js("document.querySelectorAll('.speech-panel details').forEach(d => { d.open = d.dataset.shot === 'open'; delete d.dataset.shot; }); window.__shotScroller && (window.__shotScroller.scrollTop = 0)");
+    await delay(200);
+  };
   const clickText = (text, scope = '.settings-window') => js(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(scope + ' button, ' + scope + ' label')})].find(n => n.textContent.trim() === ${JSON.stringify(text)} && !n.hidden); if (!b) throw new Error('no button ' + ${JSON.stringify(text)}); b.click(); })()`);
   const setValue = (selector, value, event = 'input') => js(`(() => { const n = document.querySelector(${JSON.stringify(selector)}); n.value = ${JSON.stringify(value)}; n.dispatchEvent(new Event(${JSON.stringify(event)}, { bubbles: true })); })()`);
   const value = (selector) => js(`document.querySelector(${JSON.stringify(selector)})?.value`);
@@ -271,6 +342,7 @@ module.exports = async ({ js, win, waitFor, delay, navigate, demoState, writes, 
     // The one Voice choice (voiceEnginesSetup.js, Locked shape 2026-11-10): Kairos Voice (default), GPT-Live, ElevenLabs,
     // one short cost and privacy line each; everything technical under More options; VoiceStudio is gone.
     await waitFor("!!document.querySelector('.speech-voice-choice [data-voice-choice=\"kairos\"]') && !!document.querySelector('.speech-more [data-voice-engine=\"voicebox\"]')");
+    if (process.env.KAIROS_SPEECH_SHOT) await speechShots(process.env.KAIROS_SPEECH_SHOT);
     const shape = await js(`(() => { const panel = document.querySelector('.speech-panel'), choice = panel.querySelector('.speech-voice-choice'), more = panel.querySelector('.speech-more');
       const outside = [...panel.children].filter(n => n !== more).map(n => n.textContent).join(' ');
       return { options: [...choice.querySelectorAll('[data-voice-choice]')].map(i => i.value), checked: choice.querySelector('[data-voice-choice]:checked')?.value,
@@ -278,12 +350,18 @@ module.exports = async ({ js, win, waitFor, delay, navigate, demoState, writes, 
         applies: choice.textContent.includes('Calls, Open Mic, replies read aloud, voice notes, phone calls and Discord voice') && choice.textContent.includes('its own voice or call mode'),
         moreFirst: panel.children[0] === choice, moreClosed: !more.open, moreLabel: more.querySelector('summary').textContent,
         technicalOutside: /Voicebox|Recognition model|GPU|runtime|model ID|Kokoro ·/i.test(outside),
-        inMore: ['Voicebox', 'Recognition model', 'Voice picker', 'Pronunciations'].every(t => more.textContent.includes(t)) && !!more.querySelector('#speech-voice'),
+        inMore: ['Voice quality and voice', 'Pronunciations', 'Listening', 'Voice servers on this computer', 'Realtime on a free Gemini key'].every(t => more.textContent.includes(t)) && !!more.querySelector('#speech-voice'),
+        groups: [...more.querySelectorAll(':scope > .set-section .set-section-title')].map(n => n.textContent),
+        explained: [...more.querySelectorAll(':scope > .set-section')].every(g => !!g.querySelector('.set-section-description')?.textContent.trim()),
+        noDuplicateConnect: !more.textContent.includes('Connect local voices') && !more.textContent.includes('Optional voice features'),
+        setupsClosed: [...more.querySelectorAll('.speech-setup')].every(d => !d.open), hdHidden: !panel.querySelector('[data-voice-engine^="hd-"]') && !/HD voice|NVIDIA/.test(panel.textContent),
         voicebox: more.querySelector('[data-voice-engine="voicebox-url"]')?.value, studio: /VoiceStudio/i.test(panel.textContent), dash: /\u2014/.test(panel.textContent) }; })()`);
     assert.deepEqual(shape, { options: ['kairos', 'gpt_live', 'elevenlabs'], checked: 'kairos',
       lines: ['Free and private', 'About 5 cents a minute on your OpenAI key', 'About 4 cents a minute of speech on your ElevenLabs key'], applies: true,
-      moreFirst: true, moreClosed: true, moreLabel: 'More options', technicalOutside: false, inMore: true, voicebox: 'http://127.0.0.1:17493', studio: false, dash: false },
-      'Speech: one Voice choice on the main path (Kairos Voice by default), cost and privacy in one line each, the technical parts under More options, no VoiceStudio');
+      moreFirst: true, moreClosed: true, moreLabel: 'More options', technicalOutside: false, inMore: true,
+      groups: ['Voice quality and voice', 'Pronunciations', 'Listening', 'Voice servers on this computer', 'Realtime on a free Gemini key'], explained: true,
+      noDuplicateConnect: true, setupsClosed: true, hdHidden: true, voicebox: 'http://127.0.0.1:17493', studio: false, dash: false },
+      'Speech: one Voice choice on the main path (Kairos Voice by default), cost and privacy in one line each, More options in five named groups with a one-line purpose each, setups closed, no duplicate server setup, no HD voice without an NVIDIA card, no VoiceStudio');
     // Picking GPT-Live or ElevenLabs without a key shows its one-step key setup and saves nothing yet.
     let picks = await mark();
     await js("document.querySelector('[data-voice-choice=\"gpt_live\"]').click()");
@@ -293,6 +371,7 @@ module.exports = async ({ js, win, waitFor, delay, navigate, demoState, writes, 
     assert.ok(await js("document.querySelector('.speech-voice-choice').textContent.includes('per 1,000 characters') && document.querySelector('.speech-voice-choice').textContent.includes('sent to ElevenLabs')"), 'Speech: ElevenLabs shows its cost and privacy copy with the key');
     await js("document.querySelector('[data-voice-choice=\"kairos\"]').click()");
     countSaves('speech voice choice without a key (no saves)', await saves(picks), []);
+    await hdChecks();
     // Pronunciations (More options): nothing seeded; Add a word gives a word, a respelling and an advanced phoneme field.
     picks = await mark();
     await js("document.querySelector('[data-voice-engine=\"pronunciation-add\"]').click()");

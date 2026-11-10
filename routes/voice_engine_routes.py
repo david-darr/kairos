@@ -3,15 +3,20 @@ choice needs. Kairos Voice needs nothing. GPT-Live needs an OpenAI key (one step
 needs its key (sealed per account, core/voice_keys.py, never returned). Under More options an admin can connect a
 Voicebox or another voice server on this computer (they reach host-only services, like the other local voice servers).
 
+Kairos Voice's quality: Standard (Kokoro) or HD (Qwen3-TTS on an NVIDIA card, core/hd_voice.py). HD is offered only
+where the card can run it; an admin installs it (it writes several gigabytes into the shared data folder), anyone
+picks it and its voice for their own account.
+
 "Check" validates without rendering speech: for ElevenLabs a voices request (free) and the plan's characters left; for
 Voicebox its /health and voice list; for OpenAI its model list.
 """
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from core import call_voices, elevenlabs_voice, openai_key, voice_keys, voicebox_voice
+from core import call_voices, elevenlabs_voice, hd_voice, openai_key, voice_keys, voicebox_voice
 from core.auth import auth_manager
 from core.middleware import require_admin, require_user
 
@@ -30,7 +35,8 @@ def _state() -> dict:
     saved = call_voices.stored()
     ready, reason = kokoro_voice.ready()
     live = _gpt_live()
-    return {"choice": saved["choice"], "notice": saved["notice"],
+    return {"choice": saved["choice"], "notice": saved["notice"], "quality": saved["quality"],
+            "hd_voice": saved["hd_voice"] or hd_voice.DEFAULT_VOICE, "hd": hd_voice.status(),
             "kairos": {"kokoro_ready": ready, "kokoro_reason": reason or ""},
             "gpt_live": {"available": bool(live), "endpoint_id": (live or {}).get("id"), "price_per_minute": GPT_LIVE_PRICE,
                          "key_page": openai_key.KEY_PAGE, "verified": False},
@@ -50,6 +56,14 @@ class Address(BaseModel):
 
 class Compatible(Address):
     voices: str = Field(default="", max_length=2000)    # typed voice names, comma separated
+
+
+class Quality(BaseModel):
+    quality: Literal["standard", "hd"]
+
+
+class HDVoice(BaseModel):
+    voice: Literal["iris", "ryan", "aiden"]
 
 
 class Choice(BaseModel):
@@ -73,6 +87,65 @@ async def choose(body: Choice, user: str = Depends(require_user)):
     except ValueError as error:
         raise HTTPException(422, str(error)) from None
     return _state()
+
+
+@router.put("/quality")
+async def choose_quality(body: Quality, user: str = Depends(require_user)):
+    """Kairos Voice in Standard (Kokoro) or HD (installed HD voice on a capable NVIDIA card)."""
+    try:
+        call_voices.set_quality(body.quality)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from None
+    return _state()
+
+
+@router.get("/hd")
+async def hd_status(user: str = Depends(require_user)):
+    return hd_voice.status()
+
+
+@router.post("/hd/install")
+async def hd_install(user: str = Depends(require_admin)):
+    """Start or resume the HD voice download (the person agreed to the size in Settings first)."""
+    try:
+        hd_voice.start_install()
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from None
+    return hd_voice.status()
+
+
+@router.post("/hd/pause")
+async def hd_pause(user: str = Depends(require_admin)):
+    hd_voice.stop_install()
+    return hd_voice.status()
+
+
+@router.delete("/hd")
+async def hd_remove(user: str = Depends(require_admin)):
+    """Delete HD voice from this computer. Accounts that chose it speak with Standard again."""
+    try:
+        await hd_voice.remove()
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from None
+    if call_voices.stored()["quality"] == "hd":
+        call_voices._save(quality="standard")
+    return _state()
+
+
+@router.put("/hd/voice")
+async def hd_choose_voice(body: HDVoice, user: str = Depends(require_user)):
+    call_voices.set_hd_voice(body.voice)
+    return _state()
+
+
+@router.post("/hd/preview")
+async def hd_preview(body: HDVoice, user: str = Depends(require_user)):
+    """A short sample of an HD voice as a WAV file. The first one loads the model (several seconds)."""
+    try:
+        data = await hd_voice.preview(body.voice)
+    except hd_voice.HDUnavailable as error:
+        raise HTTPException(422, str(error)) from None
+    return Response(content=data, media_type="audio/wav", headers={"Cache-Control": "no-store"})
 
 
 @router.post("/notice/dismiss")

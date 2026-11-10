@@ -1409,7 +1409,12 @@
     // Free realtime voice (a Gemini key): not set up in the demo.
     if (route === "/api/models/free-voice") return { configured: false, endpoint_id: null, model: null, key_page: "https://aistudio.google.com/apikey" };
     // The Voice (Settings > Speech): Kairos Voice, the default; no OpenAI or ElevenLabs key and no Voicebox in the demo.
-    if (route === "/api/voice-engines") return { choice: "kairos", notice: "", kairos: { kokoro_ready: false, kokoro_reason: "Kokoro is not downloaded" },
+    // HD voice is offered only on a PC with a capable NVIDIA card; the demo is not one, so it shows nothing for it.
+    const hdVoice = { offered: false, nvidia: false, reason: "", card: null, installed: false, ready: false, not_ready_reason: "HD voice is not installed", state: "not_installed",
+      progress: {}, partial_bytes: 0, runtime_bytes: 2901762237, models_bytes: 4328212420, download_bytes: 7229974657, disk_bytes: 9038212420, default_voice: "iris", running: false, sources: [],
+      voices: [{ id: "iris", name: "Iris", description: "Warm female voice, cloned from a donated clip (CC0)." }, { id: "ryan", name: "Ryan", description: "Male voice built into Qwen3-TTS." }, { id: "aiden", name: "Aiden", description: "Male voice built into Qwen3-TTS." }] };
+    if (route === "/api/voice-engines/hd") return hdVoice;
+    if (route === "/api/voice-engines") return { choice: "kairos", notice: "", quality: "standard", hd_voice: "iris", hd: hdVoice, kairos: { kokoro_ready: false, kokoro_reason: "Kokoro is not downloaded" },
       gpt_live: { available: false, endpoint_id: null, price_per_minute: 0.05, key_page: "https://platform.openai.com/api-keys", verified: false },
       elevenlabs: { has_key: false, key_page: "https://elevenlabs.io/app/settings/api-keys", models: ["eleven_flash_v2_5", "eleven_multilingual_v2"], price_per_1k: { eleven_flash_v2_5: 0.04, eleven_multilingual_v2: 0.08 }, verified: false },
       voicebox: { url: "http://127.0.0.1:17493", repo: "https://github.com/jamiepine/voicebox", verified: false }, compatible: { url: "", voices: [] } };
@@ -1464,6 +1469,9 @@
     if (route === "/api/speech/status") return { engine_available: true, active_model: null, models: [
       { name: "tiny.en", label: "Tiny", size_mb: 75, description: "Fastest, roughest.", downloaded: false },
       { name: "base.en", label: "Base", size_mb: 142, description: "A good balance for dictation.", downloaded: true },
+    ], optional: [
+      { name: "smart-turn", label: "Smart Turn", kind: "turn", description: "", size_mb: 8, downloaded: false, pinned: true, missing_runtime: [], missing_runtime_text: "", state: "not_downloaded", status: "Not downloaded", ready: false, runs_on: null },
+      { name: "kokoro", label: "Kokoro voice", kind: "voice", description: "", size_mb: 337, downloaded: false, pinned: true, missing_runtime: [], missing_runtime_text: "", state: "not_downloaded", status: "Not downloaded", ready: false, runs_on: null },
     ] };
     if (/^\/api\/models\/[^/]+\/catalog$/.test(route)) {
       const kind = models.find((m) => m.id === route.split("/")[3])?.kind;

@@ -3,10 +3,15 @@ fillers, phone calls to the person and to others, Discord voice). Settings > Spe
 David 2026-11-10): Kairos Voice (the default: Kokoro on this computer, or the device voice until Kokoro is ready),
 GPT-Live (a realtime call mode; anything read aloud uses Kairos Voice), ElevenLabs (the person's own key,
 core/elevenlabs_voice.py), and under More options a Voicebox the person runs (core/voicebox_voice.py) or another local
-OpenAI-compatible server. No engine installs. When ElevenLabs or Voicebox fails before any audio, Kokoro speaks the
-sentence instead if it is set up; past that the caller's own fallback (the device voice) applies.
+OpenAI-compatible server. When ElevenLabs, Voicebox or HD voice fails before any audio, Kokoro speaks the sentence
+instead if it is set up; past that the caller's own fallback (the device voice) applies.
 
-Stored per account in call_voice.json as {version: 2, choice, voicebox_url, compatible_url, compatible_voices, notice}.
+Kairos Voice has two quality levels (David, 2026-11-10): Standard (Kokoro, the default for everyone) and, on a PC with
+a capable NVIDIA card where the person installed it, HD (Qwen3-TTS through core/hd_voice.py). HD falls back to Kokoro
+sentence by sentence while it loads or if it fails.
+
+Stored per account in call_voice.json as {version: 2, choice, quality, hd_voice, voicebox_url, compatible_url,
+compatible_voices, notice}.
 An older file ({url, protocol}) is migrated on first read so nobody loses a configured engine; a saved VoiceStudio
 (removed 2026-11-10) becomes Kairos Voice with a one-line notice.
 """
@@ -22,6 +27,7 @@ SETTINGS: Optional[str] = None  # a test can point it at its own file
 logger = logging.getLogger(__name__)
 CHOICES = ('kairos', 'gpt_live', 'elevenlabs', 'voicebox', 'compatible')
 PROTOCOLS = ('compatible', 'kokoro', 'elevenlabs', 'voicebox')
+QUALITIES = ('standard', 'hd')
 VOICESTUDIO_NOTICE = 'VoiceStudio is no longer supported, so your voice is now Kairos Voice. Voicebox is under More options.'
 
 def settings_file():
@@ -38,12 +44,16 @@ def validate_url(value):
 # The built-in Kokoro engine has no server, so it carries a fixed marker where a server address would be. Callers that
 # only check "is a voice engine configured" (voice notes) keep working unchanged. ElevenLabs carries its own address.
 KOKORO_URL = 'kokoro://local'
+HD_URL = 'hd://local'
 ELEVENLABS_URL = 'https://api.elevenlabs.io'
 
 def _clean(raw):
     raw = raw if isinstance(raw, dict) else {}
     voices = raw.get('compatible_voices')
+    from core.hd_voice import VOICE_IDS
     return {'version': 2, 'choice': raw.get('choice') if raw.get('choice') in CHOICES else 'kairos',
+            'quality': raw.get('quality') if raw.get('quality') in QUALITIES else 'standard',
+            'hd_voice': raw.get('hd_voice') if raw.get('hd_voice') in VOICE_IDS else '',
             'voicebox_url': str(raw.get('voicebox_url') or ''), 'compatible_url': str(raw.get('compatible_url') or ''),
             'compatible_voices': [str(v)[:160] for v in voices[:50] if str(v).strip()] if isinstance(voices, list) else [],
             'notice': str(raw.get('notice') or '')[:300]}
@@ -96,6 +106,21 @@ def set_choice(value, url=''):
     _save(**changes)
     return configuration()
 
+def set_quality(value):
+    """Standard (Kokoro) or HD (Qwen3-TTS on an NVIDIA card). HD only once it is installed and the card can run it."""
+    if value not in QUALITIES: raise ValueError('Unknown voice quality.')
+    if value == 'hd':
+        from core import hd_voice
+        ok, reason = hd_voice.ready()
+        if not ok: raise ValueError(f'{reason}.' if reason and not reason.endswith('.') else (reason or 'HD voice is not ready.'))
+    _save(quality=value)
+    return configuration()
+
+def set_hd_voice(value):
+    from core import hd_voice
+    if value not in hd_voice.VOICE_IDS: raise ValueError('Unknown HD voice.')
+    _save(hd_voice=value)
+
 def set_compatible_voices(names):
     _save(compatible_voices=[n.strip() for n in names if n.strip()])
 
@@ -111,8 +136,11 @@ def configuration():
         from core import voicebox_voice
         return {'choice':current, 'url':value['voicebox_url'] or voicebox_voice.DEFAULT_URL, 'protocol':'voicebox'}
     if current == 'compatible': return {'choice':current, 'url':value['compatible_url'], 'protocol':'compatible'}
-    # Kairos Voice and GPT-Live: Kokoro when it is ready, else no engine (each caller then uses the device voice).
-    # GPT-Live speaks for itself in calls; everything read aloud outside a call uses Kairos Voice.
+    # Kairos Voice and GPT-Live: HD when chosen and usable, else Kokoro when it is ready, else no engine (each caller
+    # then uses the device voice). GPT-Live speaks for itself in calls; everything read aloud outside a call uses Kairos Voice.
+    if value['quality'] == 'hd':
+        from core import hd_voice
+        if hd_voice.ready()[0]: return {'choice':current, 'url':HD_URL, 'protocol':'hd'}
     from core import kokoro_voice
     return {'choice':current, 'url':KOKORO_URL if kokoro_voice.ready()[0] else '', 'protocol':'kokoro'}
 
@@ -150,6 +178,12 @@ async def _compatible_catalog(config):
 
 async def catalog():
     config = configuration()
+    if config.get('protocol') == 'hd':
+        # The account's chosen HD voice leads, so a caller that falls back to "the first voice" gets it.
+        from core import hd_voice
+        first = stored()['hd_voice'] or hd_voice.DEFAULT_VOICE
+        found = sorted(({'id': v['id'], 'name': v['name']} for v in hd_voice.VOICES), key=lambda v: v['id'] != first)
+        return {**config, 'voices': found, 'models': [hd_voice.NAME]}
     if config.get('protocol') == 'kokoro':
         # Unavailable is an answer, not a failure: no voices and the reason, so the dialog falls back to the device voice.
         from core import kokoro_voice
@@ -173,7 +207,7 @@ async def catalog():
         return {**config, **found}
     return await _compatible_catalog(config)
 
-FALLS_BACK = ('elevenlabs', 'voicebox')
+FALLS_BACK = ('elevenlabs', 'voicebox', 'hd')
 
 async def pcm(text, model, voice):
     # Whatever reaches a voice engine is plain words: markdown that slipped past the model is stripped here, once, for
@@ -202,6 +236,10 @@ async def pcm(text, model, voice):
             yield item
 
 async def _engine(config, text, model, voice):
+    if config.get('protocol') == 'hd':
+        from core import hd_voice
+        async for item in hd_voice.stream(text, voice): yield item
+        return
     if config.get('protocol') == 'elevenlabs':
         from core import elevenlabs_voice, voice_keys
         key = voice_keys.get('elevenlabs')

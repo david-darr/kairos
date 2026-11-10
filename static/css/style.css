@@ -2201,6 +2201,19 @@ button.dashboard-row:hover { background: var(--surface-2); }
 .speech-pronunciation-advanced input { margin: 6px 8px 0 0; }
 .speech-more > summary, .speech-pronunciation-advanced > summary { cursor: pointer; font-weight: 600; padding: 12px 0; min-height: 44px; box-sizing: border-box; }
 .speech-more[open] > summary { margin-bottom: 8px; }
+/* HD voice (2026-11-10): the Standard / HD choice under Kairos Voice, its consent step, and the HD voice picker. */
+.speech-hd-quality { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 0 26px; }
+.speech-hd-option { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; min-height: 32px; }
+.speech-hd-option input { margin-top: 3px; flex-shrink: 0; }
+.speech-hd-voices { display: flex; flex-direction: column; gap: 8px; }
+.speech-hd-voice { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.speech-hd-row .set-row-text { min-width: 0; }
+/* Setups that stay closed until asked for (Voicebox, another server, the Gemini key), and the Advanced disclosure. */
+.speech-setup > summary, .speech-advanced > summary { cursor: pointer; font-weight: 600; padding: 8px 0; min-height: 36px; box-sizing: border-box; color: var(--text-dim); }
+.speech-setup[open] > summary { margin-bottom: 6px; }
+.speech-advanced { margin-top: 12px; }
+.speech-openmic-voice .agent-call-voice-settings { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+.speech-openmic-voice .agent-call-voice-settings label { display: flex; align-items: center; gap: 8px; }
 
 /* Settings > Admin > Logs (static/js/views/settings.js renderLogsPanel). */
 .logs-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 6px; }

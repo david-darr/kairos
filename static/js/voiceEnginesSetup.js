@@ -2,6 +2,8 @@
 // Mic, replies read aloud, voice notes, phone calls and Discord voice (Locked shape, David 2026-11-10). Kairos Voice is the
 // default. GPT-Live and ElevenLabs set up inline with the person's own key; keys are checked first, then kept sealed in
 // the account and never come back to the page. Voicebox and another voice server on this computer are under More options.
+// Kairos Voice has a quality choice on a PC with a capable NVIDIA card (David, 2026-11-10): Standard (Kokoro, the
+// default) or HD (Qwen3-TTS on the graphics card, installed on request, core/hd_voice.py). Nobody else sees it.
 import { api, el } from './api.js';
 
 export const CHOICE_COPY = {
@@ -35,7 +37,7 @@ function status() {
 
 // The Voice choice: one radio per option, a short cost and privacy line each, and the inline setup the picked one needs.
 // `kokoroReady` comes from GET /api/speech/status (the Kokoro readiness row). onChanged(state) runs after any change.
-export function voiceChoice(state, { kokoroReady = false, onChanged = () => {}, request = api } = {}) {
+export function voiceChoice(state, { kokoroReady = false, isAdmin = false, onChanged = () => {}, request = api } = {}) {
   const said = status();
   const pending = { value: state.choice };
   const setups = el('div', { class: 'speech-voice-setup' });
@@ -43,7 +45,8 @@ export function voiceChoice(state, { kokoroReady = false, onChanged = () => {}, 
   const radios = options.map(id => {
     const input = el('input', { type: 'radio', name: 'speech-voice-choice', value: id, 'data-voice-choice': id });
     input.checked = id === state.choice;
-    const hint = id === 'kairos' ? (kokoroReady ? 'Speaking with Kokoro on this computer.' : 'Speaking with this device\'s voice until the Kokoro voice is downloaded under More options.')
+    const hdOn = state.quality === 'hd' && state.hd?.ready;
+    const hint = id === 'kairos' ? (hdOn ? 'Speaking in HD on your graphics card.' : kokoroReady ? 'Speaking with Kokoro on this computer.' : 'Speaking with this device\'s voice until the Kokoro voice is downloaded under More options.')
       : id === 'gpt_live' && !state.gpt_live?.available ? 'Add your OpenAI key to use it.'
       : id === 'elevenlabs' && !state.elevenlabs?.has_key ? 'Add your ElevenLabs key to use it.' : '';
     input.addEventListener('change', () => pick(id));
@@ -63,7 +66,8 @@ export function voiceChoice(state, { kokoroReady = false, onChanged = () => {}, 
   }
   function drawSetup() {
     const id = pending.value;
-    setups.replaceChildren(...(id === 'gpt_live' ? [openAiKeySetup(state, { onChanged, request })] : id === 'elevenlabs' ? [elevenLabsSetup(state, { onChanged, request })] : []));
+    setups.replaceChildren(...(id === 'gpt_live' ? [openAiKeySetup(state, { onChanged, request })] : id === 'elevenlabs' ? [elevenLabsSetup(state, { onChanged, request })]
+      : id === 'kairos' && state.hd?.offered ? [hdQuality(state, { isAdmin, onChanged, request })] : []));
   }
   drawSetup();
   const notice = state.notice ? el('div', { class: 'speech-voice-notice', role: 'status' }, [el('span', { text: state.notice }),
@@ -239,4 +243,132 @@ export function pronunciationsSetup(items = [], { onSaved = () => {}, request = 
     finally { save.disabled = false; }
   });
   return el('div', { class: 'free-voice-setup voice-engine-setup' }, [list, el('div', { class: 'free-voice-key' }, [add, save]), said]);
+}
+
+// -- HD voice (core/hd_voice.py) --------------------------------------------------------------------------------------
+
+const GB = bytes => `${(Number(bytes || 0) / 1e9).toFixed(1)} GB`;
+export const HD_QUALITY_COPY = {
+  standard: { title: 'Standard (Kokoro)', line: 'Works on any computer.' },
+  hd: { title: 'HD (NVIDIA)', line: 'A more natural voice that runs on your NVIDIA graphics card. Standard fills in while it loads.' },
+};
+export function hdConsentText(hd = {}) {
+  return `HD voice runs the Qwen3-TTS model on your ${hd.card || 'NVIDIA graphics card'}, on this computer: what Kairos says is never sent anywhere. `
+    + `It is a one-time download of about ${GB(hd.download_bytes)} (the graphics runtime, PyTorch, ${GB(hd.runtime_bytes)}, and the voice models, ${GB(hd.models_bytes)}) `
+    + `and needs about ${GB(hd.disk_bytes)} of disk space. Every file comes from its official source (PyTorch, PyPI, and Hugging Face for the Qwen models) `
+    + 'and is checked before it is used. You can remove it here at any time.';
+}
+
+// Polls the install until it stops, then calls done(status). Stops by itself when `node` leaves the page.
+function watchInstall(node, request, onTick, done) {
+  const timer = setInterval(async () => {
+    if (!node.isConnected) { clearInterval(timer); return; }
+    let hd; try { hd = await request('/api/voice-engines/hd', { toast: false }); } catch { return; }
+    onTick(hd);
+    if (hd.state !== 'installing') { clearInterval(timer); done(hd); }
+  }, 800);
+  return timer;
+}
+
+export function hdProgressLine(hd = {}) {
+  const p = hd.progress || {};
+  const total = p.total_bytes || hd.download_bytes || 1, done = Math.min(total, p.done_bytes || hd.partial_bytes || 0);
+  if (hd.state === 'installing' && p.stage === 'Setting up') return 'Setting up the HD voice. This takes about a minute.';
+  if (hd.state === 'installing') return `Downloading ${GB(done)} of ${GB(total)} (${Math.floor((done / total) * 100)}%).`;
+  if (p.status === 'error') return `The download stopped: ${p.error || 'it failed'}`;
+  if (hd.state === 'partial') return `Paused at ${GB(hd.partial_bytes)} of ${GB(hd.download_bytes)}. Resume picks up where it stopped.`;
+  return '';
+}
+
+// The Standard / HD choice under Kairos Voice. HD not installed yet: one consent step, then the download with progress,
+// pause and resume; when it finishes HD becomes the quality. Only an admin can download (it writes to the shared data folder).
+export function hdQuality(state, { isAdmin = false, onChanged = () => {}, request = api } = {}) {
+  let hd = state.hd || {};
+  const said = status();
+  const panel = el('div', { class: 'speech-hd-panel' });
+  const node = el('div', { class: 'speech-hd-quality', role: 'radiogroup', 'aria-label': 'Voice quality', 'data-voice-engine': 'hd-quality' });
+  const radios = ['standard', 'hd'].map(id => {
+    const input = el('input', { type: 'radio', name: 'speech-voice-quality', value: id, 'data-voice-quality': id });
+    input.checked = id === (state.quality || 'standard');
+    input.addEventListener('change', () => pick(id));
+    return el('label', { class: 'speech-hd-option' }, [input, el('span', { class: 'speech-voice-option-text' }, [
+      el('span', { class: 'speech-voice-option-title', text: HD_QUALITY_COPY[id].title }), el('span', { class: 'speech-voice-option-line', text: HD_QUALITY_COPY[id].line })])]);
+  });
+  const choose = id => { for (const label of radios) { const input = label.querySelector('input'); input.checked = input.value === id; } };
+  const save = async id => {
+    said.say('Saving...');
+    try { const next = await request('/api/voice-engines/quality', { method: 'PUT', toast: false, body: JSON.stringify({ quality: id }) }); said.say(id === 'hd' ? 'HD is your Kairos Voice quality now.' : 'Standard is your Kairos Voice quality now.', 'ok'); onChanged(next); }
+    catch (error) { said.say(error?.message || 'The quality could not be changed.', 'error'); }
+  };
+  async function pick(id) {
+    if (id === 'standard') { panel.replaceChildren(); if ((state.quality || 'standard') !== 'standard') await save('standard'); return; }
+    if (hd.installed) { panel.replaceChildren(); if (state.quality !== 'hd') await save('hd'); return; }
+    drawInstall();
+  }
+  function drawInstall() {
+    const line = el('p', { class: 'meta', role: 'status', 'data-voice-engine': 'hd-progress', text: hdProgressLine(hd) });
+    const buttons = [];
+    if (!isAdmin) buttons.push(el('span', { class: 'meta', text: 'An admin can download HD voice on this computer.' }));
+    else if (hd.state === 'installing') {
+      buttons.push(el('button', { type: 'button', class: 'btn quiet', text: 'Pause', 'data-voice-engine': 'hd-pause', onclick: async () => { try { await request('/api/voice-engines/hd/pause', { method: 'POST', toast: false }); } catch {} } }));
+    } else {
+      const resume = hd.state === 'partial' || hd.progress?.status === 'error';
+      buttons.push(el('button', { type: 'button', class: 'btn primary', text: resume ? 'Resume download' : 'Download HD voice', 'data-voice-engine': 'hd-install', onclick: async () => {
+        try { hd = await request('/api/voice-engines/hd/install', { method: 'POST', toast: false }); drawInstall(); }
+        catch (error) { said.say(error?.message || 'The download could not start.', 'error'); }
+      } }));
+      buttons.push(el('button', { type: 'button', class: 'btn quiet', text: 'Not now', 'data-voice-engine': 'hd-not-now', onclick: () => { choose(state.quality || 'standard'); panel.replaceChildren(); } }));
+    }
+    panel.replaceChildren(el('div', { class: 'free-voice-setup voice-engine-setup', 'data-voice-engine': 'hd-consent' }, [
+      el('p', { class: 'free-voice-limits', text: hdConsentText(hd) }), line, el('div', { class: 'free-voice-key' }, buttons)]));
+    if (hd.state === 'installing') watchInstall(node, request, next => { hd = next; line.textContent = hdProgressLine(hd); }, async next => {
+      hd = next;
+      if (next.installed) { panel.replaceChildren(); said.say('HD voice is installed.', 'ok'); await save('hd'); return; }
+      drawInstall();
+    });
+  }
+  node.append(...radios, panel, said);
+  if (state.quality === 'hd' && hd.installed && !hd.ready) said.say(`HD voice cannot run right now (${hd.not_ready_reason || 'no reason given'}), so Standard speaks.`, 'error');
+  if (hd.state === 'installing' || (state.quality !== 'hd' && hd.state === 'partial')) { choose('hd'); drawInstall(); }
+  return node;
+}
+
+// More options > Voice quality and voice: the HD voice itself. Installed: its voices with a short sample each, and
+// Remove (admin). Offered but not installed: where to get it. An NVIDIA card that falls short: one plain line why.
+// Anyone else: nothing (null).
+export function hdVoiceSetup(state, { isAdmin = false, onChanged = () => {}, request = api, play = blob => new Audio(URL.createObjectURL(blob)).play() } = {}) {
+  const hd = state.hd || {};
+  if (!hd.nvidia) return null;
+  if (!hd.offered) return el('p', { class: 'meta', 'data-voice-engine': 'hd-unavailable', text: hd.reason || 'HD voice cannot run on this graphics card.' });
+  if (!hd.installed) return el('p', { class: 'meta', 'data-voice-engine': 'hd-not-installed', text: 'Not installed. Choose HD under Kairos Voice above to download it.' });
+  const said = status();
+  const voices = (hd.voices || []).map(v => {
+    const input = el('input', { type: 'radio', name: 'speech-hd-voice', value: v.id, 'data-hd-voice': v.id });
+    input.checked = v.id === (state.hd_voice || hd.default_voice);
+    input.addEventListener('change', async () => {
+      try { onChanged(await request('/api/voice-engines/hd/voice', { method: 'PUT', toast: false, body: JSON.stringify({ voice: v.id }) })); }
+      catch (error) { said.say(error?.message || 'The voice could not be changed.', 'error'); }
+    });
+    const listen = el('button', { type: 'button', class: 'btn quiet', text: 'Play', 'aria-label': `Play a sample of ${v.name}`, 'data-hd-preview': v.id });
+    listen.addEventListener('click', async () => {
+      listen.disabled = true; said.say(hd.running ? `Playing ${v.name}...` : `Loading the HD voice for ${v.name}. The first sample takes a few seconds.`);
+      try {
+        const response = await fetch('/api/voice-engines/hd/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ voice: v.id }) });
+        if (!response.ok) { let detail = ''; try { detail = (await response.json()).detail; } catch {} throw new Error(detail || 'The sample could not be made.'); }
+        await play(await response.blob()); said.say('');
+      } catch (error) { said.say(error?.message || 'The sample could not be played.', 'error'); }
+      finally { listen.disabled = false; }
+    });
+    return el('div', { class: 'speech-hd-voice' }, [el('label', { class: 'speech-hd-option' }, [input, el('span', { class: 'speech-voice-option-text' }, [
+      el('span', { class: 'speech-voice-option-title', text: v.name }), el('span', { class: 'speech-voice-option-line', text: v.description })])]), listen]);
+  });
+  const remove = isAdmin ? el('button', { type: 'button', class: 'btn quiet', text: `Remove HD voice (${GB(hd.disk_bytes)})`, 'data-voice-engine': 'hd-remove', onclick: async () => {
+    said.say('Removing...');
+    try { onChanged(await request('/api/voice-engines/hd', { method: 'DELETE', toast: false })); }
+    catch (error) { said.say(error?.message || 'HD voice could not be removed.', 'error'); }
+  } }) : null;
+  return el('div', { class: 'free-voice-setup voice-engine-setup', 'data-voice-engine': 'hd-voices' }, [
+    el('div', { class: 'speech-hd-voices', role: 'radiogroup', 'aria-label': 'HD voice' }, voices),
+    el('p', { class: 'free-voice-limits', text: 'Iris is cloned from a clip its speaker donated for any use (CC0). Ryan and Aiden are built into Qwen3-TTS. When HD is on, calls, Open Mic, replies read aloud, voice notes and phone calls use the voice picked here, unless a bot has its own.' }),
+    ...(remove ? [el('div', { class: 'free-voice-key' }, [remove])] : []), said]);
 }

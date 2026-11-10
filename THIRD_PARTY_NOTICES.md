@@ -97,3 +97,8 @@ License: SIL Open Font License 1.1 for every family below. Unmodified .ttf files
 - syne: Copyright 2017 The Syne Project Authors (https://gitlab.com/bonjour-monde/fonderie/syne-typeface)
 - unbounded: Copyright 2022 The Unbounded Project Authors (https://github.com/googlefonts/unbounded)
 - vt323: Copyright 2011, The VT323 Project Authors (peter.hull@oikoi.com)
+
+## Qwen3-TTS and the HD voice runner
+
+Source: https://github.com/QwenLM/Qwen3-TTS (model code, as packaged in qwen-tts-hf 0.1.1.post1) and https://github.com/andimarafioti/faster-qwen3-tts (faster-qwen3-tts 0.5.4, the CUDA-graph runner).
+License: Apache License 2.0 (Qwen3-TTS code and the Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice and -Base weights; Copyright 2026 The Alibaba Qwen team) and MIT (the runner; Copyright (c) 2026 Andres Marafioti). Modified copies in sidecars/hd_voice/vendor/ with both licence texts and a NOTICE.md that lists every change; used only by the optional HD voice, in its own process. The weights, PyTorch and the other packages it needs are downloaded only when an admin installs HD voice (pinned in core/hd_voice_manifest.json). The Iris voice clip is kyutai/tts-voices voice-donations/3973.wav, CC0.
