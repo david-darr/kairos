@@ -384,6 +384,20 @@ def verify(python_exe: str) -> None:
     if result.returncode != 0:
         raise RuntimeError("runtime ONNX check failed:\n" + result.stderr.strip())
     log(result.stdout.strip())
+    # Kokoro's phonemizer must work from the runtime alone (misaki with spaCy's bundled English model; it must never
+    # need to download one), and nothing GPL may have come along with it (David's call 2026-11-10: licence-clean).
+    g2p_check = (
+        "import importlib.util as u, spacy; from misaki import en; "
+        "assert spacy.util.is_package('en_core_web_sm'), 'spaCy English model missing'; "
+        "bad = [m for m in ('phonemizer', 'espeakng_loader', 'kokoro_onnx') if u.find_spec(m)]; "
+        "assert not bad, 'GPL speech packages in the runtime: ' + repr(bad); "
+        "print('kokoro phonemizer', en.G2P(trf=False, fallback=None, unk='')('Sure thing.')[0])"
+    )
+    result = subprocess.run([python_exe, "-X", "utf8", "-c", g2p_check], cwd=BASE_DIR, capture_output=True, text=True,
+                            encoding="utf-8")
+    if result.returncode != 0:
+        raise RuntimeError("runtime Kokoro phonemizer check failed:\n" + result.stderr.strip())
+    log(result.stdout.strip())
     # A source distribution can satisfy the SDK version pin while shipping no
     # Claude executable. Clean installs need the wheel's bundled CLI; a
     # separately installed native CLI is only an optional newer override.

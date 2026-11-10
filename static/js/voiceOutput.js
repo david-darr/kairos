@@ -46,8 +46,10 @@ function forSpeech(text) {
 
 // Words before a first-sentence clause break (comma, semicolon, dash) may be spoken ahead of the full stop.
 const FIRST_CLAUSE_WORDS = 6;
-// A full stop after one of these does not end a sentence: titles, initials, "U.S.", "e.g.".
-const ABBREVIATION = /(?:\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|Mt|Gen|Col|Lt|Sgt|Capt|Rep|Sen|Gov|Hon|Rev|vs|Inc|Ltd|Co|Corp|Fig|approx)|\b(?!I\.)[A-Z]|\b[A-Za-z]\.[A-Za-z]|\be\.g|\bi\.e)\.$/;
+// A full stop after one of these does not end a sentence: titles, initials, "U.S.", "e.g.", short month names and
+// street words ("Nov. 12", "Elm Ave."; from the Voicebox study's splitter list, 2026-11-10). "No." is left out on
+// purpose: a reply that starts "No." must go at once.
+const ABBREVIATION = /(?:\b(?:Mr|Mrs|Ms|Mx|Dr|Prof|Sr|Jr|St|Mt|Ave|Blvd|Dept|Gen|Col|Lt|Sgt|Capt|Rep|Sen|Gov|Hon|Rev|vs|Inc|Ltd|Co|Corp|Fig|approx|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)|\b(?!I\.)[A-Z]|\b[A-Za-z]\.[A-Za-z]|\be\.g|\bi\.e)\.$/;
 const CLAUSE_BREAK = /[,;](?=\s)|\s+-{1,2}\s+|\s*[—–]\s*/g;
 
 // The next real sentence end in `text`, skipping abbreviations. Returns the regex match or null.

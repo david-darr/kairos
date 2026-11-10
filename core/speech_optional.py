@@ -9,10 +9,11 @@ Pinning status in this build: the URLs and hashes below are deliberately still T
 official release pages (and the hashes computed from the files themselves) by a person who has looked at them; they must
 not be guessed. Filling an entry in is the whole change needed to switch its download on.
 
-The ONNX runtime ships with the app (requirements.txt: the DirectML build on Windows, the standard build elsewhere).
-The Kokoro engine package (kokoro_onnx) does not: its phonemizer and espeak-ng are GPL-3.0, a licensing call that is
-David's. Without the runtime, the package or the model, every feature here reports why and does nothing: call
-endpointing stays on its fixed 700 ms (Open Mic 900 ms) silence wait and the voice stays on the device voice.
+Everything else ships with the app (requirements.txt): the ONNX runtime (the DirectML build on Windows, the standard
+build elsewhere) and Kokoro's phonemizer, misaki with spaCy's English model (core/kokoro_g2p.py, licence-clean: no
+espeak-ng, no GPL; David's call 2026-11-10). So a normal install needs only the model download. In a runtime missing
+any of it (a dev checkout without the packages), every feature here reports why and does nothing: call endpointing
+stays on its fixed 700 ms (Open Mic 900 ms) silence wait and the voice stays on the device voice.
 """
 import asyncio
 import hashlib
@@ -23,6 +24,7 @@ import re
 
 import httpx
 
+from core import kokoro_g2p
 from core.constants import DATA_DIR
 
 logger = logging.getLogger(__name__)
@@ -42,7 +44,7 @@ CATALOG = [
      "files": [{"file": "smart-turn.onnx", "size_mb": 8,
                 "url": "https://huggingface.co/pipecat-ai/smart-turn-v3/resolve/main/smart-turn-v3.2-cpu.onnx",
                 "sha256": "2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f"}]},
-    {"name": "kokoro", "label": "Kokoro voice", "kind": "voice", "needs": ["onnxruntime", "kokoro_onnx"],
+    {"name": "kokoro", "label": "Kokoro voice", "kind": "voice", "needs": ["onnxruntime", *kokoro_g2p.MODULES],
      "description": "A natural local voice that speaks sentence by sentence. The device voice stays as the fallback.",
      "files": [{"file": "kokoro-model.onnx", "size_mb": 310,
                 "url": "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx",
@@ -52,7 +54,8 @@ CATALOG = [
                 "sha256": "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"}]},
 ]
 
-RUNTIME_NAMES = {"onnxruntime": "the ONNX runtime", "kokoro_onnx": "the Kokoro engine package"}
+RUNTIME_NAMES = {"onnxruntime": "the ONNX runtime", "misaki": "the misaki phonemizer", "spacy": "spaCy",
+                 "en_core_web_sm": "spaCy's English model", "num2words": "num2words"}
 
 _progress: dict[str, dict] = {}
 
@@ -87,8 +90,15 @@ def missing_runtime(name: str) -> list[str]:
     return [m for m in entry(name)["needs"] if not module_available(m)]
 
 
+def runtime_names(missing: list[str]) -> str:
+    names = [RUNTIME_NAMES.get(m, m) for m in missing]
+    if len(names) < 2:
+        return "".join(names)
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
 def runtime_message(missing: list[str]) -> str:
-    return "Needs " + " and ".join(RUNTIME_NAMES.get(m, m) for m in missing)
+    return "Needs " + runtime_names(missing)
 
 
 def state(name: str) -> dict:
@@ -107,7 +117,7 @@ def state(name: str) -> dict:
         label, key = "Ready", "ready"
     return {"name": name, "label": item["label"], "kind": item["kind"], "description": item["description"],
             "size_mb": sum(f["size_mb"] for f in item["files"]), "downloaded": have, "pinned": is_pinned(item),
-            "missing_runtime": missing, "state": key, "status": label, "ready": key == "ready", "runs_on": _runs_on(name, key)}
+            "missing_runtime": missing, "missing_runtime_text": runtime_names(missing), "state": key, "status": label, "ready": key == "ready", "runs_on": _runs_on(name, key)}
 
 
 def _runs_on(name: str, key: str) -> str | None:

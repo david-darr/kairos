@@ -4,11 +4,12 @@ It plugs into the existing neural-voice architecture (core/call_voices.py): prot
 and "compatible", and answers the same two questions (which voices exist, give me PCM for this sentence), so the
 prefetching speaker in static/js/callVoice.js and the bots read-aloud queue use it unchanged.
 
-Gated on three things, each reported honestly and none of them fetched automatically: the model + voices files
-(user-started download, core/speech_optional.py), onnxruntime, and the `kokoro_onnx` package that turns text into
-phonemes and drives the model. If any is missing the engine is simply unavailable: `ready()` says why, `voices()` is
-empty, `synthesize()` raises KokoroUnavailable, and the device (OS) voice stays the fallback. Nothing here can crash a
-call.
+Gated on two things, each reported honestly: the model + voices files (a user-started download,
+core/speech_optional.py) and the runtime that ships with the app: onnxruntime, plus misaki with spaCy's English model,
+which turn text into phonemes (core/kokoro_g2p.py; Apache-2.0 and MIT, no espeak-ng). core/kokoro_engine.py drives the
+model. If anything is missing the engine is simply unavailable: `ready()` says why, `voices()` is empty,
+`synthesize()` raises KokoroUnavailable, and the device (OS) voice stays the fallback. Nothing here can crash a call.
+A voice whose id starts with "b" (bf_emma, bm_george) is read with British English rules, every other with American.
 
 Where it runs: the best execution provider this machine has (core/onnx_providers.py: DirectML on Windows, Core ML on
 macOS, else the processor). If the graphics provider fails to load, or fails while speaking, the same sentence is
@@ -18,7 +19,7 @@ and why, for Settings > Speech.
 import logging
 import threading
 
-from core import onnx_providers, speech_optional
+from core import kokoro_g2p, onnx_providers, speech_optional
 
 logger = logging.getLogger(__name__)
 
@@ -57,13 +58,12 @@ def reset(forget_failures: bool = False) -> None:
 def _open(provider: str):
     """A real engine on `provider`. Separate so tests can stand in for onnxruntime per provider."""
     model, voices = speech_optional.path_of(NAME, 0), speech_optional.path_of(NAME, 1)
-    from kokoro_onnx import Kokoro
-    session = onnx_providers.session(model, provider)
+    from core.kokoro_engine import KokoroEngine
     try:
-        session._model_path = model          # kokoro_onnx reads it back; a session built from bytes has none
-    except AttributeError:
-        pass
-    return Kokoro.from_session(session, voices)
+        kokoro_g2p.warm(british=False)       # misaki + spaCy load once (about 3 s), with the model, not mid-sentence
+    except Exception as e:                   # not the graphics card's fault: no provider is given up on for this
+        raise KokoroUnavailable("Kokoro's phonemizer could not load.") from e
+    return KokoroEngine(onnx_providers.session(model, provider), voices)
 
 
 def _give_up_on(provider: str, error: Exception) -> None:
@@ -113,6 +113,8 @@ def _get_engine():
         for provider in order:
             try:
                 engine = _open(provider)
+            except KokoroUnavailable:
+                raise
             except Exception as e:
                 if provider == onnx_providers.CPU or FORCE_PROVIDER:
                     raise
@@ -127,8 +129,8 @@ def _get_engine():
 def _create(engine, provider, text, voice):
     if provider == onnx_providers.DML:
         with _run_lock:
-            return engine.create(text, voice=voice, speed=1.0, lang="en-us")
-    return engine.create(text, voice=voice, speed=1.0, lang="en-us")
+            return engine.create(text, voice=voice, speed=1.0, lang=kokoro_g2p.lang_for_voice(voice))
+    return engine.create(text, voice=voice, speed=1.0, lang=kokoro_g2p.lang_for_voice(voice))
 
 
 def _render(text: str, voice: str):

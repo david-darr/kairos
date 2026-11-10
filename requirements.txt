@@ -86,6 +86,22 @@ pywhispercpp>=1.5,<2
 # tools, never to run a model, so the lock leaves sympy out (see its header).
 onnxruntime-directml>=1.24.4,<1.25; sys_platform == "win32"
 onnxruntime>=1.24,<2; sys_platform != "win32"
+# Kokoro's text-to-phonemes (core/kokoro_g2p.py), so Kokoro works for every
+# user after its model download. David's call 2026-11-10 ("Yes, use misaki"):
+# misaki is Kokoro's own G2P (Apache-2.0), replacing kokoro-onnx, whose
+# phonemizer and espeak-ng are GPL-3.0. Deliberately NOT `misaki[en]`: that
+# extra pulls phonemizer-fork and espeakng-loader (GPL) for a fallback Kairos
+# keeps off, and spacy-curated-transformers, which pulls PyTorch. So misaki
+# bare, plus the two packages its English reader imports: spaCy (MIT; its
+# deps are MIT/BSD) and num2words (LGPL-2.1, installed unmodified as its own
+# package). spaCy's English model (MIT) is the exact wheel from its official
+# release, pinned by file like llama-cpp-python; release checksum
+# 1932429d...a0fb85 matched before pinning. It must match spaCy's minor
+# version, hence spaCy <3.9.
+misaki>=0.9.4,<0.11
+spacy>=3.8,<3.9
+num2words>=0.5.14,<0.7
+en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
 # Forge terminal (Forge Phase 3, David approved 2026-10-09): a real PTY per
 # session. pywinpty wraps Windows ConPTY; ptyprocess is the POSIX equivalent.
 # Both MIT.

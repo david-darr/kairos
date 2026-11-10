@@ -70,6 +70,9 @@ const load = async (file, prefix = '') => import('data:text/javascript;base64,' 
   assert.deepEqual(_chunk('See the U.S. Army page. It costs 3.5 dollars. Version v1.10.0 shipped.'), ['See the U.S. Army page.', 'It costs 3.5 dollars.', 'Version v1.10.0 shipped.'], 'initialisms, decimals and versions stay whole');
   assert.deepEqual(_chunk('Use a tool, e.g. This one. And i.e. That one.'), ['Use a tool, e.g. This one.', 'And i.e. That one.']);
   assert.deepEqual(_chunk('Is it ready? Yes! Good. Moving on.'), ['Is it ready?', 'Yes!', 'Good.', 'Moving on.']);
+  assert.deepEqual(_chunk('It arrives Nov. 12 at the latest. Then Dec. 3 for the rest.'), ['It arrives Nov. 12 at the latest.', 'Then Dec. 3 for the rest.'], 'a short month name does not end a sentence');
+  assert.deepEqual(_chunk('She lives on Elm Ave. near the park. Mx. Lee too.'), ['She lives on Elm Ave. near the park.', 'Mx. Lee too.']);
+  assert.deepEqual(_chunk('No. I do not think so.'), ['No.', 'I do not think so.'], 'a reply that starts with "No." is not held back');
   const held = []; const digits = createChunker(s => held.push(s));
   digits.feed('I have 3.'); digits.flushSentence();
   assert.deepEqual(held, [], 'a digit and full stop waits in case it is 3.5');

@@ -189,7 +189,14 @@ class Catalog(Base):
                 self.assertTrue(speech_optional.state('smart-turn')['ready'])
             self.install('kokoro')
             with patch.object(speech_optional, 'module_available', side_effect=lambda m: m == 'onnxruntime'):
-                self.assertIn('Kokoro engine package', speech_optional.state('kokoro')['status'])
+                s = speech_optional.state('kokoro')
+                self.assertEqual(s['status'], "Needs the misaki phonemizer, spaCy, spaCy's English model and num2words")
+                self.assertEqual(s['missing_runtime_text'], "the misaki phonemizer, spaCy, spaCy's English model and num2words")
+            # Licence-clean (David, 2026-11-10): Kokoro no longer needs the GPL kokoro_onnx/phonemizer/espeak packages.
+            self.assertNotIn('kokoro_onnx', speech_optional.entry('kokoro')['needs'])
+            self.assertFalse({'phonemizer', 'espeakng_loader'} & set(speech_optional.entry('kokoro')['needs']))
+            with patch.object(speech_optional, 'module_available', side_effect=lambda m: m not in ('kokoro_onnx', 'phonemizer', 'espeakng_loader')):
+                self.assertTrue(speech_optional.state('kokoro')['ready'], 'Kokoro is ready with only the model download')
 
     def test_remove_deletes_files_and_cached_sessions(self):
         self.install('smart-turn')
@@ -291,7 +298,7 @@ class KokoroEngine(Base):
             call_voices.configure('', 'kokoro')
         self.install('kokoro')
         with patch.object(speech_optional, 'module_available', return_value=False):
-            self.assertEqual(kokoro_voice.ready()[1], 'Needs the ONNX runtime and the Kokoro engine package')
+            self.assertEqual(kokoro_voice.ready()[1], "Needs the ONNX runtime, the misaki phonemizer, spaCy, spaCy's English model and num2words")
 
     def test_catalog_falls_back_to_no_voices_with_a_reason(self):
         from core.atomic_io import write_json_atomic

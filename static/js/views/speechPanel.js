@@ -233,7 +233,7 @@ export async function renderSpeechPanel(content, status) {
         }
       }
       // Not yet downloaded but the runtime is also missing: say so up front rather than after a long download.
-      const needs = !item.downloaded && item.missing_runtime?.length ? ` Also needs ${item.missing_runtime.map(m => m === 'onnxruntime' ? 'the ONNX runtime' : 'the Kokoro engine package').join(' and ')}.` : '';
+      const needs = !item.downloaded && item.missing_runtime?.length ? ` Also needs ${item.missing_runtime_text || item.missing_runtime.join(', ')}.` : '';
       // Once usable, say which part of the computer runs it (Kokoro: the graphics card when it can, else the processor).
       const runsOn = item.runs_on ? ` ${item.runs_on}` : '';
       return row({ title: `${item.label} · ${item.size_mb} MB`, description: (item.description || '') + needs + runsOn, control: el('div', { class: 'speech-model-actions' }, parts), cls: 'speech-optional' });
