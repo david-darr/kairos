@@ -10,6 +10,10 @@
 </style>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Kairos demo</title>
+<!-- Studio's editor previews 3D shots with the vendored three.js, whose modules import it by its bare name. This map
+     is the page's only inline script; the app's Content-Security-Policy allows exactly its hash on this page
+     (core/middleware.py, core/three_vendor.py IMPORT_MAP). Keep it byte for byte. -->
+<script type="importmap">{"imports":{"three":"static/vendor/three/three.module.js"}}</script>
 <link rel="manifest" href="static/manifest.webmanifest">
 <meta name="theme-color" content="#F3EADB">
 <meta name="apple-mobile-web-app-capable" content="yes">

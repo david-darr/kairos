@@ -239,3 +239,100 @@
   .kairos-redesign [data-view][data-custom-tab="true"] .ste-shell .ste-tab { min-height: 30px; }
   .kairos-redesign [data-view][data-custom-tab="true"] .ste-shell .ste-clip { min-height: 0; }
 }
+
+/* Tracks and clips (Content Studio Editor step 3): overlay lanes above the beats, audio lanes under the narration.
+   Track clips share the beat clips' shape; their kind picks the chart token (text, picture, shape, sound). */
+.ste-olane, .ste-alane { --lane-h: 38px; }
+.ste-lane.off { background: repeating-linear-gradient(135deg, transparent 0 6px, var(--ste-wash) 6px 12px); }
+.ste-lane.off .ste-tclip { opacity: .45; }
+.ste-lane.locked .ste-tclip { cursor: default; }
+.ste-trackhead { gap: 2px; padding: 0 4px 0 8px; color: var(--text-dim); }
+.ste-head-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.studio-view .ste-head-tool { flex: none; width: 18px; min-height: 18px; height: 18px; padding: 0; border: 1px solid transparent; border-radius: 4px; background: none;
+  font: 600 10px/1 var(--font-mono); color: var(--text-faint); cursor: pointer; }
+.studio-view .ste-head-tool:hover { border-color: var(--ste-line); color: var(--text); }
+.studio-view .ste-head-tool[aria-pressed=true] { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+.studio-view .ste-tclip { position: absolute; top: 4px; bottom: 4px; min-height: 0; padding: 2px 9px 2px 9px; margin: 0; display: flex; flex-direction: column; justify-content: center;
+  align-items: flex-start; overflow: hidden; text-align: left; cursor: grab; border-radius: 6px; font: inherit; font-size: 11px; line-height: 1.25; color: var(--text);
+  --clip: var(--chart-1); background: color-mix(in srgb, var(--clip) 18%, var(--bg-panel-solid)); border: 1px solid color-mix(in srgb, var(--clip) 55%, var(--bg-panel-solid)); white-space: nowrap; }
+.studio-view .ste-tclip[data-kind=picture] { --clip: var(--chart-3); }
+.studio-view .ste-tclip[data-kind=data] { --clip: var(--chart-5); }
+.studio-view .ste-tclip[data-kind=sound] { --clip: var(--chart-6); }
+.studio-view .ste-tclip:hover { background: color-mix(in srgb, var(--clip) 28%, var(--bg-panel-solid)); }
+.studio-view .ste-tclip.selected { outline: 2px solid var(--accent); outline-offset: 0; z-index: 2; }
+.studio-view .ste-tclip.dragging { opacity: .85; cursor: grabbing; z-index: 3; box-shadow: var(--popup-shadow); }
+.studio-view .ste-tclip.blocked { outline: 2px dashed var(--danger); }
+.studio-view .ste-tclip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ste-tclip .ste-clip-top, .ste-tclip .ste-clip-label { position: relative; z-index: 1; }
+.ste-swave { position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 100%; height: 26px; pointer-events: none; }
+.ste-ctrim { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; z-index: 2; }
+.ste-ctrim.left { left: 0; border-radius: 5px 0 0 5px; }
+.ste-ctrim.right { right: 0; border-radius: 0 5px 5px 0; }
+.ste-ctrim:hover, .ste-tclip.selected .ste-ctrim { background: rgba(var(--accent-rgb), .35); }
+.ste-tl-sep { width: 1px; align-self: stretch; margin: 2px 4px; background: var(--ste-line); }
+.studio-view .ste-tl-bar select.ste-add-track { width: auto; max-width: 150px; flex: 0 0 auto; }
+.ste-shell .ste-tl-heads { flex-basis: 118px; }
+.ste-pinlane { --lane-h: 22px; }
+.studio-view .ste-pinmark { position: absolute; top: 3px; width: 16px; height: 16px; min-height: 16px; margin-left: -8px; padding: 0; border-radius: 50% 50% 50% 2px; border: 0;
+  background: var(--accent); color: var(--bg-panel-solid); font: 600 9.5px/16px var(--font-mono); text-align: center; cursor: pointer; z-index: 5; }
+
+/* The preview's overlays (never in the video): the selected clip's box and the comment pins. */
+.ste-selection, .ste-pins { position: absolute; inset: 0; pointer-events: none; }
+.ste-selbox { position: absolute; border: 1.5px solid var(--accent); border-radius: 2px; box-shadow: 0 0 0 1px rgba(var(--wash-rgb), .6); }
+.ste-selbox.idle { border-style: dashed; opacity: .7; }
+.ste-selbox span { position: absolute; left: -1px; bottom: 100%; font-size: 10px; line-height: 1.3; padding: 1px 5px; border-radius: 3px 3px 0 0; background: var(--accent); color: var(--bg-panel-solid); white-space: nowrap; }
+.studio-stage.commenting .ste-pins { pointer-events: auto; cursor: crosshair; }
+.studio-view .ste-pin { position: absolute; width: 22px; height: 22px; min-height: 22px; margin: -22px 0 0 -2px; padding: 0; border: 2px solid var(--bg-panel-solid); border-radius: 50% 50% 50% 2px;
+  background: var(--accent); color: var(--bg-panel-solid); font: 600 11px/18px var(--font-mono); text-align: center; pointer-events: auto; cursor: pointer; box-shadow: 0 1px 3px rgba(var(--shade-rgb), .35); }
+.ste-pin.draft { background: var(--text); }
+.ste-pin-form { position: absolute; width: min(260px, 38%); min-width: 190px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel-solid);
+  box-shadow: var(--shadow-lifted); pointer-events: auto; cursor: default; z-index: 6; }
+.ste-pin-form textarea { width: 100%; box-sizing: border-box; }
+
+/* Ask Kairos (step 4). */
+.ste-ask-selection { font-size: 11.5px; color: var(--text-dim); padding: 6px 8px; border-radius: 6px; background: var(--ste-wash); margin: 4px 0; }
+.ste-ask-status:empty { display: none; }
+.ste-comments { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ste-comment { display: grid; grid-template-columns: auto auto 1fr; gap: 2px 6px; align-items: center; padding: 4px 6px; border: 1px solid var(--ste-line); border-radius: 6px; }
+.ste-comment .btn { grid-row: 2; }
+.ste-comment .ste-comment-text { grid-column: 3; overflow-wrap: anywhere; }
+.studio-view .ste-comment-go { border: 0; background: none; padding: 0 2px; min-height: 0; font: 600 11px var(--font-mono); color: var(--accent); cursor: pointer; }
+.ste-run { border: 1px solid var(--ste-line); border-radius: 8px; padding: 6px 8px; margin: 6px 0; background: var(--bg-panel-solid); }
+.ste-run[data-status=pending] { border-color: var(--accent); background: var(--accent-dim); }
+.ste-run[data-status=undone], .ste-run[data-status=discarded] { opacity: .7; }
+.ste-run-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.ste-run-head strong { font-weight: 600; overflow-wrap: anywhere; }
+.ste-run-status { font-size: 10.5px; color: var(--text-faint); white-space: nowrap; }
+.ste-run[data-status=failed] .ste-run-status { color: var(--danger); }
+.ste-run-reply { margin: 4px 0; color: var(--text-dim); }
+.ste-change-list { margin: 4px 0 0; padding-left: 18px; font-size: 11.5px; }
+.ste-change-list li { margin: 2px 0; }
+.ste-change-list li[data-change=added]::marker { color: var(--success); }
+.ste-change-list li[data-change=removed]::marker { color: var(--danger); }
+.ste-since summary { font-size: 11.5px; }
+
+/* Assets: an image can be used on a beat or put over the video; sounds are the person's own files. */
+.ste-asset-cell { display: grid; gap: 3px; }
+.studio-view .ste-asset-add { font-size: 11px; padding: 1px 6px; min-height: 22px; }
+.ste-sounds { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 4px; }
+.ste-sounds li { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.ste-assets h4 { margin-top: 10px; }
+.ste-locked-note { color: var(--warn); }
+
+@media (max-width: 760px) {
+  .ste-olane, .ste-alane, .ste-pinlane, .ste-tl-sep, .ste-add-track, .studio-view .ste-track-tool { display: none; }
+  .studio-view .ste-pin { width: 30px; height: 30px; line-height: 26px; margin-top: -30px; }
+}
+.kairos-redesign [data-view][data-custom-tab="true"] .ste-shell .ste-tclip { border-radius: 6px !important; padding: 2px 9px; min-height: 0;
+  background-color: color-mix(in srgb, var(--clip) 18%, var(--bg-panel-solid)) !important; color: var(--text) !important;
+  border-color: color-mix(in srgb, var(--clip) 55%, var(--bg-panel-solid)) !important; }
+.kairos-redesign [data-view][data-custom-tab="true"] .ste-shell .ste-tclip.selected { background-color: color-mix(in srgb, var(--clip) 32%, var(--bg-panel-solid)) !important; }
+.kairos-redesign [data-view][data-custom-tab="true"] .ste-shell :is(.ste-head-tool, .ste-pinmark, .ste-comment-go) { min-height: 0 !important; padding: 0 !important; }
+.kairos-redesign [data-view][data-custom-tab="true"] .ste-shell .ste-head-tool { border-radius: 4px !important; background-color: transparent !important; color: var(--text-faint) !important;
+  border-color: transparent !important; width: 18px; height: 18px; font-size: 10px; }
+.kairos-redesign [data-view][data-custom-tab="true"] .ste-shell .ste-head-tool[aria-pressed="true"] { color: var(--accent) !important; border-color: var(--accent) !important; background-color: var(--accent-dim) !important; }
+.kairos-redesign [data-view][data-custom-tab="true"] .ste-shell .ste-pinmark { border-radius: 50% 50% 50% 2px !important; background-color: var(--accent) !important; color: var(--bg-panel-solid) !important; width: 16px; height: 16px; }
+.kairos-redesign [data-view][data-custom-tab="true"] .ste-shell .ste-pin { border-radius: 50% 50% 50% 2px !important; background-color: var(--accent) !important; color: var(--bg-panel-solid) !important;
+  padding: 0 !important; min-height: 22px !important; }
+.kairos-redesign [data-view][data-custom-tab="true"] .ste-shell .ste-comment-go { background-color: transparent !important; color: var(--accent) !important; border: 0 !important; }
+.kairos-redesign [data-view][data-custom-tab="true"] .ste-shell select.ste-add-track { width: auto !important; max-width: 160px; flex: 0 0 auto; }

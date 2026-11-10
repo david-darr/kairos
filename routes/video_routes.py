@@ -1,5 +1,6 @@
 """Authenticated video CRUD and a narrowly signed, offline-only player page."""
 from __future__ import annotations
+import asyncio
 import json
 import re
 from pathlib import Path
@@ -7,8 +8,8 @@ from typing import Any, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
-from core import (accounts, design_render, design_render_bridge, design_systems, ffmpeg_tools, video_longform, video_plan, video_render,
-                  three_vendor, video_store)
+from core import (accounts, design_render, design_render_bridge, design_systems, ffmpeg_tools, video_agent, video_longform, video_plan,
+                  video_render, three_vendor, video_store)
 from core.auth import auth_manager
 from core.middleware import get_current_user, require_user
 from core.constants import STATIC_DIR
@@ -33,6 +34,7 @@ class VideoBody(BaseModel):
     style_pack: Optional[dict[str, Any]] = None       # a user-made style pack, {id, version}
     chapters: Optional[list[dict[str, Any]]] = Field(None, max_length=video_store.MAX_CHAPTERS)   # a long video's chapters
     renderer: Optional[str] = Field(None, max_length=10)   # Pack B's 3D stage beats: threejs (built in) or blender (when installed)
+    tracks: Optional[list[dict[str, Any]]] = Field(None, max_length=8)   # overlay and audio tracks over the beats (core/video_tracks.py)
     id: Optional[str] = None
     owner: Optional[str] = None
     chat_ids: list[str] = []
@@ -43,7 +45,7 @@ class VideoBody(BaseModel):
 
     def project(self):
         return {k: v for k, v in self.model_dump().items()
-                if k in video_store.FIELDS and (k not in ("id", "narration", "cast", "palette", "style_pack", "chapters", "renderer") or v is not None)}
+                if k in video_store.FIELDS and (k not in ("id", "narration", "cast", "palette", "style_pack", "chapters", "renderer", "tracks") or v is not None)}
 
 
 class RenderBody(BaseModel):
@@ -259,14 +261,96 @@ async def add_asset(video_id: str, request: Request, user: str = Depends(require
         form = await request.form()
         upload = form.get("file")
         if not hasattr(upload, "read"):
-            raise HTTPException(422, "asset: upload an image in the file field.")
+            raise HTTPException(422, "asset: upload an image or a sound in the file field.")
         try:
-            raw = await upload.read(25 * 1024 * 1024 + 1)
             ext = Path(upload.filename or "").suffix
+            if ext.lower().lstrip(".") in video_store.AUDIO_TYPES:
+                # A sound for an audio clip (Content Studio Editor step 3): the person's own file, decoded by FFmpeg.
+                raw = await upload.read(video_store.AUDIO_UPLOAD_LIMIT + 1)
+                asset = await asyncio.to_thread(_call, video_store.add_audio, video_id, raw, ext, Path(upload.filename or "").stem)
+                return {"asset": asset, "audio": video_store.audio_info(video_id).get(asset)}
+            raw = await upload.read(25 * 1024 * 1024 + 1)
             asset = _call(video_store.add_asset, video_id, raw, ext)
         finally:
             await form.close()
     return {"asset": asset}
+
+
+@router.get("/api/videos/{video_id}/audio")
+async def audio(video_id: str, user: str = Depends(require_user)):
+    """The sounds uploaded to this video, with their lengths and peak levels for the timeline's audio lanes."""
+    _video(video_id, user)
+    return {"sounds": video_store.audio_info(video_id)}
+
+
+# -- Ask Kairos in the editor (Content Studio Editor step 4): comments on the preview, runs, dry runs and undo ---------
+
+class CommentBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    t: float
+    x: float
+    y: float
+    text: str = Field(min_length=1, max_length=video_agent.COMMENT_LIMIT)
+    under: str = Field("", max_length=200)
+
+
+class CommentPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: Optional[str] = Field(None, max_length=video_agent.COMMENT_LIMIT)
+    status: Optional[str] = Field(None, max_length=10)
+
+
+class AskBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request: str = Field("", max_length=video_agent.REQUEST_LIMIT)
+    selection: Optional[dict[str, Any]] = None
+    comments: list[str] = Field(default=[], max_length=40)
+    endpoint_id: Optional[str] = Field(None, max_length=80)
+
+
+@router.get("/api/videos/{video_id}/review")
+async def review(video_id: str, user: str = Depends(require_user)):
+    _video(video_id, user)
+    return _call(video_agent.review, video_id)
+
+
+@router.post("/api/videos/{video_id}/comments")
+async def add_comment(video_id: str, body: CommentBody, user: str = Depends(require_user)):
+    _video(video_id, user)
+    return _call(video_agent.add_comment, video_id, t=body.t, x=body.x, y=body.y, text=body.text, under=body.under)
+
+
+@router.patch("/api/videos/{video_id}/comments/{comment_id}")
+async def update_comment(video_id: str, comment_id: str, body: CommentPatch, user: str = Depends(require_user)):
+    _video(video_id, user)
+    return _call(video_agent.update_comment, video_id, comment_id, text=body.text, status=body.status)
+
+
+@router.delete("/api/videos/{video_id}/comments/{comment_id}")
+async def delete_comment(video_id: str, comment_id: str, user: str = Depends(require_user)):
+    _video(video_id, user)
+    _call(video_agent.delete_comment, video_id, comment_id)
+    return {"ok": True}
+
+
+@router.post("/api/videos/{video_id}/agent/ask")
+async def ask_kairos(video_id: str, body: AskBody, user: str = Depends(require_user)):
+    _video(video_id, user)
+    try:
+        return await video_agent.ask(video_id, body.request, body.selection, body.comments, body.endpoint_id)
+    except LookupError as error:
+        raise HTTPException(404, str(error).strip("'")) from None
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from None
+
+
+@router.post("/api/videos/{video_id}/agent/runs/{run_id}/{action}")
+async def kairos_run(video_id: str, run_id: str, action: str, user: str = Depends(require_user)):
+    _video(video_id, user)
+    actions = {"apply": video_agent.apply, "discard": video_agent.discard, "undo": video_agent.undo}
+    if action not in actions:
+        raise HTTPException(404, "Choose apply, discard or undo.")
+    return _call(actions[action], video_id, run_id)
 
 
 @router.post("/api/videos/{video_id}/render")

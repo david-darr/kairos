@@ -51,7 +51,7 @@ TYPICAL_FPS = 45.0     # measured 47.6 and 48.2 on the 3.5-minute Flat 2D sample
 SAMPLES_PER_CHAPTER = 4
 SHEET_SAMPLES = 12
 YOUTUBE_MIN_CHAPTERS, YOUTUBE_MIN_SECONDS = 3, 10   # YouTube's chapter rules (support.google.com/youtube/answer/9884579)
-ENGINE_FILES = ("engine.js", "kit.js", "layout.js", "rig.js", "scene.js", "stage.js", "stage3d.js")
+ENGINE_FILES = ("engine.js", "kit.js", "layout.js", "rig.js", "scene.js", "stage.js", "stage3d.js", "overlay.js")
 _engine = {}
 
 
@@ -110,6 +110,10 @@ def chapter_keys(project, aspect, renderer=None) -> list[str]:
         body = {**shared, "beats": beats[first:last], "before": beats[first - 1] if first else None,
                 "after": beats[last] if last < len(beats) else None, "order": [[b["kind"], b["id"]] for b in beats[:last]],
                 "offset": round(span["start"] * 30 - span["first_frame"], 6), "frames": span["frames"]}
+        from core import video_tracks
+        clips = video_tracks.clips_in(project, span["start"] - 1 / 30, span["end"] + 1 / 30)
+        if clips:   # kept out of the key otherwise, so a chapter without overlays keeps its part's name
+            body["clips"] = clips
         keys.append(hashlib.sha256(json.dumps(body, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:24])
     return keys
 
@@ -266,8 +270,10 @@ async def _thread(function, *args):
 def _sample_times(project, span):
     """Frame times inside the chapter kept for the checks and the contact sheet: the middle of up to four of its shots.
     A video rendered as one part (Blender without chapters) keeps twelve frames spread over it, as a normal render does."""
+    from core import video_tracks
+    clip_frames = video_tracks.check_frames(project, span["first_frame"], span["first_frame"] + span["frames"] - 1, 4)
     if span["id"] == "all":
-        return sorted({span["first_frame"] + round(i * (span["frames"] - 1) / 11) for i in range(12)})
+        return sorted({span["first_frame"] + round(i * (span["frames"] - 1) / 11) for i in range(12)} | clip_frames)
     beats, starts, at = project["beats"], [], 0.
     for b in beats:
         starts.append((at, at + video_store.beat_seconds(b, project["bpm"])))
@@ -276,7 +282,7 @@ def _sample_times(project, span):
     if len(picks) > SAMPLES_PER_CHAPTER:
         picks = [picks[round(i * (len(picks) - 1) / (SAMPLES_PER_CHAPTER - 1))] for i in range(SAMPLES_PER_CHAPTER)]
     low, high = span["first_frame"], span["first_frame"] + span["frames"] - 1
-    return sorted({min(high, max(low, int((starts[i][0] + starts[i][1]) / 2 * 30))) for i in picks})
+    return sorted({min(high, max(low, int((starts[i][0] + starts[i][1]) / 2 * 30))) for i in picks} | clip_frames)
 
 
 async def _chapter(project, aspect, span, key, parts, state, index):
@@ -492,6 +498,7 @@ async def _join(project, aspect, spans, keys, parts, state):
         frames, times = [raw for _, raw in samples], [i / 30 for i, _ in samples]
         notes = video_checks.check(project, aspect, layouts, frames, measured, voice or None)
         notes += video_render.character_notes(project, layouts, frames, times)
+        notes += video_checks.overlay_notes(project, aspect, layouts, frames, times)
         notes += video_render.pack_notes(project)
         notes += video_blender.renderer_note(project)
         text, problems = youtube_chapters(project) if video_store.chaptered(project) else ("", [])

@@ -2,8 +2,17 @@
 
 `engine.js` exports `mount(canvas, project, {aspect, tokens, assetsBase})`.
 Await `ready` before calling synchronous `drawFrame(seconds)` or `layout(seconds)`.
-The returned object also exposes `duration` and `info`. Each mount owns its buffers,
-images, font metrics and deterministic caches; Studio can mount several canvases.
+The returned object also exposes `duration`, `info` and `dispose()` (frees a 3D
+stage's WebGL context; Studio calls it when it replaces a preview). Each mount owns
+its buffers, images, font metrics and deterministic caches; Studio can mount several
+canvases.
+
+`overlay.js` draws a project's overlay tracks (Content Studio Editor step 3): text,
+image and shape clips over the beats in track order (the last track on top) and under
+the captions, each with its opacity and linear fades, positioned by a box of frame
+shares. Hidden tracks and audio tracks draw nothing. `layout(t)` reports each clip on
+screen with `clip`, `track` and (text) `role: 'overlay'`, its colours and `truncated`;
+`info.clips` lists the visible clips. core/video_tracks.py checks the same data.
 
 `player.html` has exactly one `<!--KD-PROJECT-->` and `<!--KD-TOKENS-->` placeholder.
 Replace the former with a complete JSON script element named `kd-project` (escape

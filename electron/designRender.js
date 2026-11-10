@@ -91,7 +91,7 @@ function allowedRequest(raw, origin, designId, videoId = '', playerPath = '', lo
     if (videoId) {
       return (url.pathname + url.search === playerPath) ||
         (url.pathname.startsWith(`/api/videos/${videoId}/assets/`) && /^\/api\/videos\/[a-f0-9]{12}\/assets\/[a-f0-9]{64}\.(png|jpg|gif|webp)$/.test(url.pathname)) ||
-        /^\/static\/motion\/(engine|kit|layout|rig|scene|stage|stage3d)\.js$/.test(url.pathname) || THREE_PATH.test(url.pathname) ||
+        /^\/static\/motion\/(engine|kit|layout|rig|scene|stage|stage3d|overlay)\.js$/.test(url.pathname) || THREE_PATH.test(url.pathname) ||
         (url.pathname.startsWith(`/api/design-fonts/${look}/`) && /^\/api\/design-fonts\/[a-z0-9_-]+\/[A-Za-z0-9_.-]+\.(woff2?|ttf|otf)$/.test(url.pathname));
     }
     return url.pathname.startsWith(`/api/designs/${designId}/`) || url.pathname.startsWith('/api/design-fonts/');

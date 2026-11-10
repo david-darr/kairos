@@ -5,7 +5,7 @@ import copy
 import json
 import math
 from core import (character_sheet, character_store, creative_direction, design_store, design_systems, design_tools, ffmpeg_tools,
-                  image_gen, style_packs, video_narration, video_render, video_store)
+                  image_gen, style_packs, video_narration, video_render, video_store, video_tracks)
 from core.tool_registry import ALL, READ, WRITE, ToolResult, _object, _str, register
 from core.untrusted import wrap_untrusted
 
@@ -111,6 +111,7 @@ def _outline(project):
         if "say" in b:
             line += f" | says: {b['say']}" + ("" if "spoken" in b else " (length estimated until video_narrate)")
         lines.append(line)
+    lines += video_tracks.outline_lines(project)
     return "\n".join(lines)
 
 
@@ -202,8 +203,9 @@ async def _read(args, ctx):
     return _safe(ctx, _outline(_video(args, ctx)))
 
 
-def edit(project, ops):
-    """Apply all operations to a copy; the caller commits only a validated result."""
+def edit(project, ops, agent=False):
+    """Apply all operations to a copy; the caller commits only a validated result. Clip and track operations
+    (core/video_tracks.py) never change a locked track; `agent` (Studio's Ask Kairos) may not lock or unlock one."""
     draft = copy.deepcopy(project)
     if not isinstance(ops, list) or not 1 <= len(ops) <= 200:
         raise ValueError("ops: give 1 to 200 operations.")
@@ -244,15 +246,20 @@ def edit(project, ops):
                 if not isinstance(beat, dict):
                     raise ValueError(f"ops[{n}].beat: give a beat object.")
             draft["beats"].insert(index(target) + (side == "after"), beat)
+        elif isinstance(kind, str) and kind.startswith(("track_", "clip_")):
+            video_tracks.apply_op(draft, op, n, agent=agent)
         else:
-            raise ValueError(f"ops[{n}].op: choose set, insert, remove, move or project.")
+            raise ValueError(f"ops[{n}].op: choose set, insert, remove, move, project, or a track_ or clip_ operation.")
+    if draft.get("tracks") == []:
+        draft.pop("tracks")
     return video_store.validate(draft)
 
 
 @register("video_edit", "Change a video atomically. ops: set {op:set,id,field,value} (field say sets or, with an empty value, removes a narration line); "
           "insert {op:insert,before|after,beat}; remove {op:remove,id}; move {op:move,id,before|after}; "
           "project {op:project,field,value} for title,look,bpm,aspects,music,narration,cast,palette,style_pack ({id, version}),chapters ([{id, title, start}]),renderer (threejs or blender); a scene beat's whole scene is set with field scene, a stage beat's with field stage. "
-          "Use beat ids from video_outline. A bad operation changes nothing. Preview again after edits.",
+          + video_tracks.OP_HELP +
+          "Use beat, track and clip ids from video_outline. A bad operation changes nothing. Preview again after edits.",
           _object({"video_id": _ID, "ops": {"type": "array", "items": {"type": "object"}}}, ("ops",)), surfaces=ALL, effect=WRITE)
 @_guard
 async def _edit(args, ctx):

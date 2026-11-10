@@ -1,4 +1,5 @@
 // Isolated fixture server; run with the shared Electron binary. No live data.
+const { scriptSrc } = require('./app-page-policy.cjs');
 const { app, BrowserWindow, session } = require('electron');
 const { exitAfterFlush } = require('./electron-exit.cjs');
 const http = require('node:http');
@@ -10,7 +11,7 @@ const demoState = { empty: false };
 const { fixture, mutate, media } = require('../demo/fixtures.js')({ now: Date.now() / 1000, state: demoState });
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-src 'self' https:; img-src 'self' data: blob:");
+  res.setHeader('Content-Security-Policy', `default-src 'self'; style-src 'self' 'unsafe-inline'; script-src ${scriptSrc(url.pathname)}; frame-src 'self' https:; img-src 'self' data: blob:`);
   if (url.pathname.startsWith('/api/')) {
     const file = req.method === 'GET' && media(url);
     if (file) { res.setHeader('Content-Type', file.type); res.end(file.base64 ? Buffer.from(file.base64, 'base64') : file.body); return; }

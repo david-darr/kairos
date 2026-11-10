@@ -246,6 +246,86 @@ def long_form_beats():
     return beats, chapters
 
 
+def chime_wav():
+    """A two-note chime made here, standing in for a sound file the person uploads (Kairos never fetches sounds)."""
+    import io
+    import wave
+    import numpy as np
+    rate = 44100
+    t = np.arange(int(1.4 * rate)) / rate
+    note = lambda f, at: np.sin(2 * np.pi * f * (t - at)) * np.exp(-(t - at) * 5) * (t >= at)
+    mono = (note(880, 0) + .8 * note(1318.5, .18)) * .35 * np.minimum(1, t / .005)
+    out = io.BytesIO()
+    with wave.open(out, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes((mono * 32767).astype("<i2").tobytes())
+    return out.getvalue()
+
+
+def badge_png():
+    """A small round badge drawn here for the image clip (our own artwork, no download)."""
+    import io
+    from PIL import Image, ImageDraw
+    im = Image.new("RGBA", (360, 360), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.ellipse((10, 10, 350, 350), fill=(29, 39, 51, 255))
+    d.ellipse((60, 60, 300, 300), outline=(242, 153, 74, 255), width=22)
+    d.ellipse((235, 70, 285, 120), fill=(242, 153, 74, 255))
+    out = io.BytesIO()
+    im.save(out, "PNG")
+    return out.getvalue()
+
+
+async def add_tracks(project):
+    """Content Studio Editor step 3: after the narration has set the timeline, put an overlay track (a title card, an
+    image badge, a fact card), a shape track (an underline and an arrow) and an audio track (a chime) over the beats,
+    each placed on its beat's measured span. Sound and image go in through the same store calls as an upload."""
+    from core import video_narration, video_render, video_store
+    project = await asyncio.to_thread(video_narration.prepare, project["id"])
+    spans = {b["id"]: (b["start"], b["end"]) for b in video_render.outline(project)}
+    first, second, third, fourth = [b["id"] for b in project["beats"][:4]]
+    sound = video_store.add_audio(project["id"], chime_wav(), "wav", "Chime")
+    badge = video_store.add_asset(project["id"], badge_png(), "png")
+    s1, s2, s3, s4 = spans[first], spans[second], spans[third], spans[fourth]
+    tracks = [
+        {"id": "titles", "kind": "overlay", "name": "Titles", "clips": [
+            {"id": "intro", "kind": "text", "start": round(s1[0] + .4, 3), "in": 0, "out": round(min(3.2, s1[1] - s1[0] - .5), 3), "fade_in": .3, "fade_out": .3,
+             "text": "An original Kairos explainer", "box": {"x": .29, "y": .06, "w": .42, "h": .1}, "role": "body", "style": "card", "color": "text", "align": "center"},
+            {"id": "fact", "kind": "text", "start": round(s3[0] + .5, 3), "in": 0, "out": round(s3[1] - s3[0] - 1.0, 3), "fade_in": .3, "fade_out": .3,
+             "text": "Blue light scatters most", "box": {"x": .06, "y": .07, "w": .4, "h": .12}, "role": "title", "style": "card", "color": "text"}]},
+        {"id": "marks", "kind": "overlay", "name": "Shapes", "clips": [
+            {"id": "underline", "kind": "shape", "start": round(s3[0] + .8, 3), "in": 0, "out": round(s3[1] - s3[0] - 1.4, 3), "fade_in": .2, "fade_out": .2,
+             "shape": "rect", "color": "accent-2", "fill": True, "box": {"x": .07, "y": .2, "w": .22, "h": .012}},
+            {"id": "arrow", "kind": "shape", "start": round(s2[0] + .5, 3), "in": 0, "out": round(s2[1] - s2[0] - 1.0, 3), "fade_in": .2, "fade_out": .2,
+             "shape": "arrow", "color": "accent-2", "fill": True, "stroke": .006, "box": {"x": .62, "y": .16, "w": .12, "h": .07}}]},
+        {"id": "pictures", "kind": "overlay", "name": "Pictures", "clips": [
+            {"id": "badge", "kind": "image", "start": round(s3[0] + .3, 3), "in": 0, "out": round(s3[1] - s3[0] - .6, 3), "fade_in": .25, "fade_out": .25,
+             "image": badge, "box": {"x": .83, "y": .07, "w": .1, "h": .17}, "fit": "contain"}]},
+        {"id": "sound", "kind": "audio", "name": "Sound", "clips": [
+            {"id": "chime", "kind": "sound", "start": round(s4[0] + .1, 3), "in": 0, "out": 1.35, "volume": .7, "fade_in": 0, "fade_out": .2, "audio": sound}]}]
+    return video_store.save(project["id"], {**project, "tracks": tracks})
+
+
+def overlay_frame(path, t, box, keep=None):
+    """The rendered frame at t (FFmpeg), and the median colour inside a clip's box."""
+    import subprocess
+    from PIL import Image
+    from core import ffmpeg_tools
+    out = Path(tempfile.mkdtemp(prefix="overlay-frame-")) / "frame.png"
+    subprocess.run([ffmpeg_tools.find(), "-v", "error", "-ss", f"{t:.3f}", "-i", str(path), "-frames:v", "1", str(out)], check=True,
+                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    with Image.open(out) as im:
+        w, h = im.size
+        crop = im.convert("RGB").crop((int(box["x"] * w) + 6, int(box["y"] * h) + 6, int((box["x"] + box["w"]) * w) - 6, int((box["y"] + box["h"]) * h) - 6))
+        values = sorted(crop.getdata(), key=sum)
+        median = values[len(values) // 2]
+        if keep:
+            im.save(keep)
+    return list(median)
+
+
 def tone_voice():
     """A stand-in for Kokoro when its model is not on this machine: a soft tone as long as the words."""
     import numpy as np
@@ -343,6 +423,8 @@ async def main(args):
         if cast:
             options["cast"] = [{"character": c, "version": 1} for c in cast]
         project = None if args.style_pack or args.long_form or args.pack_b else video_store.create(spec["title"], owner="smoke", beats=beats, **options)
+        if args.tracks:
+            project = await add_tracks(project)
         if args.long_form:
             # The pack is test-approved here (in the app only the person approves), then the chaptered video is made in it.
             style_pack_store.submit(pack["id"], 1, {"by": "render smoke"})
@@ -414,6 +496,19 @@ async def main(args):
         project = video_store.get(project["id"])
         folder = video_store._folder(project["id"]) / "renders"
         result.update(ok=True, project=project, files=sorted(p.name for p in folder.iterdir()), sheet_match=checked)
+        if args.tracks:
+            # The overlay is in the encoded video: the title card's colour is the look's background, where the beat shows
+            # the scene's sky without it.
+            import re
+            from core import design_systems
+            bg = re.search(r"--ds-bg:\s*(#[0-9A-Fa-f]{6})", design_systems.tokens_css(design_systems.get(project["look"])["tokens"])).group(1)
+            intro = project["tracks"][0]["clips"][0]
+            frame_keep = (Path(args.keep) / f"{args.name or 'narrated-sample'}-overlay-frame.png") if args.keep else None
+            if frame_keep:
+                frame_keep.parent.mkdir(parents=True, exist_ok=True)
+            result["overlay"] = {"bg": bg, "card": overlay_frame(job["path"], intro["start"] + 1.0, intro["box"], frame_keep),
+                                 "sound_clips": (job.get("narration") or {}).get("sound_clips"),
+                                 "clips": sum(len(t["clips"]) for t in project["tracks"])}
         if args.keep:
             keep = Path(args.keep)
             keep.mkdir(parents=True, exist_ok=True)
@@ -504,6 +599,7 @@ if __name__ == "__main__":
     parser.add_argument("--pack-b", action="store_true", dest="pack_b")
     parser.add_argument("--renderer", choices=("threejs", "blender"), default="threejs")
     parser.add_argument("--preview", action="store_true")
+    parser.add_argument("--tracks", action="store_true")
     parsed = parser.parse_args()
     data = tempfile.mkdtemp(prefix="video-render-smoke-")
     os.environ["JARVIS_DATA_DIR"] = data

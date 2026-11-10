@@ -268,6 +268,18 @@ export class StageRenderer {
     return this.out;
   }
 
+  // Let go of the GPU: Studio's editor mounts a new preview on every edit, and a browser keeps only a few WebGL
+  // contexts alive, dropping the oldest. The render window never needs this (one mount per job).
+  dispose() {
+    for (const value of this.scenes.values()) value.scene.traverse(o => { if (o.isMesh) o.geometry.dispose(); });
+    this.scenes.clear();
+    for (const g of this.geometries.values()) g.dispose();
+    for (const m of this.materials.values()) m.dispose?.();
+    this.sphere.dispose(); this.environment?.dispose();
+    this.composer?.dispose?.();
+    this.renderer.dispose(); this.renderer.forceContextLoss();
+  }
+
   // A character sheet cell: one figure, a fixed orthographic camera, a transparent background (no set), lit like the
   // studio, or flat (each part in its spec colour, unlit) for the colour key the sheet checks measure.
   renderCell(model, pose, { width, height, center, viewHeight, yaw = 0, flat = false }) {

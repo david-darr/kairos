@@ -40,7 +40,12 @@ TRANSITIONS = ("cut", "whip", "zoom", "flip", "dither", "mosaic", "wipe")
 MOODS = ("energetic", "calm", "warm", "dark", "playful")
 ASSET = re.compile(r"assets/[a-f0-9]{64}\.(?:png|jpg|gif|webp)")
 FIELDS = {"id", "title", "look", "bpm", "fps", "aspects", "beats", "music", "narration", "cast", "palette", "style_pack", "chapters",
-          "renderer"}
+          "renderer", "tracks"}
+# Sound files the person uploads for audio clips (Content Studio Editor step 3): decoded once by FFmpeg into 48 kHz
+# stereo WAV, named by that WAV's hash, so mixing needs no decoder and the same file always mixes the same.
+AUDIO_ASSET = re.compile(r"assets/[a-f0-9]{64}\.wav")
+AUDIO_TYPES = {"wav": "wav", "mp3": "mp3", "ogg": "ogg", "oga": "ogg", "m4a": "mov", "aac": "aac", "flac": "flac"}
+AUDIO_UPLOAD_LIMIT = 50 * 1024 * 1024
 # What draws a video's 3D stage beats (Pack B): three.js, built in (the default), or Blender when it is installed
 # (core/blender_tools.py); a Blender video falls back to three.js with a note when Blender is not found.
 RENDERERS_3D = ("threejs", "blender")
@@ -179,6 +184,9 @@ def validate(project: dict) -> dict:
             p.pop("renderer")
         elif p["renderer"] not in RENDERERS_3D:
             _error("renderer", "choose threejs (built in) or blender (only when Blender is installed); it draws the 3D stage beats.")
+    # Tracks and clips over the beats (core/video_tracks.py); a video without them is unchanged.
+    from core import video_tracks
+    video_tracks.validate(p, _audio_lookup(p["id"]))
     if is_narrated or "narration" in p:
         p["narration"] = _narration(p.get("narration"))
     for i, b in enumerate(beats):
@@ -742,6 +750,80 @@ def add_asset(video_id, raw=None, ext=None, *, design_id=None, asset=None, user=
         return "assets/" + name
 
 
+def _audio_lookup(video_id):
+    """Seconds of each sound this video holds, for the clip checks; every name is unknown before the video exists."""
+    def seconds(name):
+        try:
+            info = audio_info(video_id).get(name)
+            asset_path(video_id, name[len("assets/"):])
+        except LookupError:
+            return None
+        return info["seconds"] if info else None
+    return seconds
+
+
+def audio_info(video_id) -> dict:
+    """{asset: {seconds, title, rate, peaks}} for the sounds uploaded to this video (peaks: 0 to 255, `rate` a second)."""
+    stored = read_json(str(_folder(video_id) / "assets" / "audio.json"), {})
+    return stored if isinstance(stored, dict) else {}
+
+
+def add_audio(video_id, raw, ext, title=""):
+    """Decode a person's own sound file with FFmpeg (the demuxer forced from the file type, local files only) into a
+    48 kHz stereo WAV of at most three minutes, store it by its hash and measure it. Nothing is fetched."""
+    import subprocess
+    import tempfile
+    import wave
+    import numpy as np
+    from core import ffmpeg_tools, video_tracks
+    ext = str(ext or "").lower().lstrip(".")
+    if ext not in AUDIO_TYPES or not isinstance(raw, bytes) or not raw:
+        raise ValueError("audio: upload a WAV, MP3, OGG, M4A, AAC or FLAC sound file.")
+    if len(raw) > AUDIO_UPLOAD_LIMIT:
+        raise ValueError("audio: choose a sound file under 50 MB.")
+    exe = ffmpeg_tools.find()
+    if not exe:
+        raise RuntimeError(ffmpeg_tools.MISSING)
+    with _lock("video:" + video_id):
+        get(video_id)
+        folder = _folder(video_id) / "assets"
+        folder.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=str(folder.parent)) as temp:
+            source, out = Path(temp, "in." + ext), Path(temp, "out.wav")
+            source.write_bytes(raw)
+            result = subprocess.run([exe, "-nostdin", "-v", "error", "-protocol_whitelist", "file", "-f", AUDIO_TYPES[ext], "-i", str(source),
+                                     "-map", "0:a:0", "-vn", "-ac", "2", "-ar", "48000", "-c:a", "pcm_s16le",
+                                     "-t", str(video_tracks.SOUND_MAX_SECONDS), "-f", "wav", str(out)],
+                                    capture_output=True, timeout=120, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            if result.returncode or not out.is_file():
+                raise ValueError("audio: this sound file could not be read.")
+            data = out.read_bytes()
+            with wave.open(str(out), "rb") as w:
+                frames, rate = w.getnframes(), w.getframerate()
+                samples = np.frombuffer(w.readframes(frames), dtype="<i2").reshape(-1, 2)
+        if frames < rate // 30:
+            raise ValueError("audio: this sound is shorter than one frame.")
+        name = hashlib.sha256(data).hexdigest() + ".wav"
+        path = folder / name
+        if not path.exists():
+            if sum(p.stat().st_size for p in folder.iterdir() if p.is_file()) + len(data) > 100 * 1024 * 1024:
+                raise ValueError("audio: this video's images and sounds would exceed 100 MB.")
+            temp_path = folder / (name + ".tmp")
+            temp_path.write_bytes(data)
+            os.replace(temp_path, path)
+        per, step = 40, rate // 40
+        level = np.abs(samples.astype(np.int32)).max(axis=1)
+        count = len(level) // step
+        peaks = (level[:count * step].reshape(count, step).max(axis=1) * 255 // 32768).astype(np.uint8) if count else np.zeros(0, np.uint8)
+        import base64
+        info = audio_info(video_id)
+        clean = " ".join(str(title or "").replace("<", " ").replace(">", " ").split())[:80] or "Sound"
+        info["assets/" + name] = {"seconds": round(frames / rate, 4), "title": clean, "rate": per,
+                                  "peaks": base64.b64encode(peaks.tobytes()).decode("ascii")}
+        write_json_atomic(str(folder / "audio.json"), dict(list(info.items())[-200:]))
+        return "assets/" + name
+
+
 def credits(video_id):
     """Licensed photo attributions for this video's own assets."""
     stored = read_json(str(_folder(video_id) / "credits.json"), {})
@@ -763,7 +845,7 @@ def add_credit(video_id, asset, credit):
 
 
 def asset_path(video_id, name):
-    if not isinstance(name, str) or not ASSET.fullmatch("assets/" + name):
+    if not isinstance(name, str) or not (ASSET.fullmatch("assets/" + name) or AUDIO_ASSET.fullmatch("assets/" + name)):
         raise LookupError("No such video asset.")
     path = _folder(video_id) / "assets" / name
     if not path.is_file():

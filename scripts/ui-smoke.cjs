@@ -1,6 +1,7 @@
 // Run: node scripts/run-electron-test.cjs scripts/ui-smoke.cjs
 // Isolated renderer checks. All API responses are synthetic, all writes stay
 // in this process, and no request can reach the running JARVIS backend.
+const { scriptSrc } = require('./app-page-policy.cjs');
 const { app, BrowserWindow, session } = require("electron");
 const { exitAfterFlush } = require('./electron-exit.cjs');
 const designChecks = require('./design-canvas-checks.cjs');
@@ -64,7 +65,7 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
   // The site (docs/) may read GitHub's public release data; nothing else leaves.
   const site = url.pathname.startsWith("/docs/") || url.pathname.startsWith("/kairos/");
-  res.setHeader('Content-Security-Policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-src 'self' https: http://127.0.0.1:* http://localhost:*; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' data:" + (site ? " https://api.github.com" : ""));
+  res.setHeader('Content-Security-Policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src " + scriptSrc(url.pathname) + "; frame-src 'self' https: http://127.0.0.1:* http://localhost:*; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' data:" + (site ? " https://api.github.com" : ""));
   if (url.pathname === "/__github-latest") {
     // Stands in for api.github.com/repos/david-darr/kairos/releases/latest.
     res.setHeader("Content-Type", "application/json"); res.setHeader("Access-Control-Allow-Origin", "*");

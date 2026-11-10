@@ -58,6 +58,24 @@ const tokens = { '--ds-bg': '#101418', '--ds-surface': '#1b2129', '--ds-text': '
   '--ds-accent-2': '#ff5a1f', '--ds-on-accent': '#101418', '--ds-font-display': 'Arial, sans-serif', '--ds-font-sans': 'Arial, sans-serif', '--ds-radius-m': '4px' };
 let enabled = true;
 const template = fs.readFileSync(path.join(root, 'static/motion/player.html'), 'utf8');
+// Steps 3 and 4: a video for tracks and clips, a sound and an image it holds, and Ask Kairos's state (a stand-in for
+// core/video_agent.py: an applied run, a dry run over five changes, undo, comments).
+const trackId = 'cccc0000dddd', imageAsset = 'assets/' + 'e'.repeat(64) + '.png', soundAsset = 'assets/' + 'd'.repeat(64) + '.wav';
+const trackProject = { id: trackId, owner: 'local', title: 'Layers', look: 'sport', bpm: 120, fps: 30, aspects: ['16:9'],
+  beats: [{ id: 'l1', kind: 'title', text: 'Layers on top', bars: 2 }, { id: 'l2', kind: 'statement', text: 'Clips over beats', bars: 2 }, { id: 'l3', kind: 'end', text: 'See you soon', bars: 2 }],
+  music: { mood: 'calm', volume: .6 }, version: 1, updated: Date.now() / 1000, created: Date.now() / 1000 };
+const trackSounds = { [soundAsset]: { seconds: 2.5, title: 'Chime', rate: 40, peaks: Buffer.from(Array.from({ length: 100 }, (_, i) => Math.round(90 + 80 * Math.sin(i / 4)))).toString('base64') } };
+const review = { comments: [], runs: [], since: { since: null, changes: [] }, connection: 'Test model', dry_run_over: 5 };
+const asks = [];
+// The app page carries the exact Content-Security-Policy the backend sends for "/" (core/middleware.py), so the
+// hashed three.js import map is checked in a real browser under the real policy.
+const appPolicy = (() => {
+  const python = [path.join(root, '.venv', 'Scripts', 'python.exe'), path.join(root, '.venv', 'bin', 'python')].find(p => fs.existsSync(p));
+  const out = require('node:child_process').spawnSync(python, ['-c', "from core.middleware import content_security_policy; print(content_security_policy('/'))"], { cwd: root, encoding: 'utf8', windowsHide: true });
+  if (out.status !== 0 || !out.stdout.includes("script-src 'self' 'sha256-")) throw Error('Could not read the app page policy: ' + out.stderr);
+  return out.stdout.trim();
+})();
+const policyViolations = [];
 const customTab = { id: 'studio', label: 'Studio', user_tab: false, format: 'folder', view_url: '/tab-files/studio/view.js', style_url: '/tab-files/studio/view.css', icon_svg: '<svg viewBox="0 0 24 24"><path d="M3 6h18v15H3z"/></svg>' };
 function json(res, value, status = 200) { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)); }
 async function serve(req, res) {
@@ -78,6 +96,49 @@ async function serve(req, res) {
       writes.push({ path: p, method: req.method, body });
     }
     if (p === '/api/system/custom-tabs') return json(res, enabled ? [customTab] : []);
+    if (p === `/api/videos/${trackId}`) return json(res, req.method === 'PUT' ? Object.assign(trackProject, body, { version: trackProject.version + 1 }) : trackProject);
+    if (p === `/api/tab-studio/videos/${trackId}/resources`) return json(res, { assets: [imageAsset], renders: [], jobs: [], thumbnail: null });
+    if (p === `/api/videos/${trackId}/assets/${imageAsset.slice(7)}`) { res.setHeader('Content-Type', 'image/png'); res.end(fs.readFileSync(path.join(root, 'static/img/app-192.png'))); return; }
+    if (p === `/api/videos/${trackId}/audio`) return json(res, { sounds: trackSounds });
+    if (p === `/api/videos/${trackId}/review`) return json(res, review);
+    if (/^\/api\/videos\/[a-f0-9]{12}\/audio$/.test(p)) return json(res, { sounds: {} });
+    if (/^\/api\/videos\/[a-f0-9]{12}\/review$/.test(p)) return json(res, { comments: [], runs: [], since: { since: null, changes: [] }, connection: 'Test model', dry_run_over: 5 });
+    if (p === `/api/videos/${trackId}/comments`) {
+      const c = { id: 'm' + (review.comments.length + 1), ...body, status: 'open', created: Date.now() / 1000 }; review.comments.push(c); return json(res, c);
+    }
+    if (p.startsWith(`/api/videos/${trackId}/comments/`)) {
+      const cid = p.split('/').pop(), c = review.comments.find(x => x.id === cid);
+      if (req.method === 'DELETE') { review.comments.splice(review.comments.indexOf(c), 1); return json(res, { ok: true }); }
+      Object.assign(c, body); return json(res, c);
+    }
+    if (p === `/api/videos/${trackId}/agent/ask`) {
+      asks.push(body);
+      const run = { id: 'r' + (review.runs.length + 1), request: body.request, comments: body.comments, reply: '', status: 'applied', created: Date.now() / 1000, before: structuredClone(trackProject) };
+      if (/many/.test(body.request)) {
+        run.status = 'pending'; run.reply = 'Six short points, one after another.';
+        run.changes = Array.from({ length: 6 }, (_, i) => ({ item: `clip:p${i}`, type: 'clip', change: 'added', words: `Added clip p${i} (text "Point ${i + 1}") on Overlay 1 from 0:0${i}.0 to 0:0${i}.5.` }));
+      } else {
+        const clip = trackProject.tracks?.flatMap(t => t.clips).find(c => c.kind === 'text');
+        if (clip) clip.text = 'Welcome'; else trackProject.beats[1].text = 'Changed by Kairos';
+        trackProject.version++;
+        run.reply = 'Made the greeting warmer.';
+        run.changes = [{ item: `clip:${clip?.id}`, type: 'clip', change: 'changed', words: `Changed clip ${clip?.id} (text "Welcome"): text.` }];
+        run.after = structuredClone(trackProject);
+        for (const c of review.comments) if (body.comments.includes(c.id)) c.status = 'resolved';
+        review.since = { since: trackProject.version, changes: [] };
+      }
+      review.runs.unshift(run);
+      const { before, after, ...out } = run; return json(res, out);
+    }
+    const runAction = new RegExp(`^/api/videos/${trackId}/agent/runs/(r\\d+)/(apply|discard|undo)$`).exec(p);
+    if (runAction) {
+      const run = review.runs.find(r => r.id === runAction[1]), action = runAction[2];
+      if (action === 'undo') { Object.assign(trackProject, structuredClone(run.before), { version: trackProject.version + 1 }); run.status = 'undone'; run.conflicts = []; }
+      if (action === 'apply') { trackProject.beats[0].text = 'Six points'; trackProject.version++; run.status = 'applied'; }
+      if (action === 'discard') run.status = 'discarded';
+      const { before, after, ...out } = run;
+      return json(res, action === 'discard' ? out : { run: out, project: trackProject });
+    }
     if (p === `/api/videos/${longId}`) return json(res, req.method === 'PUT' ? Object.assign(longProject, body, { version: longProject.version + 1 }) : longProject);
     if (p === `/api/videos/${longId}/plan`) return json(res, { chaptered: true, status: longPlan, current: 'Chapter 1 at 0:00: Opening\n  00:00.0-00:04.0 b1 statement' });
     if (p === `/api/videos/${longId}/plan/approve`) { longPlan = 'approved'; return json(res, { status: 'approved' }); }
@@ -155,6 +216,7 @@ async function serve(req, res) {
   const tabFile = /^\/tab-files\/studio\/(view\.js|view\.css)$/.exec(p);
   const file = tabFile ? path.join(root, 'tabs/studio', tabFile[1]) : path.resolve(root, p === '/' ? 'static/index.html' : '.' + decodeURIComponent(p));
   if (!tabFile && !file.startsWith(path.join(root, 'static') + path.sep)) { res.writeHead(404); res.end(); return; }
+  if (p === '/') res.setHeader('Content-Security-Policy', appPolicy);
   try {
     res.setHeader('Content-Type', ({ '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.jpg': 'image/jpeg', '.png': 'image/png' })[path.extname(file)] || 'application/octet-stream');
     res.end(fs.readFileSync(file));
@@ -223,6 +285,8 @@ app.whenReady().then(async () => {
       await mouse('mouseReleased', to.x, to.y, modifiers); await pause(120);
     };
     const tap = async point => { await mouse('mouseMoved', point.x, point.y); await mouse('mousePressed', point.x, point.y); await mouse('mouseReleased', point.x, point.y); await pause(120); };
+    // Any Content-Security-Policy refusal on the page is a failure (the import map must run under the real policy).
+    win.webContents.on('did-finish-load', () => { js("window.__csp = []; document.addEventListener('securitypolicyviolation', e => window.__csp.push(e.violatedDirective + ' ' + e.blockedURI))").catch(() => {}); });
     const box = async selector => js(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, cx: r.x + r.width / 2, cy: r.y + r.height / 2 }; })()`);
     const saved = () => wait("document.querySelector('.studio-editor-top [role=status]').textContent==='Saved'");
     const playhead = async () => Number(await js("document.querySelector('.ste-playhead').getAttribute('aria-valuenow')"));
@@ -439,8 +503,10 @@ app.whenReady().then(async () => {
     await win.loadURL(base + '/#/studio/' + sceneId); await wait("!!document.querySelector('.studio-stage canvas') && !!document.querySelector('[data-scene-form]')");
     await devtools();
     await wait("!!document.querySelector('.ste-wave[data-wave=peaks]')");
-    // Pack B's three.js loads by a bare module name only the render player maps: the editor shows its 3D shots as stand-in cards.
-    assert.ok(await js("document.querySelector('.ste-preview-note').textContent.includes('stand-in cards')"), 'The preview says how it shows 3D shots');
+    // Pack B's 3D shots preview live: the app page maps three.js with its hashed import map under the real policy.
+    assert.equal(await js("document.querySelector('script[type=importmap]')?.textContent"), '{"imports":{"three":"/static/vendor/three/three.module.js"}}');
+    assert.equal(await js("document.querySelector('.ste-preview-note').textContent"), '', 'No stand-in note: the 3D shots draw in three.js');
+    assert.deepEqual(await js('window.__csp || []'), [], 'Nothing refused by the page policy');
     assert.equal(await js("document.querySelectorAll('.ste-bed').length"), 3, 'A music lane under every beat');
     assert.equal(await js("document.querySelectorAll('.ste-guide[data-guide=captions]').length"), 1, 'A narrated video shows its caption band');
     assert.ok(await js("document.querySelector('.ste-clip.narrated').getAttribute('aria-label').includes('Length set by its narration') && !document.querySelector('.ste-clip.narrated .ste-trim')"), 'A narrated beat is not trimmed by hand');
@@ -497,6 +563,12 @@ app.whenReady().then(async () => {
     await sceneEdit('Stand-in people', '1'); await pause(100);
     await wait("document.querySelector('.studio-editor-top [role=status]').textContent==='Saved'");
     assert.equal(lastStage().labels.length, 0, 'A label over a person who left goes too');
+    // The stage shot draws in 3D in the preview: its frame has the lavender set and shading, not a flat stand-in card.
+    await js("document.querySelector('.ste-clip[data-index=\"2\"]').click()"); await pause(600);
+    const stagePixels = await js(`(() => { const c = document.querySelector('.studio-stage canvas'), g = c.getContext('2d'), d = g.getImageData(0, 0, c.width, c.height).data, seen = new Set();
+      for (let i = 0; i < d.length; i += 4 * 997) seen.add((d[i] >> 4) + ',' + (d[i + 1] >> 4) + ',' + (d[i + 2] >> 4)); return seen.size; })()`);
+    assert.ok(stagePixels > 30, 'The 3D shot has shading in the preview (' + stagePixels + ' colours sampled)');
+    fs.writeFileSync(path.join(output, 'desktop-stage-canvas.png'), Buffer.from((await js("document.querySelector('.studio-stage canvas').toDataURL('image/png')")).split(',')[1], 'base64'));
     await capture('desktop-stage');
     await noOverflow(); await labels();
     win.setContentSize(390, 1000); await pause(400); await noOverflow(); await labels(); await capture('phone-stage');
@@ -505,6 +577,129 @@ app.whenReady().then(async () => {
     await noOverflow(); await labels();
     win.setContentSize(390, 1000); await pause(400); await noOverflow(); await labels(); await capture('phone-scene');
     win.setContentSize(1440, 1000); await pause(300);
+
+    // Steps 3 and 4: tracks and clips on the timeline, the clip inspector, sounds, then Ask Kairos with comment pins,
+    // an applied run with its own undo, and a dry run applied after a look.
+    await win.loadURL(base + '/#/studio/' + trackId); await wait("!!document.querySelector('.studio-stage canvas') && document.querySelectorAll('.ste-clip').length===3");
+    await devtools(); await blur();
+    const lastTracks = () => writes.filter(w => w.path === `/api/videos/${trackId}` && w.method === 'PUT').at(-1)?.body.tracks;
+    const tX = async t => { const content = await box('.ste-tl-content'), pps = await js("parseFloat(document.querySelector('.ste-clip[data-index=\"1\"]').style.left) / 4"); return content.x + t * pps; };
+    const tpps = (await tX(1)) - (await tX(0));
+    const rulerBox = await box('.ste-lane.ste-ruler');
+    await tap({ x: await tX(1), y: rulerBox.cy });
+    await js("document.querySelector('[aria-label=\"Add a text clip at the playhead\"]').click()"); await pause(150);
+    await wait("document.querySelectorAll('.ste-tclip').length===1 && document.querySelectorAll('.ste-lane.ste-olane').length===1");
+    assert.equal(await js("document.querySelector('.ste-tab[data-tab=beat]').textContent"), 'Clip', 'The inspector shows the clip');
+    assert.equal(await js("document.querySelector('[data-clip-form] h3').textContent"), 'Text clip k1');
+    assert.equal(await js("!!document.querySelector('.ste-selbox[data-guide=clip]')"), true, 'The clip is outlined on the preview');
+    await edit('Clip text', 'Hello layers'); await saved();
+    assert.deepEqual((({ id, kind, start, in: i, out, text }) => ({ id, kind, start: Math.round(start * 10) / 10, in: i, out, text }))(lastTracks()[0].clips[0]), { id: 'k1', kind: 'text', start: 1, in: 0, out: 3, text: 'Hello layers' }, 'A new text clip at the playhead');
+    // Drag along the lane (Shift: no snapping), then trim each edge.
+    let clipBox = await box('.ste-tclip[data-clip=k1]');
+    await drag({ x: clipBox.cx, y: clipBox.cy }, { x: clipBox.cx + tpps, y: clipBox.cy }, MODS.shift); await saved();
+    assert.ok(Math.abs(lastTracks()[0].clips[0].start - 2) < .05, 'Dragged one second later');
+    clipBox = await box('.ste-tclip[data-clip=k1] .ste-ctrim.right');
+    await drag({ x: clipBox.cx, y: clipBox.cy }, { x: clipBox.cx + tpps / 2, y: clipBox.cy }, MODS.shift); await saved();
+    assert.ok(Math.abs(lastTracks()[0].clips[0].out - 3.5) < .1, 'Right edge trimmed half a second longer: ' + JSON.stringify(lastTracks()[0].clips[0]));
+    clipBox = await box('.ste-tclip[data-clip=k1] .ste-ctrim.left');
+    await drag({ x: clipBox.cx, y: clipBox.cy }, { x: clipBox.cx + tpps / 2, y: clipBox.cy }, MODS.shift); await saved();
+    let k1 = lastTracks()[0].clips[0];
+    assert.ok(Math.abs(k1.start - 2.5) < .1 && Math.abs(k1.in - .5) < .1 && Math.abs(k1.out - 3.5) < .1, 'Left edge trimmed: start and in move together: ' + JSON.stringify(k1));
+    // Split at the playhead with S.
+    await tap({ x: await tX(3.5), y: rulerBox.cy }); await blur(); await press('s'); await saved();
+    const parts = lastTracks()[0].clips;
+    assert.deepEqual(parts.map(c => c.id), ['k1', 'k1-1'], 'S splits the clip at the playhead');
+    assert.ok(Math.abs(parts[1].start - 3.5) < .02 && Math.abs(parts[0].start + parts[0].out - parts[0].in - 3.5) < .02 && Math.abs(parts[1].in - (3.5 - parts[0].start + parts[0].in)) < .02, 'The halves meet at the playhead');
+    // A second overlay track, and a clip dragged onto it.
+    await js("(() => { const s = document.querySelector('[aria-label=\"Add a track\"]'); s.value = 'overlay'; s.dispatchEvent(new Event('change', { bubbles: true })); })()"); await saved();
+    assert.equal(await js("document.querySelectorAll('.ste-lane.ste-olane').length"), 2, 'Two overlay lanes');
+    const lane2 = await box('.ste-lane[data-track=t2]'); clipBox = await box('.ste-tclip[data-clip="k1-1"]');
+    await drag({ x: clipBox.cx, y: clipBox.cy }, { x: clipBox.cx, y: lane2.cy }, MODS.shift); await saved();
+    assert.deepEqual(lastTracks().map(t => [t.id, t.clips.map(c => c.id)]), [['t1', ['k1']], ['t2', ['k1-1']]], 'Dragged between lanes');
+    assert.equal(await js("document.querySelector('.ste-tclip[data-clip=\"k1-1\"]').dataset.track"), 't2');
+    // Lock and hide.
+    await js("document.querySelector('[aria-label=\"Lock track Overlay 1\"]').click()"); await saved();
+    assert.equal(lastTracks()[0].locked, true);
+    await js("document.querySelector('.ste-tclip[data-clip=k1]').click()"); await pause(120); await blur(); await press('Delete'); await pause(150);
+    assert.equal(await js("!!document.querySelector('.ste-tclip[data-clip=k1]')"), true, 'A locked clip is not deleted');
+    assert.equal(await js("document.querySelector('[aria-label=\"Clip text\"]').disabled"), true, 'The inspector is read only on a locked track');
+    await js("document.querySelector('[aria-label=\"Lock track Overlay 1\"]').click()"); await saved();
+    await js("document.querySelector('[aria-label=\"Hide track Overlay 2\"]').click()"); await saved();
+    assert.equal(lastTracks()[1].hidden, true); assert.equal(await js("document.querySelector('.ste-lane[data-track=t2]').classList.contains('off')"), true, 'A hidden lane is shaded');
+    await js("document.querySelector('[aria-label=\"Hide track Overlay 2\"]').click()"); await saved();
+    // Ripple delete closes the gap on the track; undo brings it back.
+    await js("document.querySelector('.ste-tclip[data-clip=k1]').click()"); await pause(120);
+    await tap({ x: await tX(5), y: rulerBox.cy });
+    await js("document.querySelector('[aria-label=\"Add a text clip at the playhead\"]').click()"); await saved();
+    assert.deepEqual(lastTracks()[0].clips.map(c => c.id), ['k1', 'k2'], 'A new clip lands on the selected clip\'s track');
+    await js("document.querySelector('[aria-label^=\"Ripple delete\"]').click()"); await pause(100);
+    await js("document.querySelector('.ste-tclip[data-clip=k1]').click()"); await pause(120); await blur(); await press('Delete'); await saved();
+    const k1Length = 3.5 - parts[0].start;
+    assert.ok(lastTracks()[0].clips.length === 1 && Math.abs(lastTracks()[0].clips[0].start - (5 - k1Length)) < .03, 'Ripple delete moved the next clip up by the deleted length');
+    await press('z', 'ctrl'); await saved();
+    assert.deepEqual(lastTracks()[0].clips.map(c => [c.id, Math.round(c.start * 10) / 10]), [['k1', Math.round(parts[0].start * 10) / 10], ['k2', 5]], 'Undo restores both');
+    await js("document.querySelector('[aria-label^=\"Ripple delete\"]').click()"); await pause(100);
+    // A sound from the video's own files, and an image over the video.
+    await js("document.querySelector('.ste-tab[data-tab=assets]').click()"); await pause(150);
+    await tap({ x: await tX(.5), y: rulerBox.cy });
+    await js("document.querySelector('[aria-label=\"Add Chime at the playhead\"]').click()"); await saved();
+    const audio = lastTracks().find(t => t.kind === 'audio');
+    assert.deepEqual((({ kind, audio: a, start, in: i, out }) => ({ kind, audio: a, start: Math.round(start * 10) / 10, in: i, out }))(audio.clips[0]), { kind: 'sound', audio: soundAsset, start: .5, in: 0, out: 2.5 }, 'A sound clip at the playhead');
+    assert.equal(await js("document.querySelectorAll('.ste-alane .ste-tclip[data-clip-kind=sound] canvas.ste-swave').length"), 1, 'The sound shows its waveform');
+    await js(`document.querySelector('[aria-label="Put image ${imageAsset.slice(7, 19)} over the video at the playhead"]').click()`); await saved();
+    assert.ok(lastTracks().some(t => t.clips.some(c => c.kind === 'image' && c.image === imageAsset)), 'An image over the video');
+    await js("document.querySelector('.ste-tclip[data-clip=k1]').click()"); await pause(150);
+    await tap({ x: await tX(3), y: rulerBox.cy }); await pause(300);
+    await capture('desktop-tracks');
+    await noOverflow(); await labels();
+
+    // Ask Kairos: a comment pinned on the preview, a request about the selected clip, the run and its undo.
+    await js("document.querySelector('.ste-tab[data-tab=ask]').click()"); await pause(150);
+    await blur(); await press('c');
+    assert.equal(await js("document.querySelector('.studio-stage').classList.contains('commenting')"), true, 'C turns on comment mode');
+    const frameBox = await box('.ste-frame');
+    await tap({ x: frameBox.x + frameBox.w * .3, y: frameBox.y + frameBox.h * .2 });
+    await wait("!!document.querySelector('.ste-pin-form textarea')");
+    await js("(() => { const t = document.querySelector('.ste-pin-form textarea'); t.value = 'Make this warmer'; document.querySelector('.ste-pin-form button[type=submit]').click(); })()");
+    await wait("document.querySelectorAll('.ste-comment').length===1 && !!document.querySelector('.ste-pin[data-pin=m1]') && !!document.querySelector('.ste-pinmark[data-pin=m1]')");
+    const pinned = writes.filter(w => w.path === `/api/videos/${trackId}/comments`).at(-1).body;
+    assert.ok(Math.abs(pinned.x - .3) < .02 && Math.abs(pinned.y - .2) < .02 && Math.abs(pinned.t - 3) < .05, 'The pin keeps its place and moment');
+    assert.ok(pinned.under.includes('clip k1'), 'The pin names what is under it: ' + pinned.under);
+    await press('Escape');
+    assert.equal(await js("document.querySelector('.studio-stage').classList.contains('commenting')"), false, 'Escape leaves comment mode');
+    await capture('desktop-comment-pin');
+    await js("document.querySelector('.ste-tclip[data-clip=k1]').click()"); await pause(150);
+    await edit('Describe a change', 'Make the greeting warmer');
+    await js("document.querySelector('[title=\"Ask Kairos to change the video\"]').click()");
+    await wait("!!document.querySelector('.ste-run[data-status=applied]')");
+    const asked = asks.at(-1);
+    assert.equal(asked.request, 'Make the greeting warmer');
+    assert.deepEqual(asked.selection.clips, ['k1'], 'Kairos is told the selected clip'); assert.deepEqual(asked.comments, ['m1'], 'and the pinned comment');
+    assert.ok(Number.isFinite(asked.selection.time));
+    await wait("document.querySelector('.ste-tclip[data-clip=k1] .ste-clip-label').textContent==='Welcome'");
+    assert.ok(await js("document.querySelector('.ste-run[data-status=applied]').textContent.includes('Changed clip k1')"), 'The run lists its change in plain words');
+    assert.equal(await js("document.querySelectorAll('.ste-comment').length"), 0, 'The comment it addressed is resolved');
+    await js("document.querySelector('.ste-run[data-status=applied]').scrollIntoView({ block: 'center' })"); await capture('desktop-ask-kairos');
+    await click("Undo Kairos's change");
+    await wait("!!document.querySelector('.ste-run[data-status=undone]') && document.querySelector('.ste-tclip[data-clip=k1] .ste-clip-label').textContent==='Hello layers'");
+    // A bigger change waits as a dry run until the person applies it.
+    await edit('Describe a change', 'Add many short points');
+    await js("document.querySelector('[title=\"Ask Kairos to change the video\"]').click()");
+    await wait("!!document.querySelector('.ste-pending .ste-run[data-status=pending]')");
+    assert.equal(await js("document.querySelectorAll('.ste-pending .ste-change-list li').length"), 6, 'Every proposed change listed before anything is saved');
+    await js("document.querySelector('.ste-pending .ste-run').scrollIntoView({ block: 'center' })"); await capture('desktop-dry-run');
+    // The person's changes since Kairos's last turn come back with the next review read.
+    review.since = { since: 9, changes: [{ item: 'beat:l2', type: 'beat', change: 'changed', words: 'Changed beat l2 (statement "Clips over beats"): text.' }] };
+    await click('Apply these changes');
+    await wait("!document.querySelector('.ste-pending .ste-run') && document.querySelector('.ste-clip[data-index=\"0\"]').textContent.includes('Six points')");
+    await wait("document.querySelector('.ste-since summary').textContent.includes('(1)')");
+    assert.ok(await js("document.querySelector('.ste-since').textContent.includes('Changed beat l2')"), 'The person sees their changes since Kairos last turn');
+    await noOverflow(); await labels();
+    win.setContentSize(390, 1000); await pause(400); await noOverflow(); await labels(); await capture('phone-tracks');
+    fs.writeFileSync(path.join(output, 'phone-tracks-canvas.png'), Buffer.from((await js("document.querySelector('.studio-stage canvas').toDataURL('image/png')")).split(',')[1], 'base64'));
+    assert.equal(await js("[...document.querySelectorAll('.ste-track-tool')].every(n => getComputedStyle(n).display === 'none')"), true, 'Track tools stay on desktop (the phone strip shows beats only)');
+    win.setContentSize(1440, 1000); await pause(300);
+    assert.deepEqual(await js('window.__csp || []'), [], 'Nothing refused by the page policy');
 
     // A long video: chapter headings and timeline markers, a render stopped by an app restart with Resume, the plan gate, then progress per chapter.
     await win.loadURL(base + '/#/studio/' + longId); await wait("!!document.querySelector('.studio-stage canvas')");
@@ -543,7 +738,8 @@ app.whenReady().then(async () => {
       'timeline clip sizes', 'zoom button, keys and fit', 'playhead drag', 'snapping and Shift', 'clip selection opens the inspector', 'clip drag reorder', 'edge trim in half bars',
       'Space, J/K/L, frame steps, beat edges, I/O, Alt+X, Delete, Ctrl+D, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, Alt+arrows, N, G, ?', 'keys in fields', 'aspect', 'render progress', 'downloads',
       'history confirmation', 'pane persistence per person', 'both themes', 'phone stacked view', 'scene inspector round trip', 'scene undo and redo', 'stage inspector round trip', 'cast picker', 'waveform and music lanes',
-      'chat card', 'recovery', 'long video chapters, markers, plan gate and resume', 'deep link', 'Studio enable handoff', '1440 and 390', 'labels', 'offline'] }));
+      'chat card', 'recovery', 'long video chapters, markers, plan gate and resume', '3D preview under the real policy',
+      'tracks: add, drag, trim both edges, split, lanes, lock, hide, ripple, undo, sound, image', 'Ask Kairos: comment pin, run, undo, dry run', 'deep link', 'Studio enable handoff', '1440 and 390', 'labels', 'offline'] }));
   } catch (error) {
     console.error(error.stack);
     if (win && !win.isDestroyed()) fs.writeFileSync(path.join(output, 'failure.png'), (await win.webContents.capturePage()).toPNG());

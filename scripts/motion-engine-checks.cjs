@@ -59,7 +59,7 @@ function serve(req, res) {
     res.writeHead(image ? 200 : 404, { 'Content-Type': 'image/svg+xml' }); res.end(image || ''); return;
   }
   const name = path.posix.basename(url.pathname);
-  if (url.pathname === `/static/motion/${name}` && ['engine.js', 'kit.js', 'layout.js', 'rig.js', 'scene.js', 'stage.js'].includes(name)) {
+  if (url.pathname === `/static/motion/${name}` && ['engine.js', 'kit.js', 'layout.js', 'rig.js', 'scene.js', 'stage.js', 'overlay.js'].includes(name)) {
     res.setHeader('Content-Type', 'text/javascript'); res.end(fs.readFileSync(path.join(root, 'static/motion', name))); return;
   }
   res.writeHead(404); res.end();
@@ -200,6 +200,61 @@ app.whenReady().then(async () => {
       fs.writeFileSync(destination, Buffer.from(png, 'base64')); console.log(`PASS ${aspect}; contact sheet: ${destination}`);
     }
   }
-  console.log('Motion engine Electron checks passed (two looks, three aspects, all beats, cameras, transitions and image treatments).');
+  // Overlay tracks (Content Studio Editor step 3): clips draw over the beats in track order, fade, stay out of hidden
+  // tracks, report their boxes for the checks, and draw the same pixels every time (drawFrame(t) stays deterministic).
+  const tracks = [
+    { id: 't1', kind: 'overlay', name: 'Titles', clips: [
+      { id: 'o1', kind: 'text', start: .5, in: 0, out: 2, fade_in: .5, fade_out: 0, opacity: 1, text: 'Overlay title', box: { x: .1, y: .1, w: .5, h: .15 }, style: 'card', color: 'accent' },
+      { id: 's1', kind: 'shape', start: 3, in: 0, out: 1, opacity: 1, shape: 'rect', color: 'accent-2', fill: true, box: { x: .6, y: .6, w: .2, h: .2 } }] },
+    { id: 't2', kind: 'overlay', name: 'On top', clips: [
+      { id: 'i1', kind: 'image', start: 0, in: 0, out: 2, opacity: 1, image: 'assets/field.svg', fit: 'cover', box: { x: .05, y: .7, w: .2, h: .2 } },
+      { id: 's2', kind: 'shape', start: 3, in: 0, out: 1, opacity: 1, shape: 'ellipse', color: 'white', fill: true, box: { x: .65, y: .65, w: .1, h: .1 } }] },
+    { id: 't3', kind: 'overlay', name: 'Hidden', hidden: true, clips: [{ id: 's3', kind: 'shape', start: 0, in: 0, out: 20, shape: 'rect', color: 'black', box: { x: 0, y: 0, w: .05, h: .05 } }] },
+    { id: 'a1', kind: 'audio', name: 'Sound', clips: [{ id: 'snd', kind: 'sound', start: 0, in: 0, out: 1, audio: 'assets/x.wav' }] }];
+  await win.loadURL(`${base}/api/videos/sample/player?aspect=16:9&rt=fixture-token&look=dark`);
+  for (let i = 0; i < 100 && !await js('!!window.kdReady'); i++) await pause(50);
+  await js('window.kdReady.then(() => true)');
+  const overlayResult = await js(`(async () => {
+    const E = await import('/static/motion/engine.js'), K = await import('/static/motion/kit.js');
+    const base = JSON.parse(document.getElementById('kd-project').textContent), options = { aspect: '16:9', tokens: ${JSON.stringify(looks.dark)}, assetsBase: '/api/videos/sample/assets/' };
+    const plain = document.createElement('canvas'), layered = document.createElement('canvas');
+    const a = E.mount(plain, base, options), b = E.mount(layered, { ...base, tracks: ${JSON.stringify(tracks)} }, options);
+    await Promise.all([a.ready, b.ready]);
+    const px = (c, x, y) => [...c.getContext('2d').getImageData(Math.round(x), Math.round(y), 1, 1).data.slice(0, 3)];
+    const hash = async (m, c, t) => { m.drawFrame(t); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+      return [...new Uint8Array(await crypto.subtle.digest('SHA-256', d))].map(v => v.toString(16).padStart(2, '0')).join(''); };
+    const W = 1920, H = 1080, out = { info: b.info.clips.map(c => c.id) };
+    a.drawFrame(3.5); b.drawFrame(3.5);
+    out.top = px(layered, .7 * W, .7 * H); out.under = px(layered, .62 * W, .62 * H); out.plainUnder = px(plain, .62 * W, .62 * H);
+    out.style = { accent2: K.rgb(getComputedStyle(document.documentElement).getPropertyValue('--ds-accent-2')) };
+    a.drawFrame(1); b.drawFrame(1);
+    out.hidden = [px(layered, 20, 20), px(plain, 20, 20)];
+    out.image = [px(layered, .15 * W, .8 * H), px(plain, .15 * W, .8 * H)];
+    a.drawFrame(2.6); b.drawFrame(2.6);
+    out.gap = [px(layered, .7 * W, .7 * H), px(plain, .7 * W, .7 * H)];
+    out.fade = b.layout(.75).find(e => e.clip === 'o1')?.alpha;
+    out.box = b.layout(1.5).find(e => e.clip === 'o1');
+    out.layoutIds = b.layout(1).filter(e => e.clip).map(e => e.clip).sort();
+    const h1 = await hash(b, layered, 3.5), h2 = await hash(b, layered, .9), h3 = await hash(b, layered, 3.5);
+    out.deterministic = h1 === h3 && h1 !== h2;
+    b.drawFrame(1.5); out.frame = layered.toDataURL('image/png').split(',')[1];
+    a.dispose(); b.dispose();
+    return out;
+  })()`);
+  assert.deepEqual(overlayResult.info, ['o1', 's1', 'i1', 's2'], 'Visible overlay clips in drawing order (hidden and audio tracks left out)');
+  assert.deepEqual(overlayResult.top, [255, 255, 255], 'The later track draws on top');
+  assert.ok(overlayResult.under.every((v, i) => Math.abs(v - overlayResult.style.accent2[i]) < 3), 'The lower track shows where nothing covers it');
+  assert.notDeepEqual(overlayResult.under, overlayResult.plainUnder);
+  assert.deepEqual(overlayResult.hidden[0], overlayResult.hidden[1], 'A hidden track draws nothing');
+  assert.notDeepEqual(overlayResult.image[0], overlayResult.image[1], 'An image clip draws its picture');
+  assert.deepEqual(overlayResult.gap[0], overlayResult.gap[1], 'Nothing between clips');
+  assert.ok(Math.abs(overlayResult.fade - .5) < .01, 'Half way through a 0.5 s fade in: ' + overlayResult.fade);
+  assert.equal(overlayResult.box.kind, 'text'); assert.equal(overlayResult.box.role, 'overlay'); assert.equal(overlayResult.box.text, 'Overlay title');
+  assert.ok(overlayResult.box.bg && !overlayResult.box.truncated && Math.abs(overlayResult.box.x - 192) < 1 && Math.abs(overlayResult.box.w - 960) < 1, 'The text clip reports its box on its card');
+  assert.deepEqual(overlayResult.layoutIds, ['i1', 'o1'], 'Layout reports the clips on screen, and none from a hidden track');
+  assert.ok(overlayResult.deterministic, 'The same time draws the same pixels');
+  fs.writeFileSync(path.join(output, 'motion-overlays.png'), Buffer.from(overlayResult.frame, 'base64'));
+  console.log('PASS overlay tracks; frame: ' + path.join(output, 'motion-overlays.png'));
+  console.log('Motion engine Electron checks passed (two looks, three aspects, all beats, cameras, transitions, image treatments and overlay tracks).');
   cleanup(); app.exit(0);
 }).catch(error => { console.error(error); cleanup(); app.exit(1); });

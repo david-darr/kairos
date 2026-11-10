@@ -1,4 +1,5 @@
 // Real CRM renderer, isolated synthetic API. No user account or outside network.
+const { scriptSrc } = require('./app-page-policy.cjs');
 const { app, BrowserWindow, session } = require('electron');
 const { exitAfterFlush } = require('./electron-exit.cjs');
 const fs = require('node:fs');
@@ -95,7 +96,7 @@ const server = http.createServer(async (req, res) => {
   if (!tabFile && !file.startsWith(path.join(root, 'static') + path.sep)) { res.writeHead(404); res.end(); return; }
   try {
     res.setHeader('Content-Type', ({ '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.jpg': 'image/jpeg', '.png': 'image/png' })[path.extname(file)] || 'application/octet-stream');
-    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:");
+    res.setHeader('Content-Security-Policy', `default-src 'self'; script-src ${scriptSrc(url.pathname)}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:`);
     res.end(fs.readFileSync(file));
   } catch { res.writeHead(404); res.end(); }
 });

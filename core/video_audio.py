@@ -24,11 +24,50 @@ def synthesize(project, report=None):
     """Stereo float32 at 48 kHz. `report`, when given, is filled with the narration levels for the checks."""
     p = validate(project)
     music = _music(p)
-    if not narrated(p):
-        return music
-    from core import video_narration
-    voice, stats = video_narration.track(p, SR)
-    return _mix(music, voice, stats, p["music"]["volume"], report)
+    if narrated(p):
+        from core import video_narration
+        voice, stats = video_narration.track(p, SR)
+        music = _mix(music, voice, stats, p["music"]["volume"], report)
+    return _sounds(p, music, report)
+
+
+def _sounds(p, mix, report=None):
+    """The audio tracks' sound clips (Content Studio Editor step 3), from the person's own uploaded files: each clip's
+    stretch of its file (in to out) at its volume with linear fades, placed at its start, over the music and voice.
+    A muted (hidden) track adds nothing. The mix is then kept under the same headroom as before."""
+    from core import video_store, video_tracks
+    clips = [c for t in p.get("tracks") or [] if t["kind"] == "audio" and not t["hidden"] for c in t["clips"]]
+    if not clips:
+        return mix
+    count, cache, placed = len(mix), {}, 0
+    for clip in clips:
+        name = clip["audio"]
+        if name not in cache:
+            with wave.open(str(video_store.asset_path(p["id"], name[len("assets/"):])), "rb") as w:
+                if w.getframerate() != SR or w.getnchannels() != 2 or w.getsampwidth() != 2:
+                    raise ValueError(f"The sound {name} is not a 48 kHz stereo file; upload it again.")
+                cache[name] = np.frombuffer(w.readframes(w.getnframes()), dtype="<i2").reshape(-1, 2)
+        source = cache[name]
+        first, last = round(clip["in"] * SR), min(len(source), round(clip["out"] * SR))
+        at = round(clip["start"] * SR)
+        n = min(last - first, count - at)
+        if n <= 0:
+            continue
+        piece = source[first:first + n].astype(np.float32) / 32768 * np.float32(clip["volume"])
+        t = np.arange(n, dtype=np.float32) / SR
+        gain = np.ones(n, dtype=np.float32)
+        if clip["fade_in"] > 0:
+            gain = np.minimum(gain, t / np.float32(clip["fade_in"]))
+        if clip["fade_out"] > 0:
+            gain = np.minimum(gain, (np.float32(video_tracks.length(clip)) - t) / np.float32(clip["fade_out"]))
+        mix[at:at + n] += piece * np.clip(gain, 0, 1)[:, None]
+        placed += 1
+    peak = float(np.max(np.abs(mix))) if count else 0.
+    if peak > MIX_PEAK:
+        mix *= MIX_PEAK / peak
+    if report is not None:
+        report["sound_clips"] = placed
+    return mix
 
 
 def _envelope(active, frame):

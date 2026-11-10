@@ -84,7 +84,8 @@ const { pathToFileURL } = require('node:url');
   assert.equal(M.edgeTime(list, 3, 1), 5.4); assert.equal(M.edgeTime(list, 5.4, -1), 2); assert.equal(M.edgeTime(list, 0, -1), 0); assert.equal(M.edgeTime(list, 9.4, 1), 9.4);
 
   // Panes: clamped, the preview keeps room, bad stored values fall back, flags default on.
-  assert.deepEqual(M.clampPanes({}, { width: 1440, height: 900 }), { left: 248, right: 340, timeline: 236, guides: true, snap: true });
+  assert.deepEqual(M.clampPanes({}, { width: 1440, height: 900 }), { left: 248, right: 340, timeline: 236, guides: true, snap: true, ripple: false });
+  assert.equal(M.clampPanes({ ripple: true }).ripple, true); assert.equal(M.clampPanes({ ripple: 'yes' }).ripple, false);
   const tight = M.clampPanes({ left: 500, right: 600 }, { width: 1000, height: 700 });
   assert.ok(tight.left + tight.right <= 1000 - 332 + 1 || tight.left === M.PANES.left[0]);
   assert.equal(M.clampPanes({ left: 'x', timeline: 9999 }, { width: 1440, height: 700 }).timeline, 440);
@@ -103,5 +104,32 @@ const { pathToFileURL } = require('node:url');
 
   // The scene lists are the server's (scripts/test_studio_tab.py compares them with core).
   assert.equal(M.SETTINGS.length, 6); assert.equal(M.ACTIONS.length, 8);
+  // Tracks and clips (step 3): split, trim both edges, ripple delete, room on a track, new clips and the keys.
+  const q = { bpm: 120, beats: [{ id: 'a', kind: 'title', bars: 2 }], tracks: [{ id: 't1', kind: 'overlay', name: 'Titles', clips: [
+    { id: 'k1', kind: 'text', start: 1, in: 0, out: 2, fade_in: .5, fade_out: .5, text: 'Hi' }, { id: 'k2', kind: 'text', start: 4, in: 0, out: 1, fade_in: 0, fade_out: 0, text: 'Yo' }] }] };
+  const t1 = q.tracks[0], k1 = t1.clips[0];
+  assert.equal(M.clipEnd(k1), 3); assert.equal(M.findClip(q, 'k2').index, 1); assert.equal(M.findClip(q, 'zz'), null);
+  assert.equal(M.uniqueId(q, 'k'), 'k3'); assert.equal(M.uniqueId(q, 't'), 't2');
+  assert.equal(M.fits(t1, 3, 1), true); assert.equal(M.fits(t1, 2.5, 1), false); assert.equal(M.fits(t1, 2.5, 1, 'k1'), true);
+  assert.equal(M.freeStart(t1, 1.5, 1), 3); assert.equal(M.freeStart(t1, 2.5, 1.5), 5);
+  const copy = structuredClone(k1), second = M.splitClip(copy, 2.25, 'k1-1');
+  assert.deepEqual([copy.start, copy.in, copy.out, copy.fade_in, copy.fade_out], [1, 0, 1.25, .5, 0]);
+  assert.deepEqual([second.start, second.in, second.out, second.fade_in, second.fade_out], [2.25, 1.25, 2, 0, .5]);
+  assert.equal(M.splitClip(structuredClone(k1), 1.01, 'x'), null, 'No split inside the first frame');
+  assert.deepEqual(M.trimClip(k1, 'left', 2, { track: t1 }), { start: 2, in: 1, out: 2, fade_in: .5, fade_out: .5 });
+  assert.equal(M.trimClip(k1, 'left', 0, { track: t1 }).start, 1, 'A left edge never goes before in 0');
+  assert.equal(M.trimClip(k1, 'right', 9, { track: t1 }).out, 3, 'A right edge stops at the next clip');
+  assert.equal(M.trimClip({ ...k1, id: 'snd' }, 'right', 9, { limit: 2.5 }).out, 2.5, 'A sound stays inside its file');
+  assert.equal(M.trimClip(k1, 'right', 1, { track: t1 }).out, .0333, 'At least one frame (to 4 places, as the server keeps it)');
+  const rippled = structuredClone(t1); M.removeClip(rippled, 'k1', true); assert.deepEqual(rippled.clips.map(c => [c.id, c.start]), [['k2', 2]]);
+  const kept = structuredClone(t1); M.removeClip(kept, 'k1'); assert.equal(kept.clips[0].start, 4);
+  const made = M.newClip(q, 'text', 2.5);
+  assert.deepEqual([made.id, made.start, made.out, made.style, made.box.x], ['k3', 2.5, 3, 'card', .1]);
+  assert.equal(M.newClip(q, 'sound', 0, { audio: 'assets/x.wav', out: 1.2 }).out, 1.2);
+  assert.equal(M.clipLabel({ kind: 'sound', audio: 'assets/abc.wav' }, { 'assets/abc.wav': { title: 'Ding' } }), 'Ding');
+  assert.ok(M.clipSnapTargets(q, M.clips(q), {}, 'k1').includes(5) && !M.clipSnapTargets(q, M.clips(q), {}, 'k1').includes(3));
+  assert.equal(k('s'), 'split'); assert.equal(k('c'), 'comment'); assert.equal(k('Escape'), 'escape');
+  assert.equal(M.pinVisible({ t: 2 }, 3.4), true); assert.equal(M.pinVisible({ t: 2 }, 3.6), false);
+  assert.deepEqual(M.CLIP_COLORS, ['text', 'dim', 'accent', 'accent-2', 'bg', 'surface', 'white', 'black']);
   console.log('studio editor model ok');
 })().catch(error => { console.error(error); process.exit(1); });

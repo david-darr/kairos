@@ -5,6 +5,7 @@ These are actionable observations, not a claim that a person watched the film.
 import io
 import math
 import re
+import numpy as np
 from PIL import Image, ImageColor, ImageStat
 from core.video_store import ASPECTS, beat_seconds
 
@@ -191,6 +192,8 @@ def check(project, aspect="16:9", layouts=None, frames=None, loudness=None, voic
         for box in sample.get("elements", []):
             if not box.get("text"):
                 continue
+            if box.get("clip"):
+                continue      # an overlay clip's text: overlay_notes names the clip
             label = box.get("beat", "?")
             if box.get("truncated"):
                 notes.append(f"Beat {label}'s text is cut off with an ellipsis; shorten it.")
@@ -212,7 +215,7 @@ def check(project, aspect="16:9", layouts=None, frames=None, loudness=None, voic
                 if not words or not any(line[i:i + len(words)] == words for i in range(len(line) - len(words) + 1)):
                     notes.append(f"A caption in beat {box.get('beat', '?')} is not the script's words; narrate it again.")
                 continue
-            if box.get("text"):
+            if box.get("text") and not box.get("clip"):
                 # A floating label over a head (Pack B) is a figure read at a glance: one word, however it is spaced.
                 groups.setdefault(box.get("beat"), []).append("figure" if box.get("role") == "label" else str(box["text"]))
         for beat, texts in groups.items():
@@ -228,4 +231,76 @@ def check(project, aspect="16:9", layouts=None, frames=None, loudness=None, voic
             notes.append("Soundtrack loudness is off target; aim for -16 LUFS integrated.")
         if tp is None or not math.isfinite(tp) or tp > -1:
             notes.append("Soundtrack true peak is above -1 dBTP; lower the transient peaks.")
+    return list(dict.fromkeys(notes))
+
+
+def _contrast(a, b):
+    return (max(a, b) + .05) / (min(a, b) + .05)
+
+
+def _behind(raw, box):
+    """The luminance behind a plain text clip on a rendered frame: the median over its box (letters cover well under
+    half of a text box, so the median is the background), or None when the box is off the frame."""
+    with Image.open(io.BytesIO(raw)) as image:
+        rgb = image.convert("RGB")
+        x0, y0 = max(0, int(box["x"])), max(0, int(box["y"]))
+        x1, y1 = min(rgb.width, int(box["x"] + box["w"])), min(rgb.height, int(box["y"] + box["h"]))
+        if x1 - x0 < 4 or y1 - y0 < 4:
+            return None
+        crop = rgb.crop((x0, y0, x1, y1))
+        crop.thumbnail((160, 160))
+        pixels = np.asarray(crop, dtype=np.float64) / 255
+    linear = np.where(pixels <= .04045, pixels / 12.92, ((pixels + .055) / 1.055) ** 2.4)
+    return float(np.median(linear @ np.array([.2126, .7152, .0722])))
+
+
+def overlay_notes(project, aspect="16:9", layouts=None, frames=None, times=None):
+    """Checks for the overlay and audio clips (Content Studio Editor step 3), each naming its clip: text cut off with an
+    ellipsis, text outside the safe area (which also keeps it clear of the caption band), text that reads too fast,
+    contrast under 4.5:1 (against its card, or for plain text against the pixels really behind it on a rendered
+    frame), and a clip that runs past the end of the video."""
+    from core import video_store, video_tracks
+    tracks = project.get("tracks") or []
+    if not tracks:
+        return []
+    w, h = ASPECTS[aspect]
+    captioned = (project.get("narration") or {}).get("captions", True) and video_store.narrated(project)
+    portrait = aspect == "9:16"
+    safe_top = h * (.13 if portrait else .05)
+    safe_bottom = safe_top + h * ((.56 if portrait else .70 if aspect == "1:1" else .73) if captioned else (.70 if portrait else .90))
+    left, right = w * .05, w * .95
+    total, notes, names = video_store.duration(project), [], {}
+    for track in tracks:
+        for clip in track["clips"]:
+            names[clip["id"]] = f"Clip {clip['id']} on {track['name']}"
+            if track["hidden"]:
+                continue
+            if clip["start"] >= total - 1e-6:
+                notes.append(f"{names[clip['id']]} starts after the video ends ({total:.1f} s); move it earlier or it is not seen.")
+            elif video_tracks.end(clip) > total + 1 / 30:
+                notes.append(f"{names[clip['id']]} runs past the end of the video ({total:.1f} s); it is cut there.")
+            if clip["kind"] == "text" and len(clip["text"].split()) / video_tracks.length(clip) > 3.5:
+                notes.append(f"{names[clip['id']]} reads faster than 3.5 words/s; shorten the text or lengthen the clip.")
+    by_time = {round(s.get("time", -1), 6): s.get("elements", []) for s in layouts or []}
+    for sample in layouts or []:
+        for box in sample.get("elements", []):
+            if not box.get("clip") or box.get("kind") != "text":
+                continue
+            label = names.get(box["clip"], f"Clip {box['clip']}")
+            if box.get("truncated"):
+                notes.append(f"{label}: its text is cut off with an ellipsis; shorten it or make its box bigger.")
+            if box["x"] < left - .5 or box["x"] + box["w"] > right + .5 or box["y"] < safe_top - .5 or box["y"] + box["h"] > safe_bottom + .5:
+                notes.append(f"{label} has text outside the safe area" + (" (or over the captions)" if captioned else "") + "; move it inward.")
+            fg, bg = _luminance(box.get("color")), _luminance(box.get("bg")) if box.get("bg") else None
+            if fg is not None and bg is not None and _contrast(fg, bg) < 4.5:
+                notes.append(f"{label} has text contrast under 4.5:1 on its card; pick another colour.")
+    for raw, t in zip(frames or [], times or []):
+        for box in by_time.get(round(t, 6), []):
+            if not box.get("clip") or box.get("kind") != "text" or box.get("bg"):
+                continue
+            fg = _luminance(box.get("color"))
+            behind = _behind(raw, box) if fg is not None else None
+            if behind is not None and _contrast(fg, behind) < 4.5:
+                notes.append(f"{names.get(box['clip'], 'Clip ' + box['clip'])} has text contrast under 4.5:1 against what is behind it "
+                             f"(at {t:.1f} s); use the card style or another colour.")
     return list(dict.fromkeys(notes))

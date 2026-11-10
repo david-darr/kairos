@@ -162,7 +162,9 @@ export const SHORTCUTS = [
   ['Home / End', 'Start or end of the video'],
   ['I / O', 'Set the start or end of the work area at the playhead'],
   ['Alt + X', 'Clear the work area'],
-  ['Delete', 'Delete the selected beat'],
+  ['Delete', 'Delete the selected beat or clip (with Ripple on, later clips on its track move up)'],
+  ['S', 'Split the selected clip at the playhead'],
+  ['C', 'Comment mode: click the preview to pin a comment for Kairos'],
   ['Ctrl + D', 'Duplicate the selected beat'],
   ['Alt + Left / Right', 'Move the selected beat earlier or later'],
   ['Ctrl + Z', 'Undo'],
@@ -196,6 +198,9 @@ export function keyAction(e) {
     case 'ArrowDown': return 'next-edge';
     case 'Home': return 'start';
     case 'End': return 'end';
+    case 's': return 'split';
+    case 'c': return 'comment';
+    case 'Escape': return 'escape';
     case 'i': return 'mark-in';
     case 'o': return 'mark-out';
     case 'Delete': case 'Backspace': return 'delete';
@@ -232,6 +237,7 @@ export function clampPanes(raw = {}, viewport = { width: 1440, height: 900 }) {
   out.timeline = Math.min(out.timeline, Math.max(PANES.timeline[0], viewport.height - 260));
   for (const key of ['leftTab', 'rightTab']) if (typeof raw[key] === 'string' && /^[a-z]{2,12}$/.test(raw[key])) out[key] = raw[key];
   for (const key of ['guides', 'snap']) out[key] = typeof raw[key] === 'boolean' ? raw[key] : true;
+  out.ripple = raw.ripple === true;   // ripple delete for track clips: off until the person turns it on
   return out;
 }
 export const panesKey = username => 'kairos:studio-editor:v1:' + String(username || 'local');
@@ -256,3 +262,101 @@ export function musicLevel(t, spans, volume = .7) {
   const level = clamp(Number(volume) || 0, 0, 1);
   return level * (1 - duck * .75);   // -12 dB is about a quarter of the amplitude
 }
+
+// -- Tracks and clips (Content Studio Editor build spec, step 3; core/video_tracks.py checks the same rules) ------------
+// Overlay tracks hold text, image and shape clips drawn over the beats (the last track on top, captions above all);
+// audio tracks hold sound clips. A clip starts at `start` on the timeline and plays its own time from `in` to `out`.
+export const TRACK_KINDS = ['overlay', 'audio'];
+export const CLIP_KINDS = { overlay: ['text', 'image', 'shape'], audio: ['sound'] };
+export const CLIP_COLORS = ['text', 'dim', 'accent', 'accent-2', 'bg', 'surface', 'white', 'black'];
+export const CLIP_SHAPES = ['rect', 'ellipse', 'line', 'arrow'];
+export const MAX_TRACKS = 8, MAX_TRACK_CLIPS = 60, MAX_CLIPS = 200;
+const FRAME = 1 / FPS;
+const r4 = v => Math.round(v * 10000) / 10000;
+export const clipLength = c => c.out - c.in;
+export const clipEnd = c => c.start + clipLength(c);
+export const tracksOf = p => Array.isArray(p.tracks) ? p.tracks : [];
+export function findClip(p, id) {
+  for (const track of tracksOf(p)) { const index = track.clips.findIndex(c => c.id === id); if (index >= 0) return { track, clip: track.clips[index], index }; }
+  return null;
+}
+// Ids are unique across beats, tracks and clips (the server refuses a clip id a beat has).
+export function uniqueId(p, base) {
+  const taken = new Set([...p.beats.map(b => b.id), ...tracksOf(p).flatMap(t => [t.id, ...t.clips.map(c => c.id)])]);
+  let n = 1; while (taken.has(`${base}${n}`)) n++;
+  return `${base}${n}`;
+}
+export const sortClips = track => { track.clips.sort((a, b) => a.start - b.start || (a.id < b.id ? -1 : 1)); return track; };
+// Does a clip of this length fit at `start` on the track without overlapping another clip (except `ignore`)?
+export function fits(track, start, length, ignore = null) {
+  if (start < -1e-6) return false;
+  return track.clips.every(c => c.id === ignore || start + length <= c.start + 1e-6 || start >= clipEnd(c) - 1e-6);
+}
+// The first free start at or after `at` on a track for a clip of `length` (moving past any clip in the way).
+export function freeStart(track, at, length, ignore = null) {
+  let start = Math.max(0, at);
+  for (let guard = 0; guard < 200 && !fits(track, start, length, ignore); guard++) {
+    const blocker = track.clips.filter(c => c.id !== ignore && start < clipEnd(c) - 1e-6 && start + length > c.start + 1e-6).sort((a, b) => clipEnd(a) - clipEnd(b))[0];
+    if (!blocker) break;
+    start = clipEnd(blocker);
+  }
+  return r4(start);
+}
+// A new clip with the defaults the inspector shows. `at` is the playhead; text and shapes last 3 s, a sound its length.
+export function newClip(p, kind, at, extra = {}) {
+  const id = uniqueId(p, 'k'), base = { id, kind, start: r4(Math.max(0, at)), in: 0, out: 3, fade_in: 0, fade_out: 0 };
+  if (kind === 'text') return { ...base, opacity: 1, fade_in: .3, fade_out: .3, text: 'Your text', box: { x: .1, y: .08, w: .8, h: .16 }, role: 'title', style: 'card', color: 'text', align: 'center', ...extra };
+  if (kind === 'image') return { ...base, opacity: 1, image: '', box: { x: .62, y: .08, w: .3, h: .3 }, fit: 'contain', ...extra };
+  if (kind === 'shape') return { ...base, opacity: 1, shape: 'rect', box: { x: .1, y: .7, w: .3, h: .06 }, color: 'accent', fill: true, stroke: .006, ...extra };
+  return { ...base, volume: .8, audio: '', ...extra };
+}
+// Cut a clip at timeline time `at`: the clip keeps the part before; returns the part after (a fade in stays with the
+// first part, a fade out with the second), or null when `at` is not at least a frame inside it.
+export function splitClip(clip, at, newId) {
+  if (!(at >= clip.start + FRAME - 1e-6 && at <= clipEnd(clip) - FRAME + 1e-6)) return null;
+  const cut = r4(clip.in + at - clip.start);
+  const second = { ...structuredClone(clip), id: newId, start: r4(at), in: cut, fade_in: 0 };
+  clip.out = cut; clip.fade_out = 0; clip.fade_in = Math.min(clip.fade_in, clipLength(clip));
+  second.fade_out = Math.min(second.fade_out, clipLength(second));
+  return second;
+}
+// Drag an edge to timeline time t. The left edge moves the clip's start and its `in` together (in stays >= 0); the
+// right edge moves `out`. A clip keeps at least one frame, a sound stays inside its file (`limit` seconds), and the
+// edge stops at the next clip on its track.
+export function trimClip(clip, edge, t, { track = null, limit = Infinity } = {}) {
+  const out = { start: clip.start, in: clip.in, out: clip.out };
+  const others = track ? track.clips.filter(c => c.id !== clip.id) : [];
+  if (edge === 'left') {
+    const floor = Math.max(clip.start - clip.in, ...others.filter(c => clipEnd(c) <= clip.start + 1e-6).map(clipEnd), 0);
+    const start = clamp(t, floor, clipEnd(clip) - FRAME), delta = start - clip.start;
+    out.start = r4(start); out.in = r4(clip.in + delta);
+  } else {
+    const ceiling = Math.min(clip.start + (limit - clip.in), ...others.filter(c => c.start >= clipEnd(clip) - 1e-6).map(c => c.start));
+    out.out = r4(clip.in + clamp(t, clip.start + FRAME, ceiling) - clip.start);
+  }
+  out.fade_in = Math.min(clip.fade_in || 0, out.out - out.in); out.fade_out = Math.min(clip.fade_out || 0, out.out - out.in - out.fade_in);
+  return out;
+}
+// Remove a clip; with ripple, later clips on the same track move left by its length (closing the gap).
+export function removeClip(track, id, ripple = false) {
+  const at = track.clips.findIndex(c => c.id === id);
+  if (at < 0) return track;
+  const [gone] = track.clips.splice(at, 1);
+  if (ripple) for (const c of track.clips) if (c.start >= gone.start - 1e-6) c.start = r4(Math.max(0, c.start - clipLength(gone)));
+  return track;
+}
+// Where a clip is on screen in plain words, for the timeline and for screen readers.
+export function clipLabel(c, sounds = {}) {
+  if (c.kind === 'text') return c.text || 'Text';
+  if (c.kind === 'image') return c.image ? `Image ${c.image.slice(7, 15)}` : 'Image (choose one)';
+  if (c.kind === 'shape') return `${c.color || 'accent'} ${c.shape || 'rect'}`;
+  return sounds[c.audio]?.title || (c.audio ? `Sound ${c.audio.slice(7, 15)}` : 'Sound (choose one)');
+}
+// Snapping targets for clips: beat edges, every other clip's edges, the playhead, the work area and chapters.
+export function clipSnapTargets(p, list, extra = {}, ignore = null) {
+  const out = new Set(snapTargets(list, extra));
+  for (const t of tracksOf(p)) for (const c of t.clips) if (c.id !== ignore) { out.add(c.start); out.add(clipEnd(c)); }
+  return [...out].sort((a, b) => a - b);
+}
+// Comment pins show on the preview near their time.
+export const pinVisible = (pin, t, near = 1.5) => Math.abs(pin.t - t) <= near;

@@ -278,6 +278,10 @@ async def _render(project, aspect, job_id):
         encoder = ffmpeg_tools.Encoder(temp, wav)
         total = math.ceil(video_store.duration(project) * 30 - 1e-7)
         indices = {round(i * (total - 1) / 11) for i in range(12)}
+        sheet_indices = set(indices)
+        # Overlay text clips (Content Studio Editor step 3): one more kept frame inside each, for the contrast check.
+        from core import video_tracks
+        indices |= video_tracks.check_frames(project, 0, total - 1)
         job = _job(project, aspect, job_id, frame_times=[i / 30 for i in indices])
         seen = 0
         thumb_index = min(total - 1, thumb_frame(project, job["fps"]))
@@ -295,7 +299,7 @@ async def _render(project, aspect, job_id):
                 return
             for frame in frames:
                 if seen in indices:
-                    samples.append(frame)
+                    samples.append((seen, frame))
                 if seen == thumb_index:
                     thumb = frame
                 seen += 1
@@ -309,12 +313,14 @@ async def _render(project, aspect, job_id):
         await asyncio.to_thread(encoder.finish)
         encoder = None
         measured = await _thread_done(ffmpeg_tools.loudness, temp)
-        notes = video_checks.check(project, aspect, layouts, samples, measured, voice or None)
-        notes += character_notes(project, layouts, samples, [i / 30 for i in sorted(indices)])
+        frames_kept, times_kept = [f for _, f in samples], [i / 30 for i, _ in samples]
+        notes = video_checks.check(project, aspect, layouts, frames_kept, measured, voice or None)
+        notes += character_notes(project, layouts, frames_kept, times_kept)
+        notes += video_checks.overlay_notes(project, aspect, layouts, frames_kept, times_kept)
         notes += pack_notes(project)
         notes += video_blender.renderer_note(project)
         sheet = folder / f"sheet-{slug}.png"
-        sheet.write_bytes(ffmpeg_tools.contact_sheet(samples, 4))
+        sheet.write_bytes(ffmpeg_tools.contact_sheet([f for i, f in samples if i in sheet_indices], 4))
         thumb_path = folder / f"thumb-{slug}.png"
         if thumb:
             with Image.open(io.BytesIO(thumb)) as image:
@@ -366,7 +372,8 @@ async def preview(video_id, aspect, times=None):
         layouts.extend(samples)
     async with _machine():
         await design_render_bridge.video(_job(project, aspect, secrets.token_hex(8), times), consume)
-    notes = video_checks.check(project, aspect, layouts, frames) + character_notes(project, layouts, frames, times) + pack_notes(project)
+    notes = (video_checks.check(project, aspect, layouts, frames) + character_notes(project, layouts, frames, times)
+             + video_checks.overlay_notes(project, aspect, layouts, frames, times) + pack_notes(project))
     if video_blender.wants_blender(project):
         notes.append("Preview drawn with three.js; the render uses Blender." if video_blender.effective(project) == "blender"
                      else video_blender.renderer_note(project)[0])

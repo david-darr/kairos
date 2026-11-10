@@ -1,6 +1,7 @@
 import { clamp, expoOut, pop, inOut, hash, seededRandom, zoomAbout, scrim, card, windowReveal, BAYER, contrast, readable, luminance, rgb } from './kit.js';
 import { drawScene, sceneBoxes, groundLine, packCard, drawCardSky, drawCardWorld } from './scene.js';
 import { stageModel, stagePose, labelsAt, actorBoxes } from './stage.js';
+import { normalizeTracks, alphaAt, drawOverlay, overlayBoxes } from './overlay.js';
 import { normalizeProject, dimensions, safeArea, captionBand, captionAt, fitText, frameTime, beatAt, transitionAt, beatLayout, cameraAt, beatElapsed, transitionTransform, visibleBox, compositionAt, revealElapsed, listMarker } from './layout.js';
 
 function lookTokens(canvas, supplied) {
@@ -95,8 +96,10 @@ export function mount(canvas, input, options = {}) {
   const measureCtx = buffer(doc, 1, 1).getContext('2d');
   const measure = (text, size, role) => { measureCtx.font = font(style, size, role); return measureCtx.measureText(text).width; };
   const images = new Map(), samples = new Map(), plans = new Map();
+  // Overlay tracks (overlay.js): text, image and shape clips over the beats, under the captions.
+  const overlays = normalizeTracks(input?.tracks);
   const layers = Array.from({ length: 2 }, () => ({ bg: buffer(doc, w, h), fg: buffer(doc, w, h) }));
-  let loaded = false;
+  let loaded = false, disposed = false;
   const plan = beat => {
     if (!plans.has(beat.id)) plans.set(beat.id, beatLayout(beat, aspect, measure, { ...style, captioned: project.captioned, composition: compositionAt(project.beats, project.beats.indexOf(beat)) }));
     return plans.get(beat.id);
@@ -119,13 +122,14 @@ export function mount(canvas, input, options = {}) {
   const ready = (async () => {
     // Explicit loads activate @font-face rules before fonts.ready can resolve early.
     await Promise.all([doc.fonts.load(font(style, 96, 'title')), doc.fonts.load(font(style, 48, 'body')),
-      ...[...new Set(project.beats.map(b => b.image).filter(Boolean))].map(loadImage)]);
+      ...[...new Set([...project.beats.map(b => b.image), ...overlays.map(c => c.image)].filter(Boolean))].map(loadImage)]);
     await doc.fonts.ready;
     if (hasStage && !overlay) {
       const { StageRenderer } = await import('./stage3d.js');
       stage3d = new StageRenderer(w, h, { ss: options.ss || 2 });
       for (const beat of project.beats) if (beat.kind === 'stage') stage3d.build(modelOf(beat));
     }
+    if (disposed) { stage3d?.dispose(); stage3d = null; throw new Error('This preview was replaced before it was ready.'); }
     for (const beat of project.beats) plan(beat);
     loaded = true; drawFrame(0);
   })();
@@ -395,6 +399,10 @@ export function mount(canvas, input, options = {}) {
     c.fit.lines.forEach((line, row) => ctx.fillText(line, c.x + c.w / 2, c.y + capPad + row * c.fit.lineHeight + c.fit.size * .88));
     ctx.restore();
   }
+  const overlayEnv = { w, h, style, measure, font, images };
+  function drawOverlays(t) {
+    for (const clip of overlays) drawOverlay(ctx, clip, alphaAt(clip, t), overlayEnv);
+  }
   function drawFrame(time) {
     if (!loaded) throw new Error('Await mount.ready before drawing');
     const { t, beat, transition: tr } = active(time);
@@ -402,7 +410,7 @@ export function mount(canvas, input, options = {}) {
     if (overlay) ctx.clearRect(0, 0, w, h);
     else { ctx.fillStyle = style.bg; ctx.fillRect(0, 0, w, h); }
     if (!tr) {
-      const layer = renderLayer(beat, t, 0); ctx.drawImage(layer.bg, 0, 0); ctx.drawImage(layer.fg, 0, 0); drawCaption(t); return;
+      const layer = renderLayer(beat, t, 0); ctx.drawImage(layer.bg, 0, 0); ctx.drawImage(layer.fg, 0, 0); drawOverlays(t); drawCaption(t); return;
     }
     const a = renderLayer(project.beats[tr.from], t, 0), b = renderLayer(project.beats[tr.to], t, 1);
     // Paint scene pairs in order so an incoming background covers outgoing copy.
@@ -412,6 +420,7 @@ export function mount(canvas, input, options = {}) {
     if (tr.kind === 'wipe') {
       ctx.fillStyle = style.accent; ctx.fillRect(w * inOut(tr.p) - 10, 0, 20, h);
     }
+    drawOverlays(t);
     drawCaption(t);
   }
   function layout(time) {
@@ -464,6 +473,7 @@ export function mount(canvas, input, options = {}) {
         result.push(...sceneBoxes(b, project, w, h, groundLine(h, band, project.captioned), p * (b.end - b.start), p));
       }
     }
+    result.push(...overlayBoxes(overlays, t, w, h, measure, style));
     const c = caption(t);
     if (c) result.push({ beat: c.part.beat, kind: 'text', role: 'caption', text: c.part.text, fontSize: c.fit.size, x: c.x, y: c.y, w: c.w, h: c.h,
       color: c.color, bg: style.bg, truncated: c.fit.truncated });
@@ -478,9 +488,12 @@ export function mount(canvas, input, options = {}) {
     return { beat: beat.id, camera: p.camera, groups: p.groups };
   }
   const stageModels = () => Object.fromEntries(project.beats.filter(b => b.kind === 'stage').map(b => [b.id, modelOf(b)]));
-  return { ready, duration: project.duration, drawFrame, layout, pose, stageModels, stageInfo: () => stage3d && { ...stage3d.info, lost: stage3d.lost },
+  // Studio's editor remounts its preview on every edit: free the 3D renderer's GPU context with the old mount.
+  const dispose = () => { disposed = true; stage3d?.dispose(); stage3d = null; loaded = false; };
+  return { ready, duration: project.duration, drawFrame, layout, pose, stageModels, dispose, stageInfo: () => stage3d && { ...stage3d.info, lost: stage3d.lost },
     info: { duration: project.duration, fps: 30, width: w, height: h, aspect, layer: overlay ? 'overlay' : 'full',
-      renderer: hasStage ? (overlay ? 'blender' : 'threejs') : '2d-engine', beats: project.beats.map(({ id, start, end }) => ({ id, start, end })) } };
+      renderer: hasStage ? (overlay ? 'blender' : 'threejs') : '2d-engine', beats: project.beats.map(({ id, start, end }) => ({ id, start, end })),
+      clips: overlays.map(({ id, track, start, end }) => ({ id, track, start, end })) } };
 }
 
 // A module import for Studio does not mount anything unless the player marker exists.

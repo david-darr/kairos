@@ -4,6 +4,7 @@ import * as M from '/static/js/studioEditorModel.js';
 import { createTimeline } from '/static/js/studioTimeline.js';
 import { sceneForm } from '/static/js/studioSceneForm.js';
 import { stageForm } from '/static/js/studioStageForm.js';
+import { clipForm } from '/static/js/studioClipForm.js';
 
 // Runtime URLs also work in the generated website demo, which keeps motion modules.
 const MOTION_URL = '/static/motion/engine.js';
@@ -107,21 +108,25 @@ async function preview(canvas, p, aspect) {
     document.head.append(style);
   }
   const characters = p.cast?.length ? await castSpecs(p) : {};
-  const options = { aspect, tokens: data.variables, assetsBase: `/api/videos/${p.id}/assets/` };
+  // Pack B's 3D shots draw live with three.js: the app page maps its bare name with a hashed import map
+  // (static/index.html, core/middleware.py). The preview draws at the video's size without the render's 2x supersampling.
+  const options = { aspect, tokens: data.variables, assetsBase: `/api/videos/${p.id}/assets/`, ss: 1 };
+  let player;
   try {
-    const player = mount(canvas, { ...p, characters }, options);
+    player = mount(canvas, { ...p, characters }, options);
     await player.ready;
     return player;
   } catch (error) {
-    // Pack B's 3D shots load three.js by its bare name, which only the render player's page maps; the app page cannot
-    // yet. Preview them as stand-in cards of the same length instead of losing the whole preview; renders are unchanged.
-    if (!p.beats.some(b => b.kind === 'stage') || !/three/i.test(error.message)) throw error;
+    player?.dispose?.();
+    // A computer whose browser cannot draw WebGL (no GPU, a blocked context) still previews everything else: its 3D
+    // shots show as stand-in cards of the same length. Renders are unchanged.
+    if (!p.beats.some(b => b.kind === 'stage') || /replaced before it was ready/.test(error.message)) throw error;
     const flat = { ...p, characters, beats: p.beats.map(b => b.kind !== 'stage' ? b : { ...b, kind: 'statement', stage: undefined, text: b.text || '3D shot', sub: '3D shot, drawn in the render' }) };
     delete flat.renderer;
-    const player = mount(canvas, flat, options);
-    await player.ready;
-    player.standIn = true;
-    return player;
+    const stand = mount(canvas, flat, options);
+    await stand.ready;
+    stand.standIn = error.message;
+    return stand;
   }
 }
 function loadJobs(id) {
@@ -235,6 +240,7 @@ export async function render(container, tabId, options = {}) {
             } else {
               const player = await preview(canvas, { ...p, beats: p.beats.slice(0, 1) }, p.aspects[0]);
               if (card.isConnected) player.drawFrame(Math.min(.8, player.duration / 2));
+              player.dispose?.();   // the card keeps its drawn frame; a 3D first beat frees its GPU context
             }
           }).catch(error => { if (card.isConnected) status.textContent = `Preview unavailable: ${error.message}`; });
         }
@@ -293,6 +299,10 @@ async function editor(host, id, looks, back, parentDisposed) {
   let disposed = false, timer, previewTimer, pollTimer, frame = 0, mountGeneration = 0, lastGroup = '', lastGroupAt = 0;
   let selected = 0, aspect = '16:9', rate = 0, looping = true, time = 0, lastFrame = 0, player, layoutModule = null;
   let resources = { assets: [], renders: [], jobs: [] }, jobs = [], errors = {}, plan = null, peaks = {}, peaksKey = '', accountCharacters = null;
+  // Step 3: the selected clip on a track (null when a beat is selected) and the sounds uploaded to this video.
+  // Step 4: Ask Kairos's comments, runs and the person's changes since its last turn (core/video_agent.py).
+  let selectedClip = null, sounds = {}, review = { comments: [], runs: [], since: { changes: [] }, connection: null, dry_run_over: 5 };
+  let commenting = false, draftPin = null, asking = false;
   const names = {}, forms = {};  // each cast character's name and its form (2d draws scenes, 3d plays stage beats)
   const state = sessions.get(id) || { p: null, undo: [], redo: [], dirty: false, revision: 0, saving: null, error: '' };
   state.view ||= {};
@@ -308,7 +318,7 @@ async function editor(host, id, looks, back, parentDisposed) {
     const recovered = await Promise.allSettled(loadJobs(id).map(jobId => api(`/api/video-jobs/${jobId}`)));
     jobs = [...new Map([...resources.jobs, ...recovered.filter(r => r.status === 'fulfilled').map(r => r.value)].map(j => [j.id, j])).values()];
     aspect = view.aspect && state.p.aspects.includes(view.aspect) ? view.aspect : state.p.aspects[0];
-    await loadPlan();
+    await Promise.all([loadPlan(), loadSounds(), loadReview()]);
   } catch (error) { host.replaceChildren(el('p', { role: 'alert', text: error.message }), button('Back to projects', back)); return () => { disposed = true; }; }
   if (parentDisposed()) return () => {};
   let panes = M.clampPanes(loadPanes(user), { width: innerWidth, height: innerHeight });
@@ -316,6 +326,7 @@ async function editor(host, id, looks, back, parentDisposed) {
   const total = () => M.totalSeconds(state.p);
   const clipList = () => M.clips(state.p);
 
+  let rightTabs = null;
   // -- the parts ------------------------------------------------------------------------------------------------
   const status = el('span', { role: 'status', 'aria-live': 'polite', class: 'ste-status' });
   const summaryError = el('p', { role: 'alert', class: 'studio-error' });
@@ -325,6 +336,9 @@ async function editor(host, id, looks, back, parentDisposed) {
   const stage = el('div', { class: 'studio-stage' });
   const frameBox = el('div', { class: 'ste-frame' });
   const guides = el('div', { class: 'ste-guides', 'aria-hidden': 'true' });
+  // The selected clip's box, and the comment pins (step 4), over the canvas; never in the video.
+  const selectionLayer = el('div', { class: 'ste-selection', 'aria-hidden': 'true' });
+  const pinsLayer = el('div', { class: 'ste-pins', role: 'group', 'aria-label': 'Comments on the preview' });
   stage.append(frameBox);
   const previewError = el('p', { role: 'status', class: 'studio-error' });
   const previewNote = el('p', { class: 'meta ste-preview-note', role: 'status' });
@@ -346,7 +360,17 @@ async function editor(host, id, looks, back, parentDisposed) {
     zoom: (z, anchor, offset) => { view.zoom = z; view.fit = anchor === 0 && offset === undefined && z === M.fitZoom(total(), timeline.width()); refreshTimeline(); timeline.keep(anchor ?? time, offset); },
     toggleSnap: () => run('snap'),
     clearWorkArea: () => run('clear-work-area'),
+    selectClip: clipId => selectClip(clipId, { seek: true }),
+    moveClip: (clipId, trackId, start) => guarded(() => moveClip(clipId, trackId, start)),
+    trimClip: (clipId, result) => guarded(() => { changed(p => { const f = M.findClip(p, clipId); if (f) { Object.assign(f.clip, result); M.sortClips(f.track); } }); if (clipId === selectedClip) drawInspector(); }),
+    split: () => guarded(() => run('split')),
+    toggleRipple: () => { panes.ripple = !panes.ripple; savePanes(); refreshTimeline(); },
+    addTrack: kind => guarded(() => addTrack(kind)),
+    trackAction: (trackId, action) => guarded(() => trackAction(trackId, action)),
+    addClip: kind => guarded(() => addClip(kind)),
+    selectComment: commentId => focusComment(commentId),
   });
+  function guarded(action) { Promise.resolve().then(action).catch(error => toast(error.message, 'error')); }
 
   // -- saving, undo and the timing of everything ---------------------------------------------------------------
   function renderErrors() {
@@ -400,11 +424,12 @@ async function editor(host, id, looks, back, parentDisposed) {
     if (!state[from].length) return;
     state[to].push(clone(state.p)); state.p = state[from].pop(); lastGroup = '';
     selected = Math.min(selected, state.p.beats.length - 1);
+    if (selectedClip && !M.findClip(state.p, selectedClip)) selectedClip = null;
     changed(() => {}, false); drawInspector(); drawProject();
   }
   function selectBeat(index, { seek = false } = {}) {
     if (index < 0 || index >= state.p.beats.length) return;
-    selected = index;
+    selected = index; selectedClip = null;
     if (seek) { const c = clipList()[index]; if (time < c.start || time >= c.end) { stop(); time = c.start; } }
     drawBeats(); drawInspector(); refreshTimeline(); timeline.reveal(index); drawFrame();
   }
@@ -426,6 +451,101 @@ async function editor(host, id, looks, back, parentDisposed) {
       if (p.chapters?.length) p.chapters = p.chapters.flatMap(c => c.start !== gone.id ? [c] : next && !p.chapters.some(o => o.start === next.id) ? [{ ...c, start: next.id }] : []);
     }); selected = Math.min(selected, state.p.beats.length - 1); drawBeats(); drawInspector(); refreshTimeline();
   }
+  // -- tracks and clips (step 3) --------------------------------------------------------------------------------
+  function selectClip(clipId, { seek = false } = {}) {
+    const found = M.findClip(state.p, clipId);
+    if (!found) return;
+    selectedClip = clipId;
+    if (seek && (time < found.clip.start || time >= M.clipEnd(found.clip))) { stop(); time = found.clip.start; }
+    rightTabs.show('beat'); drawBeats(); drawInspector(); refreshTimeline(); timeline.revealTime(found.clip.start); drawFrame();
+  }
+  const clipCount = p => M.tracksOf(p).reduce((n, t) => n + t.clips.length, 0);
+  function addTrack(kind, name, group = '') {
+    if (M.tracksOf(state.p).length >= M.MAX_TRACKS) throw Error(`A video can have at most ${M.MAX_TRACKS} tracks.`);
+    let trackId;
+    changed(p => {
+      p.tracks ||= [];
+      const n = p.tracks.filter(t => t.kind === kind).length + 1;
+      trackId = M.uniqueId(p, 't');
+      p.tracks.push({ id: trackId, kind, name: name || (kind === 'audio' ? `Sound ${n}` : `Overlay ${n}`), hidden: false, locked: false, clips: [] });
+    }, true, group);
+    refreshTimeline();
+    return trackId;
+  }
+  // A new clip at the playhead: on the selected clip's track when it fits there, else the first unlocked track of its
+  // kind with room, else a new track.
+  function addClip(kind, extra = {}) {
+    if (clipCount(state.p) >= M.MAX_CLIPS) throw Error(`A video holds at most ${M.MAX_CLIPS} clips.`);
+    const trackKind = kind === 'sound' ? 'audio' : 'overlay';
+    const probe = M.newClip(state.p, kind, time, extra), length = M.clipLength(probe);
+    const current = selectedClip && M.findClip(state.p, selectedClip)?.track;
+    const candidates = [current, ...M.tracksOf(state.p)].filter(t => t && t.kind === trackKind && !t.locked && t.clips.length < M.MAX_TRACK_CLIPS);
+    let track = candidates.find(t => M.fits(t, time, length)) || null;
+    const group = 'add-clip-' + Date.now(), trackId = track?.id || addTrack(trackKind, undefined, group);   // one undo step
+    let newId;
+    changed(p => {
+      const target = p.tracks.find(t => t.id === trackId), clip = M.newClip(p, kind, time, extra);
+      clip.start = M.freeStart(target, time, M.clipLength(clip));
+      target.clips.push(clip); M.sortClips(target); newId = clip.id;
+    }, true, group);
+    selectClip(newId);
+    return newId;
+  }
+  function moveClip(clipId, trackId, start) {
+    changed(p => {
+      const found = M.findClip(p, clipId), target = p.tracks.find(t => t.id === trackId);
+      if (!found || !target) return;
+      if (target !== found.track) { found.track.clips.splice(found.index, 1); target.clips.push(found.clip); }
+      found.clip.start = start; M.sortClips(target);
+    });
+    selectClip(clipId);
+  }
+  function splitClip() {
+    const found = selectedClip && M.findClip(state.p, selectedClip);
+    if (!found) throw Error('Select a clip on a track to split it. Beats change length with their bars.');
+    if (found.track.locked) throw Error(`The track ${found.track.name} is locked. Unlock it to split its clips.`);
+    if (!(time >= found.clip.start + 1 / 30 && time <= M.clipEnd(found.clip) - 1 / 30)) throw Error('Move the playhead inside the clip to split it there.');
+    changed(p => {
+      const f = M.findClip(p, selectedClip), second = M.splitClip(f.clip, time, M.uniqueId(p, f.clip.id + '-'));
+      if (second) { f.track.clips.splice(f.index + 1, 0, second); M.sortClips(f.track); }
+    });
+    drawInspector(); refreshTimeline();
+  }
+  function deleteClip(ripple = !!panes.ripple) {
+    const found = M.findClip(state.p, selectedClip);
+    if (!found) return;
+    if (found.track.locked) throw Error(`The track ${found.track.name} is locked. Unlock it to delete its clips.`);
+    const gone = selectedClip;
+    changed(p => { const f = M.findClip(p, gone); if (f) M.removeClip(f.track, gone, ripple); });
+    selectedClip = null; drawInspector(); refreshTimeline(); drawFrame();
+  }
+  async function trackAction(trackId, action) {
+    const track = M.tracksOf(state.p).find(t => t.id === trackId);
+    if (!track) return;
+    if (action === 'remove') {
+      if (track.locked) throw Error(`The track ${track.name} is locked. Unlock it before removing it.`);
+      if (track.clips.length && !await confirmDialog({ title: `Remove ${track.name}?`, message: `Its ${track.clips.length} ${track.clips.length === 1 ? 'clip goes' : 'clips go'} with it. Undo brings them back.`, confirmLabel: 'Remove track', danger: true })) return;
+      changed(p => { p.tracks = p.tracks.filter(t => t.id !== trackId); });
+      if (selectedClip && !M.findClip(state.p, selectedClip)) selectedClip = null;
+    } else changed(p => { const t = p.tracks.find(x => x.id === trackId); t[action] = !t[action]; });
+    drawInspector(); refreshTimeline();
+  }
+  // The selected visual clip's box on the preview (and nothing in the video itself). Redrawn only when it changes,
+  // since playback calls this every frame.
+  let selectionKey = '';
+  function drawSelection() {
+    const found = selectedClip && M.findClip(state.p, selectedClip);
+    const live = !!found && time >= found.clip.start && time < M.clipEnd(found.clip);
+    const key = found?.clip.box ? `${found.clip.id}|${live}|${JSON.stringify(found.clip.box)}` : '';
+    if (key === selectionKey) return;
+    selectionKey = key; selectionLayer.replaceChildren();
+    if (!found?.clip.box) return;
+    const b = found.clip.box;
+    const node = el('div', { class: 'ste-selbox' + (live ? '' : ' idle'), 'data-guide': 'clip' }, [el('span', { text: `${found.clip.kind} ${found.clip.id}${live ? '' : ' (not on screen now)'}` })]);
+    Object.assign(node.style, { left: b.x * 100 + '%', top: b.y * 100 + '%', width: b.w * 100 + '%', height: b.h * 100 + '%' });
+    selectionLayer.append(node);
+  }
+
   function refreshTimeline() {
     const clipsNow = clipList(), sum = total();
     // Until the person zooms, the whole video fits, at any pane width.
@@ -433,7 +553,8 @@ async function editor(host, id, looks, back, parentDisposed) {
     if (Number.isFinite(view.inPoint) && view.inPoint > sum) delete view.inPoint;
     if (Number.isFinite(view.outPoint) && view.outPoint > sum) delete view.outPoint;
     timeline.update({ p: state.p, list: clipsNow, total: sum, time, selected, zoom: view.zoom, snap: panes.snap, inPoint: view.inPoint, outPoint: view.outPoint,
-      marks: M.chapterMarks(state.p, clipsNow), peaks, spans: M.speechSpans(state.p, clipsNow), music: state.p.music });
+      marks: M.chapterMarks(state.p, clipsNow), peaks, spans: M.speechSpans(state.p, clipsNow), music: state.p.music,
+      selectedClip, sounds, comments: review.comments, ripple: !!panes.ripple });
   }
   function timing() {
     time = Math.min(time, total()); refreshTimeline(); drawFrame(); loadPeaks();
@@ -442,6 +563,7 @@ async function editor(host, id, looks, back, parentDisposed) {
     try { player?.drawFrame(Math.min(time, player.duration)); } catch (error) { previewError.textContent = error.message; }
     clock.textContent = `${M.timecode(time)} / ${M.timecode(total())}`;
     timeline.setTime(time, rate !== 0);
+    drawPins(); drawSelection();
   }
   // The narration lane draws each spoken line's own peak levels (read from its cached audio by the server).
   async function loadPeaks() {
@@ -462,11 +584,14 @@ async function editor(host, id, looks, back, parentDisposed) {
     canvas.addEventListener('contextrestored', () => { if (!disposed && canvas.isConnected) remount(); });
     try {
       const [next] = await Promise.all([preview(canvas, clone(state.p), aspect), layoutModule || import(LAYOUT_URL).then(m => { layoutModule = m; })]);
-      if (disposed || generation !== mountGeneration) return;
+      if (disposed || generation !== mountGeneration) { next.dispose?.(); return; }
       let named = false;
       for (const [cid, entry] of Object.entries(await castSpecs(state.p).catch(() => ({})))) { const form = entry.spec?.form === '3d' ? '3d' : '2d'; if ((entry.spec?.name && names[cid] !== entry.spec.name) || forms[cid] !== form) { names[cid] = entry.spec?.name || names[cid]; forms[cid] = form; named = true; } }
       if (named) { drawInspector(); drawProject(); }
-      player = next; frameBox.replaceChildren(canvas, guides); stage.dataset.aspect = aspect; previewError.textContent = ''; previewNote.textContent = next.standIn ? 'The 3D shots show here as stand-in cards of the same length; renders draw them in 3D.' : ''; fitFrame(); drawFrame();
+      const old = player; player = next; old?.dispose?.();
+      frameBox.replaceChildren(canvas, guides, selectionLayer, pinsLayer); stage.dataset.aspect = aspect; previewError.textContent = '';
+      previewNote.textContent = next.standIn ? `The 3D preview could not start here (${next.standIn}), so 3D shots show as stand-in cards of the same length; renders still draw them in 3D.` : '';
+      fitFrame(); drawFrame();
     } catch (error) { if (!disposed && generation === mountGeneration) { player = null; previewError.textContent = 'Preview unavailable: ' + error.message; } }
   }
   // The preview keeps its aspect inside whatever room the pane has; the guides sit over it, never in the video.
@@ -531,7 +656,10 @@ async function editor(host, id, looks, back, parentDisposed) {
       case 'mark-in': view.inPoint = time; if (Number.isFinite(view.outPoint) && view.outPoint <= time) delete view.outPoint; return refreshTimeline();
       case 'mark-out': view.outPoint = time; if (Number.isFinite(view.inPoint) && view.inPoint >= time) delete view.inPoint; return refreshTimeline();
       case 'clear-work-area': delete view.inPoint; delete view.outPoint; return refreshTimeline();
-      case 'delete': return deleteBeat();
+      case 'delete': return selectedClip ? deleteClip() : deleteBeat();
+      case 'split': return splitClip();
+      case 'comment': return setCommenting(!commenting);
+      case 'escape': if (commenting || draftPin) { draftPin = null; return setCommenting(false); } if (selectedClip) { selectedClip = null; drawInspector(); refreshTimeline(); drawFrame(); } return undefined;
       case 'duplicate': return duplicateBeat();
       case 'move-earlier': return move(selected, selected - 1);
       case 'move-later': return move(selected, selected + 1);
@@ -585,36 +713,238 @@ async function editor(host, id, looks, back, parentDisposed) {
   })]), el('p', { class: 'meta', text: 'Drag on the timeline or here to reorder. Alt + Up or Down moves a beat in this list.' })]);
   const assetsPanel = el('div', { class: 'ste-assets' });
   function drawAssets() {
-    const beat = state.p.beats[selected], pictured = ['image', 'split', 'logo'].includes(beat?.kind);
-    assetsPanel.replaceChildren(el('p', { class: 'meta', text: pictured ? `Choose an image for beat ${selected + 1}.` : 'Images in this video. Select an image, split or logo beat to use one.' }));
+    const beat = selectedClip ? null : state.p.beats[selected], pictured = ['image', 'split', 'logo'].includes(beat?.kind);
+    assetsPanel.replaceChildren(el('h4', { text: 'Images' }), el('p', { class: 'meta', text: pictured ? `Choose an image for beat ${selected + 1}, or put one over the video as an overlay clip.` : 'Images in this video. Select an image, split or logo beat to use one there, or put one over the video as an overlay clip.' }));
     const grid = el('div', { class: 'ste-asset-tiles' });
     for (const asset of resources.assets) {
       const on = beat?.image === asset;
-      grid.append(el('button', { type: 'button', class: 'ste-asset' + (on ? ' selected' : ''), disabled: !pictured, 'aria-pressed': String(on), 'aria-label': `Use image ${asset.slice(7, 19)} on beat ${selected + 1}`,
-        onclick: () => { changed(p => { p.beats[selected].image = asset; }); drawInspector(); drawAssets(); } }, [el('img', { src: `/api/videos/${id}/assets/${asset.slice(7)}`, alt: '' })]));
+      grid.append(el('div', { class: 'ste-asset-cell' }, [el('button', { type: 'button', class: 'ste-asset' + (on ? ' selected' : ''), disabled: !pictured, 'aria-pressed': String(on), 'aria-label': `Use image ${asset.slice(7, 19)} on beat ${selected + 1}`,
+        onclick: () => { changed(p => { p.beats[selected].image = asset; }); drawInspector(); drawAssets(); } }, [el('img', { src: `/api/videos/${id}/assets/${asset.slice(7)}`, alt: '' })]),
+        button('Overlay', () => addClip('image', { image: asset }), { class: 'btn quiet ste-asset-add', 'aria-label': `Put image ${asset.slice(7, 19)} over the video at the playhead` })]));
     }
-    if (!resources.assets.length) grid.append(el('p', { class: 'meta', text: 'No images yet. Upload one from the Beat panel of an image beat, or bring one from a design.' }));
-    assetsPanel.append(grid);
+    if (!resources.assets.length) grid.append(el('p', { class: 'meta', text: 'No images yet. Upload one below, from the Beat panel of an image beat, or bring one from a design.' }));
+    const imageUpload = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/gif,image/webp', 'aria-label': 'Upload an image' });
+    imageUpload.addEventListener('change', () => upload(imageUpload, async result => { resources.assets = [...new Set([...resources.assets, result.asset])]; drawAssets(); }));
+    assetsPanel.append(grid, field('Upload an image', imageUpload, '', 'PNG, JPEG, GIF or WebP. Up to 25 MB and 40 megapixels.'));
+    // Sounds: the person's own files, for audio clips. Nothing is fetched from anywhere else.
+    const soundUpload = el('input', { type: 'file', accept: '.wav,.mp3,.ogg,.oga,.m4a,.aac,.flac,audio/*', 'aria-label': 'Upload a sound' });
+    soundUpload.addEventListener('change', () => upload(soundUpload, async result => { await loadSounds(); drawAssets(); refreshTimeline(); toast(`Added ${result.audio?.title || 'the sound'}.`); }));
+    const soundList = el('ul', { class: 'ste-sounds', 'aria-label': 'Sounds in this video' });
+    for (const [asset, info] of Object.entries(sounds)) soundList.append(el('li', {}, [el('span', { text: `${info.title} (${info.seconds.toFixed(1)} s)` }),
+      button('Add at playhead', () => addClip('sound', { audio: asset, out: Math.round(Math.min(info.seconds, 30) * 1000) / 1000 }), { class: 'btn quiet', 'aria-label': `Add ${info.title} at the playhead` })]));
+    if (!Object.keys(sounds).length) soundList.append(el('li', { class: 'meta', text: 'No sounds yet.' }));
+    assetsPanel.append(el('h4', { text: 'Sounds' }), soundList, field('Upload a sound', soundUpload, '', 'Your own WAV, MP3, OGG, M4A, AAC or FLAC file, up to 50 MB; the first 3 minutes are kept. Needs FFmpeg.'));
   }
+  async function upload(input, then) {
+    if (!input.files[0]) return;
+    const form = new FormData(); form.append('file', input.files[0]); input.disabled = true;
+    try { await then(await api(endpoint + '/assets', { method: 'POST', headers: {}, body: form })); }
+    catch (error) { toast(error.message, 'error'); } finally { input.disabled = false; input.value = ''; }
+  }
+  async function loadSounds() { try { sounds = (await api(endpoint + '/audio')).sounds || {}; } catch { sounds = {}; } }
+  // Ask Kairos (step 4): the request with the selection, comments pinned on the preview, the dry run for big changes,
+  // each run's changes in plain words with its own undo, and the person's changes since Kairos's last turn.
   const askMascot = createMascot({ state: 'idle', size: 56 });
-  const askPanel = el('div', { class: 'ste-ask' }, [el('div', { class: 'ste-ask-head' }, [askMascot, el('p', { class: 'meta', text: 'Kairos opens a chat about this video with your words as a draft. Nothing is sent until you send it.' })]),
-    field('Describe a change', ask), button('Ask Kairos', async () => {
-      if (!ask.value.trim()) { ask.focus(); return; }
-      askMascot.setAttribute('state', 'thinking');
-      try {
-        if (!await save()) throw Error('Fix the highlighted fields before asking Kairos.');
-        const result = await write(`${BASE}/chat`, { video_id: id });
-        go('chat', { sessionId: result.session_id, mobileDraft: `For [Video: ${state.p.title}](/videos/${id}): ${ask.value.trim()}`, mobileConversation: true });
-      } finally { askMascot.setAttribute('state', 'idle'); }
-    }, { class: 'btn primary' })]);
+  const askConnection = el('p', { class: 'meta' });
+  const askSelection = el('p', { class: 'ste-ask-selection', 'aria-live': 'polite' });
+  const askStatus = el('p', { class: 'meta ste-ask-status', role: 'status', 'aria-live': 'polite' });
+  const commentList = el('ol', { class: 'ste-comments', 'aria-label': 'Comments on the preview' });
+  const pendingHost = el('div', { class: 'ste-pending' });
+  const runsHost = el('div', { class: 'ste-runs' });
+  const sinceHost = el('details', { class: 'disclosure-panel ste-since' });
+  const commentToggle = button('Comment on the preview', () => setCommenting(!commenting), { 'aria-pressed': 'false', title: 'Comment mode (C): click the preview to pin a comment' });
+  const sendComments = button('Send comments to Kairos', () => askKairos({ commentsOnly: true }));
+  const askButton = button('Ask Kairos', () => askKairos(), { class: 'btn primary', title: 'Ask Kairos to change the video' });
+  const askPanel = el('div', { class: 'ste-ask' }, [el('div', { class: 'ste-ask-head' }, [askMascot, el('div', {}, [
+      el('p', { class: 'meta', text: 'Kairos changes this video with the same tools it uses in chat. More than a few changes wait for your OK, and you can undo each request on its own.' }), askConnection])]),
+    askSelection, field('Describe a change', ask, '', 'Kairos sees the whole timeline, your selection, your comments and what you changed since its last turn.'),
+    el('div', { class: 'studio-actions' }, [askButton, button('Open in chat', () => openChat(), { class: 'btn quiet', title: 'Open a chat about this video with your words as a draft' })]), askStatus,
+    pendingHost,
+    el('section', { class: 'ste-group', 'aria-label': 'Comments' }, [el('h4', { text: 'Comments' }), commentList, el('div', { class: 'studio-actions' }, [commentToggle, sendComments])]),
+    sinceHost, el('section', { class: 'ste-group', 'aria-label': "Kairos's changes" }, [el('h4', { text: "Kairos's changes" }), runsHost])]);
+  async function openChat() {
+    if (!await save()) throw Error('Fix the highlighted fields before asking Kairos.');
+    const result = await write(`${BASE}/chat`, { video_id: id });
+    go('chat', { sessionId: result.session_id, mobileDraft: `For [Video: ${state.p.title}](/videos/${id}): ${ask.value.trim() || 'Help me with this video.'}`, mobileConversation: true });
+  }
+  async function loadReview() { try { review = await api(endpoint + '/review'); } catch { /* the panel keeps what it had */ } }
+  // What is on screen at a point (shares of the frame) at the playhead: the beat or clip text, a character, a picture.
+  function underPoint(fx, fy) {
+    if (!player?.layout) return [];
+    const { width: w, height: h } = player.info || {}, px = fx * (w || 1920), py = fy * (h || 1080), out = [];
+    let elements = [];
+    try { elements = player.layout(Math.min(time, player.duration)); } catch { return []; }
+    for (const box of elements) {
+      if (px < box.x || py < box.y || px > box.x + box.w || py > box.y + box.h) continue;
+      if (box.clip) out.push(`clip ${box.clip} (${box.overlay}${box.text ? ` "${box.text}"` : ''})`);
+      else if (box.kind === 'text') out.push(`${box.role === 'caption' ? 'caption' : 'text'} "${String(box.text).slice(0, 60)}" (beat ${box.beat})`);
+      else if (box.kind === 'character') out.push(`a character (beat ${box.beat})`);
+      else if (box.kind === 'image') out.push(`a picture (beat ${box.beat || '?'})`);
+    }
+    return [...new Set(out)].slice(0, 4);
+  }
+  function selectionPayload() {
+    const out = { time: Math.round(time * 1000) / 1000 };
+    if (selectedClip) out.clips = [selectedClip]; else if (state.p.beats[selected]) out.beats = [state.p.beats[selected].id];
+    if (Number.isFinite(view.inPoint) || Number.isFinite(view.outPoint)) out.region = { start: Number.isFinite(view.inPoint) ? view.inPoint : 0, end: Number.isFinite(view.outPoint) ? view.outPoint : total() };
+    const under = underPoint(.5, .5); if (under.length) out.under = under;
+    return out;
+  }
+  function drawAskSelection() {
+    const found = selectedClip && M.findClip(state.p, selectedClip), beat = state.p.beats[selected];
+    const what = found ? `clip ${found.clip.id} (${found.clip.kind}: ${M.clipLabel(found.clip, sounds)}) on ${found.track.name}` : beat ? `beat ${selected + 1} (${beat.kind}: ${M.beatLabel(beat)})` : 'nothing';
+    const region = Number.isFinite(view.inPoint) || Number.isFinite(view.outPoint) ? `, the work area ${M.timecode(Number.isFinite(view.inPoint) ? view.inPoint : 0)} to ${M.timecode(Number.isFinite(view.outPoint) ? view.outPoint : total())}` : '';
+    askSelection.textContent = `Kairos looks at ${what}${region}, with the playhead at ${M.timecode(time)}.`;
+  }
+  function openComments() { return review.comments.filter(c => c.status === 'open'); }
+  function drawComments() {
+    commentList.replaceChildren();
+    review.comments.forEach((c, i) => {
+      if (c.status !== 'open') return;
+      const include = el('input', { type: 'checkbox', checked: c.include !== false, 'aria-label': `Send comment ${i + 1} to Kairos` });
+      include.addEventListener('change', () => { c.include = include.checked; drawComments(); });
+      commentList.append(el('li', { class: 'ste-comment', 'data-comment': c.id }, [include,
+        el('button', { type: 'button', class: 'ste-comment-go', text: `${i + 1}. ${M.timecode(c.t)}`, 'aria-label': `Go to comment ${i + 1} at ${M.timecode(c.t)}`, onclick: () => focusComment(c.id) }),
+        el('span', { class: 'ste-comment-text', text: c.text }),
+        button('Resolve', async () => { await api(`${endpoint}/comments/${c.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'resolved' }) }); await afterReview(); }, { class: 'btn quiet', 'aria-label': `Resolve comment ${i + 1}` }),
+        button('Delete', async () => { await api(`${endpoint}/comments/${c.id}`, { method: 'DELETE' }); await afterReview(); }, { class: 'btn quiet', 'aria-label': `Delete comment ${i + 1}` })]));
+    });
+    const count = openComments().filter(c => c.include !== false).length;
+    if (!openComments().length) commentList.append(el('li', { class: 'meta', text: 'No comments. Turn on comment mode (C) and click the preview to pin one at that moment.' }));
+    sendComments.textContent = count ? `Send ${count} ${count === 1 ? 'comment' : 'comments'} to Kairos` : 'Send comments to Kairos';
+    sendComments.disabled = !count || asking;
+  }
+  const RUN_STATUS = { applied: 'Applied', pending: 'Waiting for your OK', undone: 'Undone', discarded: 'Discarded', failed: 'Not applied', answered: 'No changes' };
+  function changeList(changes) { return el('ul', { class: 'ste-change-list' }, (changes || []).map(c => el('li', { 'data-change': c.change, text: c.words }))); }
+  function drawRuns() {
+    pendingHost.replaceChildren(); runsHost.replaceChildren();
+    for (const run of review.runs) {
+      const card = el('article', { class: 'ste-run', 'data-run': run.id, 'data-status': run.status }, [
+        el('div', { class: 'ste-run-head' }, [el('strong', { text: run.request || 'Comments on the preview' }), el('span', { class: 'ste-run-status', text: RUN_STATUS[run.status] || run.status })]),
+        ...(run.reply ? [el('p', { class: 'ste-run-reply', text: run.reply })] : []), ...(run.error ? [el('p', { class: 'studio-error', text: run.error })] : [])]);
+      if (run.changes?.length) card.append(el('details', { open: run.status === 'pending' }, [el('summary', { text: `${run.changes.length} ${run.changes.length === 1 ? 'change' : 'changes'}` }), changeList(run.changes)]));
+      if (run.conflicts?.length) card.append(el('p', { class: 'meta', text: 'Left as you changed them: ' + run.conflicts.join(' ') }));
+      if (run.status === 'pending') {
+        card.append(el('p', { class: 'meta', text: `This changes more than ${review.dry_run_over} things, so it waits for you. Nothing is saved yet.` }),
+          el('div', { class: 'studio-actions' }, [button('Apply these changes', () => runAction(run.id, 'apply'), { class: 'btn primary' }), button('Discard', () => runAction(run.id, 'discard'), { class: 'btn quiet' })]));
+        pendingHost.append(card);
+        continue;
+      }
+      if (run.status === 'applied') card.append(el('div', { class: 'studio-actions' }, [button("Undo Kairos's change", () => runAction(run.id, 'undo'), { 'aria-label': `Undo Kairos's change: ${run.request || 'comments'}` })]));
+      runsHost.append(card);
+    }
+    if (!runsHost.children.length) runsHost.append(el('p', { class: 'meta', text: 'Nothing yet. What Kairos changes shows here, each with its own undo.' }));
+    const since = review.since?.changes || [];
+    sinceHost.replaceChildren(el('summary', { text: since.length ? `Your changes since Kairos's last turn (${since.length})` : "Your changes since Kairos's last turn" }),
+      since.length ? changeList(since) : el('p', { class: 'meta', text: review.since?.since ? 'None. Kairos sees the video as it left it.' : 'Kairos has not changed this video from here yet.' }));
+    askConnection.textContent = review.connection ? `Uses your model connection: ${review.connection}.` : 'Add a model connection in Settings > Models to ask Kairos here.';
+  }
+  async function afterReview() { await loadReview(); if (disposed) return; drawComments(); drawRuns(); drawPins(true); refreshTimeline(); }
+  // A run that changed the video: load the new version; the editor's own Undo steps back over it too.
+  async function takeProject(project) {
+    if (!project) { clearSharedReads(); project = await api(endpoint); }
+    state.undo.push(clone(state.p)); state.undo = state.undo.slice(-30); state.redo = [];
+    state.p = project; state.dirty = false; lastGroup = '';
+    selected = Math.min(selected, state.p.beats.length - 1);
+    if (selectedClip && !M.findClip(state.p, selectedClip)) selectedClip = null;
+    drawBeats(); drawInspector(); drawProject(); timing(); renderErrors(); remount();
+  }
+  async function runAction(runId, action) {
+    const out = await write(`${endpoint}/agent/runs/${runId}/${action}`, {});
+    if (out.project) await takeProject(out.project);
+    if (action === 'undo') askStatus.textContent = out.run.conflicts?.length ? "Undone, except what you changed again since." : "Kairos's change is undone.";
+    if (action === 'apply') askStatus.textContent = `Applied ${out.run.changes.length} changes.`;
+    await afterReview();
+  }
+  async function askKairos({ commentsOnly = false } = {}) {
+    const request = commentsOnly ? '' : ask.value.trim(), picked = openComments().filter(c => c.include !== false).map(c => c.id);
+    if (!request && !picked.length) { ask.focus(); throw Error('Describe a change, or pin a comment on the preview first.'); }
+    if (!await save()) throw Error('Fix the highlighted fields before asking Kairos.');
+    asking = true; askButton.disabled = true; sendComments.disabled = true; askMascot.setAttribute('state', 'thinking');
+    askStatus.textContent = 'Kairos is working on it...';
+    try {
+      const run = await write(`${endpoint}/agent/ask`, { request, selection: selectionPayload(), comments: picked });
+      if (run.status === 'applied') { await takeProject(); askStatus.textContent = `Done: ${run.changes.length} ${run.changes.length === 1 ? 'change' : 'changes'}. ${run.reply}`; if (!commentsOnly) ask.value = ''; }
+      else if (run.status === 'pending') askStatus.textContent = `Kairos proposes ${run.changes.length} changes. Look them over, then apply or discard them.`;
+      else if (run.status === 'failed') askStatus.textContent = 'Kairos could not make that change: ' + (run.error || run.reply);
+      else askStatus.textContent = run.reply || 'Kairos made no changes.';
+    } catch (error) { askStatus.textContent = error.message; throw error; }
+    finally { asking = false; askButton.disabled = false; askMascot.setAttribute('state', 'idle'); await afterReview(); }
+  }
+  // Comment pins on the preview: comment mode, a click pins one at that place and moment.
+  function setCommenting(on) {
+    commenting = on; draftPin = on ? draftPin : null;
+    commentToggle.setAttribute('aria-pressed', String(on)); commentToggle.classList.toggle('primary', on);
+    stage.classList.toggle('commenting', on); drawPins(true);
+    if (on) { leftTabs.show('ask'); stop(); }
+  }
+  let pinsKey = '';
+  function drawPins(force = false) {
+    const visible = review.comments.filter(c => c.status === 'open' && M.pinVisible(c, time));
+    const key = visible.map(c => c.id).join(',') + '|' + (draftPin ? `${draftPin.x},${draftPin.y}` : '') + '|' + review.comments.length;
+    if (!force && key === pinsKey) return;
+    pinsKey = key; pinsLayer.replaceChildren();
+    for (const c of visible) {
+      const number = review.comments.indexOf(c) + 1;
+      const pin = el('button', { type: 'button', class: 'ste-pin', 'data-pin': c.id, text: String(number), 'aria-label': `Comment ${number}: ${c.text}`, title: c.text, onclick: event => { event.stopPropagation(); focusComment(c.id); } });
+      Object.assign(pin.style, { left: c.x * 100 + '%', top: c.y * 100 + '%' }); pinsLayer.append(pin);
+    }
+    if (draftPin) {
+      const text = el('textarea', { rows: 2, maxlength: 500, 'aria-label': 'Comment for Kairos', placeholder: 'What should change here?' });
+      const form = el('form', { class: 'ste-pin-form' }, [text, el('div', { class: 'studio-actions' }, [el('button', { type: 'submit', class: 'btn primary', text: 'Pin comment' }),
+        el('button', { type: 'button', class: 'btn quiet', text: 'Cancel', onclick: () => { draftPin = null; drawPins(true); } })])]);
+      form.addEventListener('submit', async event => {
+        event.preventDefault();
+        if (!text.value.trim()) { text.focus(); return; }
+        try {
+          await write(`${endpoint}/comments`, { t: Math.round(time * 1000) / 1000, x: draftPin.x, y: draftPin.y, text: text.value.trim(), under: underPoint(draftPin.x, draftPin.y).join('; ').slice(0, 200) });
+          draftPin = null; await afterReview(); askStatus.textContent = 'Comment pinned. Pin more, then send them to Kairos together.';
+        } catch (error) { toast(error.message, 'error'); }
+      });
+      const mark = el('span', { class: 'ste-pin draft', 'aria-hidden': 'true', text: '+' });
+      Object.assign(mark.style, { left: draftPin.x * 100 + '%', top: draftPin.y * 100 + '%' });
+      Object.assign(form.style, { left: Math.min(draftPin.x * 100, 60) + '%', top: Math.min(draftPin.y * 100 + 4, 70) + '%' });
+      pinsLayer.append(mark, form); setTimeout(() => text.focus(), 0);
+    }
+  }
+  pinsLayer.addEventListener('click', event => {
+    if (!commenting || event.target !== pinsLayer) return;
+    const r = pinsLayer.getBoundingClientRect();
+    draftPin = { x: Math.round(Math.min(1, Math.max(0, (event.clientX - r.left) / r.width)) * 10000) / 10000, y: Math.round(Math.min(1, Math.max(0, (event.clientY - r.top) / r.height)) * 10000) / 10000 };
+    drawPins(true);
+  });
+  function focusComment(commentId) {
+    const c = review.comments.find(x => x.id === commentId);
+    if (!c) return;
+    stop(); time = Math.min(c.t, total()); leftTabs.show('ask'); drawFrame(); timeline.revealTime(c.t);
+    commentList.querySelector(`[data-comment="${commentId}"] .ste-comment-go`)?.focus();
+  }
   const leftTabs = tabs('Beats and assets', [['beats', 'Beats', beatsPanel], ['assets', 'Assets', assetsPanel], ['ask', 'Ask Kairos', askPanel]],
-    key => { panes.leftTab = key; savePanes(); if (key === 'assets') drawAssets(); });
+    key => { panes.leftTab = key; savePanes(); if (key === 'assets') drawAssets(); if (key === 'ask') { drawAskSelection(); drawComments(); drawRuns(); } });
 
   // -- the right pane: the selected beat, the project, renders, history -------------------------------------------
   const group = (title, children, extra = {}) => el('section', { class: 'ste-group', ...extra }, [el('h4', { text: title }), ...children]);
   const sceneHelpers = { field, select, change: (mutate, g) => changed(mutate, true, g), redraw: () => drawInspector() };
   function drawInspector() {
     inspector.replaceChildren();
+    drawAskSelection();
+    const beatTab = rightTabs?.list.querySelector('[data-tab=beat]');
+    const found = selectedClip && M.findClip(state.p, selectedClip);
+    if (beatTab) beatTab.textContent = found ? 'Clip' : 'Beat';
+    if (found) {
+      const trackIndex = state.p.tracks.indexOf(found.track);
+      inspector.append(clipForm({ p: state.p, trackIndex, clipIndex: found.index, images: resources.assets, sounds, time, helpers: sceneHelpers,
+        actions: { split: () => run('split'), remove: ripple => deleteClip(ripple), moveTo: trackId => {
+          const target = state.p.tracks.find(t => t.id === trackId);
+          if (!target || target === found.track) return;
+          if (target.locked) { toast(`${target.name} is locked.`, 'error'); drawInspector(); return; }
+          if (!M.fits(target, found.clip.start, M.clipLength(found.clip), found.clip.id)) { toast(`It would overlap a clip on ${target.name}.`, 'error'); drawInspector(); return; }
+          moveClip(found.clip.id, trackId, found.clip.start);
+        } } }));
+      renderErrors(); drawSelection();
+      if (leftTabs.current() === 'assets') drawAssets();
+      return;
+    }
     const beat = state.p.beats[selected], path = `beats[${selected}]`, c = clipList()[selected];
     const setBeat = (key, value) => changed(p => { if ((key === 'image' || key === 'say') && !value) delete p.beats[selected][key]; else p.beats[selected][key] = value; }, true, path + '.' + key);
     const textField = (label, key, limit, multiline = false) => {
@@ -698,7 +1028,7 @@ async function editor(host, id, looks, back, parentDisposed) {
     el('div', { class: 'ste-row2' }, [field('Camera', select('Camera', CAMERAS, beat.camera || 'still', v => setBeat('camera', v)), path + '.camera'),
       field('Transition to next beat', select('Transition', TRANSITIONS, beat.transition || 'cut', v => setBeat('transition', v)), path + '.transition')])]));
     inspector.append(el('div', { class: 'studio-actions' }, [button('Duplicate beat', duplicateBeat, { title: 'Duplicate (Ctrl + D)' }), button('Delete beat', deleteBeat, { class: 'btn danger', title: 'Delete (Delete key)' })]));
-    renderErrors();
+    renderErrors(); drawSelection();
     if (leftTabs.current() === 'assets') drawAssets();
   }
   function drawProject() {
@@ -775,7 +1105,7 @@ async function editor(host, id, looks, back, parentDisposed) {
       if (!history.length) historyHost.append(el('p', { text: 'No earlier versions yet.' }));
     } catch (error) { historyHost.textContent = error.message; }
   }
-  const rightTabs = tabs('Inspector', [['beat', 'Beat', inspector], ['project', 'Project', projectPanel], ['render', 'Render', queue],
+  rightTabs = tabs('Inspector', [['beat', 'Beat', inspector], ['project', 'Project', projectPanel], ['render', 'Render', queue],
     ['history', 'History', el('div', {}, [el('p', { class: 'meta', text: 'Every save is a version. Restoring one saves it again as the newest.' }), historyHost])]],
   key => { panes.rightTab = key; savePanes(); if (key === 'history') drawHistory(); });
 
@@ -883,6 +1213,7 @@ async function editor(host, id, looks, back, parentDisposed) {
       const latest = results[0].status === 'fulfilled' ? results[0].value : null;
       if (latest && !state.dirty && !state.saving && latest.version !== state.p.version) {
         state.undo = []; state.redo = []; state.p = latest; selected = Math.min(selected, latest.beats.length - 1);
+        if (selectedClip && !M.findClip(state.p, selectedClip)) selectedClip = null;
         resources = await api(`${BASE}/videos/${id}/resources`);
         if (disposed) return;
         drawBeats(); drawInspector(); drawProject(); timing(); remount();
@@ -958,6 +1289,7 @@ async function editor(host, id, looks, back, parentDisposed) {
   }
   const onResize = () => { panes = M.clampPanes(panes, { width: innerWidth, height: innerHeight }); layout(); refreshTimeline(); };
   const stageObserver = new ResizeObserver(() => fitFrame());
+  shell.addEventListener('studio-error', event => toast(event.detail, 'error'));
   host.replaceChildren(shell);
   host.closest('.studio-view')?.classList.add('studio-editing');
   layout(); stageObserver.observe(stage); addEventListener('resize', onResize);
@@ -966,7 +1298,7 @@ async function editor(host, id, looks, back, parentDisposed) {
   frame = requestAnimationFrame(animate); pollTimer = setTimeout(poll, 3000);
   if (state.dirty) timer = setTimeout(save, 500);
   return () => {
-    disposed = true; mountGeneration++; rate = 0; player = null;
+    disposed = true; mountGeneration++; rate = 0; player?.dispose?.(); player = null;
     clearTimeout(timer); clearTimeout(previewTimer); clearTimeout(pollTimer); cancelAnimationFrame(frame);
     document.removeEventListener('keydown', onKey); document.removeEventListener('keyup', onKeyUp, true); removeEventListener('resize', onResize); stageObserver.disconnect();
     if (sheet.open) sheet.close();

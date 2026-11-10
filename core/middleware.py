@@ -35,6 +35,36 @@ _OWN_POLICY_PATHS = (re.compile(r"/api/designs/[^/]+/boards/[^/]+/render"),
 _loopback_port: Optional[int] = None
 
 
+def _app_page_script_hashes() -> str:
+    """The one inline script the app page may run: the import map that lets Studio's editor load the vendored three.js
+    by its bare name (static/motion/stage3d.js and the vendored example files import 'three'). An external import map
+    is not allowed by browsers, so the page carries it inline and only that page's policy allows exactly its hash.
+    Checked once at startup: if static/index.html does not carry the exact map core/three_vendor.py defines, no hash
+    is added and the page's 3D preview falls back to stand-in cards (scripts/test_app_csp.py keeps them equal)."""
+    from core import three_vendor
+    from core.constants import STATIC_DIR
+    try:
+        page = open(f"{STATIC_DIR}/index.html", encoding="utf-8").read()
+    except OSError:
+        return ""
+    return " " + three_vendor.csp_hash() if three_vendor.IMPORT_MAP_TAG in page else ""
+
+
+APP_PAGE_SCRIPT_HASHES = _app_page_script_hashes()
+
+
+def content_security_policy(path: str) -> str:
+    """The app's own policy. The app page ("/") adds the hash of its import map; every other response has none."""
+    hashes = APP_PAGE_SCRIPT_HASHES if path == "/" else ""
+    return ("default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" + hashes + "; "
+            "frame-src 'self' https: http://127.0.0.1:* http://localhost:*; img-src 'self' data: blob:; "
+            # Your own animation for the Animated background plays from a local object URL.
+            "media-src 'self' blob:; "
+            # Desktop notifications show the bot's face, a data: SVG; Chromium
+            # loads notification icons under connect-src. data: reaches no host.
+            "connect-src 'self' data:")
+
+
 def remember_loopback_port(scope: dict) -> None:
     global _loopback_port
     server = scope.get("server")
@@ -66,9 +96,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
-        # No more inline <script> in index.html as of the app.js SPA rewrite —
-        # script-src 'self' alone covers same-origin external modules and
-        # dynamic import(), so 'unsafe-inline' is dropped from script-src.
+        # No inline <script> in index.html runs except the three.js import map,
+        # allowed by its hash on "/" only — script-src 'self' covers same-origin
+        # external modules and dynamic import(), so 'unsafe-inline' is dropped.
         # style-src keeps it since style.css still uses some inline style
         # attributes from JS-built elements (views/*.js).
         # frame-src (David's ask 2026-09-15, the side browser): the web
@@ -85,15 +115,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # and X-Frame-Options/frame-ancestors below still stop JARVIS itself
         # from being framed by anyone else. Plain HTTP is limited to the two
         # App Preview hosts; the renderer chooses its session's allowed port.
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; "
-            "frame-src 'self' https: http://127.0.0.1:* http://localhost:*; img-src 'self' data: blob:; "
-            # Your own animation for the Animated background plays from a local object URL.
-            "media-src 'self' blob:; "
-            # Desktop notifications show the bot's face, a data: SVG; Chromium
-            # loads notification icons under connect-src. data: reaches no host.
-            "connect-src 'self' data:"
-        )
+        # The app page ("/") also allows its one inline import map by hash (see content_security_policy).
+        response.headers["Content-Security-Policy"] = content_security_policy(request.url.path)
         # Odysseus applies this same no-cache rule to .js/.css/.html source
         # files specifically (see specs/frontend.md) — without it, Electron's
         # persistent Chromium profile (unlike the old ad hoc kiosk browser

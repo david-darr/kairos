@@ -1,5 +1,7 @@
 // A real narrated video render through the app's own render path. Run via run-electron-test.cjs:
-//   node scripts/run-electron-test.cjs video-render-smoke [--sample | --pack-a | --style-pack | --long-form] [--models <kokoro folder>] [--keep <folder>] [--name <stem>]
+//   node scripts/run-electron-test.cjs video-render-smoke [--sample | --pack-a | --style-pack | --long-form] [--tracks] [--models <kokoro folder>] [--keep <folder>] [--name <stem>]
+// --tracks (Content Studio Editor step 3) puts an overlay track, a shape track and an audio clip over the beats and checks
+// they reach the encoded video and the soundtrack.
 // --long-form renders a 3 to 5 minute chaptered video in the starter pack, stops it in its second chapter and resumes it (up to an hour).
 // Electron runs only the app's render worker (electron/designRender.js); scripts/video_render_smoke.py serves the
 // player and renders with core/video_render.render on a free loopback port, with temporary data. Without --models a
@@ -55,6 +57,7 @@ app.whenReady().then(async () => {
   if (args.includes('--long-form')) py.push('--long-form');
   if (args.includes('--pack-b')) py.push('--pack-b');
   if (args.includes('--preview')) py.push('--preview');
+  if (args.includes('--tracks')) py.push('--tracks');
   for (const name of ['--models', '--keep', '--name', '--renderer']) if (flag(name)) py.push(name, flag(name));
   backend = spawn(python, py, { cwd: ROOT, env: { ...process.env, KAIROS_RENDER_TOKEN: token }, stdio: 'inherit', windowsHide: true });
   const exited = new Promise(resolve => backend.on('exit', code => resolve(code)));
@@ -70,7 +73,7 @@ app.whenReady().then(async () => {
   const job = result.job;
   const summary = { seconds: job.seconds, render_seconds: result.render_seconds, real_voice: result.real_voice, loudness: job.loudness,
     narration: job.narration, notes: job.notes, sheets: result.sheets, sheet_match: result.sheet_match, pack: result.pack || null, kept: result.kept || null, long: result.long || null,
-    renderer: job.renderer || null, capture_fps: job.capture_fps || null, fps: job.fps || null, measured: job.measured || null };
+    renderer: job.renderer || null, capture_fps: job.capture_fps || null, fps: job.fps || null, measured: job.measured || null, overlay: result.overlay || null };
   console.log(JSON.stringify(summary, null, 2));
   if (args.includes('--preview')) return finish(0, 'Preview frames kept in ' + result.kept);
   if (!job.narration || !job.narration.lines) return finish(1, 'The render has no narration track.');
@@ -116,6 +119,14 @@ app.whenReady().then(async () => {
     if (lines.length < 3 || !lines[0].startsWith('00:00 ')) return finish(1, 'The YouTube chapter list is wrong: ' + long.chapters_text);
     const strays = (job.notes || []).filter(n => /pack (does not use|keeps shots)|outside the .* pack|opening beat runs past|YouTube/.test(n));
     if (strays.length) return finish(1, 'The long sample strays from its pack or YouTube rules: ' + strays.join(' '));
+  }
+  // Tracks and clips: the title card is in the encoded frames, the sound clip was mixed, and no clip check fired.
+  if (args.includes('--tracks')) {
+    const o = result.overlay || {}, want = [1, 3, 5].map(i => parseInt(o.bg.slice(i, i + 2), 16));
+    if (!o.card || o.card.some((v, i) => Math.abs(v - want[i]) > 18)) return finish(1, `The title card is not in the video: ${JSON.stringify(o.card)} against ${o.bg}.`);
+    if (o.sound_clips !== 1) return finish(1, 'The sound clip was not mixed into the soundtrack.');
+    const clipNotes = (job.notes || []).filter(n => /^Clip /.test(n));
+    if (clipNotes.length) return finish(1, 'The clip checks named problems: ' + clipNotes.join(' '));
   }
   finish(0, 'Video render smoke passed.');
 });

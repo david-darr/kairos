@@ -186,7 +186,16 @@ class StudioTests(unittest.TestCase):
         self.assertEqual(js_list(view, "CAMERAS"), list(video_store.CAMERAS))
         self.assertEqual(js_list(view, "TRANSITIONS"), list(video_store.TRANSITIONS))
         self.assertIn(f"LEAD = {video_store.LEAD}".replace("0.", "."), model)
-        for path in ("tabs/studio/view.js", "static/js/studioEditorModel.js", "static/js/studioTimeline.js", "static/js/studioSceneForm.js", "static/js/studioStageForm.js", "static/css/studio-editor.css"):
+        # Tracks and clips (step 3): the editor's lists are core/video_tracks.py's.
+        from core import video_tracks
+        self.assertEqual(js_list(model, "CLIP_COLORS"), list(video_tracks.COLORS))
+        self.assertEqual(js_list(model, "CLIP_SHAPES"), list(video_tracks.SHAPES))
+        self.assertEqual(js_list(model, "TRACK_KINDS"), list(video_tracks.TRACK_KINDS))
+        self.assertIn(f"MAX_TRACKS = {video_tracks.MAX_TRACKS}, MAX_TRACK_CLIPS = {video_tracks.MAX_TRACK_CLIPS}, MAX_CLIPS = {video_tracks.MAX_CLIPS}", model)
+        overlay = (ROOT / "static/motion/overlay.js").read_text(encoding="utf-8")
+        self.assertEqual(js_list(overlay, "COLORS"), list(video_tracks.COLORS))
+        for path in ("tabs/studio/view.js", "static/js/studioEditorModel.js", "static/js/studioTimeline.js", "static/js/studioSceneForm.js", "static/js/studioStageForm.js",
+                     "static/js/studioClipForm.js", "static/motion/overlay.js", "static/css/studio-editor.css"):
             self.assertNotIn("—", (ROOT / path).read_text(encoding="utf-8"), path + " has an em-dash")
 
     def test_failed_asset_copy_rolls_back_new_project(self):

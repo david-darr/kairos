@@ -1,5 +1,6 @@
 // node scripts/swarm-smoke.cjs — isolated renderer, synthetic API, no live backend.
 if (!process.versions.electron) {
+const { scriptSrc } = require('./app-page-policy.cjs');
   const { spawnSync } = require('node:child_process');
   const result = spawnSync(require('../electron/node_modules/electron'), [__filename],
     { stdio: 'inherit', windowsHide: true, timeout: 120000 });
@@ -99,7 +100,7 @@ function seedWork(company) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://fixture');
   res.setHeader('Cache-Control', 'no-store');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:");
+  res.setHeader('Content-Security-Policy', `default-src 'self'; script-src ${scriptSrc(url.pathname)}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:`);
   const json = (value, code = 200) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)); };
   if (url.pathname.startsWith('/api/') && !url.pathname.startsWith('/api/swarm')) {
     if (url.pathname === '/api/chat/live/snapshot') return json(liveChatSnapshot());
