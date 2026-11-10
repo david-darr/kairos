@@ -8,6 +8,8 @@ misaki (each syllable read on its own, the spelling rules for any it does not kn
 
 Stored in the account's pronunciations.json as [{word, say, phonemes}]; nothing is seeded.
 """
+import hashlib
+import json
 import os
 import re
 import threading
@@ -20,6 +22,7 @@ FILE = "pronunciations.json"
 PATH: Optional[str] = None            # a test can point it at its own file
 MAX_ITEMS = 200
 _WORD = re.compile(r"[A-Za-z][A-Za-z'\-]{0,39}")
+_TOKEN = re.compile(r"[A-Za-z][A-Za-z'\-]*")
 _SAY = re.compile(r"[A-Za-z]+(?:[- ][A-Za-z]+){0,9}")
 _STRESS = "ˈˌ"
 _lock = threading.Lock()
@@ -110,6 +113,30 @@ def _table() -> dict:
     with _lock:
         _cache[path] = (stamp, table)
     return table
+
+
+def signature(text: str) -> str:
+    """A short fingerprint of the listed pronunciations that can change how `text` is said ("" when none can).
+    core/video_store.speech_key adds it to a narration line's cache key, so editing the list re-speaks only the lines
+    with an affected word. Matched generously (the words as written, as core/kokoro_g2p.expand spells them out, and
+    the parts of hyphenated or apostrophe words): a spare match costs one re-speak, a missed one keeps a stale line."""
+    try:
+        table = _table()
+    except Exception:
+        return ""                       # no account in scope: the lookup during speech finds nothing either
+    if not table or not text:
+        return ""
+    from core import kokoro_g2p
+    words = set()
+    for source in (text, kokoro_g2p.expand(text)):
+        for token in _TOKEN.findall(source):
+            token = token.lower()
+            words.add(token)
+            words.update(part for part in re.split(r"['\-]+", token) if part)
+    hits = sorted((w, table[w]) for w in words if w in table)
+    if not hits:
+        return ""
+    return hashlib.sha256(json.dumps(hits, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
 
 
 def lookup(word: str, british: bool = False) -> Optional[str]:

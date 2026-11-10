@@ -7,8 +7,8 @@ measured, and the parts are joined with short pauses into the beat's line. The m
 its shot's length and every caption carries a measured time. Kokoro's ONNX model returns audio only (its one output
 is `audio`, checked 2026-11-10), so there are no word timings: captions are line parts, not words.
 
-The spoken lines are cached per video as 24 kHz mono WAV files named by their speech key (voice + text), so an edit
-re-speaks only the lines it changed. `track()` lays the lines on the 48 kHz timeline for core/video_audio.py, which
+The spoken lines are cached per video as 24 kHz mono WAV files named by their speech key (voice + text + the account's
+Pronunciations entries for words in the line), so an edit, to a line or to the list, re-speaks only the lines it changed. `track()` lays the lines on the 48 kHz timeline for core/video_audio.py, which
 ducks the music under them. Nothing here posts, downloads or installs anything; when Kokoro is not set up the
 narration step says why and the video stays as it is.
 """
@@ -94,10 +94,12 @@ def read_clip(video_id, key) -> np.ndarray:
 
 
 def missing(project) -> list[str]:
-    """Ids of narrated beats whose line is not measured yet, or whose audio file is gone."""
+    """Ids of narrated beats whose line is not measured yet, whose audio file is gone, or whose measurement is stale
+    (the key no longer matches: a Pronunciations edit changed how the line is said)."""
     out = []
     for b in project["beats"]:
-        if "say" in b and ("spoken" not in b or not clip_path(project["id"], b["spoken"]["key"]).is_file()):
+        if "say" in b and ("spoken" not in b or not clip_path(project["id"], b["spoken"]["key"]).is_file()
+                           or b["spoken"]["key"] != video_store.speech_key(project["narration"]["voice"], b["say"])):
             out.append(b["id"])
     return out
 

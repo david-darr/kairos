@@ -932,6 +932,44 @@ class NarrationTrackTests(unittest.TestCase):
         self.assertIn('says: "Clouds are heavy. They still float, though, all day long."', plan)
         self.assertNotIn("estimated", plan)
 
+    def test_a_pronunciation_edit_respeaks_only_the_lines_it_touches(self):
+        from core import pronunciations
+        old_path = pronunciations.PATH
+        pronunciations.PATH = os.path.join(fixture.name, "pronunciations-narration.json")
+        try:
+            pronunciations.save([])
+            p = make(beats=narrated()["beats"])
+            voice = FakeVoice()
+            first = video_narration.prepare(p["id"], voice)
+            keys = {b["id"]: b["spoken"]["key"] for b in first["beats"] if "spoken" in b}
+            self.assertEqual(len(voice.calls), 3)
+            pronunciations.save([{"word": "Clouds", "phonemes": "kˈIɹOs"}])
+            self.assertEqual(video_narration.missing(video_store.get(p["id"])), ["hook"], "only the line with the listed word is stale")
+            second = video_narration.prepare(p["id"], voice)
+            self.assertEqual([c[0] for c in voice.calls[3:]], ["Clouds are heavy.", "They still float, though, all day long."])
+            hook, end = second["beats"][0]["spoken"]["key"], second["beats"][2]["spoken"]["key"]
+            self.assertNotEqual(hook, keys["hook"])
+            self.assertEqual(end, keys["end"], "a line without a listed word keeps its key and its audio")
+            self.assertTrue(video_narration.clip_path(p["id"], hook).is_file())
+            self.assertEqual(video_narration.missing(second), [])
+            pronunciations.save([{"word": "Clouds", "phonemes": "kˈIɹOs"}, {"word": "Nguyen", "phonemes": "nwˈɛn"}])
+            self.assertEqual(video_narration.missing(video_store.get(p["id"])), [], "an entry for a word no line says changes nothing")
+            pronunciations.save([{"word": "clouds", "phonemes": "klˈWdz"}])
+            video_narration.prepare(p["id"], voice)
+            self.assertEqual(len(voice.calls), 7, "a changed sound for a listed word re-speaks its line")
+            pronunciations.save([])
+            self.assertEqual(video_narration.missing(video_store.get(p["id"])), ["hook"])
+            self.assertEqual(video_store.speech_key("af_heart", narrated()["beats"][0]["say"]), keys["hook"])
+            third = video_narration.prepare(p["id"], voice)
+            self.assertEqual(len(voice.calls), 9)
+            self.assertEqual(third["beats"][0]["spoken"]["key"], keys["hook"], "clearing the list returns the line to its first key")
+            pronunciations.save([{"word": "float", "phonemes": "flˈOt"}, {"word": "Saint", "phonemes": "sˈAnt"}])
+            self.assertTrue(pronunciations.signature("They float-ish"), "a part of a hyphenated word counts")
+            self.assertTrue(pronunciations.signature("St. Louis"), "the spelled-out form Kokoro reads counts")
+            self.assertEqual(pronunciations.signature("Look up today."), "")
+        finally:
+            pronunciations.PATH = old_path
+
     def test_an_edit_made_while_speaking_wins(self):
         p = make(beats=narrated()["beats"])
         def edit_midway(text, voice):

@@ -212,7 +212,13 @@ def _narration(value):
 
 
 def speech_key(voice, say):
-    return hashlib.sha256(f"kokoro|{voice}|{' '.join(say.split())}".encode("utf-8")).hexdigest()[:16]
+    """The cache key of a spoken line: the voice, the text, and the account's Pronunciations entries for words in it
+    (core/pronunciations.signature), so a pronunciation edit re-speaks only the lines it changes. A line with no
+    listed word keeps the key it had before pronunciations counted."""
+    from core import pronunciations
+    line = " ".join(say.split())
+    said = pronunciations.signature(line)
+    return hashlib.sha256(f"kokoro|{voice}|{line}{'|' + said if said else ''}".encode("utf-8")).hexdigest()[:16]
 
 
 def _timing(b, narration, path):

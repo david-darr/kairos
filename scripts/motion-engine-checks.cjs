@@ -117,9 +117,13 @@ app.whenReady().then(async () => {
           const statement = L.beatLayout(beats.find(b=>b.kind==='statement'), kdInfo.aspect, displayMeasure, {composition})[0];
           if (statement.lines.length < 2 || statement.lines.length > 3 || statement.size < 150) layoutErrors.push({composition,statement});
           const rows = L.beatLayout(beats.find(b=>b.kind==='list'), kdInfo.aspect, displayMeasure, {composition}).filter(b=>b.role==='body');
+          // The marker sits 24px left of its row at body size and grows with rows set above 90px (dd059f2e), so the
+          // gap scales with the row; every marker shares one x, clears the text and stays inside the safe area.
+          const firstMarker = L.listMarker(rows[0]);
           for (const row of rows) {
-            const marker = L.listMarker(row);
-            if (row.align !== 'left' || row.size < 59.39 || row.x-marker.x !== 24 || row.x !== rows[0].x) layoutErrors.push({composition,row,marker});
+            const marker = L.listMarker(row), gap = row.x-marker.x;
+            if (row.align !== 'left' || row.size < 59.39 || row.x !== rows[0].x || marker.x !== firstMarker.x
+              || Math.abs(gap - 24*Math.max(1, row.size/90)) > 1e-6 || marker.x+marker.radius >= row.x || marker.x-marker.radius < safe.x) layoutErrors.push({composition,row,marker});
           }
         }
         const designedTimes = [0, ...kdInfo.beats.map(b=>b.start+(b.end-b.start)*.60)];
