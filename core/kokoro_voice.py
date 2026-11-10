@@ -9,11 +9,16 @@ Gated on three things, each reported honestly and none of them fetched automatic
 phonemes and drives the model. If any is missing the engine is simply unavailable: `ready()` says why, `voices()` is
 empty, `synthesize()` raises KokoroUnavailable, and the device (OS) voice stays the fallback. Nothing here can crash a
 call.
+
+Where it runs: the best execution provider this machine has (core/onnx_providers.py: DirectML on Windows, Core ML on
+macOS, else the processor). If the graphics provider fails to load, or fails while speaking, the same sentence is
+spoken again on the processor and the processor is used for the rest of the session; `device()` says which is in use
+and why, for Settings > Speech.
 """
 import logging
 import threading
 
-from core import speech_optional
+from core import onnx_providers, speech_optional
 
 logger = logging.getLogger(__name__)
 
@@ -23,21 +28,66 @@ DEFAULT_VOICE = "af_heart"
 MAX_TEXT = 1600
 
 _lock = threading.Lock()
+_run_lock = threading.Lock()      # DirectML sessions take one Run at a time (its documented limit)
 _engine = None
+_provider = None                  # the provider _engine runs on
+_failed: dict[str, str] = {}      # provider -> why it was given up on, for this session
 
 # A test supplies a fake engine without onnxruntime. Called with (model_path, voices_path); the result needs
 # get_voices() -> list[str] and create(text, voice=, speed=, lang=) -> (float32 samples, sample_rate).
 ENGINE_FACTORY = None
+
+# The benchmark pins one provider (e.g. "CPUExecutionProvider") to time it; None means choose the best.
+FORCE_PROVIDER = None
 
 
 class KokoroUnavailable(Exception):
     """Message is meant to be shown to the user as-is."""
 
 
-def reset() -> None:
-    global _engine
+def reset(forget_failures: bool = False) -> None:
+    global _engine, _provider
     with _lock:
         _engine = None
+        _provider = None
+        if forget_failures:
+            _failed.clear()
+
+
+def _open(provider: str):
+    """A real engine on `provider`. Separate so tests can stand in for onnxruntime per provider."""
+    model, voices = speech_optional.path_of(NAME, 0), speech_optional.path_of(NAME, 1)
+    from kokoro_onnx import Kokoro
+    session = onnx_providers.session(model, provider)
+    try:
+        session._model_path = model          # kokoro_onnx reads it back; a session built from bytes has none
+    except AttributeError:
+        pass
+    return Kokoro.from_session(session, voices)
+
+
+def _give_up_on(provider: str, error: Exception) -> None:
+    _failed[provider] = (str(error).strip().splitlines() or [type(error).__name__])[0][:200]
+    logger.warning("kokoro: %s failed, using the processor from now on: %s", provider, _failed[provider])
+
+
+def device() -> dict:
+    """Which provider Kokoro uses (or will use once loaded), in words for Settings > Speech."""
+    if ENGINE_FACTORY is not None:
+        provider, loaded = onnx_providers.CPU, _engine is not None
+    else:
+        loaded = _engine is not None
+        provider = _provider if loaded else (FORCE_PROVIDER or onnx_providers.candidates(skip=_failed)[0])
+    where = onnx_providers.label(provider)
+    gave_up = [p for p in _failed if p != onnx_providers.CPU]
+    if gave_up and provider == onnx_providers.CPU:
+        card = onnx_providers.label(gave_up[0])
+        text = f"Runs on the processor. {card[:1].upper() + card[1:]} could not run it on this PC."
+    elif loaded:
+        text = f"Runs on {where}."
+    else:
+        text = f"Will run on {where}."
+    return {"provider": provider, "loaded": loaded, "label": where, "text": text, "failed": dict(_failed)}
 
 
 def ready() -> tuple[bool, str | None]:
@@ -51,17 +101,54 @@ def ready() -> tuple[bool, str | None]:
 
 
 def _get_engine():
-    global _engine
+    global _engine, _provider
     with _lock:
         if _engine is not None:
             return _engine
-        model, voices = speech_optional.path_of(NAME, 0), speech_optional.path_of(NAME, 1)
         if ENGINE_FACTORY is not None:
-            _engine = ENGINE_FACTORY(model, voices)
-        else:
-            from kokoro_onnx import Kokoro
-            _engine = Kokoro(model, voices)
-        return _engine
+            model, voices = speech_optional.path_of(NAME, 0), speech_optional.path_of(NAME, 1)
+            _engine, _provider = ENGINE_FACTORY(model, voices), onnx_providers.CPU
+            return _engine
+        order = [FORCE_PROVIDER] if FORCE_PROVIDER else onnx_providers.candidates(skip=_failed)
+        for provider in order:
+            try:
+                engine = _open(provider)
+            except Exception as e:
+                if provider == onnx_providers.CPU or FORCE_PROVIDER:
+                    raise
+                _give_up_on(provider, e)
+                continue
+            _engine, _provider = engine, provider
+            logger.info("kokoro: loaded on %s", provider)
+            return _engine
+        raise KokoroUnavailable("Kokoro could not load.")
+
+
+def _create(engine, provider, text, voice):
+    if provider == onnx_providers.DML:
+        with _run_lock:
+            return engine.create(text, voice=voice, speed=1.0, lang="en-us")
+    return engine.create(text, voice=voice, speed=1.0, lang="en-us")
+
+
+def _render(text: str, voice: str):
+    """(samples, rate) on the chosen provider; a graphics-provider failure retries the same text on the processor."""
+    global _engine, _provider
+    engine = _get_engine()
+    provider = _provider
+    try:
+        return _create(engine, provider, text, voice)
+    except Exception as e:
+        # Only the runtime's own errors count against the provider; a bad voice id or text is not the card's fault.
+        runtime_error = type(e).__module__.startswith("onnxruntime")
+        if not runtime_error or provider in (None, onnx_providers.CPU) or FORCE_PROVIDER or ENGINE_FACTORY is not None:
+            raise
+        with _lock:
+            _give_up_on(provider, e)
+            if _engine is engine:
+                _engine, _provider = None, None
+        engine = _get_engine()
+        return _create(engine, _provider, text, voice)
 
 
 def voices() -> list[dict]:
@@ -99,9 +186,8 @@ def synthesize(text: str, voice: str) -> bytes:
         raise KokoroUnavailable("That text cannot be spoken.")
     import numpy as np
     try:
-        engine = _get_engine()
         wanted = voice if voice and voice != "default" else DEFAULT_VOICE
-        samples, rate = engine.create(text, voice=wanted, speed=1.0, lang="en-us")
+        samples, rate = _render(text, wanted)
     except Exception as e:
         logger.exception("kokoro: synthesis failed")
         raise KokoroUnavailable("Kokoro could not speak. Check its download and the selected voice.") from e

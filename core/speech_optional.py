@@ -9,8 +9,10 @@ Pinning status in this build: the URLs and hashes below are deliberately still T
 official release pages (and the hashes computed from the files themselves) by a person who has looked at them; they must
 not be guessed. Filling an entry in is the whole change needed to switch its download on.
 
-onnxruntime is NOT bundled. Without it, or without the model, every feature here reports why and does nothing:
-call endpointing stays on its fixed 700 ms (Open Mic 900 ms) silence wait and the voice stays on the device voice.
+The ONNX runtime ships with the app (requirements.txt: the DirectML build on Windows, the standard build elsewhere).
+The Kokoro engine package (kokoro_onnx) does not: its phonemizer and espeak-ng are GPL-3.0, a licensing call that is
+David's. Without the runtime, the package or the model, every feature here reports why and does nothing: call
+endpointing stays on its fixed 700 ms (Open Mic 900 ms) silence wait and the voice stays on the device voice.
 """
 import asyncio
 import hashlib
@@ -105,7 +107,16 @@ def state(name: str) -> dict:
         label, key = "Ready", "ready"
     return {"name": name, "label": item["label"], "kind": item["kind"], "description": item["description"],
             "size_mb": sum(f["size_mb"] for f in item["files"]), "downloaded": have, "pinned": is_pinned(item),
-            "missing_runtime": missing, "state": key, "status": label, "ready": key == "ready"}
+            "missing_runtime": missing, "state": key, "status": label, "ready": key == "ready", "runs_on": _runs_on(name, key)}
+
+
+def _runs_on(name: str, key: str) -> str | None:
+    """Which part of the computer runs Kokoro, in plain words, once it is usable. Smart Turn always runs on the
+    processor (DirectML cannot run its model), and its description already says so."""
+    if key != "ready" or name != "kokoro":
+        return None
+    from core import kokoro_voice
+    return kokoro_voice.device()["text"]
 
 
 def status() -> list[dict]:

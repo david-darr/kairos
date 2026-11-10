@@ -371,6 +371,19 @@ def verify(python_exe: str) -> None:
     missing = missing_distributions(python_exe)
     if missing:
         raise RuntimeError("runtime is missing required packages: " + ", ".join(missing))
+    # The speech models' runtime must load (the lock leaves out sympy, which only its offline tools use), and the
+    # Windows build must be the DirectML one: if a plain onnxruntime wheel overwrote it, Kokoro would silently lose
+    # the graphics card for every user.
+    ort_check = (
+        "import sys, onnxruntime as o; p = o.get_available_providers(); "
+        "assert 'CPUExecutionProvider' in p, p; "
+        "assert sys.platform != 'win32' or 'DmlExecutionProvider' in p, 'Windows runtime has no DirectML: ' + repr(p); "
+        "print('onnxruntime', o.__version__, p)"
+    )
+    result = subprocess.run([python_exe, "-c", ort_check], cwd=BASE_DIR, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError("runtime ONNX check failed:\n" + result.stderr.strip())
+    log(result.stdout.strip())
     # A source distribution can satisfy the SDK version pin while shipping no
     # Claude executable. Clean installs need the wheel's bundled CLI; a
     # separately installed native CLI is only an optional newer override.

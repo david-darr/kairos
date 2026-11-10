@@ -234,7 +234,9 @@ export async function renderSpeechPanel(content, status) {
       }
       // Not yet downloaded but the runtime is also missing: say so up front rather than after a long download.
       const needs = !item.downloaded && item.missing_runtime?.length ? ` Also needs ${item.missing_runtime.map(m => m === 'onnxruntime' ? 'the ONNX runtime' : 'the Kokoro engine package').join(' and ')}.` : '';
-      return row({ title: `${item.label} · ${item.size_mb} MB`, description: (item.description || '') + needs, control: el('div', { class: 'speech-model-actions' }, parts), cls: 'speech-optional' });
+      // Once usable, say which part of the computer runs it (Kokoro: the graphics card when it can, else the processor).
+      const runsOn = item.runs_on ? ` ${item.runs_on}` : '';
+      return row({ title: `${item.label} · ${item.size_mb} MB`, description: (item.description || '') + needs + runsOn, control: el('div', { class: 'speech-model-actions' }, parts), cls: 'speech-optional' });
     });
     if (optionalRows.length) parts.push(group({ title: 'Optional voice features', description: 'Not needed for dictation. They need the ONNX runtime and stay off until you download them.', cls: 'speech-optional-group' }, optionalRows));
 

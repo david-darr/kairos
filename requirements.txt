@@ -74,6 +74,18 @@ llama-cpp-python[server] @ https://github.com/abetlen/llama-cpp-python/releases/
 # bundled runtime for the same job. Models are NOT bundled; one is downloaded
 # on first use, so the installer does not grow for an optional feature.
 pywhispercpp>=1.5,<2
+# The ONNX runtime for the optional speech models, Smart Turn and the Kokoro
+# voice (core/speech_optional.py; their model files stay user-started
+# downloads). David's call 2026-11-09: Kokoro on the graphics card, for all
+# users. Windows gets the DirectML build, which runs on any DirectX 12 card
+# (NVIDIA, AMD, Intel) and on the processor when there is none
+# (core/onnx_providers.py falls back by itself). About 71 MB installed.
+# Elsewhere the standard build (macOS: with Core ML). MIT. Both install the
+# same `onnxruntime` module, so exactly one may be in a runtime: the markers
+# keep them apart. The DirectML build needs sympy only for its offline model
+# tools, never to run a model, so the lock leaves sympy out (see its header).
+onnxruntime-directml>=1.24.4,<1.25; sys_platform == "win32"
+onnxruntime>=1.24,<2; sys_platform != "win32"
 # Forge terminal (Forge Phase 3, David approved 2026-10-09): a real PTY per
 # session. pywinpty wraps Windows ConPTY; ptyprocess is the POSIX equivalent.
 # Both MIT.

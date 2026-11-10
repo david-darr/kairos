@@ -106,6 +106,28 @@ class NewPaths(unittest.TestCase):
             (Path(folder) / "onnx").mkdir()
             self.assertEqual(bench.detect_onnx_dir(folder), str(Path(folder) / "onnx"))
 
+    def test_kokoro_bench_pins_each_provider_through_the_app_and_times_idle_gaps(self):
+        """--kokoro-bench goes through kokoro_voice.FORCE_PROVIDER (the app's own provider choice), not kokoro_onnx's
+        ONNX_PROVIDER variable, and puts the app's choice back afterwards."""
+        from unittest.mock import patch
+        from core import kokoro_voice
+        seen = []
+
+        def opener(provider):
+            seen.append(provider)
+            return bench.FakeKokoro(delay_ms=1)
+        with patch("onnxruntime.get_available_providers", return_value=["DmlExecutionProvider", "CPUExecutionProvider"]), \
+                patch.object(kokoro_voice, "_open", side_effect=opener), patch.object(kokoro_voice, "ready", return_value=(True, None)), \
+                patch.object(bench, "GAPS_S", (0,)):
+            results = bench.kokoro_bench(2, gaps=2)
+        self.assertEqual(seen, ["CPUExecutionProvider", "DmlExecutionProvider"])
+        self.assertIsNone(kokoro_voice.FORCE_PROVIDER)
+        self.assertEqual([r["provider"] for r in results], ["CPU", "DirectML", "CUDA"])
+        self.assertEqual(len(results[1]["idle"][0]["times"]), 2)
+        text = bench.kokoro_table(results, 2)
+        self.assertIn("after 0 s idle, 'Sure thing.'", text)
+        self.assertIn("CUDA: not in this onnxruntime build", text)
+
     def test_resample_keeps_duration(self):
         import numpy as np
         out = bench.resample(np.ones(24000, dtype=np.float32), 24000)

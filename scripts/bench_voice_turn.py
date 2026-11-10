@@ -5,6 +5,8 @@
     .venv\\Scripts\\python.exe -X utf8 scripts\\bench_voice_turn.py --light      CI-light: fakes for speech-to-text and the voice
     .venv\\Scripts\\python.exe -X utf8 scripts\\bench_voice_turn.py --backend cuda --smart-turn real --voice-engine both
     .venv\\Scripts\\python.exe -X utf8 scripts\\bench_voice_turn.py --backend none --kokoro-bench 10    Kokoro on its own
+    .venv\\Scripts\\python.exe -X utf8 scripts\\bench_voice_turn.py --backend none --kokoro-bench 10 --kokoro-gap 4   plus idle gaps
+    ... --voice-engine kokoro --kokoro-provider CPU      pin Kokoro's provider in the turns (default: what the app picks)
 
 The optional ONNX models (Smart Turn, Kokoro) are read, never written, from --onnx-dir: by default the `onnx` folder
 beside the whisper model (--models-dir), else the dev profile's speech_models\\onnx. They run through the app's own
@@ -525,19 +527,23 @@ KOKORO_SENTENCES = ["Sure thing.", "I checked and you have two meetings this aft
 PROVIDERS = [("CPU", "CPUExecutionProvider"), ("DirectML", "DmlExecutionProvider"), ("CUDA", "CUDAExecutionProvider")]
 
 
-def kokoro_bench(repeats, voice="default"):
-    """Kokoro on its own, per execution provider: cold start, then time to first audio per sentence (the whole sentence
-    is rendered before its first piece is sent, so that is the render time). Providers this onnxruntime build lacks are
-    reported, not installed."""
+GAPS_S = (2, 5, 8)      # idle gaps before a render: renders after a few seconds idle were erratic on the CPU (2026-11-07)
+
+
+def kokoro_bench(repeats, voice="default", gaps=0):
+    """Kokoro on its own, per execution provider, through the app's own provider choice (core/onnx_providers.py, pinned
+    with kokoro_voice.FORCE_PROVIDER): cold start, then time to first audio per sentence (the whole sentence is rendered
+    before its first piece is sent, so that is the render time), then with `gaps` > 0, "Sure thing." rendered `gaps`
+    times after each idle gap in GAPS_S. Providers this onnxruntime build lacks are reported, not installed."""
     import onnxruntime
     from core import kokoro_voice
     available = onnxruntime.get_available_providers()
-    results, previous = [], os.environ.get("ONNX_PROVIDER")
+    results, previous = [], kokoro_voice.FORCE_PROVIDER
     try:
         for label, provider in PROVIDERS:
             if provider not in available:
                 results.append({"provider": label, "available": False}); continue
-            os.environ["ONNX_PROVIDER"] = provider        # kokoro_onnx's own provider switch (session.resolve_providers)
+            kokoro_voice.FORCE_PROVIDER = provider
             kokoro_voice.reset()
             started = time.perf_counter(); engine = kokoro_voice._get_engine(); load_ms = (time.perf_counter() - started) * 1000
             first_ms, _ = kokoro_render(KOKORO_SENTENCES[0], voice)
@@ -549,13 +555,17 @@ def kokoro_bench(repeats, voice="default"):
                     times.append(spent); audio_ms = len(pcm) / 48
                 rows.append({"sentence": sentence, "p50": percentile(times, 0.5), "p95": percentile(times, 0.95), "audio_ms": audio_ms,
                              "realtime": audio_ms / max(1e-6, percentile(times, 0.5))})
+            idle = []
+            for gap in (GAPS_S if gaps else ()):
+                times = []
+                for _ in range(gaps):
+                    time.sleep(gap)
+                    times.append(kokoro_render(KOKORO_SENTENCES[0], voice)[0])
+                idle.append({"gap_s": gap, "times": times, "p50": percentile(times, 0.5), "max": max(times)})
             results.append({"provider": label, "available": True, "session": list(engine.sess.get_providers()) if hasattr(engine, "sess") else [],
-                            "load_ms": load_ms, "first_render_ms": first_ms, "sentences": rows})
+                            "load_ms": load_ms, "first_render_ms": first_ms, "sentences": rows, "idle": idle})
     finally:
-        if previous is None:
-            os.environ.pop("ONNX_PROVIDER", None)
-        else:
-            os.environ["ONNX_PROVIDER"] = previous
+        kokoro_voice.FORCE_PROVIDER = previous
         kokoro_voice.reset()
     return results
 
@@ -569,6 +579,8 @@ def kokoro_table(results, repeats):
         lines.append(f"  {row['provider']} ({', '.join(row['session'])}): model load {fmt(row['load_ms'])}, first render after load {fmt(row['first_render_ms'])}")
         for s in row["sentences"]:
             lines.append(f"    {fmt(s['p50'])} / {fmt(s['p95'])} for {fmt(s['audio_ms'])} ms of audio ({s['realtime']:.1f}x real time): {s['sentence']}")
+        for gap in row.get("idle") or []:
+            lines.append(f"    after {gap['gap_s']} s idle, '{KOKORO_SENTENCES[0]}': p50 {fmt(gap['p50'])}, worst {fmt(gap['max'])} ({', '.join(fmt(t) for t in gap['times'])})")
     return "\n".join(lines)
 
 
@@ -655,7 +667,9 @@ def run(args):
                     raise SystemExit(f"{name} is not usable from {onnx}: {reason}")
             if args.kokoro_bench:
                 say(f"Kokoro on its own ({args.kokoro_bench} renders per sentence) ...")
-                extra = kokoro_table(kokoro_bench(args.kokoro_bench, args.kokoro_voice), args.kokoro_bench)
+                extra = kokoro_table(kokoro_bench(args.kokoro_bench, args.kokoro_voice, args.kokoro_gap), args.kokoro_bench)
+            # The live turns: Kokoro on the provider the app would pick, or the one --kokoro-provider pins.
+            kokoro_voice.FORCE_PROVIDER = dict(PROVIDERS).get(args.kokoro_provider) if args.kokoro_provider != "auto" else None
             if args.warm:
                 warm = warm_models(wants_smart, any(s[4] == "kokoro" for s in scenarios))
                 say(f"warmed {warm}")
@@ -700,7 +714,7 @@ def run(args):
                 services.close()
         speech_acceleration.stop()
         sapi.close()
-        voices = f"SAPI voice '{args.voice}'" + (f", Kokoro voice '{args.kokoro_voice}' on {', '.join(__import__('onnxruntime').get_available_providers()[:1])}" if wants_kokoro else "")
+        voices = f"SAPI voice '{args.voice}'" + (f", Kokoro voice '{args.kokoro_voice}' on {kokoro_voice.device()['provider']}" if wants_kokoro else "")
         meta = (f"{'; '.join(hardware)}; {voices}; scripted model first token {args.ttft} ms at {args.tokens_per_s} tokens/s; {args.repeats} x {len(fixtures)} turns"
                 + (f"; warmed at call start {warm}" if warm else ""))
         return summaries, table(summaries, meta) + ("\n" + extra if extra else "")
@@ -723,6 +737,8 @@ def parser():
     p.add_argument("--voice-engine", choices=["sapi", "kokoro", "both"], default="sapi", help="the reply's voice: Windows SAPI, or Kokoro through core/kokoro_voice.py")
     p.add_argument("--kokoro-voice", default="default", help="Kokoro voice id (default: the app's default voice)")
     p.add_argument("--kokoro-bench", type=int, default=0, help="also time Kokoro on its own: renders per sentence on each available provider; 0 = skip")
+    p.add_argument("--kokoro-gap", type=int, default=0, help="with --kokoro-bench: also render 'Sure thing.' this many times after each idle gap (2, 5, 8 s); 0 = skip")
+    p.add_argument("--kokoro-provider", choices=["auto", "CPU", "DirectML", "CUDA"], default="auto", help="the provider Kokoro uses in the voice turns: auto = what the app picks")
     p.add_argument("--warm", action=argparse.BooleanOptionalAction, default=True,
                    help="load and run Smart Turn and Kokoro once before the turns, as a call start does")
     p.add_argument("--tokens-per-s", type=float, default=60)

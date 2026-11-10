@@ -71,6 +71,8 @@ def _get_session():
             _session = SESSION_FACTORY(path)
         else:
             import onnxruntime as ort
+            # The processor on purpose, even where DirectML is installed: this int8 CPU export fails on DirectML (a
+            # Reshape, 2026-11-09) and answers in about 30 ms on one thread here, so a graphics card would not help.
             options = ort.SessionOptions()
             options.inter_op_num_threads = 1
             options.intra_op_num_threads = 1
