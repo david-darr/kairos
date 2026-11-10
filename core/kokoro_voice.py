@@ -162,6 +162,11 @@ def voices() -> list[dict]:
     except Exception:
         logger.exception("kokoro: could not list voices")
         return []
+    # 2026-11-10: callers that fall back to "the first voice" (a bot with no valid saved voice) got af_alloy, a weak
+    # voice, because the list is alphabetical. The best voice leads the list, so every fallback lands on it.
+    if DEFAULT_VOICE in names:
+        names.remove(DEFAULT_VOICE)
+        names.insert(0, DEFAULT_VOICE)
     return [{"id": v, "name": v} for v in names]
 
 
