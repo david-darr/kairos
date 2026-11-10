@@ -39,7 +39,7 @@ CAMERAS = ("still", "push", "pull", "pan", "shake")
 TRANSITIONS = ("cut", "whip", "zoom", "flip", "dither", "mosaic", "wipe")
 MOODS = ("energetic", "calm", "warm", "dark", "playful")
 ASSET = re.compile(r"assets/[a-f0-9]{64}\.(?:png|jpg|gif|webp)")
-FIELDS = {"id", "title", "look", "bpm", "fps", "aspects", "beats", "music", "narration", "cast", "palette"}
+FIELDS = {"id", "title", "look", "bpm", "fps", "aspects", "beats", "music", "narration", "cast", "palette", "style_pack"}
 ACTIONS = ("idle", "wave", "point", "walk", "jump", "shrug", "think", "nod")
 MAX_CAST, MAX_ON_SCREEN, MAX_PROPS = 6, 3, 6
 MAX_SECONDS = 120               # a video with music only
@@ -155,6 +155,7 @@ def validate(project: dict) -> dict:
         elif "scene" in b:
             _error(path + ".scene", "only a scene beat has a scene; set kind to scene or remove it.")
     _cast(p, beats)
+    _style_pack(p)
     if is_narrated or "narration" in p:
         p["narration"] = _narration(p.get("narration"))
     for i, b in enumerate(beats):
@@ -275,6 +276,26 @@ def _cast(p, beats):
         p.setdefault("palette", "dawn")
         if p["palette"] not in style_packs.PALETTES:
             _error("palette", "choose " + ", ".join(style_packs.PALETTES) + ".")
+
+
+def _style_pack(p):
+    """A user-made style pack the video is made in, pinned to one version ({id, version}); built-in packs need no pin.
+    A video renders only in an approved version (core/video_render.py); its look comes from that version's numbers."""
+    if "style_pack" not in p:
+        return
+    from core import style_pack_store
+    value = p["style_pack"]
+    if value is None:
+        p.pop("style_pack")
+        return
+    if not isinstance(value, dict) or set(value) != {"id", "version"}:
+        _error("style_pack", "give {id, version} of one of this account's style packs.")
+    if isinstance(value["version"], bool) or not isinstance(value["version"], int) or value["version"] < 1:
+        _error("style_pack.version", "use a version number of that pack.")
+    try:
+        style_pack_store.version_of(style_pack_store.get(value["id"]), value["version"])
+    except LookupError as error:
+        _error("style_pack", str(error).strip("'") + " The Styles tab in Studio > Content lists this account's packs.")
 
 
 def clauses(text):

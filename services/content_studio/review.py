@@ -7,7 +7,7 @@ ever creates an account or deletes anything: retired means out of the rotation, 
 import time
 
 from . import scoring
-from .formats import STYLE_PACKS
+from .formats import all_packs
 from .store import DAY, HARD_MAX_NICHES, StudioError, conflict
 
 OPEN = ("proposed", "awaiting_user")
@@ -60,7 +60,7 @@ def scoreboard(store, now=None):
     pack_rows = _table(store, posted, scored, now, lambda p: p["style_pack"])
     packs = [{**blank, **{k: v for k, v in pack_rows.get(pid, {}).items() if k != "key"}, "id": pid, "name": pack["name"],
               "available": pack["available"]}
-             for pid, pack in STYLE_PACKS.items() if pid in pack_rows or pack["available"]]
+             for pid, pack in all_packs().items() if pid in pack_rows or pack["available"]]
     for row in niches:
         row.pop("key", None)
     for rows in strategies.values():

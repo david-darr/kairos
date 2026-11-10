@@ -11,9 +11,10 @@ tools read them from here.
   Its characters are versioned specs (core/character_store.py); a video may only use a version the person approved.
 - `glossy-3d`, `voxel-3d`: listed, not built (units 5 and 6).
 
-The seam for user-made packs (a later unit): `user_packs()` returns the current account's own pack files. Each is
-data only (no scripts run from a pack) with the same fields as a built-in entry plus its owner; it targets one of the
-renderers below and may name character specs by id and version. Nothing reads pack files yet, so it returns [].
+User-made packs (core/style_pack_store.py): `user_packs()` lists the current account's own packs with the same fields
+as a built-in entry, drawn by the built-in pack they are based on (their `base`). A user pack is available only while
+it has a version the person approved and its renderer runs today (the 2D engine); Blender and Three.js packs are
+recognised but unavailable until build unit 5. Packs are data only; nothing runs from a pack.
 """
 from __future__ import annotations
 
@@ -58,8 +59,33 @@ PROPS = ("sun", "moon", "star", "cloud", "lightbulb", "heart", "book", "planet",
 
 
 def user_packs() -> list[dict]:
-    """The current account's own packs (a later unit). Data only; nothing runs from a pack."""
-    return []
+    """The current account's own packs, each shaped like a built-in entry. Data only; nothing runs from a pack."""
+    from core import style_pack_store
+    out = []
+    try:
+        metas = style_pack_store.list_all()
+    except Exception:       # no account folder yet (a fresh install): no user packs
+        return out
+    for meta in metas:
+        version = style_pack_store.approved_version(meta)
+        shown = version or style_pack_store.latest(meta)["version"]
+        try:
+            data = style_pack_store.spec(meta["id"], shown)
+        except LookupError:
+            continue
+        base = BUILT_IN[data["base"]]
+        runs = data["renderer"] == "2d-engine"
+        if not runs:
+            state = "Its renderer is not built yet (build unit 5)."
+        elif version is None:
+            state = "Not approved yet: approve its sample in Studio > Content > Styles."
+        else:
+            state = f"Approved version {version}."
+        out.append({"id": meta["id"], "name": meta["name"], "available": bool(runs and version), "renderer": data["renderer"],
+                    "base": data["base"], "units_per_minute": base["units_per_minute"], "max_seconds": base["max_seconds"],
+                    "characters": base["characters"], "approved_version": version,
+                    "note": (data["summary"] + " " if data["summary"] else "") + state})
+    return out
 
 
 def all_packs() -> dict:

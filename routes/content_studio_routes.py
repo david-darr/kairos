@@ -35,6 +35,7 @@ class ChannelEditBody(Body):
     aspect: Optional[str] = Field(None, max_length=5)
     notes: Optional[str] = Field(None, max_length=1000)
     voice: Optional[str] = Field(None, max_length=40)
+    style_pack: Optional[str] = Field(None, max_length=40)
 
 
 class BatchBody(Body):
@@ -282,9 +283,11 @@ def submit_post(post_id: int, user: str = Depends(require_user)):
 
 @router.get("/approvals")
 def approvals(user: str = Depends(require_user)):
-    """Posts waiting for the person, and character sheets waiting for their OK (approved at /api/characters)."""
-    from core import character_store
-    return {"posts": pipeline.approval_queue(studio), "characters": character_store.pending()}
+    """Posts waiting for the person, and character sheets and style packs waiting for their OK (approved at
+    /api/characters and /api/style-packs)."""
+    from core import character_store, style_pack_store
+    packs = [{k: v for k, v in p.items() if k != "spec"} for p in style_pack_store.pending()]
+    return {"posts": pipeline.approval_queue(studio), "characters": character_store.pending(), "style_packs": packs}
 
 
 @router.post("/posts/{post_id}/approve")

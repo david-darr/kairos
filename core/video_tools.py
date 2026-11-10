@@ -28,6 +28,10 @@ NARRATION = ("Narration: give a beat a say line (what the narrator speaks over i
              "Kokoro voice (default af_heart; a channel keeps one voice) and captions on or off. Narrated videos may run to "
              f"{video_store.NARRATED_MAX_SECONDS} seconds and {video_store.NARRATED_MAX_BEATS} beats. Run video_narrate for the "
              "timestamped shot plan before rendering. ")
+PACKS = ("Style packs: style_pack names one of this account's approved user-made packs (content_studio_style_packs or the Styles tab "
+         "lists them); the video then takes the pack's look, palette, lighting, music, voice, caption style and character set unless "
+         "you give your own, renders only in the pack's approved version, and the render notes name any setting, shot, prop, camera, "
+         "transition or shot length outside the pack's rules. ")
 _ID = _str("Video id; optional when this chat has one linked video")
 _ASPECT = {"type": "string", "enum": list(video_store.ASPECTS)}
 
@@ -92,13 +96,14 @@ _NARRATION = {"type": "object", "properties": {"voice": _str("Kokoro voice id, e
                                                "captions": {"type": "boolean"}}}
 
 
-@register("video_create", FLOW + NARRATION + SCENES + "Create a video project with a chosen look and beats; returns a Studio link. Pick a look with creative_direction(type=video) first.",
+@register("video_create", FLOW + NARRATION + SCENES + PACKS + "Create a video project with a chosen look and beats; returns a Studio link. Pick a look with creative_direction(type=video) first.",
           _object({"title": _str("Video title"), "look": _str("Look id from creative_direction"),
                    "beats": {"type": "array", "items": {"type": "object"}, "minItems": 1, "maxItems": video_store.NARRATED_MAX_BEATS},
                    "narration": _NARRATION,
                    "cast": {"type": "array", "maxItems": video_store.MAX_CAST, "items": {"type": "object", "properties": {
                        "character": _str("Character id from character_list"), "version": {"type": "integer"}}}},
                    "palette": {"type": "string", "enum": list(style_packs.PALETTES)},
+                   "style_pack": _str("A user-made style pack's id; its approved version is used"),
                    "aspects": {"type": "array", "items": _ASPECT}, "bpm": {"type": "number", "minimum": 60, "maximum": 180},
                    "music": {"type": "object", "properties": {"mood": {"type": "string", "enum": list(video_store.MOODS)},
                                                               "volume": {"type": "number", "minimum": 0, "maximum": 1}}}},
@@ -109,6 +114,17 @@ async def _create(args, ctx):
     if not key:
         raise ValueError("A video must be created from a chat.")
     owner = _owner(ctx)
+    args = dict(args)
+    if args.get("style_pack"):
+        from core import style_pack_store
+        pack_id = args.pop("style_pack")
+        meta, version, data = style_pack_store.usable(pack_id)
+        defaults = style_pack_store.video_defaults(data)
+        if not any(isinstance(b, dict) and b.get("kind") == "scene" for b in args.get("beats") or []):
+            defaults.pop("cast", None)
+        for key, value in defaults.items():
+            args.setdefault(key, value)
+        args["style_pack"] = {"id": meta["id"], "version": version}
     look = args.get("look")
     if not look:
         return _safe(ctx, "Pick a look first. " + creative_direction.describe(args.get("title", ""), "video", owner=owner))
@@ -119,7 +135,7 @@ async def _create(args, ctx):
         for i, beat in enumerate(beats):
             if isinstance(beat, dict):
                 beat.setdefault("id", f"b{i + 1}")
-    options = {k: args[k] for k in ("aspects", "bpm", "music", "narration", "cast", "palette") if k in args}
+    options = {k: args[k] for k in ("aspects", "bpm", "music", "narration", "cast", "palette", "style_pack") if k in args}
     project = video_store.create(args.get("title"), look=look, beats=beats, owner=owner, chat_key_=key, **options)
     title = project["title"].replace("[", "").replace("]", "").replace("\n", " ")
     step = "video_narrate for the shot plan, " if video_store.narrated(project) else ""
@@ -148,8 +164,8 @@ def edit(project, ops):
             raise ValueError(f"ops[{n}]: give an operation object.")
         kind = op.get("op")
         if kind == "project":
-            if op.get("field") not in ("title", "look", "bpm", "aspects", "music", "narration", "cast", "palette") or "value" not in op:
-                raise ValueError(f"ops[{n}].field: project edits title, look, bpm, aspects, music, narration, cast or palette with value.")
+            if op.get("field") not in ("title", "look", "bpm", "aspects", "music", "narration", "cast", "palette", "style_pack") or "value" not in op:
+                raise ValueError(f"ops[{n}].field: project edits title, look, bpm, aspects, music, narration, cast, palette or style_pack with value.")
             draft[op["field"]] = op["value"]
         elif kind == "set":
             if op.get("field") not in ("kind", "bars", "text", "sub", "number", "items", "image", "camera", "transition", "treatment", "say", "scene") or "value" not in op:
@@ -182,7 +198,7 @@ def edit(project, ops):
 
 @register("video_edit", "Change a video atomically. ops: set {op:set,id,field,value} (field say sets or, with an empty value, removes a narration line); "
           "insert {op:insert,before|after,beat}; remove {op:remove,id}; move {op:move,id,before|after}; "
-          "project {op:project,field,value} for title,look,bpm,aspects,music,narration,cast,palette; a scene beat's whole scene is set with field scene. "
+          "project {op:project,field,value} for title,look,bpm,aspects,music,narration,cast,palette,style_pack ({id, version}); a scene beat's whole scene is set with field scene. "
           "Use beat ids from video_outline. A bad operation changes nothing. Preview again after edits.",
           _object({"video_id": _ID, "ops": {"type": "array", "items": {"type": "object"}}}, ("ops",)), surfaces=ALL, effect=WRITE)
 @_guard

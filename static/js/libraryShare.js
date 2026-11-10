@@ -4,8 +4,8 @@ import { api, el, toast, confirmDialog } from "./api.js";
 // have shared with each other. Sharing publishes a snapshot under your name;
 // adding makes a private copy in your own account. Routes: routes/library_routes.py.
 
-const KIND_LABELS = { skill: "Skill", automation: "Automation", design: "Look", bot: "Bot" };
-const SHARE_WORDS = { skill: "skill", automation: "automation", design: "look", bot: "bot" };
+const KIND_LABELS = { skill: "Skill", automation: "Automation", design: "Look", bot: "Bot", style_pack: "Video style" };
+const SHARE_WORDS = { skill: "skill", automation: "automation", design: "look", bot: "bot", style_pack: "video style" };
 
 // A library write that can answer "check this first" (a skill the safety scan wants confirmed), which api()
 // would turn into an unreadable error, so it reads the answer itself.
@@ -99,7 +99,7 @@ function libraryCard(item, redraw) {
 export async function renderSharedLibrary(host) {
   const list = el("div", { class: "tool-store-grid" });
   host.replaceChildren(
-    el("p", { class: "meta", text: "Skills, automations, looks and bots people on this Kairos shared. Adding makes your own private copy, so later changes by the sharer never change yours until you update." }),
+    el("p", { class: "meta", text: "Skills, automations, looks, video styles and bots people on this Kairos shared. Adding makes your own private copy, so later changes by the sharer never change yours until you update." }),
     list);
   async function draw() {
     let items;
@@ -107,7 +107,7 @@ export async function renderSharedLibrary(host) {
     catch (error) { list.replaceChildren(el("div", { class: "tool-store-notice", text: "The shared library is unavailable right now." })); return; }
     if (!host.isConnected) return;
     if (!items.length) {
-      list.replaceChildren(el("div", { class: "tool-store-notice library-empty", text: "Nothing is shared yet. Use Share with this Kairos on a skill, automation, look or bot of yours." }));
+      list.replaceChildren(el("div", { class: "tool-store-notice library-empty", text: "Nothing is shared yet. Use Share with this Kairos on a skill, automation, look, video style or bot of yours." }));
       return;
     }
     list.replaceChildren(...items.map((item) => libraryCard(item, draw)));

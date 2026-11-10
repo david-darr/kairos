@@ -301,9 +301,11 @@ export function mount(canvas, input, options = {}) {
   // Captions burn in from the script's measured parts, in a band below the beat's copy, over every transition.
   const band = captionBand(aspect), captionFits = new Map();
   const [capMin, capMax] = aspect === '16:9' ? [44, 62] : [46, 64], capPad = 20;
+  const upper = project.pack?.captionCase === 'upper';
   function caption(t) {
-    const part = project.captioned ? captionAt(project, t) : null;
+    let part = project.captioned ? captionAt(project, t) : null;
     if (!part) return null;
+    if (upper) part = { ...part, text: part.text.toUpperCase() };
     if (!captionFits.has(part.text)) captionFits.set(part.text, fitText(part.text, { w: band.w - capPad * 2, h: band.h - capPad * 2 }, { min: capMin, max: capMax, measure: (v, size) => measure(v, size, 'body') }));
     const fit = captionFits.get(part.text), lineW = Math.max(...fit.lines.map(line => measure(line, fit.size, 'body')));
     const boxW = Math.min(band.w, lineW + capPad * 2), boxH = fit.lines.length * fit.lineHeight + capPad * 2;

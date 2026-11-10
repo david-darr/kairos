@@ -16,6 +16,10 @@ import would accept:
   Adding creates a DISABLED copy.
 - design: a saved design system (tokens and guide) or a saved style (the look). Added through
   core/design_systems.py save and save_style, which validate every value.
+- style_pack: a user-made video style pack (core/style_pack_store.py), as its export file: the pack's fields and its
+  characters as specs, from the sharer's approved version. Adding goes through the pack import, so it lands as a draft
+  the adder renders a sample of and approves in their own account (with their own character approvals); an update
+  becomes a new draft version of the adder's copy. Nothing runs from a pack.
 - bot: one bot or a team of bots, as the scrubbed package from services/bot_package.py, added with its own
   inspect and import (new bots start on Full approval; routines paused; no secrets, memory, chats or
   connections). Tab code is not shared here: tabs are admin-installed and install-wide already.
@@ -44,7 +48,7 @@ from core import accounts
 from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
 
-KINDS = ("skill", "automation", "design", "bot")
+KINDS = ("skill", "automation", "design", "bot", "style_pack")
 MAX_ITEMS = 1000
 MAX_FILES = 60
 MAX_FILE_BYTES = 400_000
@@ -290,7 +294,25 @@ def _export_bot(ref: str, description: str) -> dict:
             "description": description or "; ".join(names)[:200], "data": package}
 
 
-_EXPORTERS = {"skill": _export_skill, "automation": _export_automation, "design": _export_design, "bot": _export_bot}
+def _export_style_pack(ref: str, description: str) -> dict:
+    from core import style_pack_store
+    try:
+        meta = style_pack_store.get(ref)
+    except LookupError as exc:
+        raise LibraryError("You have no such style pack.", 404) from exc
+    version = style_pack_store.approved_version(meta)
+    if version is None:
+        raise LibraryError("Approve the style pack before sharing it.", 409)
+    try:
+        data = style_pack_store.export_data(ref, version)
+    except style_pack_store.ImportRefused as exc:
+        raise LibraryError(str(exc)) from exc
+    _refuse_secrets(data, "That style pack")
+    return {"title": meta["name"][:120], "description": description or data["pack"].get("summary") or "A video style pack.", "data": data}
+
+
+_EXPORTERS = {"skill": _export_skill, "automation": _export_automation, "design": _export_design, "bot": _export_bot,
+              "style_pack": _export_style_pack}
 
 
 # -- reading a snapshot back (untrusted: checked again) -------------------------------------
@@ -352,6 +374,12 @@ def details(item_id: str) -> dict:
         data = _snapshot_data(item)
         out["design_type"] = data.get("type")
         out["name"] = data.get("name")
+    elif item["kind"] == "style_pack":
+        data = _snapshot_data(item)
+        pack = data.get("pack") if isinstance(data, dict) else None
+        out["name"] = (pack or {}).get("name")
+        out["summary"] = (pack or {}).get("summary")
+        out["characters"] = len(data.get("characters") or []) if isinstance(data, dict) else 0
     else:
         from services import bot_package
         package = _snapshot_data(item)
@@ -435,7 +463,7 @@ def _apply(item: dict, record: Optional[dict], confirmed: bool) -> dict:
     sharer = _view(item, {}, _me())["sharer_name"]
     try:
         local = {"skill": _apply_skill, "automation": _apply_automation, "design": _apply_design,
-                 "bot": _apply_bot}[item["kind"]](item, record, confirmed, sharer)
+                 "bot": _apply_bot, "style_pack": _apply_style_pack}[item["kind"]](item, record, confirmed, sharer)
     except skill_curator.SkillImportRefused as exc:
         raise LibraryError("The safety scan did not allow this skill." if not exc.needs_confirmation
                            else "The safety scan found something to check. Add anyway to accept it.", 422,
@@ -523,3 +551,23 @@ def _apply_bot(item, record, confirmed, sharer):
     except ValueError as exc:
         raise LibraryError(f"That shared bot cannot be added: {exc}") from exc
     return [row["id"] for row in result.get("created", [])]
+
+
+def _apply_style_pack(item, record, confirmed, sharer):
+    """A private draft copy through the pack import (checked like any pack file); an update is a new draft version of
+    the adder's copy when it still exists."""
+    from core import style_pack_store
+    data = _snapshot_data(item)
+    owner = _my_name() or ""
+    into = None
+    if record:
+        try:
+            style_pack_store.get(record["local_id"])
+            into = record["local_id"]
+        except LookupError:
+            into = None
+    try:
+        meta = style_pack_store.import_data(data, by=owner, origin="shared", source=f"shared by {sharer}", into=into)
+    except (style_pack_store.ImportRefused, ValueError, LookupError) as exc:
+        raise LibraryError(f"That shared style pack cannot be added: {exc}") from exc
+    return meta["id"]

@@ -37,7 +37,7 @@ TEAM_ROLES = ("producer", "researcher", "evaluator", "script_writer", "editor", 
 ASPECTS = ("9:16", "16:9", "1:1")
 # Columns added after the first release; a store made before them gains them when it opens.
 LATER_COLUMNS = {"snapshots": {"source": "TEXT NOT NULL DEFAULT 'manual'"},
-                 "channels": {"look": "TEXT", "aspect": "TEXT", "notes": "TEXT NOT NULL DEFAULT ''", "voice": "TEXT"},
+                 "channels": {"look": "TEXT", "aspect": "TEXT", "notes": "TEXT NOT NULL DEFAULT ''", "voice": "TEXT", "style_pack": "TEXT"},
                  "posts": {"pick_reason": "TEXT NOT NULL DEFAULT ''", "tags": "TEXT NOT NULL DEFAULT ''",
                            "ai_label": "INTEGER NOT NULL DEFAULT 1", "format_id": "INTEGER REFERENCES formats(id)",
                            "port_id": "INTEGER REFERENCES ports(id)", "style_pack": "TEXT",
@@ -333,12 +333,22 @@ class Store:
         return self._rows(f"SELECT c.*, n.name AS niche_name FROM channels c JOIN niches n ON n.id = c.niche_id {clause} "
                           "ORDER BY c.id", tuple(args))
 
-    def edit_channel(self, channel_id, look=None, aspect=None, notes=None, voice=None):
-        """The channel's own look (a Studio video look id), aspect, voice notes and narrator voice (a Kokoro voice id),
-        so the Editor and Script Writer make each channel's posts in its own style and the channel keeps one voice.
-        None leaves a field as it is; "" clears it."""
+    def edit_channel(self, channel_id, look=None, aspect=None, notes=None, voice=None, style_pack=None):
+        """The channel's own look (a Studio video look id), aspect, voice notes, narrator voice (a Kokoro voice id) and
+        style pack (a built-in or the account's own approved pack), so the Editor and Script Writer make each channel's
+        posts in its own style and the channel keeps one voice. None leaves a field as it is; "" clears it."""
         self.get_channel(channel_id)
         changes = {}
+        if style_pack is not None:
+            style_pack = _clean_text(style_pack, "style pack", 40, False)
+            if style_pack:
+                from core import style_packs
+                pack = style_packs.get(style_pack)
+                if pack is None:
+                    raise StudioError("that style pack is not in this account")
+                if not pack["available"]:
+                    raise StudioError(f"{pack['name']} cannot be used yet: {pack['note']}")
+            changes["style_pack"] = style_pack or None
         if voice is not None:
             voice = _clean_text(voice, "voice", 40, False)
             if voice and not VOICE_ID.match(voice):
@@ -596,10 +606,11 @@ class Store:
             format_id, style_pack = port["format_id"], style_pack or port["style_pack"]
         if format_id is not None and self.get_format(format_id)["status"] != "active":
             raise conflict("that format is retired")
-        from .formats import STYLE_PACKS
-        style_pack = style_pack or "motion-type"
-        if style_pack not in STYLE_PACKS:
-            raise StudioError(f"style pack must be one of {', '.join(STYLE_PACKS)}")
+        from .formats import all_packs
+        style_pack = style_pack or channel.get("style_pack") or "motion-type"   # the channel's own pack by default
+        packs = all_packs()
+        if style_pack not in packs:
+            raise StudioError(f"style pack must be one of {', '.join(packs)}")
         post_id = self._insert(
             "posts", channel_id=channel_id, topic_id=topic_id, title=_clean_text(title, "title", 200),
             caption=_clean_text(caption, "caption", 5000, False), format=_clean_text(format, "format", 80, False) or None,

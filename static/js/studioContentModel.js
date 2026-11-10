@@ -166,8 +166,9 @@ export function sortDecisions(decisions) {
 
 export const ASPECTS = [['', 'Platform default (9:16)'], ['9:16', '9:16 tall'], ['16:9', '16:9 wide'], ['1:1', '1:1 square']];
 
-export function channelLookText(channel) {
+export function channelLookText(channel, packs) {
   const bits = [];
+  if (channel.style_pack) bits.push(`style ${packName(channel.style_pack, packs)}`);
   if (channel.look) bits.push(`look ${channel.look}`);
   if (channel.aspect) bits.push(channel.aspect);
   if (channel.notes) bits.push('voice notes set');
@@ -477,4 +478,48 @@ export function characterChanges(spec, form) {
   const name = String(form.name || '').trim();
   if (name && name !== spec.name) changes.name = name;
   return changes;
+}
+
+// -- user-made style packs (Video Styles, routes/style_pack_routes.py) --------------------------------------------------
+
+export function packStatus(version) {
+  if (!version) return ['No version', 'muted'];
+  const sample = version.sample?.status || '';
+  if (version.status === 'draft') {
+    if (sample === 'rendering') return ['Rendering its sample', 'accent'];
+    if (sample.startsWith('waiting')) return ['Waiting for character sheets', 'warn'];
+    if (sample.startsWith('failed')) return ['Sample failed', 'warn'];
+    return ['Draft, no sample yet', 'muted'];
+  }
+  return ({ awaiting_approval: ['Waiting for your OK', 'accent'], approved: ['Approved', 'ok'], rejected: ['Rejected', 'warn'] })[version.status]
+    || [version.status || '', 'muted'];
+}
+// What a channel can do with the pack: use its approved version, or nothing yet.
+export function packUseText(pack) {
+  const v = pack.approved_version, renderer = pack.spec?.renderer;
+  if (renderer && renderer !== '2d-engine') return 'Its renderer is not built yet, so it cannot render.';
+  return v ? `Channels and videos use version ${v}.` : 'Not approved yet, so no channel can use it.';
+}
+export function packOriginText(origin) {
+  const from = origin?.from && origin.kind !== 'starter' ? ` (${origin.from})` : '';
+  const label = ({ brief: 'Made from a written brief', duplicate: 'Duplicated', starter: 'Starter pack', import: 'Imported',
+    shared: 'Added from the shared library', reference: 'Made from a reference video' })[origin?.kind];
+  return label ? label + from + '.' : '';
+}
+export function packFacts(spec) {
+  if (!spec) return [];
+  const palette = typeof spec.look.palette === 'string' ? `${spec.look.palette} palette` : 'its own palette';
+  return [
+    ['Look', `${spec.base === 'flat-2d' ? 'Flat 2D with characters' : 'Motion type'}, ${palette}, ${spec.look.lighting} light, design look ${spec.look.design_look}`],
+    ['Characters', spec.characters.length ? `${spec.characters.length} in its set (${spec.look.families.join(', ')} families)` : 'None'],
+    ['Scenes', `${spec.scenes.settings.join(', ')}; ${spec.scenes.shots.join(', ')} shots`],
+    ['Camera and cuts', `${spec.scenes.cameras.join(', ')}; ${spec.scenes.transitions.join(', ')}`],
+    ['Pacing', `${spec.pacing.words_per_second} words a second, shots of ${spec.pacing.shot_seconds[0]} to ${spec.pacing.shot_seconds[1]} s, hook in ${spec.pacing.hook_seconds} s`],
+    ['Captions', spec.captions.on ? `On, ${spec.captions.case === 'upper' ? 'upper case' : 'sentence case'}` : 'Off'],
+    ['Music and voice', `${spec.music.mood} music, voice ${spec.voice.voice}`],
+  ];
+}
+// The pack options a channel can pick: the built-ins that run today and the account's approved packs.
+export function packOptions(available) {
+  return [['', 'Motion type (default)'], ...(available || []).filter(p => p.id !== 'motion-type').map(p => [p.id, p.name])];
 }

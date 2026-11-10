@@ -363,6 +363,8 @@ app.include_router(video_routes.router)
 from routes import character_routes  # Pack A characters: specs, sheets and the person's approval (Video Styles unit 3)
 _video_middleware._OWN_POLICY_PATHS += (character_routes.SHEET_PAGE_PATH,)
 app.include_router(character_routes.router)
+from routes import style_pack_routes  # user-made style packs: brief, duplicate, starter, import/export, the person's approval
+app.include_router(style_pack_routes.router)
 app.include_router(design_routes.router)
 app.include_router(design_routes.systems_router)
 app.include_router(design_routes.render_router)

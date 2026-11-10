@@ -1,6 +1,7 @@
 import { api, el, toast, confirmDialog, openPanelDialog } from './api.js';
 import { group, row, pill, note, empty, badge, hueFor } from './settingsKit.js';
 import * as M from './studioContentModel.js';
+import { libraryShareButton } from './libraryShare.js';
 
 // The Content section of the Studio tab: channels, the pipeline board, approvals, the scoreboard, the weekly report
 // and the numbers import for the Content Studio team (routes/content_studio_routes.py). Drawn with the Settings kit
@@ -9,10 +10,14 @@ import * as M from './studioContentModel.js';
 // Formats shows the Researcher's format cards and the ports the Evaluator checked; the bots write them, this only reads.
 // Characters (Pack A) lists each character's versions with their reference sheets: a sheet waiting for you is also in
 // Approvals, and only you approve it (routes/character_routes.py). A video may only use an approved version.
+// Styles lists the account's own style packs (routes/style_pack_routes.py): make one from a written brief, duplicate one,
+// add the starter pack or import a pack file; edit the brief (a new version), render its sample, export it, share it, and
+// approve or reject it. A pack waiting for you is also in Approvals. Channels pick their pack in Look.
 
 const BASE = '/api/content-studio';
-const TABS = [['approvals', 'Approvals'], ['pipeline', 'Pipeline'], ['channels', 'Channels'], ['formats', 'Formats'], ['characters', 'Characters'], ['scoreboard', 'Scoreboard'], ['report', 'Report']];
+const TABS = [['approvals', 'Approvals'], ['pipeline', 'Pipeline'], ['channels', 'Channels'], ['formats', 'Formats'], ['characters', 'Characters'], ['styles', 'Styles'], ['scoreboard', 'Scoreboard'], ['report', 'Report']];
 const CHARACTERS = '/api/characters';
+const STYLES = '/api/style-packs';
 const sendTo = (path, body = {}) => api(path, { method: 'POST', body: JSON.stringify(body), toast: false });
 const get = path => api(BASE + path);
 const send = (path, body = {}) => api(BASE + path, { method: 'POST', body: JSON.stringify(body), toast: false });
@@ -77,7 +82,7 @@ export async function mountContent(host, { signal } = {}) {
 
   async function loadCore() {
     const names = ['niches', 'channels', 'pipeline', 'approvals', 'watch', 'settings', 'analytics/youtube/status', 'posting/youtube/status'];
-    const results = await Promise.allSettled(names.map(n => get('/' + n)));
+    const [results, styles] = await Promise.all([Promise.allSettled(names.map(n => get('/' + n))), api(STYLES).catch(() => null)]);
     if (!alive()) return;
     if (results.every(r => r.status === 'rejected')) {
       root.replaceChildren(el('p', { role: 'alert', class: 'sc-error', text: M.loadFailure(results[0].reason) }), btn('Try again', reload));
@@ -86,7 +91,8 @@ export async function mountContent(host, { signal } = {}) {
     const value = (name, fallback) => { const r = results[names.indexOf(name)]; return r.status === 'fulfilled' ? r.value : fallback; };
     data = { ...(data || {}), niches: value('niches', { niches: [] }).niches, maxLive: value('niches', {}).max_live,
       channels: value('channels', { channels: [] }).channels, items: value('pipeline', { items: [] }).items,
-      approvals: value('approvals', { posts: [] }).posts, sheets: value('approvals', {}).characters || [], findings: value('watch', { findings: [] }).findings,
+      approvals: value('approvals', { posts: [] }).posts, sheets: value('approvals', {}).characters || [], packsWaiting: value('approvals', {}).style_packs || [],
+      styles, findings: value('watch', { findings: [] }).findings,
       hasTeam: (value('settings', {}).team_bot_ids || []).length > 0, settings: value('settings', {}),
       yt: value('analytics/youtube/status', null), ytPost: value('posting/youtube/status', null),
       failed: names.filter((n, i) => results[i].status === 'rejected' && !n.includes('youtube')) };
@@ -213,15 +219,17 @@ export async function mountContent(host, { signal } = {}) {
     const notes = el('textarea', { rows: 4, 'aria-label': 'Voice notes', maxlength: '1000', placeholder: 'How this channel talks. For example, calm and curious, no hype.' });
     notes.value = channel.notes || '';
     const voice = textInput('Narrator voice', { value: channel.voice || '', maxlength: '40', placeholder: 'For example, af_heart' });
+    const pack = selectOf('Style pack', M.packOptions(data.styles?.available), channel.style_pack || '');
     const status = el('p', { class: 'set-error', role: 'alert' });
     const body = el('div', { class: 'sc-dialog' }, [
-      note('The Editor renders this channel\'s videos in its look and aspect, and the Script Writer follows its voice notes.'),
-      group({}, [row({ title: 'Look', description: 'A Studio video look id. Leave it empty to let the Editor choose.', control: look, stack: true }),
+      note('The Editor renders this channel\'s videos in its style pack, look and aspect, and the Script Writer follows its voice notes.'),
+      group({}, [row({ title: 'Style pack', description: 'How this channel\'s videos look and sound. Only approved packs are listed (Styles).', control: pack }),
+        row({ title: 'Look', description: 'A Studio video look id. Leave it empty to let the Editor choose.', control: look, stack: true }),
         row({ title: 'Aspect', control: aspect }), row({ title: 'Voice notes', control: notes, stack: true }),
         row({ title: 'Narrator voice', description: 'The Kokoro voice that narrates every video on this channel. Left empty, the first narrated video sets it.', control: voice, stack: true })]), status]);
     const save = btn('Save look', async () => {
       status.textContent = '';
-      try { await send(`/channels/${channel.id}/edit`, { look: look.value.trim(), aspect: aspect.value, notes: notes.value.trim(), voice: voice.value.trim() }); }
+      try { await send(`/channels/${channel.id}/edit`, { look: look.value.trim(), aspect: aspect.value, notes: notes.value.trim(), voice: voice.value.trim(), style_pack: pack.value }); }
       catch (error) { status.textContent = M.loadFailure(error); return; }
       dialog.close(); toast('Look saved.'); await reload();
     }, 'primary');
@@ -243,7 +251,7 @@ export async function mountContent(host, { signal } = {}) {
       }, 'quiet', { 'aria-label': `Archive ${name}` }));
     }
     return row({ icon: badge(M.platformName(channel.platform), hueFor(channel.platform)), title: channel.handle,
-      description: M.platformName(channel.platform) + (channel.status === 'archived' ? '' : `. ${M.channelLookText(channel)}`) + (channel.archive_reason ? `. ${channel.archive_reason}` : ''),
+      description: M.platformName(channel.platform) + (channel.status === 'archived' ? '' : `. ${M.channelLookText(channel, data.styles?.available)}`) + (channel.archive_reason ? `. ${channel.archive_reason}` : ''),
       below: warning ? el('div', { class: 'sc-warning', role: 'alert' }, [el('strong', { text: 'Platform warning: ' }), warning]) : null,
       control: controls, cls: warning ? 'sc-row-warning' : '', attrs: { 'data-channel-id': channel.id } });
   }
@@ -339,7 +347,7 @@ export async function mountContent(host, { signal } = {}) {
   // -- approvals -------------------------------------------------------------------------------
 
   function approvalsView() {
-    const sheets = data.sheets.map(sheetCard);
+    const sheets = [...data.packsWaiting.map(v => packCard(v)), ...data.sheets.map(sheetCard)];
     if (!data.approvals.length) return sheets.length ? sheets : [empty('Nothing is waiting for you. Posts appear here when the Producer brings them for approval.')];
     const out = [...sheets, note('Approving marks a post approved. Preparing it for the platform comes later, so approved posts wait in the Pipeline until then.')];
     const count = data.approvals.length;
@@ -479,6 +487,175 @@ export async function mountContent(host, { signal } = {}) {
       out.push(group({ title: character.name, description: `${character.family[0].toUpperCase() + character.family.slice(1)} family. ${M.castableText(character)}`, cls: 'sc-character',
         actions: [btn('New version', () => versionDialog(character), 'quiet', { 'aria-label': `New version of ${character.name}` })] }, rows));
     }
+    return out;
+  }
+
+  // -- style packs ---------------------------------------------------------------------------------
+
+  // A pack version waiting for the person: its sample video and contact sheet, then Approve or Reject with a note.
+  function packCard(v) {
+    const title = `${v.name}, version ${v.version}`;
+    const node = el('article', { class: 'sc-post sc-pack', 'data-pack-approval': `${v.id}-${v.version}`, 'aria-label': `${v.name} style pack` });
+    const header = el('header', { class: 'sc-post-head' }, [el('h3', { class: 'sc-post-title', text: `Style pack: ${title}` }),
+      el('div', { class: 'sc-post-pills' }, [pill(M.packStatus(v)[0], 'accent')])]);
+    const base = `${STYLES}/${encodeURIComponent(v.id)}/versions/${Number(v.version)}`;
+    const media = el('div', { class: 'sc-pack-media' }, [
+      el('video', { class: 'sc-pack-video', src: `${base}/sample.mp4`, controls: '', preload: 'metadata', 'aria-label': `Sample video of ${title}` }),
+      el('img', { class: 'sc-sheet-img', src: `${base}/sample-sheet.png`, alt: `Contact sheet of the ${title} sample`, loading: 'lazy' })]);
+    const notes = (v.sample?.notes || []).slice(0, 6);
+    const view = () => node.replaceChildren(header, media,
+      notes.length ? el('ul', { class: 'sc-problems' }, notes.map(n => el('li', { text: n }))) : el('p', { class: 'sc-dim', text: 'The sample passed its checks.' }),
+      note('Approving lets channels and videos use this version. Its characters keep their own approved sheets.'),
+      el('div', { class: 'sc-actions' }, [
+        btn('Approve', async () => { await sendTo(`${base}/approve`); toast(`${v.name} version ${v.version} approved.`); await reload(); }, 'primary', { 'aria-label': `Approve ${title}` }),
+        btn('Reject', () => asking(), 'quiet danger', { 'aria-label': `Reject ${title}` })]));
+    const asking = () => {
+      const reason = el('textarea', { rows: 3, 'aria-label': 'What should change?', maxlength: '500', placeholder: 'What should change? The next version follows it.' });
+      node.replaceChildren(header, media, reason, el('div', { class: 'sc-actions' }, [
+        btn('Reject pack', async () => { await sendTo(`${base}/reject`, { reason: reason.value.trim() }); toast('Rejected.'); await reload(); }, 'danger'),
+        btn('Cancel', () => view(), 'quiet')]));
+      reason.focus();
+    };
+    view();
+    return node;
+  }
+
+  function briefDialog() {
+    const brief = el('textarea', { rows: 12, 'aria-label': 'Brief', maxlength: '12000',
+      placeholder: 'Describe the style like notes to a director: the look and colours, the characters, the scenes, the camera, the pacing, the sound and the captions.' });
+    const name = textInput('Name', { maxlength: '60', placeholder: 'Optional. For example, Calm space explainer' });
+    const status = el('p', { class: 'set-error', role: 'alert' });
+    const body = el('div', { class: 'sc-dialog' }, [
+      note('A model from your Settings > Models turns the brief into the pack\'s look, scenes, pacing and sound. The brief stays with the pack. Use your own characters and words, never another channel\'s.'),
+      group({}, [row({ title: 'Brief', control: brief, stack: true }), row({ title: 'Name', control: name, stack: true })]), status]);
+    const make = btn('Make pack', async () => {
+      status.textContent = '';
+      if (!brief.value.trim()) { status.textContent = 'Write the brief first.'; return; }
+      status.textContent = 'Turning the brief into a pack...';
+      try { await sendTo(STYLES, { source: 'brief', brief: brief.value.trim(), name: name.value.trim() }); }
+      catch (error) { status.textContent = M.loadFailure(error); return; }
+      dialog.close(); toast('Pack made as a draft. Render its sample to send it for your OK.'); await reload();
+    }, 'primary');
+    const dialog = openPanelDialog({ title: 'New style pack from a brief', body, footer: el('div', {}, [make]), className: 'sc-dialog-panel' });
+  }
+
+  function duplicateDialog(pack) {
+    const name = textInput('Name', { maxlength: '60', value: `${pack.name.slice(0, 52)} copy` });
+    const status = el('p', { class: 'set-error', role: 'alert' });
+    const body = el('div', { class: 'sc-dialog' }, [note('The copy is a new pack of your own, starting as a draft. The original stays as it is.'),
+      group({}, [row({ title: 'Name', control: name, stack: true })]), status]);
+    const go = btn('Duplicate', async () => {
+      status.textContent = '';
+      try { await sendTo(STYLES, { source: 'duplicate', pack_id: pack.id, name: name.value.trim() }); }
+      catch (error) { status.textContent = M.loadFailure(error); return; }
+      dialog.close(); toast('Duplicated as a draft.'); await reload();
+    }, 'primary');
+    const dialog = openPanelDialog({ title: `Duplicate ${pack.name}`, body, footer: el('div', {}, [go]), className: 'sc-dialog-panel' });
+  }
+
+  function editDialog(pack) {
+    const spec = pack.spec;
+    const name = textInput('Name', { maxlength: '60', value: spec.name });
+    const summary = el('textarea', { rows: 2, 'aria-label': 'Summary', maxlength: '300' }); summary.value = spec.summary || '';
+    const brief = el('textarea', { rows: 12, 'aria-label': 'Director brief', maxlength: '12000' }); brief.value = spec.director_brief || '';
+    const mood = selectOf('Music mood', [['energetic', 'Energetic'], ['calm', 'Calm'], ['warm', 'Warm'], ['dark', 'Dark'], ['playful', 'Playful']], spec.music.mood);
+    const caseSel = selectOf('Caption case', [['sentence', 'Sentence case'], ['upper', 'Upper case']], spec.captions.case);
+    const captions = selectOf('Captions', [['on', 'On'], ['off', 'Off']], spec.captions.on ? 'on' : 'off');
+    const voice = textInput('Narrator voice', { maxlength: '40', value: spec.voice.voice });
+    const why = textInput('What changed', { maxlength: '300', placeholder: 'For example, calmer music for the night series' });
+    const status = el('p', { class: 'set-error', role: 'alert' });
+    const body = el('div', { class: 'sc-dialog' }, [note('Any change makes a new version, a draft until you approve its sample. Older versions stay as they were.'),
+      group({}, [row({ title: 'Name', control: name, stack: true }), row({ title: 'Summary', control: summary, stack: true }),
+        row({ title: 'Director brief', description: 'The long notes the team follows when it makes a video in this pack.', control: brief, stack: true }),
+        row({ title: 'Music mood', control: mood }), row({ title: 'Captions', control: captions }), row({ title: 'Caption case', control: caseSel }),
+        row({ title: 'Narrator voice', description: 'A Kokoro voice id, for example af_heart.', control: voice, stack: true }),
+        row({ title: 'What changed', control: why, stack: true })]), status]);
+    const save = btn('Save new version', async () => {
+      status.textContent = '';
+      const changes = {};
+      if (name.value.trim() !== spec.name) changes.name = name.value.trim();
+      if (summary.value.trim() !== (spec.summary || '')) changes.summary = summary.value.trim();
+      if (brief.value.trim() !== (spec.director_brief || '')) changes.director_brief = brief.value.trim();
+      if (mood.value !== spec.music.mood) changes.music = { mood: mood.value };
+      const on = captions.value === 'on';
+      if (on !== spec.captions.on || caseSel.value !== spec.captions.case) changes.captions = { on, case: caseSel.value };
+      if (voice.value.trim() !== spec.voice.voice) changes.voice = { voice: voice.value.trim() };
+      if (!Object.keys(changes).length) { status.textContent = 'Change something first.'; return; }
+      try { await sendTo(`${STYLES}/${encodeURIComponent(pack.id)}/versions`, { changes, note: why.value.trim() }); }
+      catch (error) { status.textContent = M.loadFailure(error); return; }
+      dialog.close(); toast('New version saved as a draft.'); await reload();
+    }, 'primary');
+    const dialog = openPanelDialog({ title: `Edit ${pack.name}`, body, footer: el('div', {}, [save]), className: 'sc-dialog-panel' });
+  }
+
+  function importDialog() {
+    const file = el('input', { type: 'file', accept: '.json,application/json', 'aria-label': 'Style pack file' });
+    const status = el('p', { class: 'set-error', role: 'alert' });
+    const body = el('div', { class: 'sc-dialog' }, [
+      note('A style pack file holds data only: the look, the rules, the brief and its characters. Nothing in it runs. It arrives as a draft: render its sample and approve it, and approve its characters\' sheets, before any channel uses it.'),
+      group({}, [row({ title: 'Pack file', control: file })]), status]);
+    const go = btn('Import', async () => {
+      status.textContent = '';
+      const chosen = file.files?.[0];
+      if (!chosen) { status.textContent = 'Choose a pack file first.'; return; }
+      const form = new FormData(); form.append('file', chosen);
+      const res = await fetch(`${STYLES}/import`, { method: 'POST', body: form });
+      if (!res.ok) { let detail = ''; try { detail = (await res.json()).detail; } catch { /* No body. */ } status.textContent = typeof detail === 'string' && detail ? detail : 'That file could not be imported.'; return; }
+      dialog.close(); toast('Imported as a draft.'); await reload();
+    }, 'primary');
+    const dialog = openPanelDialog({ title: 'Import a style pack', body, footer: el('div', {}, [go]), className: 'sc-dialog-panel' });
+  }
+
+  function packVersionRow(pack, v) {
+    const [label, tone] = M.packStatus(v), controls = [pill(label, tone)];
+    const base = `${STYLES}/${encodeURIComponent(pack.id)}/versions/${v.version}`;
+    if (v.status === 'draft' || v.status === 'rejected') {
+      const rendering = v.sample?.status === 'rendering';
+      controls.push(btn(rendering ? 'Rendering' : 'Make sample', async () => {
+        const out = await sendTo(`${base}/sample`);
+        const now = out.versions?.find(x => x.version === v.version);
+        toast(now?.sample?.status?.startsWith('waiting') ? 'Character sheets sent for your OK first. Approve them, then make the sample.' : 'Rendering the sample. It takes a few minutes.');
+        await reload();
+      }, '', { 'aria-label': `Make the sample of ${pack.name} version ${v.version}`, ...(rendering ? { disabled: '' } : {}) }));
+    }
+    if (v.status === 'awaiting_approval') controls.push(btn('Review', () => select('approvals'), 'primary', { 'aria-label': `Review ${pack.name} version ${v.version}` }));
+    const bits = [v.note, v.reason ? `Rejected: ${v.reason}` : '', v.sample?.status?.startsWith('failed') ? v.sample.status : '',
+      v.sample?.waiting?.length ? `Waiting for the sheets of ${v.sample.waiting.join(', ')}.` : ''].filter(Boolean);
+    const below = v.sample_url ? el('div', { class: 'sc-pack-links' }, [el('a', { href: v.sample_url, target: '_blank', rel: 'noopener', text: 'Watch the sample' }), ' ',
+      el('a', { href: v.sheet_url, target: '_blank', rel: 'noopener', text: 'Contact sheet' })]) : null;
+    return row({ title: `Version ${v.version}`, description: bits.join(' ') || ' ', control: controls, below, attrs: { 'data-pack-version': `${pack.id}-${v.version}` } });
+  }
+
+  async function stylesView() {
+    const got = await api(STYLES);
+    data.styles = got;
+    const hasStarter = id => got.packs.some(p => p.origin?.kind === 'starter' && p.origin?.from === id);
+    const actions = [btn('New from a brief', () => briefDialog(), 'primary'), btn('Import', () => importDialog())];
+    for (const starter of got.starters || []) {
+      if (!hasStarter(starter.id)) actions.push(btn(`Add ${starter.name}`, async () => {
+        await sendTo(STYLES, { source: 'starter', starter: starter.id }); toast(`${starter.name} added as a draft. Make its sample to review it.`); await reload();
+      }, '', { 'aria-label': `Add the starter pack ${starter.name}` }));
+    }
+    const out = [el('div', { class: 'sc-bar' }, [note('A style pack is how a channel\'s videos look and sound: palette, characters, scenes, camera, pacing, captions, music and voice, with a director brief the team follows. You approve each pack from its sample before a channel can use it.'),
+      el('div', { class: 'sc-actions' }, actions)])];
+    if (!got.packs.length) out.push(empty('No style packs yet. Write a brief, add the starter pack, or import a pack file.'));
+    for (const pack of got.packs) {
+      const spec = pack.spec;
+      const rows = M.packFacts(spec).map(([k, v]) => row({ title: k, description: v, stack: true }));
+      if (spec?.director_brief) {
+        rows.push(row({ title: 'Director brief', stack: true, below: el('details', { class: 'sc-brief' }, [el('summary', { text: 'Show the brief' }), el('p', { class: 'sc-text', text: spec.director_brief })]) }));
+      }
+      rows.push(...[...pack.versions].reverse().map(v => packVersionRow(pack, v)));
+      const latest = pack.versions.at(-1);
+      const tools = [btn('Edit', () => editDialog(pack), 'quiet', { 'aria-label': `Edit ${pack.name}` }),
+        btn('Duplicate', () => duplicateDialog(pack), 'quiet', { 'aria-label': `Duplicate ${pack.name}` }),
+        el('a', { class: 'btn quiet', href: latest.export_url.replace(/v=\d+$/, `v=${pack.approved_version || latest.version}`), download: '', text: 'Export', 'aria-label': `Export ${pack.name}` })];
+      if (pack.approved_version) tools.push(libraryShareButton('style_pack', pack.id, { text: 'Share' }));
+      out.push(group({ title: pack.name, description: [spec?.summary, M.packOriginText(pack.origin), M.packUseText(pack)].filter(Boolean).join(' '), cls: 'sc-style-pack',
+        actions: tools }, rows));
+    }
+    const built = got.built_in.map(p => row({ title: p.name, description: p.note, control: pill(p.available ? 'Available' : 'Not built yet', p.available ? 'ok' : 'muted'), attrs: { 'data-pack': p.id } }));
+    out.push(group({ title: 'Built into Kairos', description: 'The engines every pack is drawn by.' }, built));
     return out;
   }
 
@@ -647,9 +824,9 @@ export async function mountContent(host, { signal } = {}) {
   async function draw() {
     if (!data) return;
     if (!data.niches.length && !data.channels.length) { root.replaceChildren(emptyState()); return; }
-    tab ||= data.approvals.length || data.sheets.length ? 'approvals' : 'pipeline';
+    tab ||= data.approvals.length || data.sheets.length || data.packsWaiting.length ? 'approvals' : 'pipeline';
     const bar = el('div', { class: 'sc-tabs', role: 'tablist', 'aria-label': 'Content sections' }, TABS.map(([id, name]) => {
-      const waiting = data.approvals.length + data.sheets.length, count = id === 'approvals' && waiting ? ` ${waiting}` : '';
+      const waiting = data.approvals.length + data.sheets.length + data.packsWaiting.length, count = id === 'approvals' && waiting ? ` ${waiting}` : '';
       const node = el('button', { type: 'button', role: 'tab', class: 'sc-tab', id: `sc-tab-${id}`, 'aria-selected': String(id === tab), 'aria-controls': 'sc-body', 'data-tab': id, text: name + count });
       node.addEventListener('click', () => select(id));
       return node;
@@ -662,7 +839,7 @@ export async function mountContent(host, { signal } = {}) {
     const panel = el('div', { class: 'sc-body', id: 'sc-body', role: 'tabpanel', 'aria-labelledby': `sc-tab-${tab}` }, [el('p', { role: 'status', text: 'Loading...' })]);
     root.replaceChildren(...[alerts(), data.failed.length ? el('p', { class: 'set-error', role: 'alert', text: 'Some parts did not load. Try again in a moment.' }) : null, bar, panel].filter(Boolean));
     const shown = tab;
-    const build = { approvals: approvalsView, pipeline: pipelineView, channels: channelsView, formats: formatsView, characters: charactersView, scoreboard: scoreboardView, report: reportView }[shown];
+    const build = { approvals: approvalsView, pipeline: pipelineView, channels: channelsView, formats: formatsView, characters: charactersView, styles: stylesView, scoreboard: scoreboardView, report: reportView }[shown];
     try {
       const content = await build();
       if (alive() && tab === shown && panel.isConnected) panel.replaceChildren(...content);

@@ -83,6 +83,27 @@ def narration_notes(project, voice=None):
     return notes
 
 
+CAPTION_OVERLAP_PX = 8   # a figure's anti-aliased edge or a foot's round cap may touch the band; a body may not
+
+
+def caption_clear_notes(layouts):
+    """Captions stay clear of characters: in any sampled moment, a caption box overlapping a character's visible figure
+    (more than a few pixels both ways) is named. Close shots cut the figure at the near ground (static/motion/scene.js)."""
+    notes = []
+    for sample in layouts or []:
+        elements = sample.get("elements", [])
+        captions = [b for b in elements if b.get("role") == "caption"]
+        figures = [b for b in elements if b.get("kind") == "character" and b.get("h", 0) > 0]
+        for c in captions:
+            for f in figures:
+                wide = min(c["x"] + c["w"], f["x"] + f["w"]) - max(c["x"], f["x"])
+                tall = min(c["y"] + c["h"], f["y"] + f["h"]) - max(c["y"], f["y"])
+                if wide > CAPTION_OVERLAP_PX and tall > CAPTION_OVERLAP_PX:
+                    notes.append(f"Beat {f.get('beat', '?')}: the caption covers a character ({f.get('shot', 'a')} shot); "
+                                 "keep captions clear of characters.")
+    return list(dict.fromkeys(notes))
+
+
 def check(project, aspect="16:9", layouts=None, frames=None, loudness=None, voice=None):
     """Accept samples as {time, elements: kdLayout(t)}; deduplicate repeated notes."""
     w, h = ASPECTS[aspect]
@@ -115,6 +136,7 @@ def check(project, aspect="16:9", layouts=None, frames=None, loudness=None, voic
             fg, bg = _luminance(box.get("color")), _luminance(box.get("bg"))
             if fg is not None and bg is not None and (max(fg, bg) + .05) / (min(fg, bg) + .05) < 4.5:
                 notes.append(f"Beat {label} has text contrast under 4.5:1; strengthen the text or background color.")
+    notes += caption_clear_notes(layouts)
     # Use the worker's actual visible text too, since layout can reveal extra text.
     lengths = {b["id"]: beat_seconds(b, project["bpm"]) for b in project["beats"]}
     for sample in layouts or []:

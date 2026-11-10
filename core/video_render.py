@@ -91,6 +91,37 @@ def cast_problems(project):
     return out
 
 
+def pack_problems(project, sample_of=None):
+    """Why a video cannot render in its style pack: the pack is missing, or the version is not approved. The pack's own
+    sample (core/style_pack_sample.py, `sample_of` = (id, version)) renders before approval: it is what the person
+    approves."""
+    from core import style_pack_store
+    pin = project.get("style_pack")
+    if not pin:
+        return []
+    try:
+        meta = style_pack_store.get(pin["id"])
+        status = style_pack_store.version_of(meta, pin["version"])["status"]
+    except LookupError as error:
+        return [str(error).strip("'")]
+    if status == "approved" or sample_of == (pin["id"], pin["version"]):
+        return []
+    return [f"The style pack {meta['name']} version {pin['version']} is {status.replace('_', ' ')}; a video renders only in an approved "
+            "version. Approve it in Studio > Content > Styles, or use an approved version."]
+
+
+def pack_notes(project):
+    """Where the video strays from its style pack's scene rules and pacing."""
+    from core import style_pack_store
+    pin = project.get("style_pack")
+    if not pin:
+        return []
+    try:
+        return style_pack_store.rule_notes(project, style_pack_store.spec(pin["id"], pin["version"]))
+    except LookupError as error:
+        return [str(error).strip("'")]
+
+
 def character_notes(project, layouts, frames, times):
     """Sheet-match checks (section 5) on sampled frames: each character the layout reports at a frame's time."""
     from core import character_checks, character_store
@@ -140,13 +171,16 @@ def cancel(job_id):
     return status(job_id)
 
 
-def start(video_id, aspect):
+def start(video_id, aspect, sample_of=None):
     """Return a reviewable job id immediately; fail before queuing without FFmpeg."""
     project = video_store.get(video_id)
     _aspect(project, aspect)
     problems = cast_problems(project)
     if problems:
         raise ValueError("cast: " + " ".join(problems))
+    problems = pack_problems(project, sample_of)
+    if problems:
+        raise ValueError("style_pack: " + " ".join(problems))
     if not ffmpeg_tools.find():
         raise RuntimeError(ffmpeg_tools.MISSING)
     if not design_render_bridge.available():
@@ -164,8 +198,8 @@ def start(video_id, aspect):
     return status(job_id)
 
 
-async def render(video_id, aspect):
-    job = start(video_id, aspect)
+async def render(video_id, aspect, sample_of=None):
+    job = start(video_id, aspect, sample_of)
     await _tasks[job["id"]]
     return status(job["id"])
 
@@ -239,6 +273,7 @@ async def _render(project, aspect, job_id):
         measured = await _thread_done(ffmpeg_tools.loudness, temp)
         notes = video_checks.check(project, aspect, layouts, samples, measured, voice or None)
         notes += character_notes(project, layouts, samples, [i / 30 for i in sorted(indices)])
+        notes += pack_notes(project)
         sheet = folder / f"sheet-{slug}.png"
         sheet.write_bytes(ffmpeg_tools.contact_sheet(samples, 4))
         thumb_path = folder / f"thumb-{slug}.png"
@@ -286,6 +321,7 @@ async def preview(video_id, aspect, times=None):
         layouts.extend(samples)
     async with _machine():
         await design_render_bridge.video(_job(project, aspect, secrets.token_hex(8), times), consume)
-    notes = video_checks.check(project, aspect, layouts, frames) + character_notes(project, layouts, frames, times)
+    notes = video_checks.check(project, aspect, layouts, frames) + character_notes(project, layouts, frames, times) + pack_notes(project)
+    notes += [f"Preview only: {p}" for p in pack_problems(project)]
     _last_preview[video_id] = {"version": project["version"], "notes": list(dict.fromkeys(notes))}
     return frames

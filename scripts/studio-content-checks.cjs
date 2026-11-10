@@ -83,7 +83,7 @@ function content(method, p, body) {
   if (/^\/channels\/\d+\/restore$/.test(p)) { Object.assign(channel, { status: 'live', archive_reason: null }); return [200, channel]; }
   if (/^\/channels\/\d+\/resume$/.test(p)) { channel.paused = 0; store.findings = store.findings.filter(f => f.channel_id !== id); return [200, channel]; }
   if (p === '/pipeline') return [200, { items: store.items }];
-  if (p === '/approvals') return [200, { posts: store.approvals, characters: pending() }];
+  if (p === '/approvals') return [200, { posts: store.approvals, characters: pending(), style_packs: pendingPacks() }];
   if (p === '/watch') return [200, { findings: store.findings }];
   if (p === '/settings') { if (method === 'PUT') Object.assign(store.settings, body); return [200, { ...store.settings, team_bot_ids: store.team }]; }
   if (p === '/posts' && method === 'GET') return [200, { posts: store.posted }];
@@ -149,6 +149,41 @@ function characters(method, p, body) {
   return [200, { ...c, spec: pipSpec }];
 }
 
+// User-made style packs (routes/style_pack_routes.py): an approved starter pack and a draft made from a brief.
+const packSpec = name => ({ name, summary: `${name} in flat shapes.`, renderer: '2d-engine', base: 'flat-2d', director_brief: `The brief of ${name}.\nSecond paragraph.`,
+  look: { design_look: 'nordic', palette: { sky: ['#173d7a', '#3f7bc8'] }, families: ['round', 'square'], outline: 7, lighting: 'glow' },
+  characters: [{ character: 'abcdefabcdef', version: 1 }], scenes: { settings: ['meadow', 'space'], shots: ['wide', 'close'], props: ['sun'], cameras: ['still', 'push'], transitions: ['cut'] },
+  pacing: { words_per_second: 2.6, shot_seconds: [2, 8], hook_seconds: 5 }, captions: { on: true, case: 'sentence' }, music: { mood: 'calm', volume: .55 }, voice: { voice: 'af_heart' } });
+const packVersion = (id, version, status, extra = {}) => ({ version, status, note: 'First version.', reason: '', sample: status === 'draft' ? null : { status: 'ready', notes: [] },
+  sample_url: status === 'draft' ? null : `/api/style-packs/${id}/versions/${version}/sample.mp4`, sheet_url: status === 'draft' ? null : `/api/style-packs/${id}/versions/${version}/sample-sheet.png`,
+  export_url: `/api/style-packs/${id}/export?v=${version}`, ...extra });
+const styles = { packs: [
+  { id: 'aaaaaaaaaaaa', name: 'Flat science explainer', origin: { kind: 'starter', from: 'flat-science-explainer' }, approved_version: 1, spec: packSpec('Flat science explainer'),
+    versions: [packVersion('aaaaaaaaaaaa', 1, 'approved', { note: 'The starter pack.' })] },
+  { id: 'cccccccccccc', name: 'Night mode', origin: { kind: 'brief', from: 'david' }, approved_version: null, spec: packSpec('Night mode'),
+    versions: [packVersion('cccccccccccc', 1, 'draft', { note: 'From a brief.' })] }],
+  built_in: [{ id: 'motion-type', name: 'Motion type', available: true, note: 'Kinetic type.' }, { id: 'glossy-3d', name: 'Glossy 3D mascot', available: false, note: 'Not built yet (build unit 5).' }],
+  available: [{ id: 'motion-type', name: 'Motion type' }, { id: 'flat-2d', name: 'Flat 2D explainer' }, { id: 'aaaaaaaaaaaa', name: 'Flat science explainer' }],
+  starters: [{ id: 'flat-science-explainer', name: 'Flat science explainer', summary: 'Flat science.' }] };
+const pendingPacks = () => styles.packs.flatMap(k => k.versions.filter(v => v.status === 'awaiting_approval').map(v => ({ id: k.id, name: k.name, ...v })));
+function stylePacks(method, p, body) {
+  if (p === '/api/style-packs' && method === 'GET') return [200, { ...styles, pending: pendingPacks() }];
+  if (p === '/api/style-packs' || p === '/api/style-packs/import') {
+    const id = 'dddddddddddd'.slice(0, 11) + styles.packs.length;
+    const k = { id, name: body?.name || 'New pack', origin: { kind: body?.source || 'import' }, approved_version: null, spec: packSpec(body?.name || 'New pack'), versions: [packVersion(id, 1, 'draft')] };
+    styles.packs.push(k); return [200, k];
+  }
+  const m = /^\/api\/style-packs\/([a-f0-9]{12})\/versions(?:\/(\d+)\/(sample|approve|reject))?$/.exec(p);
+  const k = m && styles.packs.find(x => x.id === m[1]);
+  if (!k) return [404, { detail: 'No such style pack.' }];
+  if (!m[2]) { k.versions.push(packVersion(k.id, k.versions.length + 1, 'draft', { note: body.note })); return [200, k]; }
+  const v = k.versions.find(x => x.version === Number(m[2]));
+  if (m[3] === 'sample') Object.assign(v, packVersion(k.id, v.version, 'awaiting_approval'));
+  if (m[3] === 'approve') { v.status = 'approved'; k.approved_version = v.version; }
+  if (m[3] === 'reject') Object.assign(v, { status: 'rejected', reason: body.reason });
+  return [200, k];
+}
+
 function json(res, value, status = 200) { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)); }
 async function serve(req, res) {
   const url = new URL(req.url, 'http://localhost'), p = url.pathname;
@@ -156,11 +191,13 @@ async function serve(req, res) {
     let body = null;
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       let raw = ''; for await (const chunk of req) raw += chunk;
-      body = raw ? JSON.parse(raw) : {};
+      body = (req.headers['content-type'] || '').startsWith('multipart/form-data') ? { multipart: raw.includes('kairos.style-pack') } : raw ? JSON.parse(raw) : {};
       writes.push({ path: p, method: req.method, body });
     }
     if (/^\/api\/characters\/[a-f0-9]{12}\/versions\/\d+\/sheet\.png$/.test(p)) { res.writeHead(200, { 'Content-Type': 'image/png' }); res.end(PIXEL); return; }
     if (p.startsWith('/api/characters')) { const [status, value] = characters(req.method, p, body); return json(res, value, status); }
+    if (/^\/api\/style-packs\/[a-f0-9]{12}\/versions\/\d+\/sample(\.mp4|-sheet\.png)$/.test(p)) { res.writeHead(200, { 'Content-Type': 'image/png' }); res.end(PIXEL); return; }
+    if (p.startsWith('/api/style-packs')) { const [status, value] = stylePacks(req.method, p, body); return json(res, value, status); }
     if (p.startsWith('/api/content-studio/')) { const [status, value] = content(req.method, p.slice('/api/content-studio'.length), body); return json(res, value, status); }
     if (p === '/api/system/custom-tabs') return json(res, [customTab]);
     if (p === '/api/tab-studio/looks') return json(res, { default: 'sport', looks: [{ id: 'sport', name: 'Sport' }] });
@@ -298,11 +335,14 @@ app.whenReady().then(async () => {
     assert.ok(await js("document.querySelector('[data-channel-id=\"1\"]').textContent.includes('No look set')"));
     await js("document.querySelector('button[aria-label=\"Look for YouTube @cooks\"]').click()");
     await wait("!!document.querySelector('[aria-label=\"Look id\"]')");
+    assert.deepEqual(await js("[...document.querySelector('[aria-label=\"Style pack\"]').options].map(o=>o.textContent)"),
+      ['Motion type (default)', 'Flat 2D explainer', 'Flat science explainer'], 'Only approved packs are offered');
     await fill('Look id', 'sport'); await fill('Aspect', '16:9'); await fill('Voice notes', 'Calm, curious.'); await fill('Narrator voice', 'af_heart');
+    await fill('Style pack', 'aaaaaaaaaaaa');
     await click('.sc-dialog-panel button', 'Save look');
     await wait("!document.querySelector('[aria-label=\"Look id\"]')");
-    assert.deepEqual(last('/channels/1/edit').body, { look: 'sport', aspect: '16:9', notes: 'Calm, curious.', voice: 'af_heart' });
-    await wait("document.querySelector('[data-channel-id=\"1\"]').textContent.includes('look sport, 16:9, voice notes set')");
+    assert.deepEqual(last('/channels/1/edit').body, { look: 'sport', aspect: '16:9', notes: 'Calm, curious.', voice: 'af_heart', style_pack: 'aaaaaaaaaaaa' });
+    await wait("document.querySelector('[data-channel-id=\"1\"]').textContent.includes('style Flat science explainer, look sport, 16:9, voice notes set')");
     await noOverflow(); await labels();
 
     // 4. The pipeline board: steps, owner, age, overdue flag; a click opens the details.
@@ -431,6 +471,67 @@ app.whenReady().then(async () => {
     assert.ok(!(await js("document.querySelector('.sc-body').textContent")).includes('\u2014'), 'No em-dashes in the copy');
     await pause(1100);
 
+    // 5d. Styles: the account's own style packs. Make one from a brief, duplicate, edit the brief, import, render a sample,
+    // and approve it in Approvals (only the person approves). Export and Share are offered on an approved pack.
+    await tab('styles');
+    await wait("document.querySelectorAll('.sc-style-pack').length===2");
+    const stext = await js("document.querySelector('.sc-body').textContent");
+    for (const part of ['Flat science explainer', 'Starter pack. Channels and videos use version 1.', 'Night mode',
+      'Made from a written brief (david). Not approved yet', 'Draft, no sample yet', 'Not approved yet, so no channel can use it.', 'Show the brief', 'Built into Kairos',
+      'Flat 2D with characters, its own palette, glow light', 'You approve each pack from its sample']) assert.ok(stext.includes(part), part);
+    assert.ok(!stext.includes('Add Flat science explainer'), 'The starter pack is offered only until it is added');
+    assert.ok(!stext.includes('\u2014'), 'No em-dashes in the copy');
+    assert.equal(await js("document.querySelector('a[aria-label=\"Export Flat science explainer\"]').getAttribute('href')"), '/api/style-packs/aaaaaaaaaaaa/export?v=1');
+    assert.deepEqual(await js("[...document.querySelectorAll('.sc-style-pack')].map(g=>[...g.querySelectorAll('button')].some(b=>b.textContent==='Share'))"), [true, false], 'Only an approved pack is shared');
+    await capture('desktop-styles'); await noOverflow(); await labels();
+    await click('.sc button', 'Make the sample of Night mode version 1');
+    await wait("document.querySelector('.sc-tab[data-tab=approvals]').textContent==='Approvals 1'");
+    assert.ok(last('/api/style-packs/cccccccccccc/versions/1/sample'));
+    await tab('approvals');
+    await wait("!!document.querySelector('[data-pack-approval=\"cccccccccccc-1\"] video')");
+    assert.ok(await js("document.querySelector('[data-pack-approval=\"cccccccccccc-1\"] img').alt.includes('Contact sheet')"));
+    await capture('desktop-pack-approval'); await labels();
+    await click('.sc button', 'Approve Night mode, version 1');
+    await wait("!document.querySelector('[data-pack-approval]')");
+    assert.ok(last('/api/style-packs/cccccccccccc/versions/1/approve'));
+    await tab('styles');
+    await wait("document.querySelectorAll('.sc-style-pack').length===2");
+    await click('.sc button', 'New from a brief');
+    await wait("!!document.querySelector('.sc-dialog [aria-label=Brief]')");
+    await click('.sc-dialog-panel button', 'Make pack');
+    await wait("document.querySelector('.sc-dialog .set-error').textContent.includes('Write the brief first')");
+    await fill('Brief', 'Calm ocean explainers. Deep teal water, slow pans, gentle music.'); await fill('Name', 'Ocean calm');
+    await click('.sc-dialog-panel button', 'Make pack');
+    await wait("!document.querySelector('.sc-dialog')");
+    assert.deepEqual(last('/api/style-packs').body, { source: 'brief', brief: 'Calm ocean explainers. Deep teal water, slow pans, gentle music.', name: 'Ocean calm' });
+    await wait("document.querySelectorAll('.sc-style-pack').length===3");
+    await click('.sc button', 'Duplicate Flat science explainer');
+    await wait("!!document.querySelector('.sc-dialog [aria-label=Name]')");
+    await click('.sc-dialog-panel button', 'Duplicate');
+    await wait("!document.querySelector('.sc-dialog')");
+    assert.deepEqual(last('/api/style-packs').body, { source: 'duplicate', pack_id: 'aaaaaaaaaaaa', name: 'Flat science explainer copy' });
+    await wait("document.querySelectorAll('.sc-style-pack').length===4");
+    await click('.sc button', 'Edit Night mode');
+    await wait("!!document.querySelector('.sc-dialog [aria-label=\"Director brief\"]')");
+    await click('.sc-dialog-panel button', 'Save new version');
+    await wait("document.querySelector('.sc-dialog .set-error').textContent.includes('Change something first')");
+    await fill('Director brief', 'A calmer brief.'); await fill('Caption case', 'upper'); await fill('What changed', 'Calmer');
+    await click('.sc-dialog-panel button', 'Save new version');
+    await wait("!document.querySelector('.sc-dialog')");
+    assert.deepEqual(last('/api/style-packs/cccccccccccc/versions').body, { changes: { director_brief: 'A calmer brief.', captions: { on: true, case: 'upper' } }, note: 'Calmer' });
+    await click('.sc button', 'Import');
+    await wait("!!document.querySelector('.sc-dialog [aria-label=\"Style pack file\"]')");
+    await click('.sc-dialog-panel button', 'Import');
+    await wait("document.querySelector('.sc-dialog .set-error').textContent.includes('Choose a pack file')");
+    await js(`(() => { const dt = new DataTransfer(); dt.items.add(new File([JSON.stringify({ format: 'kairos.style-pack', format_version: 1 })], 'pack.kairos-style.json', { type: 'application/json' }));
+      document.querySelector('[aria-label="Style pack file"]').files = dt.files; })()`);
+    await click('.sc-dialog-panel button', 'Import');
+    await wait("!document.querySelector('.sc-dialog')");
+    assert.deepEqual(last('/api/style-packs/import').body, { multipart: true });
+    await noOverflow(); await labels();
+    assert.ok(!(await js("document.querySelector('.sc-body').textContent")).includes('\u2014'), 'No em-dashes in the copy');
+    await pause(1100);
+
     // 6. Scoreboard: needs more data, scores, awaiting decisions with Confirm / Reject.
     await tab('scoreboard');
     await wait("!!document.querySelector('[data-score-row=Cooking]')");
@@ -501,7 +602,7 @@ app.whenReady().then(async () => {
 
     // 8. Phone layout: nothing spills sideways and every control is at least 44px.
     win.setContentSize(390, 1000); await pause(350);
-    for (const name of ['approvals', 'pipeline', 'channels', 'formats', 'characters', 'scoreboard', 'report']) {
+    for (const name of ['approvals', 'pipeline', 'channels', 'formats', 'characters', 'styles', 'scoreboard', 'report']) {
       await tab(name); await pause(250); await noOverflow(); await labels();
       assert.deepEqual(await js("[...document.querySelectorAll('.sc button,.sc select,.sc input:not([type=checkbox]),.sc textarea')].filter(n=>n.getBoundingClientRect().height>0 && n.getBoundingClientRect().height<43).map(n=>n.outerHTML.slice(0,90))"), [], `Phone targets in ${name}`);
       await capture('phone-' + name);
@@ -516,7 +617,7 @@ app.whenReady().then(async () => {
     store.forbidden = false;
 
     assert.deepEqual(errors, []); assert.deepEqual(outside, []);
-    console.log(JSON.stringify({ ok: true, output, writes: writes.length, checks: ['empty state and template deep link', 'add channel', 'warning shown and resolved', 'archive and restore', 'youtube connections and privacy', 'channel look', 'pipeline board', 'details', 'post to youtube', 'approve', 'edit', 'reject with note', 'redraft', 'batch approval', 'scoreboard needs more data', 'niche proposal', 'team settings', 'decisions confirm and reject', 'format cards and ports', 'characters and sheet approval', 'report', 'csv mapping and import', '390 phone', '403', 'offline'] }));
+    console.log(JSON.stringify({ ok: true, output, writes: writes.length, checks: ['empty state and template deep link', 'add channel', 'warning shown and resolved', 'archive and restore', 'youtube connections and privacy', 'channel look', 'pipeline board', 'details', 'post to youtube', 'approve', 'edit', 'reject with note', 'redraft', 'batch approval', 'scoreboard needs more data', 'niche proposal', 'team settings', 'decisions confirm and reject', 'format cards and ports', 'characters and sheet approval', 'style packs: brief, duplicate, edit, import, sample, approval', 'channel style pack', 'report', 'csv mapping and import', '390 phone', '403', 'offline'] }));
   } catch (error) {
     console.error(error.stack);
     if (win && !win.isDestroyed()) fs.writeFileSync(path.join(output, 'failure.png'), (await win.webContents.capturePage()).toPNG());

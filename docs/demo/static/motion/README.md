@@ -110,3 +110,16 @@ short label on a card at the top.
 
 `sheet.js` + `sheet.html` render a character's reference sheet (every view, expression and mouth
 shape, the palette) in the render worker as a PNG job; the layout comes from core/character_sheet.py.
+
+## User-made style packs
+
+A video made in a user-made style pack (core/style_pack_store.py) gets the pack's look from the
+player as `pack`: its scene palette as checked hex colours, its lighting (flat, soft or glow: how
+strong the soft light gradients on the flat layers are) and its caption case. `normalizePack` keeps
+only those; a malformed palette is dropped and the named palette is used. Nothing else of a pack
+reaches the page, and nothing in a pack runs.
+
+Captions stay clear of characters: a captioned scene stands its figures 3% of the height above the
+caption band, and a close shot cuts the cast at the near ground layer (`castClip`), so a close
+figure is framed from the chest up and its box in `layout()` carries that `clip`. The render notes
+name any caption that still covers a character (core/video_checks.caption_clear_notes).

@@ -161,5 +161,29 @@ const { pathToFileURL } = require('node:url');
   assert.deepEqual(M.characterChanges(spec, { body: 'red', accessory: 'cap', name: ' Pippa ' }), { accessory: 'cap', name: 'Pippa' });
   assert.deepEqual(M.characterChanges(spec, {}), {});
 
+  // Style packs: status pills by sample progress, what channels can do with a pack, its origin, facts and channel options.
+  assert.deepEqual(M.packStatus({ status: 'draft', sample: null }), ['Draft, no sample yet', 'muted']);
+  assert.deepEqual(M.packStatus({ status: 'draft', sample: { status: 'rendering' } }), ['Rendering its sample', 'accent']);
+  assert.deepEqual(M.packStatus({ status: 'draft', sample: { status: 'waiting for character sheets' } }), ['Waiting for character sheets', 'warn']);
+  assert.deepEqual(M.packStatus({ status: 'draft', sample: { status: 'failed: no desktop app' } }), ['Sample failed', 'warn']);
+  assert.deepEqual(M.packStatus({ status: 'awaiting_approval' }), ['Waiting for your OK', 'accent']);
+  assert.equal(M.packUseText({ approved_version: 2, spec: { renderer: '2d-engine' } }), 'Channels and videos use version 2.');
+  assert.equal(M.packUseText({ approved_version: null, spec: { renderer: '2d-engine' } }), 'Not approved yet, so no channel can use it.');
+  assert.equal(M.packUseText({ approved_version: 1, spec: { renderer: 'blender' } }), 'Its renderer is not built yet, so it cannot render.');
+  assert.equal(M.packOriginText({ kind: 'brief', from: 'david' }), 'Made from a written brief (david).');
+  assert.equal(M.packOriginText({ kind: 'starter', from: 'flat-science-explainer' }), 'Starter pack.');
+  assert.equal(M.packOriginText({ kind: 'nope' }), '');
+  const packSpec = { base: 'flat-2d', look: { palette: { sky: ['#000000', '#111111'] }, lighting: 'glow', design_look: 'nordic', families: ['round'] },
+    characters: [{ character: 'abcdefabcdef', version: 1 }], scenes: { settings: ['space'], shots: ['wide', 'close'], cameras: ['push'], transitions: ['cut'] },
+    pacing: { words_per_second: 2.6, shot_seconds: [2, 8], hook_seconds: 5 }, captions: { on: true, case: 'upper' }, music: { mood: 'calm' }, voice: { voice: 'af_heart' } };
+  const facts = Object.fromEntries(M.packFacts(packSpec));
+  assert.equal(facts.Look, 'Flat 2D with characters, its own palette, glow light, design look nordic');
+  assert.equal(facts.Captions, 'On, upper case');
+  assert.deepEqual(M.packFacts(null), []);
+  for (const [, text] of M.packFacts(packSpec)) assert.ok(!text.includes('—'), 'no em-dashes');
+  assert.deepEqual(M.packOptions([{ id: 'motion-type', name: 'Motion type' }, { id: 'flat-2d', name: 'Flat 2D explainer' }, { id: 'abcdefabcdef', name: 'Mine' }]),
+    [['', 'Motion type (default)'], ['flat-2d', 'Flat 2D explainer'], ['abcdefabcdef', 'Mine']]);
+  assert.equal(M.channelLookText({ style_pack: 'abcdefabcdef', look: 'sport' }, [{ id: 'abcdefabcdef', name: 'Mine' }]), 'style Mine, look sport');
+
   console.log('studio content model ok');
 })().catch(error => { console.error(error); process.exit(1); });

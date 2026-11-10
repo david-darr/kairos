@@ -29,6 +29,7 @@ class VideoBody(BaseModel):
     narration: Optional[dict[str, Any]] = None
     cast: Optional[list[dict[str, Any]]] = None      # Pack A: characters pinned to versions
     palette: Optional[str] = Field(None, max_length=24)
+    style_pack: Optional[dict[str, Any]] = None       # a user-made style pack, {id, version}
     id: Optional[str] = None
     owner: Optional[str] = None
     chat_ids: list[str] = []
@@ -39,7 +40,7 @@ class VideoBody(BaseModel):
 
     def project(self):
         return {k: v for k, v in self.model_dump().items()
-                if k in video_store.FIELDS and (k not in ("id", "narration", "cast", "palette") or v is not None)}
+                if k in video_store.FIELDS and (k not in ("id", "narration", "cast", "palette", "style_pack") or v is not None)}
 
 
 class RenderBody(BaseModel):
@@ -142,6 +143,13 @@ def player_page(project):
                                   for cid, c in character_store.resolve(project["cast"]).items()}
         except LookupError as error:
             raise HTTPException(422, "cast: " + str(error).strip("'")) from None
+    if project.get("style_pack"):
+        # The pack's look as numbers and names (palette colours, lighting, caption case); nothing else of it reaches the page.
+        from core import style_pack_store
+        try:
+            data["pack"] = style_pack_store.render_look(style_pack_store.spec(project["style_pack"]["id"], project["style_pack"]["version"]))
+        except LookupError as error:
+            raise HTTPException(422, "style_pack: " + str(error).strip("'")) from None
     data_json = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     css = design_systems.tokens_css(system["tokens"]) + design_systems.font_faces(system["id"], "/api/design-fonts")
     page = page.replace("<!--KD-PROJECT-->", '<script type="application/json" id="kd-project">' + data_json + '</script>')

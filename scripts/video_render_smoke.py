@@ -14,6 +14,11 @@ Pack A (Video Styles unit 3): every run also makes characters from Kairos's star
 reference sheet through the same worker (a PNG job on the sheet page), checks it, approves it in the temporary
 store (a test approval: in the app only the person approves) and casts it in scene beats, so the render covers the
 rig, the mouth shapes timed from the narration and the sheet-match checks. --pack-a renders the Pack A sample.
+
+User-made style packs: --style-pack adds the shipped starter pack (Flat science explainer) to the temporary account,
+renders and checks its characters' sheets, test-approves them there, and makes the pack's own sample with
+core/style_pack_sample.make, the same call the Styles tab and the bots use, so the sample goes through the app's render
+path in the pack's palette, lighting, characters, rules, music and voice. --keep also copies the pack file it exports.
 """
 import argparse
 import asyncio
@@ -116,7 +121,8 @@ async def main(args):
     import uvicorn
     from fastapi import FastAPI
     from fastapi.staticfiles import StaticFiles
-    from core import character_sheet, character_store, design_render_bridge, speech_optional, video_narration, video_render, video_store
+    from core import (character_sheet, character_store, design_render_bridge, speech_optional, style_pack_sample, style_pack_store,
+                      video_narration, video_render, video_store)
     from core.constants import STATIC_DIR
     from routes import character_routes, design_routes, video_routes
 
@@ -141,8 +147,17 @@ async def main(args):
         else:
             raise RuntimeError("Electron's render worker did not connect.")
         spec = PACK_A if args.pack_a else SAMPLE if args.sample else SMOKE
+        if args.style_pack:
+            spec = {"aspects": [style_pack_sample.ASPECT], "characters": [], "beats": []}
         # Characters: made from the starting family, sheet rendered by the worker and checked, then approved here.
         cast, sheets = [], []
+        pack = None
+        if args.style_pack:
+            pack = style_pack_store.install_starter(by="smoke")
+            for entry in style_pack_store.spec(pack["id"], 1)["characters"]:
+                meta = await character_sheet.submit(entry["character"], entry["version"])
+                sheets.append({"id": meta["id"], "name": meta["name"], "metrics": character_store.version_of(meta, entry["version"])["metrics"]})
+                character_store.decide(meta["id"], entry["version"], True, "render smoke (test approval in a temporary store)")
         for family in spec.get("characters", []):
             meta = character_store.create(character_store.starter(family), by="smoke")
             meta = await character_sheet.submit(meta["id"], 1)
@@ -156,7 +171,7 @@ async def main(args):
         options = {k: v for k, v in spec.items() if k not in ("title", "characters", "beats")}
         if cast:
             options["cast"] = [{"character": c, "version": 1} for c in cast]
-        project = video_store.create(spec["title"], owner="smoke", beats=beats, **options)
+        project = None if args.style_pack else video_store.create(spec["title"], owner="smoke", beats=beats, **options)
         result["sheets"] = sheets
         # Prove the sheet-match checks measured real frames: count the frames with a character in them, and run the
         # same frames against a deliberately wrong palette, which must be named.
@@ -188,7 +203,23 @@ async def main(args):
                 print(f"video-render-smoke: {round(time.time() - began)} s, {states}", flush=True)
         ticker = asyncio.create_task(progress())
         try:
-            job = await video_render.render(project["id"], spec["aspects"][0])
+            if args.style_pack:
+                # The pack's own sample, exactly as Studio and the bots make it; the render job is caught for the report.
+                jobs = []
+                real_render = video_render.render
+
+                async def caught(video_id, aspect, sample_of=None):
+                    job_ = await real_render(video_id, aspect, sample_of=sample_of)
+                    jobs.append(job_)
+                    return job_
+                style_pack_sample.video_render.render = caught
+                meta = await style_pack_sample.make(pack["id"], 1, owner="smoke", by="render smoke")
+                job = jobs[-1]
+                project = video_store.get(job["video_id"])
+                result["pack"] = {"id": pack["id"], "name": meta["name"], "step": meta["step"],
+                                  "status": style_pack_store.version_of(meta, 1)["status"]}
+            else:
+                job = await video_render.render(project["id"], spec["aspects"][0])
         finally:
             ticker.cancel()
         result.update(job={k: v for k, v in job.items() if k != "path"}, render_seconds=round(time.time() - began, 1))
@@ -205,6 +236,8 @@ async def main(args):
             shutil.copy2(job["path"], keep / f"{stem}.mp4")
             for sheet in sheets:
                 shutil.copy2(character_store.sheet_path(sheet["id"], 1), keep / f"{stem}-character-sheet-{sheet['name'].lower()}.png")
+            if pack:
+                (keep / f"{stem}.kairos-style.json").write_bytes(style_pack_store.export_bytes(pack["id"], 1))
             shutil.copy2(folder / f"sheet-{slug}.png", keep / f"{stem}-contact-sheet.png")
             shutil.copy2(folder / f"thumb-{slug}.png", keep / f"{stem}-thumbnail.png")
             (keep / f"{stem}-project.json").write_text(json.dumps(project, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -231,6 +264,7 @@ if __name__ == "__main__":
     parser.add_argument("--name")
     parser.add_argument("--sample", action="store_true")
     parser.add_argument("--pack-a", action="store_true", dest="pack_a")
+    parser.add_argument("--style-pack", action="store_true", dest="style_pack")
     parsed = parser.parse_args()
     data = tempfile.mkdtemp(prefix="video-render-smoke-")
     os.environ["JARVIS_DATA_DIR"] = data

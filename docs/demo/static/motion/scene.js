@@ -15,9 +15,12 @@ export const PALETTES = {
   paper: { sky: ['#f4efe6', '#fbf8f2'], far: '#e2d6c3', mid: '#c9b79c', near: '#a48b6e', ground: '#7d6750', prop: '#ffffff', ink: '#3b3127', glow: '#ffffff' },
 };
 const DEPTH = { sky: 0, far: .22, mid: .5, near: .8, cast: 1 };
+// A style pack's lighting (core/style_pack_store.py): how strong the soft light gradients on the flat layers are.
+export const LIGHTING = { flat: 0, soft: 1, glow: 1.8 };
 const TAU = Math.PI * 2;
 
-export function groundLine(h, band, captioned) { return captioned && band ? band.y - h * .012 : h * .88; }
+// A captioned scene stands its figures far enough above the caption band that feet (and a push-in camera) stay clear.
+export function groundLine(h, band, captioned) { return captioned && band ? band.y - h * .03 : h * .88; }
 
 // The camera per depth: a far layer moves less than the cast. `p` is the beat's progress 0..1.
 export function layerTransform(camera, p, seed, depth, w, h, anchorY) {
@@ -49,8 +52,10 @@ function hills(g, y, amp, period, seed, color, w, h) {
   for (let x = -w; x <= w * 2; x += 24) g.lineTo(x, y - amp * (.6 * Math.sin(x / period + seed) + .4 * Math.sin(x / (period * .47) + seed * 2.1)));
   g.lineTo(w * 2, h * 2); g.closePath(); g.fillStyle = color; g.fill();
 }
-function soft(g, color, x, y, w, h, alpha = .14) {
-  // Soft gradient light on a flat layer, within the palette (glow over the layer colour).
+function soft(g, color, x, y, w, h, alpha = .14, light = 1) {
+  // Soft gradient light on a flat layer, within the palette (glow over the layer colour). A flat pack draws none.
+  if (!(light > 0)) return;
+  alpha = Math.min(.6, alpha * light);
   const grad = g.createLinearGradient(x, y, x, y + h); grad.addColorStop(0, color); grad.addColorStop(1, 'rgba(255,255,255,0)');
   g.save(); g.globalAlpha *= alpha; g.fillStyle = grad; g.fillRect(x, y, w, h); g.restore();
 }
@@ -79,7 +84,7 @@ function layer(g, name, setting, pal, w, h, ground, seed, seconds) {
         g.stroke(); g.restore();
       }
     }
-    if (name === 'near') { g.fillStyle = pal.near; g.fillRect(-w, ground, w * 3, h * 2); soft(g, pal.glow, -w, ground, w * 3, h * .05); }
+    if (name === 'near') { g.fillStyle = pal.near; g.fillRect(-w, ground, w * 3, h * 2); soft(g, pal.glow, -w, ground, w * 3, h * .05, .14, pal.light); }
   } else if (setting === 'city') {
     if (name === 'far') for (let x = -w * .2; x < w * 1.3; x += w * .06) { const bh = h * (.18 + random() * .22); g.fillStyle = pal.far; g.fillRect(x, ground - h * .08 - bh, w * .055, bh + h); }
     if (name === 'mid') {
@@ -95,8 +100,10 @@ function layer(g, name, setting, pal, w, h, ground, seed, seconds) {
     if (name === 'far') {
       g.fillStyle = pal.glow;
       for (let i = 0; i < 140; i++) { g.globalAlpha = .3 + random() * .6; g.beginPath(); g.arc(random() * w * 1.4 - w * .2, random() * ground, 1 + random() * 2.2, 0, TAU); g.fill(); }
-      g.globalAlpha = 1; g.fillStyle = pal.far; g.beginPath(); g.arc(w * .2, h * .24, Math.min(w, h) * .1, 0, TAU); g.fill();
-      soft(g, pal.glow, w * .1, h * .14, Math.min(w, h) * .2, Math.min(w, h) * .2, .25);
+      // A far planet, its soft light kept inside its own disc (a square of light showed around it before).
+      const r = Math.min(w, h) * .1, px = w * .2, py = h * .24;
+      g.globalAlpha = 1; g.fillStyle = pal.far; g.beginPath(); g.arc(px, py, r, 0, TAU); g.fill();
+      g.save(); g.beginPath(); g.arc(px, py, r, 0, TAU); g.clip(); soft(g, pal.glow, px - r, py - r, r * 2, r * 2, .25, pal.light); g.restore();
     }
     if (name === 'mid') hills(g, ground - h * .05, h * .02, 300, random() * 9, pal.mid, w, h);
     if (name === 'near') {
@@ -125,7 +132,7 @@ function layer(g, name, setting, pal, w, h, ground, seed, seconds) {
         else { g.beginPath(); g.moveTo(bx, sy); g.lineTo(bx + w * .015, sy - bh); g.lineTo(bx + w * .03, sy); g.closePath(); g.fill(); }
       }
     }
-    if (name === 'near') { g.fillStyle = pal.near; g.fillRect(-w, ground, w * 3, h * 2); soft(g, pal.glow, -w, ground, w * 3, h * .04, .1); }
+    if (name === 'near') { g.fillStyle = pal.near; g.fillRect(-w, ground, w * 3, h * 2); soft(g, pal.glow, -w, ground, w * 3, h * .04, .1, pal.light); }
   }
 }
 
@@ -161,9 +168,24 @@ export function drawIcon(g, icon, size, pal, t = 0) {
   g.restore();
 }
 
+// The scene's colours: a style pack's own palette (checked hex values) or a named one, with the pack's lighting.
+export function paletteOf(project) {
+  const pack = project.pack || {};
+  return { ...(pack.palette || PALETTES[project.palette] || PALETTES.dawn), light: LIGHTING[pack.lighting] ?? 1 };
+}
+
+// A close shot frames the figure from the chest up: the near ground layer stands in front of it, so its lower body
+// never reaches the caption band under the ground line. Returns the y the cast is cut at, or null for other shots.
+export function castClip(beat, p, w, h, ground) {
+  if ((beat.scene || {}).shot !== 'close') return null;
+  const tf = layerTransform(beat.camera, p, hash(beat.id) % 100, DEPTH.near, w, h, ground * .85);
+  return tf.ay + (ground - tf.ay) * tf.s + tf.dy;
+}
+const clipped = (box, clip) => clip == null ? box : { ...box, h: Math.max(0, Math.min(box.h, clip - box.y)), clip };
+
 // Draws the whole scene beat into `g` (w x h). Returns what layout reports: characters and props in frame pixels.
 export function drawScene(g, beat, project, w, h, ground, t, p) {
-  const pal = PALETTES[project.palette] || PALETTES.dawn, scene = beat.scene || {}, setting = SETTINGS.includes(scene.setting) ? scene.setting : 'meadow';
+  const pal = paletteOf(project), scene = beat.scene || {}, setting = SETTINGS.includes(scene.setting) ? scene.setting : 'meadow';
   const seed = hash(beat.id) % 100, boxes = [];
   for (const name of ['sky', 'far', 'mid', 'near']) {
     const tf = layerTransform(beat.camera, p, seed, DEPTH[name], w, h, ground * .85);
@@ -179,15 +201,18 @@ export function drawScene(g, beat, project, w, h, ground, t, p) {
     boxes.push({ kind: 'prop', beat: beat.id, icon: prop.icon, x: x - size / 2, y: y - size / 2, w: size, h: size });
   }
   // Soft contact shadows, then the cast, back to front by x so overlaps read left to right.
-  const cast = placeCast(beat, project.characters, w, h, ground, t, p);
+  const cast = placeCast(beat, project.characters, w, h, ground, t, p), clip = castClip(beat, p, w, h, ground);
+  g.save();
+  if (clip != null) { g.beginPath(); g.rect(-w, -h, w * 3, clip + h); g.clip(); }
   for (const c of cast) {
     const [x, y] = apply(castTf, c.x, c.y), H = c.H * castTf.s;
     g.save(); g.globalAlpha = .18; g.fillStyle = pal.ink; g.beginPath(); g.ellipse(x, y, H * .28, H * .04, 0, 0, TAU); g.fill(); g.restore();
     const box = drawCharacter(g, c.spec, x, y, H, c.state);
     boxes.push({ kind: 'character', beat: beat.id, character: c.member.character, version: c.version, shot: scene.shot || 'medium',
       view: c.state.view, expression: c.state.expression, mouth: c.state.mouth, action: c.member.action || 'idle', speaking: !!c.member.speaking,
-      ...box, short });
+      ...clipped(box, clip), short });
   }
+  g.restore();
   return boxes;
 }
 
@@ -200,11 +225,12 @@ export function sceneBoxes(beat, project, w, h, ground, t, p) {
     const [x, y] = apply(castTf, prop.x * w, prop.y * h + bob), size = prop.size * short * castTf.s;
     boxes.push({ kind: 'prop', beat: beat.id, icon: prop.icon, x: x - size / 2, y: y - size / 2, w: size, h: size });
   }
+  const clip = castClip(beat, p, w, h, ground);
   for (const c of placeCast(beat, project.characters, w, h, ground, t, p)) {
     const [x, y] = apply(castTf, c.x, c.y), H = c.H * castTf.s;
     boxes.push({ kind: 'character', beat: beat.id, character: c.member.character, version: c.version, shot: scene.shot || 'medium',
       view: c.state.view, expression: c.state.expression, mouth: c.state.mouth, action: c.member.action || 'idle', speaking: !!c.member.speaking,
-      ...figureBox(c.spec, x, y, H, c.state), short });
+      ...clipped(figureBox(c.spec, x, y, H, c.state), clip), short });
   }
   return boxes;
 }

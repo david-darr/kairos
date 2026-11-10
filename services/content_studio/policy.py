@@ -265,7 +265,10 @@ def port_findings(store, port, today=None):
     found += distance_findings(card, {"title": port["example_title"], "thumbnail": port["thumbnail"], "mascot": port["mascot"],
                                       "premise": port["premise"], "subject": port["subject"]})
     # 3. Cost to make in the chosen pack.
-    pack = formats.STYLE_PACKS[port["style_pack"]]
+    pack = formats.all_packs().get(port["style_pack"])
+    if pack is None:
+        return {"ok": False, "findings": found + [{"check": "cost", "result": "reject",
+                                                  "reason": "The port's style pack is no longer in this account."}], "cost": None}
     typical = (card["length_min_s"] + card["length_max_s"]) / 2
     cost = formats.cost(port["style_pack"], min(typical, pack["max_seconds"]))
     if not pack["available"]:

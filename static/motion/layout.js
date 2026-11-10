@@ -46,11 +46,21 @@ export function normalizeProject(input = {}) {
   });
   const characters = input.characters && typeof input.characters === 'object' ? input.characters : {};
   return { id: str(input.id, 64), title: str(input.title, 180), look: str(input.look, 64), bpm, bar, fps: 30,
-    palette: str(input.palette, 24) || 'dawn', characters,
+    palette: str(input.palette, 24) || 'dawn', characters, pack: normalizePack(input.pack),
     aspects: (Array.isArray(input.aspects) ? input.aspects : ['16:9']).filter(a => SIZES[a]), beats, duration: start,
     captioned: beats.some(b => b.captions.length) };
 }
 const ONE = (v, list, fallback) => list.includes(v) ? v : fallback;
+const HEX = v => typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v);
+// A user-made style pack's look as the player receives it (core/style_pack_store.render_look): colours and names only.
+export function normalizePack(input) {
+  if (!input || typeof input !== 'object') return null;
+  const raw = input.palette && typeof input.palette === 'object' ? input.palette : null;
+  const layers = ['far', 'mid', 'near', 'ground', 'prop', 'ink', 'glow'];
+  const palette = raw && Array.isArray(raw.sky) && raw.sky.length === 2 && raw.sky.every(HEX) && layers.every(k => HEX(raw[k]))
+    ? { sky: [...raw.sky], ...Object.fromEntries(layers.map(k => [k, raw[k]])) } : null;
+  return { palette, lighting: ONE(input.lighting, ['flat', 'soft', 'glow'], 'soft'), captionCase: input.caption_case === 'upper' ? 'upper' : 'sentence' };
+}
 const unit = (v, fallback) => clamp(finite(v, fallback), 0, 1);
 // Defensive copy of a scene beat (the backend validates it; core/video_store.py _scene).
 export function normalizeScene(input) {

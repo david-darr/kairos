@@ -217,5 +217,24 @@ const path = require('node:path');
   const label = L.beatLayout(sp.beats[0], '16:9', charWidth, { captioned: true });
   assert.equal(label.length, 1);
   assert.ok(label[0].y + label[0].h <= 1080 * .25 && label[0].align === 'center', 'a scene label stays at the top');
-  console.log(`Motion engine pure checks passed (${boxesChecked} fitted text boxes; all kinds/aspects/cameras/transitions; Pack A rig and scenes).`);
+  // A close shot is cut at the near ground, so the caption band under the ground line never covers the figure.
+  const band = L.captionBand('16:9'), ground = S.groundLine(1080, band, true);
+  const close = { ...sp.beats[0], scene: { ...sp.beats[0].scene, shot: 'close' } };
+  for (const camera of ['still', 'push', 'pull', 'pan']) {
+    const fig = S.sceneBoxes({ ...close, camera }, sp, 1920, 1080, ground, 1, .5).find(b => b.kind === 'character');
+    assert.ok(fig.clip != null && fig.y + fig.h <= band.y, `${camera}: a close figure ends above the caption band`);
+    assert.ok(fig.height / 1080 > .58, 'still a close shot');
+  }
+  const medium = S.sceneBoxes({ ...sp.beats[0], camera: 'push', scene: { ...sp.beats[0].scene, shot: 'medium' } }, sp, 1920, 1080, ground, 1, 1).find(b => b.kind === 'character');
+  assert.ok(medium.y + medium.h < band.y + 8 && medium.clip === undefined, 'a medium figure stands clear of the band');
+  // A user-made style pack reaches the engine as checked colours and names only.
+  const pack = L.normalizePack({ palette: { sky: ['#173d7a', '#3f7bc8'], far: '#6c8fd8', mid: '#4a6fc0', near: '#dfe6f5', ground: '#b9c6e4', prop: '#ffd166', ink: '#1b2a4a', glow: '#ffffff' },
+    lighting: 'glow', caption_case: 'upper', script: 'alert(1)' });
+  assert.deepEqual([pack.lighting, pack.captionCase, pack.palette.near, 'script' in pack], ['glow', 'upper', '#dfe6f5', false]);
+  assert.equal(L.normalizePack({ palette: { sky: ['red', 'blue'] }, lighting: 'laser' }).palette, null, 'a bad palette is dropped, never drawn');
+  assert.equal(L.normalizePack({ palette: { sky: ['red', 'blue'] }, lighting: 'laser' }).lighting, 'soft');
+  assert.equal(S.paletteOf({ palette: 'dusk', pack: pack }).near, '#dfe6f5');
+  assert.equal(S.paletteOf({ palette: 'dusk', pack: pack }).light, S.LIGHTING.glow);
+  assert.equal(S.paletteOf({ palette: 'dusk', pack: null }).near, S.PALETTES.dusk.near);
+  console.log(`Motion engine pure checks passed (${boxesChecked} fitted text boxes; all kinds/aspects/cameras/transitions; Pack A rig and scenes; style packs and close shots).`);
 })().catch(error => { console.error(error); process.exitCode = 1; });

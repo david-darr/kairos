@@ -138,12 +138,17 @@ def fill(account):
     account.seeded["format cards"] = "file"
     # Pack A characters (Video Styles unit 3) are made through their route; the marker is the character's name.
     account.seed("characters", "POST", "/api/characters", {"family": "round", "name": m}, "character")
+    # User-made style packs: the starter pack through its route, then a copy named with the marker (a brief needs a model).
+    starter = account.seed("style packs", "POST", "/api/style-packs", {"source": "starter"}, "style_pack")
+    if starter is not None and starter.status_code < 300:
+        account.seed("style packs", "POST", "/api/style-packs",
+                     {"source": "duplicate", "pack_id": starter.json()["id"], "name": f"{m} pack"}, "style_pack")
 
 
 ID_PARAMS = {"session": "session", "note": "note", "event": "event", "document": "document", "doc": "document",
              "project": "project", "endpoint": "endpoint", "task": "task", "routine": "task", "agent": "agent",
              "bot": "agent", "design": "design", "skill": "skill", "slug": "skill", "hook": "hook", "trigger": "trigger",
-             "format_id": "format", "character_id": "character"}
+             "format_id": "format", "character_id": "character", "pack_id": "style_pack"}
 
 
 # Fields the edit routes accept; extra ones are ignored. A route that refuses the body (422) proves nothing

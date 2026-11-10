@@ -22,6 +22,12 @@ characters. The pipeline lists them with the version each video may cast (the ne
 Editor designs a missing one with character_make and sends its sheet with character_sheet, and only the person
 approves it. A flat-2d render is recorded only when its video has scene beats and every cast version is approved.
 
+User-made style packs (Video Styles, user packs): the Producer and Editor can propose a pack (content_studio_propose_style_pack,
+from a written brief turned into pack data, or by duplicating a pack with changes) and render its sample
+(content_studio_style_pack_sample, which first sends any unapproved character sheet). Only the person approves a pack, in
+Studio > Content > Styles; no tool approves. A channel uses its own pack by default, and a post in a user pack is recorded
+only when its video is made in that pack's approved version.
+
 Policy checks (services/content_studio/policy.py) run at the pick, when a script is saved and when a post is queued:
 sameness against the channel's last 30 posts, no narrator presented as a health, legal, money or political expert, no
 distress or rescue hooks, no cross-posting between the team's own channels, and the AI label on every post. The
@@ -98,7 +104,8 @@ def _pipeline(args, ctx, bot, role):
     active strategies (the default first) and any open request for a replacement niche."""
     channels = [{"id": c["id"], "niche_id": c["niche_id"], "niche": c["niche_name"], "platform": c["platform"], "handle": c["handle"],
                  "paused": bool(c["paused"]), "look": c["look"], "aspect": c["aspect"] or "9:16",
-                 "notes": c["notes"], "voice": c["voice"]} for c in studio.list_channels(status="live")]
+                 "notes": c["notes"], "voice": c["voice"], "style_pack": c.get("style_pack") or "motion-type"}
+                for c in studio.list_channels(status="live")]
     strategies = {r: [{"id": s["id"], "name": s["name"], "default": bool(s["is_default"])}
                       for s in sorted(studio.list_strategies(r, "active"), key=lambda s: not s["is_default"])]
                   for r in ("script_writer", "evaluator")}
@@ -112,7 +119,9 @@ def _pipeline(args, ctx, bot, role):
         "formats": [{"id": f["id"], "name": f["name"]} for f in studio.list_formats("active")],
         "ports_accepted": [{"id": p["id"], "format": p["format_name"], "niche_id": p["niche_id"], "style_pack": p["style_pack"]}
                            for p in studio.list_ports(status="accepted")],
-        "characters": _characters()})
+        "characters": _characters(),
+        "style_packs": [{"id": p["id"], "name": p["name"], "base": p.get("base", p["id"]), "available": p["available"]}
+                        for p in formats.packs()]})
 
 
 def _characters():
@@ -121,6 +130,12 @@ def _characters():
     return [{"id": m["id"], "name": m["name"], "family": m["family"], "castable_version": character_store.approved_version(m),
              "waiting_for_person": [v["version"] for v in m["versions"] if v["status"] == "awaiting_approval"]}
             for m in character_store.list_all()]
+
+
+def _base(pack_id):
+    """The built-in pack a post's pack is drawn by: itself for a built-in, the base of a user-made one."""
+    pack = formats.all_packs().get(pack_id) or {}
+    return pack.get("base", pack_id)
 
 
 def _drafted(post_id):
@@ -166,7 +181,10 @@ def _pick(args, ctx, bot, role):
                                           "mascot", "style_pack", "thumbnail", "checks")} if port else None),
             "pick_checks": early})
     tail = " The Script Writer writes it next."
-    if post["style_pack"] == "flat-2d":
+    if post["style_pack"] not in formats.STYLE_PACKS:
+        tail += (f" It is made in the user-made style pack {formats.all_packs()[post['style_pack']]['name']}: the Editor passes "
+                 f"style_pack={post['style_pack']} to video_create, which applies the pack's approved look, voice and characters.")
+    if _base(post["style_pack"]) == "flat-2d":
         castable = [c["name"] for c in _characters() if c["castable_version"]]
         tail += (" It is a Flat 2D post: the Script Writer writes scene beats for " + ", ".join(castable) + "." if castable else
                  " It is a Flat 2D post and no character is approved yet: the Editor designs one (character_make, character_sheet) "
@@ -254,17 +272,28 @@ def _channel_voice(post, render_ref):
 
 
 def _pack_matches(post, render_ref):
-    """A flat-2d post's video is made of scene beats with approved characters (the render itself refuses others)."""
-    if post["style_pack"] != "flat-2d":
+    """A flat-2d post's video is made of scene beats with approved characters (the render itself refuses others); a post
+    in a user-made pack is made in that pack's approved version."""
+    user_pack = post["style_pack"] not in formats.STYLE_PACKS
+    if _base(post["style_pack"]) != "flat-2d" and not user_pack:
         return
     match = _STUDIO_RENDER.match((render_ref or "").strip())
     if not match:
-        raise StudioError("a Flat 2D post's render_ref is its Studio render link, so the cast can be checked")
-    from core import video_render, video_store
+        raise StudioError("this post's render_ref is its Studio render link, so its pack and cast can be checked")
+    from core import style_pack_store, video_render, video_store
     try:
         project = video_store.get(match.group(1))
     except LookupError:
         raise StudioError("that Studio render's video is not in this account")
+    if user_pack:
+        pin = project.get("style_pack") or {}
+        if pin.get("id") != post["style_pack"]:
+            raise StudioError("the video is not made in this post's style pack; make it with video_create style_pack="
+                              + post["style_pack"])
+        if not style_pack_store.is_approved(pin["id"], pin["version"]):
+            raise StudioError("the video uses a version of the style pack the person has not approved")
+    if _base(post["style_pack"]) != "flat-2d":
+        return
     if not any(b["kind"] == "scene" for b in project["beats"]) or not project.get("cast"):
         raise StudioError("a Flat 2D post needs scene beats with cast characters; this video has none")
     problems = video_render.cast_problems(project)
@@ -375,6 +404,88 @@ def _decide_port(args, ctx, bot, role):
     return _data(ctx, "content studio port", port) + tail
 
 
+def _pack_line(meta):
+    from core import style_pack_store
+    versions = ", ".join(f"v{v['version']} {v['status'].replace('_', ' ')}"
+                         + (f" (sample: {v['sample']['status']})" if v.get("sample") and v["status"] == "draft" else "")
+                         for v in meta["versions"])
+    data = style_pack_store.spec(meta["id"], style_pack_store.latest(meta)["version"])
+    return {"id": meta["id"], "name": meta["name"], "versions": versions, "approved_version": style_pack_store.approved_version(meta),
+            "renderer": data["renderer"], "base": data["base"], "summary": data["summary"], "origin": meta.get("origin", {}).get("kind")}
+
+
+def _style_packs(args, ctx, bot, role):
+    from core import style_pack_store
+    out = {"built_in": [{"id": k, "name": v["name"], "available": v["available"], "note": v["note"]}
+                        for k, v in formats.STYLE_PACKS.items()],
+           "user_packs": [_pack_line(m) for m in style_pack_store.list_all()],
+           "starters": style_pack_store.starters()}
+    if args.get("pack_id"):
+        try:
+            meta = style_pack_store.get(args["pack_id"])
+            version = args.get("version") or style_pack_store.latest(meta)["version"]
+            out["pack"] = {**_pack_line(meta), "spec": style_pack_store.spec(meta["id"], version)}
+        except LookupError as error:
+            raise StudioError(str(error).strip("'"))
+    return _data(ctx, "content studio style packs", out)
+
+
+_PACK_KEYS = ("name", "summary", "renderer", "base", "look", "characters", "scenes", "pacing", "captions", "music", "voice")
+
+
+def _propose_pack(args, ctx, bot, role):
+    """A new pack from a written brief (the bot turns the brief into pack data), a duplicate of a pack, or a new version
+    of a pack; always a draft until the person approves its sample."""
+    from core import style_pack_brief, style_pack_store
+    brief = (args.get("brief") or "").strip()
+    fields = {k: args[k] for k in _PACK_KEYS if k in args}
+    try:
+        if args.get("pack_id"):
+            if brief:
+                fields["director_brief"] = brief
+            meta = style_pack_store.new_version(args["pack_id"], fields, by=bot["name"], note=args.get("note", ""))
+        elif args.get("duplicate_of"):
+            meta = style_pack_store.duplicate(args["duplicate_of"], name=fields.pop("name", ""), by=bot["name"])
+            if fields or brief:
+                meta = style_pack_store.new_version(meta["id"], {**fields, **({"director_brief": brief} if brief else {})},
+                                                    by=bot["name"], note=args.get("note", ""))
+        else:
+            if not brief:
+                raise StudioError("a new pack starts from a written brief (brief), or duplicate_of an existing pack")
+            data = style_pack_store.default_cast(style_pack_brief.from_fields(brief, fields), by=bot["name"])
+            meta = style_pack_store.create(data, by=bot["name"], note=args.get("note", "") or "From a brief.",
+                                           origin={"kind": "brief", "from": bot["name"], "brief": brief})
+    except LookupError as error:
+        raise StudioError(str(error).strip("'"))
+    except ValueError as error:
+        raise StudioError(str(error))
+    v = style_pack_store.latest(meta)["version"]
+    return _data(ctx, "content studio style pack", _pack_line(meta)) + (
+        f" Version {v} is a draft. Render its sample with content_studio_style_pack_sample (pack_id {meta['id']}, version {v}); "
+        "then the person approves or rejects it in Studio > Content > Styles. Tell the Producer it waits for them.")
+
+
+async def _pack_sample(args, ctx, bot, role):
+    from core import character_sheet, style_pack_sample, style_pack_store
+    try:
+        from services import bot_departments
+        meta = await style_pack_sample.make(args["pack_id"], args["version"], owner=bot_departments.owner(bot) or bot["name"], by=bot["name"])
+    except (character_sheet.Unavailable, RuntimeError) as error:
+        raise StudioError(str(error))
+    except LookupError as error:
+        raise StudioError(str(error).strip("'"))
+    except ValueError as error:
+        raise StudioError(str(error))
+    if meta["step"] == "sheets":
+        waiting = style_pack_store.version_of(meta, args["version"])["sample"].get("waiting", [])
+        return (f"The sample waits for the person to approve the character sheets of {', '.join(waiting)} (sent to Studio > Content > "
+                "Approvals). Run this again once they are approved.")
+    sample = style_pack_store.version_of(meta, args["version"])["sample"]
+    notes = sample.get("notes") or []
+    return (f"The sample of {meta['name']} version {args['version']} is rendered ({sample.get('seconds')} s) and waits for the person's "
+            "approval in Studio > Content > Styles." + ("\nRender notes:\n" + "\n".join(notes) if notes else " No render notes."))
+
+
 def _run_review(args, ctx, bot, role):
     return _data(ctx, "content studio review", review.run_review(studio, None, args.get("dry_run", True)))
 
@@ -430,7 +541,8 @@ _add("content_studio_pick_topic", "Evaluator: pick a topic candidate for one cha
            "strategy": _str(80), "title": _str(200, "Working title; the topic's title when left out"),
            "format": _str(80, "The format, for example 'list' or 'explainer', when there is no format card"),
            "port_id": _int("An accepted port this episode is made from"), "format_id": _int("A format card, when not from a port"),
-           "style_pack": {"type": "string", "enum": list(formats.STYLE_PACKS), "description": "The style pack; motion-type when left out"}},
+           "style_pack": _str(40, "The style pack: motion-type, flat-2d, or the id of an approved user-made pack (content_studio_style_packs); "
+                                  "the channel's own pack when left out")},
           ("channel_id", "topic_id", "reason")),
      WRITE, ("evaluator",), _pick)
 _add("content_studio_save_script", "Script Writer: save the script with its beat outline and narration lines for a drafted post, and optionally its "
@@ -506,7 +618,7 @@ _add("content_studio_propose_port", "Researcher: propose porting a format card i
                "url": _str(500), "supports": _str(300, "What it shows"), "checked": _str(10, "YYYY-MM-DD")}, ("url", "supports", "checked"))},
            "premise": _str(200, "The premise in our own words for the new niche"), "subject": _str(200),
            "mascot": _str(80, "Our own mascot or character, or 'none'"),
-           "style_pack": {"type": "string", "enum": list(formats.STYLE_PACKS)},
+           "style_pack": _str(40, "motion-type, flat-2d, or a user-made pack's id"),
            "thumbnail": _str(300, "What the thumbnail shows"), "example_title": _str(200)},
           ("format_id", "niche_id", "audience_match", "audience_evidence", "premise", "subject", "mascot", "style_pack", "thumbnail", "example_title")),
      WRITE, ("researcher",), _propose_port)
@@ -541,3 +653,32 @@ _add("content_studio_record_metrics", "Executor: record metrics snapshots for po
          "taken_at": {"type": "number", "description": "Unix time the numbers were read; defaults to now"}},
          ("post_id", "views", "avg_view_duration_s", "video_length_s"))}}, ("rows",)),
      WRITE, ("executor",), _metrics)
+_PACK_SCHEMA = {
+    "name": _str(60, "The pack's name. A pack we propose never carries a real channel's name"),
+    "summary": _str(300, "One or two sentences on the look"),
+    "renderer": {"type": "string", "enum": ["2d-engine", "blender", "threejs"], "description": "Only 2d-engine renders today"},
+    "base": {"type": "string", "enum": ["motion-type", "flat-2d"], "description": "flat-2d for characters in scenes, motion-type for type"},
+    "look": {"type": "object", "description": "design_look (a Studio look id), palette (dawn, mint, dusk, night, paper, or {sky: [top, bottom], far, mid, "
+                                              "near, ground, prop, ink, glow} as hex), families (round, square, triangle), outline (4-14), lighting (flat, soft, glow)"},
+    "characters": {"type": "array", "maxItems": 6, "items": _obj({"character": _str(12), "version": _int()}, ("character", "version")),
+                   "description": "Character ids and versions from character_list (flat-2d only)"},
+    "scenes": {"type": "object", "description": "settings, shots, props, cameras, transitions: the subsets the pack uses"},
+    "pacing": {"type": "object", "description": "words_per_second (1.5-4), shot_seconds [shortest, longest], hook_seconds"},
+    "captions": {"type": "object", "description": "on (true/false), case (sentence or upper)"},
+    "music": {"type": "object", "description": "mood (energetic, calm, warm, dark, playful), volume 0-1"},
+    "voice": {"type": "object", "description": "voice: a Kokoro voice id; a channel keeps one voice"},
+}
+_add("content_studio_style_packs", "Read the style packs: the built-in ones, this account's own packs with each version's status, and the starter "
+     "packs. Pass pack_id (and version) for one pack's full data and director brief.",
+     _obj({"pack_id": _str(12), "version": _int()}), READ, ANY, _style_packs)
+_add("content_studio_propose_style_pack", "Producer or Editor: propose a user-made style pack. New: give the person's written brief as brief and turn it "
+     "into the pack fields yourself (look, scenes, pacing, captions, music, voice, characters); the brief stays attached as the director brief. "
+     "Or duplicate_of an existing pack with changes, or pack_id to make a new version (a change to the brief too). Use our own geometric "
+     "characters only; never name or copy a real channel's characters, logos, artwork or scenes, and never put a real channel's name on a "
+     "pack we propose. Always a draft: render its sample next; only the person approves a pack.",
+     _obj({"brief": _str(12000, "The written brief, kept as the director brief"), "duplicate_of": _str(12), "pack_id": _str(12),
+           "note": _str(300, "What changed and why"), **_PACK_SCHEMA}), WRITE, ("producer", "editor"), _propose_pack)
+_add("content_studio_style_pack_sample", "Producer or Editor: render a style pack version's sample (a short narrated video in the pack, through the app's "
+     "own render path) and send it for the person's approval. Character sheets in the pack that are not approved yet are rendered and sent "
+     "to the person first, and the sample waits for them. Needs the desktop app. Only the person approves.",
+     _obj({"pack_id": _str(12), "version": _int()}, ("pack_id", "version")), WRITE, ("producer", "editor"), _pack_sample)

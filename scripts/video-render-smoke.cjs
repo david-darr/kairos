@@ -1,5 +1,5 @@
 // A real narrated video render through the app's own render path. Run via run-electron-test.cjs:
-//   node scripts/run-electron-test.cjs video-render-smoke [--sample] [--models <kokoro folder>] [--keep <folder>] [--name <stem>]
+//   node scripts/run-electron-test.cjs video-render-smoke [--sample | --pack-a | --style-pack] [--models <kokoro folder>] [--keep <folder>] [--name <stem>]
 // Electron runs only the app's render worker (electron/designRender.js); scripts/video_render_smoke.py serves the
 // player and renders with core/video_render.render on a free loopback port, with temporary data. Without --models a
 // tone stands in for Kokoro, so the suite needs no download. FFmpeg must be on the machine (Kairos never installs it).
@@ -50,6 +50,7 @@ app.whenReady().then(async () => {
   const py = ['-B', '-X', 'utf8', path.join(__dirname, 'video_render_smoke.py'), '--port', String(port), '--out', out];
   if (args.includes('--sample')) py.push('--sample');
   if (args.includes('--pack-a')) py.push('--pack-a');
+  if (args.includes('--style-pack')) py.push('--style-pack');
   for (const name of ['--models', '--keep', '--name']) if (flag(name)) py.push(name, flag(name));
   backend = spawn(python, py, { cwd: ROOT, env: { ...process.env, KAIROS_RENDER_TOKEN: token }, stdio: 'inherit', windowsHide: true });
   const exited = new Promise(resolve => backend.on('exit', code => resolve(code)));
@@ -64,7 +65,7 @@ app.whenReady().then(async () => {
   if (code !== 0 || !result.ok) return finish(1, 'Video render smoke failed: ' + (result.error || `backend exited ${code}`));
   const job = result.job;
   const summary = { seconds: job.seconds, render_seconds: result.render_seconds, real_voice: result.real_voice, loudness: job.loudness,
-    narration: job.narration, notes: job.notes, sheets: result.sheets, sheet_match: result.sheet_match, kept: result.kept || null };
+    narration: job.narration, notes: job.notes, sheets: result.sheets, sheet_match: result.sheet_match, pack: result.pack || null, kept: result.kept || null };
   console.log(JSON.stringify(summary, null, 2));
   if (!job.narration || !job.narration.lines) return finish(1, 'The render has no narration track.');
   // Pack A: each character's sheet rendered and passed its own checks, and no frame drifted from its sheet.
@@ -74,5 +75,15 @@ app.whenReady().then(async () => {
   const match = result.sheet_match || {};
   if (!(match.frames_with_characters > 0)) return finish(1, 'No sampled frame had a character to compare with its sheet.');
   if (!(match.wrong_palette_notes > 0)) return finish(1, 'The sheet-match check did not notice a wrong palette.');
+  // Captions stay clear of characters in every sampled moment, close shots included.
+  const covered = (job.notes || []).filter(n => /caption covers a character/.test(n));
+  if (covered.length) return finish(1, 'A caption covers a character: ' + covered.join(' '));
+  // A style pack's sample waits for the person's approval once rendered, and keeps to the pack's rules.
+  if (args.includes('--style-pack')) {
+    if (!result.pack || result.pack.step !== 'sample' || result.pack.status !== 'awaiting_approval') return finish(1, 'The style pack sample was not sent for approval.');
+    const strays = (job.notes || []).filter(n => /pack (does not use|keeps shots)|outside the .* pack|opening beat runs past/.test(n));
+    if (strays.length) return finish(1, 'The sample strays from its own pack: ' + strays.join(' '));
+    if (!(job.seconds >= 20 && job.seconds <= 30)) return finish(1, `The sample runs ${job.seconds} s, outside 20 to 30 s.`);
+  }
   finish(0, 'Video render smoke passed.');
 });

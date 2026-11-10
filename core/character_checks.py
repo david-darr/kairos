@@ -62,7 +62,9 @@ def _column_measure(pixels, palette, cx, cy):
         return None
     column = pixels[:, cx]
     outline = _near(column, _rgb(palette["outline"]), OUTLINE_TOL)
-    inside = _body_mask(column[None, :, :], palette)[0] | _near(column, _rgb(palette["head"]), 60)
+    # The body, or the belly patch over it (the head colour at 55% over the body, static/motion/rig.js), or the head.
+    belly = _rgb(palette["head"]) * .55 + _rgb(palette["body"]) * .45
+    inside = _body_mask(column[None, :, :], palette)[0] | _near(column, _rgb(palette["head"]), 60) | _near(column, belly, TOL)
     if not inside[max(0, cy - 3):cy + 4].any():
         return None
     y = cy
@@ -153,8 +155,9 @@ def frame_notes(frame: bytes, boxes: list[dict], cast: dict) -> list[str]:
                 notes.append(f"{label}'s {key} colour is off the approved sheet ({spec['palette'][key]} covers {found[key]:.1%} of the figure).")
         others = [b for b in boxes if b is not box and b.get("kind") in ("character", "prop", "text")]
         cx, cy = box["body"]["cx"], box["body"]["cy"]
-        if box.get("action") == "walk" or cy + box["body"]["h"] / 2 + 4 > fh or any(b["x"] <= cx <= b["x"] + b["w"] and b["y"] <= cy + box["body"]["h"] and cy <= b["y"] + b["h"] for b in others):
-            continue      # crossing legs, the body running off the frame, or a figure, prop or caption over its lower edge
+        bottom = min(fh, box.get("clip") or fh)    # a close shot cuts the figure at the near ground
+        if box.get("action") == "walk" or cy + box["body"]["h"] / 2 + 4 > bottom or any(b["x"] <= cx <= b["x"] + b["w"] and b["y"] <= cy + box["body"]["h"] and cy <= b["y"] + b["h"] for b in others):
+            continue      # crossing legs, the body running off the frame or behind the near ground, or a figure, prop or caption over its lower edge
         row = _column_measure(pixels, spec["palette"], cx, cy)
         if row is None:
             notes.append(f"{label}'s body could not be found where the rig drew it; check the frame.")

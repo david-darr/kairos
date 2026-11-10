@@ -18,7 +18,8 @@ from .store import PLATFORMS, StudioError
 # (motion-type) and Pack A (flat-2d) are built; a port into a pack that is not built is refused as "cannot be made
 # yet" until its unit lands. `units_per_minute` is a planning estimate of render effort relative to Pack 0 (not
 # measured), used only so a long, heavy port does not beat a cheaper format by default. `max_seconds` is what the
-# pack can make today. User-made packs join through style_packs.user_packs() in a later unit.
+# pack can make today. User-made packs (core/style_pack_store.py) join through style_packs.user_packs(): each is drawn by
+# its base pack and is available only once the person approved a version.
 from core.style_packs import BUILT_IN as STYLE_PACKS, all_packs
 COST_WARN_RATIO = 3.0      # a port this many times dearer than the cheapest pack that could make it is a warning
 STALE_DAYS = 45            # evidence checked longer ago than this is flagged as stale
