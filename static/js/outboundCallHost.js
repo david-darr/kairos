@@ -6,6 +6,8 @@ import { api } from './api.js';
 
 export const LIVE_POLL_MS = 1500;
 export const IDLE_POLL_MS = 5000;
+// While no call is going and no panel is up, this host makes no reads of its own: the ring poll (ringHost.js) carries
+// the count of calls going (`outbound`), and `nudge(count)` starts polling here when it is above zero (2026-11-09).
 
 const STATUS = { dialing: 'Ringing', live: 'On the call', ended: 'Ended' };
 
@@ -132,7 +134,7 @@ export function createOutboundCallHost({ document: doc = document, api: request 
   async function poll() {
     if (busy || stopped) return;
     busy = true;
-    let live = false;
+    let live = false, followUp = false;
     try {
       const { calls = [] } = await request('/api/phone/outbound/active', { toast: false });
       const ids = new Set(calls.map(c => c.id));
@@ -144,13 +146,17 @@ export function createOutboundCallHost({ document: doc = document, api: request 
         if (call.status !== 'ended' || panels.has(call.id)) draw(call);
         if (call.status !== 'ended') live = true;
       }
-    } catch { /* offline or signed out: the next poll tries again */ }
+      followUp = live || calls.length > 0 || panels.size > 0;
+    } catch { followUp = panels.size > 0; /* offline or signed out: the next ring poll's nudge, or a panel's poll, tries again */ }
     finally { busy = false; }
-    if (!stopped) timer = setTimer(poll, live ? LIVE_POLL_MS : IDLE_POLL_MS);
+    clearTimer(timer); timer = null;
+    if (!stopped && followUp) timer = setTimer(poll, live ? LIVE_POLL_MS : IDLE_POLL_MS);
   }
 
   return {
     start() { if (!stopped) return; stopped = false; poll(); },
+    // The ring poll's word on calls going: above zero, or unknown (an older server), read now unless a read is due.
+    nudge(count) { if (stopped || busy || timer) return; if (count === undefined || count > 0) poll(); },
     stop() { stopped = true; clearTimer(timer); timer = null; for (const id of [...panels.keys()]) remove(id); },
     // Settings > Phone opens a past or live call here.
     async show(id) {
@@ -159,6 +165,7 @@ export function createOutboundCallHost({ document: doc = document, api: request 
       draw(call);
       const entry = panels.get(id);
       if (entry) { entry.keep = true; entry.node.scrollIntoView?.({ block: 'nearest' }); }
+      if (!timer && !busy) poll();   // keep the panel current while it is up
       return call;
     },
     poll, panels, draw,
@@ -166,5 +173,11 @@ export function createOutboundCallHost({ document: doc = document, api: request 
 }
 
 let host = null;
-export function mountOutboundCallHost() { if (!host) { host = createOutboundCallHost(); host.start(); } return host; }
+export function mountOutboundCallHost() {
+  if (!host) {
+    host = createOutboundCallHost(); host.start();
+    document.addEventListener('kairos:rings-polled', event => host.nudge(event.detail?.outbound));
+  }
+  return host;
+}
 export function showOutboundCall(id) { return mountOutboundCallHost().show(id); }

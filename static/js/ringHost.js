@@ -4,7 +4,12 @@
 // The phone push (static/sw.js) opens the app at /?agent=...&ring=..., which comes here through answerRingFromLink.
 import { api, toast } from './api.js';
 
-export const POLL_MS = 3000;
+// Every 6 s while the window shows; every 18 s (every third tick) while it is hidden (minimised), so a ring still
+// reaches the desktop notification well inside its 60 s. The same reply says whether a call to someone else is going,
+// so the outbound call panel (outboundCallHost.js) needs no poll of its own while nothing is (2026-11-09: an idle chat
+// made 22 reads per 30 s with this at 3 s and the outbound panel's own 5 s poll; the shell's budget is 14).
+export const POLL_MS = 6000;
+export const HIDDEN_POLL_MS = 18000;
 let pending = null;   // the ring just answered, waiting for its call screen: {id, agentId, reason, name}
 
 export function setPendingRing(ring) { pending = ring && { ...ring, at: Date.now() }; }
@@ -53,10 +58,11 @@ function createTone(AudioContext) {
 
 export function createRingHost({ document: doc = document, api: request = api, Notification: Note = typeof Notification === 'undefined' ? null : Notification,
   AudioContext: Audio = typeof window === 'undefined' ? null : (window.AudioContext || window.webkitAudioContext), focus = () => { window.jarvis?.showWindow?.(); window.focus?.(); },
-  answer = id => answerRing(id, doc), decline = declineRing, hasFocus = () => doc.hasFocus?.() } = {}) {
+  answer = id => answerRing(id, doc), decline = declineRing, hasFocus = () => doc.hasFocus?.(), isHidden = () => !!doc.hidden,
+  now = () => Date.now(), onResult = () => {} } = {}) {
   const shown = new Map();   // ring id -> {sheet, note}
   const tone = createTone(Audio);
-  let timer = null, busy = false, stopped = false;
+  let timer = null, busy = false, stopped = false, lastAt = 0;
 
   const make = (tag, props = {}, children = []) => {
     const node = doc.createElement(tag);
@@ -104,22 +110,36 @@ export function createRingHost({ document: doc = document, api: request = api, N
 
   async function poll() {
     if (busy || stopped) return;
-    busy = true;
+    busy = true; lastAt = now();
     try {
-      const { rings = [] } = await request('/api/rings/pending', { toast: false });
+      const reply = await request('/api/rings/pending', { toast: false });
+      const rings = reply?.rings || [];
       const ids = new Set(rings.map(ring => ring.id));
       for (const id of [...shown.keys()]) if (!ids.has(id)) close(id);
       for (const ring of rings) if (!shown.has(ring.id)) open(ring);
+      try { onResult(reply); } catch { /* a listener's problem is not the ring's */ }
     } catch { /* offline or signed out: the next poll tries again */ }
     finally { busy = false; }
   }
+  // The timer's tick: hidden, it reads only every HIDDEN_POLL_MS.
+  const tick = () => { if (!isHidden() || now() - lastAt >= HIDDEN_POLL_MS - 500) poll(); };   // 500 ms for timer drift
+  // Shown again after a while hidden: read now rather than wait for the next tick.
+  const onVisible = () => { if (!isHidden() && now() - lastAt >= POLL_MS) poll(); };
 
   return {
-    start() { if (timer) return; stopped = false; poll(); timer = setInterval(poll, POLL_MS); },
-    stop() { stopped = true; clearInterval(timer); timer = null; for (const id of [...shown.keys()]) close(id); },
-    poll, shown,
+    start() { if (timer) return; stopped = false; poll(); timer = setInterval(tick, POLL_MS); doc.addEventListener?.('visibilitychange', onVisible); },
+    stop() { stopped = true; clearInterval(timer); timer = null; doc.removeEventListener?.('visibilitychange', onVisible); for (const id of [...shown.keys()]) close(id); },
+    poll, tick, shown,
   };
 }
 
 let host = null;
-export function mountRingHost() { if (!host) { host = createRingHost(); host.start(); } return host; }
+// Each reply is announced as 'kairos:rings-polled' with `outbound` (calls to other people going now, or undefined
+// from an older server), which the outbound call panel listens for.
+export function mountRingHost() {
+  if (!host) {
+    host = createRingHost({ onResult: reply => document.dispatchEvent(new CustomEvent('kairos:rings-polled', { detail: { outbound: reply?.outbound } })) });
+    host.start();
+  }
+  return host;
+}

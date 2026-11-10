@@ -128,6 +128,26 @@ const noTimers = { setTimer: () => 0, clearTimer: () => {} };
     host2.stop();
   });
 
+  await check('with no call going it reads nothing of its own; the ring poll nudges it when one starts', async () => {
+    const doc = fakeDocument(), timers = [];
+    let list = [], reads = 0;
+    const host = M.createOutboundCallHost({ document: doc, api: async () => { reads++; return { calls: list }; }, Notification: null,
+      setTimer: (fn, ms) => { timers.push(ms); return timers.length; }, clearTimer: () => {} });
+    host.start(); await Promise.resolve(); await Promise.resolve();
+    assert.equal(reads, 1, 'one read when the window opens');
+    assert.deepEqual(timers, [], 'nothing going: no timer of its own');
+    host.nudge(0);
+    assert.equal(reads, 1, 'the ring poll says none is going: no read');
+    list = [call()];
+    host.nudge(1); await Promise.resolve(); await Promise.resolve();
+    assert.equal(reads, 2, 'a call started: it reads at once');
+    assert.equal(panels(doc).length, 1);
+    assert.deepEqual(timers, [M.LIVE_POLL_MS], 'while a call is live it follows it closely');
+    host.nudge(1);
+    assert.equal(reads, 2, 'a read is already due: the nudge adds none');
+    host.stop();
+  });
+
   await check('labels name each speaker plainly', async () => {
     const c = call();
     assert.equal(M.speakerLabel({ who: 'them' }, c), "Luigi's");

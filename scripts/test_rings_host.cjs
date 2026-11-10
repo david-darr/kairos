@@ -101,6 +101,24 @@ const sheets = doc => doc.body.children.filter(node => !node.removed);
     assert.equal(sheets(behind).length, 0);
   });
 
+  await check('hidden, the tick reads only every 18 s; shown again, it reads at once; each reply reaches onResult', async () => {
+    const doc = fakeDocument(), replies = [];
+    let clock = 0, hidden = false, reads = 0;
+    const host = M.createRingHost({ document: doc, api: async () => { reads++; return { rings: [], outbound: 2 }; }, Notification: null, AudioContext: null,
+      isHidden: () => hidden, now: () => clock, onResult: reply => replies.push(reply.outbound) });
+    assert.equal(M.POLL_MS, 6000);
+    assert.equal(M.HIDDEN_POLL_MS, 18000);
+    await host.poll(); assert.equal(reads, 1);
+    assert.deepEqual(replies, [2], 'the reply, with its count of calls going, reaches the listener');
+    hidden = true;
+    for (clock = 6000; clock < 18000; clock += 6000) { host.tick(); await Promise.resolve(); }
+    assert.equal(reads, 1, 'hidden, ticks inside 18 s read nothing');
+    clock = 18000; host.tick(); await Promise.resolve(); await Promise.resolve();
+    assert.equal(reads, 2, 'hidden, it still reads every 18 s so a ring reaches the notification');
+    hidden = false; clock = 19000; host.tick(); await Promise.resolve();
+    assert.equal(reads, 3, 'shown, every tick reads');
+  });
+
   console.log(`ring host: ${passed.length} checks passed`);
   for (const name of passed) console.log(`  ok - ${name}`);
 })().catch(error => { console.error(error); process.exit(1); });

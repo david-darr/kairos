@@ -314,5 +314,27 @@ class ToolTests(RingCase):
         self.assertTrue(first.startswith("Not sent:"), first)
 
 
+
+class PollRouteTests(RingCase):
+    async def test_the_ring_poll_also_counts_calls_to_other_people_going_now(self):
+        from routes import ring_routes
+        from services import outbound_calls
+        with patch.object(accounts, "effective_account", lambda: "acct1"),                 patch.object(outbound_calls, "active", lambda account: [{"id": "c1"}, {"id": "c2"}]):
+            self.ring()
+            reply = await ring_routes.pending(user="alice")
+        self.assertEqual(len(reply["rings"]), 1)
+        self.assertEqual(reply["outbound"], 2)
+
+    async def test_a_failed_count_leaves_outbound_out_so_the_panel_looks_for_itself(self):
+        from routes import ring_routes
+        from services import outbound_calls
+
+        def broken(account):
+            raise RuntimeError("store unreadable")
+        with patch.object(accounts, "effective_account", lambda: "acct1"), patch.object(outbound_calls, "active", broken),                 self.assertLogs("routes.ring_routes", level="ERROR"):
+            reply = await ring_routes.pending(user="alice")
+        self.assertEqual(reply["rings"], [])
+        self.assertNotIn("outbound", reply)
+
 if __name__ == "__main__":
     unittest.main()
