@@ -108,9 +108,22 @@ const lazyApi = async (path, init) => (await import('./api.js')).api(path, init)
 // the lists whose version differs from the ones held. Before it, every 10 s re-fetched the bot list, the team
 // map and the automations whether or not they had changed: 2.5 MB a minute at 100 bots (2026-11-10).
 export const PULSE_PARTS = ['agents', 'conversations', 'team', 'automations'];
-export function pulsePath(held = {}) {
-  const query = PULSE_PARTS.filter(part => typeof held[part] === 'string' && held[part]).map(part => `${part}=${encodeURIComponent(held[part])}`).join('&');
-  return '/api/bot-pulse' + (query ? `?${query}` : '');
+export function pulsePath(held = {}, only = null) {
+  const pairs = PULSE_PARTS.filter(part => typeof held[part] === 'string' && held[part]).map(part => `${part}=${encodeURIComponent(held[part])}`);
+  if (Array.isArray(only) && only.length) pairs.push(`only=${only.filter(part => PULSE_PARTS.includes(part)).join(',')}`);
+  return '/api/bot-pulse' + (pairs.length ? `?${pairs.join('&')}` : '');
+}
+// The bot list, read through the pulse (only when it changed); the whole list on a backend without the pulse.
+// Returns the list, or null when it is unchanged since the last read.
+export function changedAgentsReader(request) {
+  let held = null;
+  return async (force = false) => {
+    const reply = await request(pulsePath(force || !held ? {} : { agents: held }, ['agents']), { toast: false }).catch(() => null);
+    if (!reply?.versions) { held = null; return request('/api/agents'); }
+    if (!('agents' in reply)) { held = reply.versions.agents || null; return null; }
+    held = reply.versions.agents || null;
+    return reply.agents;
+  };
 }
 // The versions held after a reply: a list that came back (or was unchanged) takes the reply's version; a list
 // the server could not read (null) is dropped, so the next poll asks for it whole.

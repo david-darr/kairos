@@ -30,6 +30,26 @@ const bot = (id, name, extra = {}) => ({ id, name, enabled: true, status: 'idle'
     assert.deepEqual(R.heldAfter(held, reply), { agents: 'a2', team: 't1', automations: 'm2' });
     // A version that moved without its body (a lost reply) is not taken: the next poll asks again.
     assert.deepEqual(R.heldAfter({ team: 't1' }, { versions: { team: 't2' } }), {});
+    assert.equal(R.pulsePath({ agents: 'a1' }, ['agents', 'nope']), '/api/bot-pulse?agents=a1&only=agents');
+  });
+
+  check('the Bots home grid reads the bot list only when it changed, and the whole list without the pulse', async () => {
+    const calls = [];
+    let version = 'v1';
+    const request = async path => {
+      calls.push(path);
+      if (path.startsWith('/api/bot-pulse')) return path.includes(`agents=${version}`) ? { versions: { agents: version } } : { versions: { agents: version }, agents: [{ id: version }] };
+      return [{ id: 'whole' }];
+    };
+    const read = R.changedAgentsReader(request);
+    assert.deepEqual(await read(), [{ id: 'v1' }], 'the first read brings the list');
+    assert.equal(await read(), null, 'unchanged: nothing comes back');
+    version = 'v2';
+    assert.deepEqual(await read(), [{ id: 'v2' }], 'changed: the new list');
+    assert.deepEqual(await read(true), [{ id: 'v2' }], 'forced: the list again');
+    assert.deepEqual(calls, ['/api/bot-pulse?only=agents', '/api/bot-pulse?agents=v1&only=agents', '/api/bot-pulse?agents=v1&only=agents', '/api/bot-pulse?only=agents']);
+    const old = R.changedAgentsReader(async path => { if (path.startsWith('/api/bot-pulse')) throw new Error('404'); return [{ id: 'whole' }]; });
+    assert.deepEqual(await old(), [{ id: 'whole' }]);
   });
 
   check('bots are ordered by `order`, then by name', () => {

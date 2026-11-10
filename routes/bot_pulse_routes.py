@@ -6,7 +6,8 @@ whether or not anything had changed: 2.5 MB a minute with one window open (100-b
 
 GET /api/bot-pulse?agents=V&conversations=V&team=V&automations=V answers with each list's version (a hash of
 what the list's own route returns), how many items need the person, and only the lists whose version differs
-from the one the window already holds. A window that holds nothing (its first read, or after a change it made
+from the one the window already holds. `only=agents` (a comma list) reads just those lists and leaves the
+needs-you count out: the Bots home grid polls the bot list this way. A window that holds nothing (its first read, or after a change it made
 itself) passes no versions and gets every list. Each list is the exact body of its route
 (/api/agents, /api/agents/conversations, /api/bot-team/map, /api/bot-automations), so the window treats both
 the same; a list that fails here is left out with a null version, and the window keeps what it has.
@@ -48,10 +49,11 @@ async def _read(part: str, user: str):
 async def pulse(agents: Optional[str] = Query(None, max_length=64),
                 conversations: Optional[str] = Query(None, max_length=64),
                 team: Optional[str] = Query(None, max_length=64), automations: Optional[str] = Query(None, max_length=64),
-                user: str = Depends(require_user)) -> dict:
+                only: Optional[str] = Query(None, max_length=100), user: str = Depends(require_user)) -> dict:
     held = {"agents": agents, "conversations": conversations, "team": team, "automations": automations}
+    wanted = [p for p in PARTS if p in (only or "").split(",")] if only else list(PARTS)
     reply: dict = {"versions": {}}
-    for part in PARTS:
+    for part in wanted:
         try:
             body = jsonable_encoder(await _read(part, user))
         except Exception:
@@ -62,6 +64,8 @@ async def pulse(agents: Optional[str] = Query(None, max_length=64),
         reply["versions"][part] = current
         if held[part] != current:
             reply[part] = body
+    if only:
+        return reply
     try:
         from services import bot_attention
         reply["needs_you"] = len((await asyncio.to_thread(bot_attention.needs_you, user))["rows"])

@@ -13,7 +13,7 @@ import { botKip } from '../botsKip.js';
 import { botStatusLine } from '../botStatus.js';
 import { loadBotsCss, withBotColor, applyBotsInterface } from '../botsUi.js';
 import { icon } from '../botsIcons.js';
-import { visibleBots, archivedBots, railRow, openBot } from '../botsRail.js';
+import { visibleBots, archivedBots, railRow, openBot, changedAgentsReader } from '../botsRail.js';
 import { openNewBot, openArchived } from '../botsPanelHost.js';
 
 const SHELL_CSS = '/static/css/bots-shell.css';
@@ -116,11 +116,16 @@ export async function render(container) {
     if (focused) body.querySelector(`.bots-bot-card[data-agent-id="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true });
   }
 
-  async function refresh() {
+  // The grid's 10-second poll reads the bot list only when it changed (routes/bot_pulse_routes.py, 2026-11-10):
+  // a window parked here re-read 132 KB every 10 s at 100 bots.
+  const readAgents = changedAgentsReader(api);
+  async function refresh(event) {
     const at = ++version;
     try {
-      const next = await api('/api/agents');
-      if (disposed || at !== version || !Array.isArray(next)) return;
+      const next = await readAgents(!agents || !!event?.type);
+      if (disposed || at !== version) return;
+      if (next === null) return;  // unchanged
+      if (!Array.isArray(next)) return;
       agents = next; draw();
     } catch {
       if (!disposed && at === version && !agents) body.replaceChildren(h('p', { class: 'bots-home-message', role: 'alert', text: 'Bots could not load. Try opening this page again.' }));

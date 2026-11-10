@@ -77,6 +77,13 @@ class PulseTests(unittest.TestCase):
         self.assertIn("Pulse Bot new", [a["name"] for a in after["agents"]])
         self.assertNotIn("automations", after, "the automations did not change")
 
+    def test_only_reads_just_the_lists_asked_for(self):
+        first = self.pulse({"only": "agents"})
+        self.assertEqual(set(first), {"versions", "agents"})
+        self.assertEqual(set(first["versions"]), {"agents"})
+        idle = self.pulse({"only": "agents", "agents": first["versions"]["agents"]})
+        self.assertEqual(set(idle), {"versions"})
+
     def test_a_list_that_cannot_be_read_is_left_out_and_the_rest_still_come(self):
         real = bot_pulse_routes._read
 
