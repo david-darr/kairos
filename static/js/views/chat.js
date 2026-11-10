@@ -235,19 +235,26 @@ async function forkFrom(session, index) {
 }
 
 // Each connection's recent speed and reliability (unit 3), read at most once a minute, for advice only.
+// `fresh` skips the cache: a failed reply is itself a new run, so figures cached before it was seen
+// (the model picker fills the cache when a chat opens) cannot count it (2026-11-09).
 let statsCache = { at: 0, value: null };
-async function recentModelStats() {
-  if (statsCache.value && Date.now() - statsCache.at < 60000) return statsCache.value;
+async function recentModelStats({ fresh = false } = {}) {
+  if (!fresh && statsCache.value && Date.now() - statsCache.at < 60000) return statsCache.value;
   try { statsCache = { at: Date.now(), value: (await api('/api/models/stats'))?.endpoints || {} }; }
-  catch { return {}; }
+  catch { return statsCache.value || {}; }
   return statsCache.value;
 }
+// Failed replies already read against fresh stats in this page, so a re-render reuses the cache.
+const statsReadForFailure = new Set();
 
 // A model that keeps failing: say so under its failed reply, with what a switch costs. Advice only; the
 // person chooses (unit 7).
 async function suggestSwitch(session, index, card) {
   const failed = session.messages[index];
-  const stats = await recentModelStats();
+  const failureKey = `${session.id}:${index}:${failed.ts ?? ''}`;
+  const fresh = !statsReadForFailure.has(failureKey);
+  statsReadForFailure.add(failureKey);
+  const stats = await recentModelStats({ fresh });
   if (!card.isConnected || session.id !== activeSessionId || card.querySelector('.chat-switch-suggestion')) return;
   const text = switchSuggestion(stats[failed.failure_model_endpoint_id], failed.failure_model_name,
     session.context_state?.used_tokens);
