@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "bad2fe9857df4f9992ab81b873d3222c5709fa8aff15e3e903b7a05ac4213c23",
+  "app.js": "eafd633ba95a51cba1aa1d67465c42b1acd14435d98537adc7c0a00cbd3412a4",
   "fixtures.js": "74e8f04406fdfdd94bc804a64941ea0ce5d40ce5f93566a69d6fcf51031b2b7a",
   "index.html": "765d80b018d722a27e29860be2ae3b86e889fe704be8a9dfdc0752e78379ad19",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -1767,7 +1767,7 @@
   "static/js/views/settingsChannels.js": "4d46a6d3410dbcedce491f69a266e526a7f4ff171ac6bf2b1ec3f625512e6155",
   "static/js/views/settingsHooks.js": "aff3d447199c55e266cbc4f20dbe734c6cf526d9dc3bd750ef5e60da645293a8",
   "static/js/views/settingsNotifications.js": "18df61204a29010921e1f528c18af53b669f3b0fb102cfb6aecfb1415806d1a4",
-  "static/js/views/speechPanel.js": "359ca9718994e514a4bfd7ffd924f8993cf2666ace3cb1ac34a153d7278a5739",
+  "static/js/views/speechPanel.js": "f7d87bca539c43140c4e42de23f34fc9d710929fde9ce28f0e906438da7587d3",
   "static/js/views/stub.js": "f401016e0a236e84b5a18f08c99800a5d10e7e7d0a9225f66c88ea423fefecfe",
   "static/js/views/swarm.js": "eb719518c3bc8320a7d5c2bbb7e34aaec0bd7e91bd8b91f25c035692064620ad",
   "static/js/views/taskBoard.js": "6ffc9d83794e7a153d5399e93812d8de5862f811303adda66e90ed2458f683b8",
@@ -1777,7 +1777,7 @@
   "static/js/voiceEnginesSetup.js": "6626f7ccebd7e0b854648d33375c230f39cd4d20fe6c9c8763ed0a7e2acf065b",
   "static/js/voiceFiller.js": "72e53784d003f8ecb50b5a09f6155cb09cad1bbeb63626d8d668ef32c0e021d1",
   "static/js/voiceInput.js": "87be37831e6a71712850f4ddd3844ee3bdc840a041bc93750d80c48ab92f1acd",
-  "static/js/voiceOutput.js": "1c30cbfd28c5a3a521bd35ee868b90a688593a10776aee4a696f1f2caa9caf1d",
+  "static/js/voiceOutput.js": "0fcd56032cb7d908858772aa00b15de1a4e11cda929737ba63c0e5cfdcd07f4c",
   "static/js/voiceTrace.js": "ba1679d63be9aeefe2a6ca7b394cbd2de865e614cfb773076d06c4402f2c8657",
   "static/js/waitNotice.js": "33479c242b00aca0199520aa399aad780f8efec3363dafa68a6beb9fce798f71",
   "static/js/workspaceParts.js": "96919377a75286ebaaeb63af905e866d688cea534ea4fc5b427e3d172e476161",
