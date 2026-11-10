@@ -59,7 +59,7 @@ function serve(req, res) {
     res.writeHead(image ? 200 : 404, { 'Content-Type': 'image/svg+xml' }); res.end(image || ''); return;
   }
   const name = path.posix.basename(url.pathname);
-  if (url.pathname === `/static/motion/${name}` && ['engine.js', 'kit.js', 'layout.js', 'rig.js', 'scene.js'].includes(name)) {
+  if (url.pathname === `/static/motion/${name}` && ['engine.js', 'kit.js', 'layout.js', 'rig.js', 'scene.js', 'stage.js'].includes(name)) {
     res.setHeader('Content-Type', 'text/javascript'); res.end(fs.readFileSync(path.join(root, 'static/motion', name))); return;
   }
   res.writeHead(404); res.end();

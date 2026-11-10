@@ -169,7 +169,18 @@ const { pathToFileURL } = require('node:url');
   assert.deepEqual(M.packStatus({ status: 'awaiting_approval' }), ['Waiting for your OK', 'accent']);
   assert.equal(M.packUseText({ approved_version: 2, spec: { renderer: '2d-engine' } }), 'Channels and videos use version 2.');
   assert.equal(M.packUseText({ approved_version: null, spec: { renderer: '2d-engine' } }), 'Not approved yet, so no channel can use it.');
-  assert.equal(M.packUseText({ approved_version: 1, spec: { renderer: 'blender' } }), 'Its renderer is not built yet, so it cannot render.');
+  assert.equal(M.packUseText({ approved_version: 1, spec: { renderer: 'threejs', base: 'voxel-3d' } }), 'Its renderer is not built yet, so it cannot render.');
+  // Pack B: a glossy 3D pack renders with three.js or Blender, and Studio says plainly when Blender is not installed.
+  assert.equal(M.packUseText({ approved_version: 1, spec: { renderer: 'blender', base: 'glossy-3d' } }), 'Channels and videos use version 1.');
+  const none = { blender: { found: false, supported: false } }, have = { blender: { found: true, supported: true, version: '5.2.2' } };
+  assert.match(M.rendererText('blender', none), /Blender isn't installed on this computer, so it renders with three\.js/);
+  assert.match(M.rendererText('blender', have), /Blender 5\.2\.2, installed/);
+  assert.match(M.rendererText('threejs', none), /three\.js, built into Kairos/);
+  assert.deepEqual(M.rendererOptions(none, { inherit: true }).map(o => o[1]), ["The style pack's choice", 'three.js (built in)', 'Blender (not installed)']);
+  assert.ok(!/—/.test(M.rendererText('blender', none) + M.rendererText('blender', have)), 'no em-dashes');
+  assert.ok(M.packFacts({ base: 'glossy-3d', renderer: 'blender', look: { palette: 'dawn', design_look: 'nordic', lighting: 'soft', families: ['round'] }, characters: [],
+    scenes: { settings: ['lavender'], shots: ['wide'], cameras: ['still'], transitions: ['cut'] }, pacing: { words_per_second: 2.6, shot_seconds: [2, 6], hook_seconds: 5 },
+    captions: { on: true, case: 'sentence' }, music: { mood: 'calm' }, voice: { voice: 'af_heart' } }, none).some(([k, v]) => k === '3D renderer' && /isn't installed/.test(v)));
   assert.equal(M.packOriginText({ kind: 'brief', from: 'david' }), 'Made from a written brief (david).');
   assert.equal(M.packOriginText({ kind: 'starter', from: 'flat-science-explainer' }), 'Starter pack.');
   assert.equal(M.packOriginText({ kind: 'nope' }), '');

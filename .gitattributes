@@ -6,3 +6,6 @@ addon_packages/** -text
 skill_templates/** -text
 # Kairos CLI snapshot goldens and recorded SSE: byte-exact fixtures.
 scripts/fixtures/kairos_cli/** -text
+# static/vendor/three: hashes in its VENDORED.txt (core/three_vendor.check); the site demo's copy too.
+static/vendor/three/** -text
+docs/demo/static/vendor/three/** -text

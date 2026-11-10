@@ -8,7 +8,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 from core import (accounts, design_render, design_render_bridge, design_systems, ffmpeg_tools, video_longform, video_plan, video_render,
-                  video_store)
+                  three_vendor, video_store)
 from core.auth import auth_manager
 from core.middleware import get_current_user, require_user
 from core.constants import STATIC_DIR
@@ -32,6 +32,7 @@ class VideoBody(BaseModel):
     palette: Optional[str] = Field(None, max_length=24)
     style_pack: Optional[dict[str, Any]] = None       # a user-made style pack, {id, version}
     chapters: Optional[list[dict[str, Any]]] = Field(None, max_length=video_store.MAX_CHAPTERS)   # a long video's chapters
+    renderer: Optional[str] = Field(None, max_length=10)   # Pack B's 3D stage beats: threejs (built in) or blender (when installed)
     id: Optional[str] = None
     owner: Optional[str] = None
     chat_ids: list[str] = []
@@ -42,7 +43,7 @@ class VideoBody(BaseModel):
 
     def project(self):
         return {k: v for k, v in self.model_dump().items()
-                if k in video_store.FIELDS and (k not in ("id", "narration", "cast", "palette", "style_pack", "chapters") or v is not None)}
+                if k in video_store.FIELDS and (k not in ("id", "narration", "cast", "palette", "style_pack", "chapters", "renderer") or v is not None)}
 
 
 class RenderBody(BaseModel):
@@ -125,6 +126,18 @@ async def delete_video(video_id: str, user: str = Depends(require_user)):
     return {"ok": True}
 
 
+@router.get("/api/video-renderers")
+async def renderers(user: str = Depends(require_user)):
+    """Pack B's 3D renderers for Studio: three.js always; Blender only when this computer has it (core/blender_tools.py)."""
+    from core import blender_tools
+    return blender_tools.status()
+
+
+def _blender_ready():
+    from core import blender_tools
+    return blender_tools.find() is not None
+
+
 def player_page(project):
     """Inject data, never executable project text, into lane D's fixed template."""
     path = Path(STATIC_DIR) / "motion" / "player.html"
@@ -145,6 +158,8 @@ def player_page(project):
                                   for cid, c in character_store.resolve(project["cast"]).items()}
         except LookupError as error:
             raise HTTPException(422, "cast: " + str(error).strip("'")) from None
+    if project.get("renderer") == "blender" and not _blender_ready():
+        data["renderer"] = "threejs"     # the page draws what will render: without Blender, three.js
     if project.get("style_pack"):
         # The pack's look as numbers and names (palette colours, lighting, caption case); nothing else of it reaches the page.
         from core import style_pack_store
@@ -209,7 +224,8 @@ def _player_response(video_id, request, aspect, v):
     if aspect not in project["aspects"]:
         raise HTTPException(422, "aspect: choose an aspect listed in the project.")
     origin = f"{request.url.scheme}://{request.url.netloc}"
-    csp = (f"default-src 'none'; script-src {origin}/static/motion/; style-src 'unsafe-inline'; "
+    # Pack B's 3D stage loads the vendored three.js through the page's import map (core/three_vendor.py).
+    csp = (f"default-src 'none'; script-src {three_vendor.script_src(origin)}; style-src 'unsafe-inline'; "
            f"img-src {origin}/api/videos/{video_id}/assets/; font-src {origin}/api/design-fonts/; "
            f"connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'")
     return HTMLResponse(player_page(project), headers={"Content-Security-Policy": csp, "Cache-Control": "no-store",

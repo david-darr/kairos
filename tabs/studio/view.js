@@ -5,8 +5,10 @@ const MOTION_URL = '/static/motion/engine.js';
 
 const BASE = '/api/tab-studio';
 const ASPECTS = ['16:9', '9:16', '1:1'];
-const KINDS = ['title', 'statement', 'big-number', 'list', 'image', 'quote', 'split', 'logo', 'end', 'scene'];
+const KINDS = ['title', 'statement', 'big-number', 'list', 'image', 'quote', 'split', 'logo', 'end', 'scene', 'stage'];
 const NEW_SCENE = { setting: 'meadow', shot: 'medium', cast: [], props: [] };
+// Pack B: a 3D studio shot (static/motion/stage.js): set tone, shot, 3D cast, stand-in people, glossy props, labels over heads.
+const NEW_STAGE = { set: 'lavender', shot: 'medium', cast: [], people: { count: 0 }, props: [], labels: [] };
 // A Pack A video's cast: each character's spec at the version the project pins (routes/character_routes.py).
 const castCache = new Map();
 async function castSpecs(p) {
@@ -379,7 +381,11 @@ async function editor(host, id, looks, back, parentDisposed) {
     const only = (node, shown) => { node.hidden = !shown; return node; };
     inspector.append(el('h3', { text: `Beat ${selected + 1}` }), field('Kind', select('Beat kind', KINDS, beat.kind, v => {
       // A scene needs its scene; another kind must not keep one.
-      changed(p => { const b = p.beats[selected]; b.kind = v; if (v === 'scene') b.scene ||= structuredClone(NEW_SCENE); else delete b.scene; }); drawInspector();
+      changed(p => {
+        const b = p.beats[selected]; b.kind = v;
+        if (v === 'scene') b.scene ||= structuredClone(NEW_SCENE); else delete b.scene;
+        if (v === 'stage') b.stage ||= structuredClone(NEW_STAGE); else delete b.stage;
+      }); drawInspector();
     }), path + '.kind'),
       textField('Text', 'text', 140, true), only(textField('Supporting text', 'sub', 100), !['big-number', 'list'].includes(kind)),
       only(textField('Number', 'number', 140), kind === 'big-number'));
@@ -395,7 +401,15 @@ async function editor(host, id, looks, back, parentDisposed) {
       try { const value = JSON.parse(sceneText.value); setBeat('scene', value); sceneField.querySelector('.meta').textContent = 'Saved.'; }
       catch { sceneField.querySelector('.meta').textContent = 'Not valid JSON yet; nothing saved.'; }
     });
-    inspector.append(only(itemField, kind === 'list'), only(sceneField, kind === 'scene'), textField('Narration (the line spoken over this beat)', 'say', 400, true));
+    const stageText = el('textarea', { rows: 10, 'aria-label': 'Stage as JSON', spellcheck: 'false' });
+    stageText.value = JSON.stringify(beat.stage || NEW_STAGE, null, 1);
+    const stageField = field('3D stage (set, shot, cast, people, props, labels)', stageText, path + '.stage',
+      'Sets: lavender, peach, mint, sky, night. Shots: wide, medium, close. Props: ball, block, pillar, ring, coin. Labels float over c0 (the first cast member) or p0 (the first person).');
+    stageText.addEventListener('input', () => {
+      try { setBeat('stage', JSON.parse(stageText.value)); stageField.querySelector('.meta').textContent = 'Saved.'; }
+      catch { stageField.querySelector('.meta').textContent = 'Not valid JSON yet; nothing saved.'; }
+    });
+    inspector.append(only(itemField, kind === 'list'), only(sceneField, kind === 'scene'), only(stageField, kind === 'stage'), textField('Narration (the line spoken over this beat)', 'say', 400, true));
     // Chapters: a long narrated video (up to 20 minutes) in parts; each chapter starts at a beat and needs a title.
     const chapter = (state.p.chapters || []).find(c => c.start === beat.id);
     const chapterTitle = el('input', { value: chapter?.title || '', maxlength: 80, 'aria-label': 'Chapter that starts at this beat' });
@@ -470,6 +484,19 @@ async function editor(host, id, looks, back, parentDisposed) {
       field('Tempo (BPM)', el('input', { type: 'number', min: 60, max: 180, value: state.p.bpm, 'aria-label': 'Tempo in beats per minute', oninput: e => changed(p => { p.bpm = Number(e.target.value); }) }), 'bpm', '60 to 180 BPM'),
       field('Music mood', select('Music mood', MOODS, state.p.music.mood, v => changed(p => { p.music.mood = v; })), 'music.mood'),
       field('Music volume', el('input', { type: 'range', min: 0, max: 1, step: .01, value: state.p.music.volume, 'aria-label': 'Music volume', oninput: e => changed(p => { p.music.volume = Number(e.target.value); }) }), 'music.volume', '0 to 1'));
+    // Pack B: what draws the 3D stage beats. Blender is offered only when this computer has it (Kairos never installs it).
+    if (state.p.beats.some(b => b.kind === 'stage')) {
+      const choice = select('3D renderer', [['threejs', 'three.js (built in)'], ['blender', 'Blender']], state.p.renderer || 'threejs', v => changed(p => { p.renderer = v; }));
+      const host = field('3D renderer', choice, 'renderer', 'three.js is built in and fast.');
+      inspector.append(host);
+      api('/api/video-renderers').then(status => {
+        const b = status.blender, option = choice.querySelector('option[value="blender"]');
+        option.textContent = b.supported ? `Blender ${b.version} (installed)` : 'Blender (not installed)';
+        option.disabled = !b.supported && state.p.renderer !== 'blender';
+        host.querySelector('.meta').textContent = b.supported ? `three.js is built in and fast. Blender ${b.version} is installed: softer light, much slower to render.`
+          : `three.js is built in and fast. ${b.message}`;
+      }).catch(() => {});
+    }
     renderErrors();
   }
   function planPanel() {
@@ -597,7 +624,7 @@ async function editor(host, id, looks, back, parentDisposed) {
     el('div', { class: 'studio-columns' }, [el('aside', { 'aria-label': 'Beat sequence' }, [el('h3', { text: 'Beats' }), el('p', { class: 'meta', text: 'Drag to reorder, use Move buttons, or Alt + Arrow keys.' }), list,
       field('Add beat by kind', addKind), button('Add beat', () => {
         if (state.p.beats.length >= maxBeats(state.p)) throw Error(`A video can have at most ${maxBeats(state.p)} beats.`);
-        changed(p => p.beats.push({ id: beatId(), kind: addKind.value, text: '', bars: 1, ...(addKind.value === 'scene' ? { scene: structuredClone(NEW_SCENE) } : {}) })); selected = state.p.beats.length - 1; drawBeats(); drawInspector();
+        changed(p => p.beats.push({ id: beatId(), kind: addKind.value, text: '', bars: 1, ...(addKind.value === 'scene' ? { scene: structuredClone(NEW_SCENE) } : {}), ...(addKind.value === 'stage' ? { stage: structuredClone(NEW_STAGE) } : {}) })); selected = state.p.beats.length - 1; drawBeats(); drawInspector();
       })]), el('section', { class: 'studio-centre', 'aria-label': 'Preview and rendering' }, [
       field('Preview aspect', select('Preview aspect', ASPECTS, aspect, value => { aspect = value; remount(); })), stage, previewError,
       el('div', { class: 'studio-actions' }, [play, el('label', { class: 'studio-check' }, [el('input', { type: 'checkbox', checked: looping, onchange: e => { looping = e.target.checked; } }), el('span', { text: 'Loop' })]), clock]),

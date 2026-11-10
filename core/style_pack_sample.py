@@ -11,6 +11,10 @@ thumbnail with the pack version, and sends the version for the person's approval
 The sample's script is fixed and harmless, so packs are compared on their look, not their words: why we have seasons
 (Earth's axis is tilted about 23 degrees; the half leaning toward the Sun gets more direct light and longer days; it is
 not the distance to the Sun). Standard physics, not checked against a source in this module.
+
+A glossy 3D pack (Pack B) gets its own short "what if" sample instead: what if you could see how much everyone slept? The
+people and their numbers are made up, on purpose; the script states no real figure. It renders with the pack's renderer
+(three.js, or Blender when installed and picked), so a Blender pack's sample shows the Blender look.
 """
 from __future__ import annotations
 
@@ -46,9 +50,61 @@ def _props(wanted, allowed, places):
     return [{"icon": icon, **place} for icon, place in zip([w for w in wanted if w in allowed], places)]
 
 
+TITLE_3D = "What if you could see sleep?"
+LINES_3D = {
+    "hook": "What if you could see how much sleep everyone got last night?",
+    "crowd": "A little number would float over every head.",
+    "mine": "And mine says five hours and forty minutes.",
+    "explains": "That explains a lot.",
+    "everyone": "Now picture everyone else's number, right there, where nobody can hide it.",
+    "want": "So, would you want to know your number? Or would you rather not look?",
+}
+
+
+def beats_3d(data) -> list[dict]:
+    """Pack B's sample: stage beats in the pack's set tones, shots, props and cameras, cut on the narration. The numbers
+    over heads belong to made-up people."""
+    scenes = data["scenes"]
+    cam = lambda *wanted: _pick(wanted, scenes["cameras"])         # noqa: E731
+    cut = lambda *wanted: _pick(wanted, scenes["transitions"])     # noqa: E731
+    tone = lambda *wanted: _pick(wanted, scenes["settings"])       # noqa: E731
+    shot = lambda *wanted: _pick(wanted, scenes["shots"])          # noqa: E731
+    props = scenes["props"]
+    prop = lambda shape, **more: [{"shape": shape, **more}] if shape in props else []   # noqa: E731
+    me = data["characters"][0]["character"]
+    who = lambda **more: {"character": me, "x": 0, **more}        # noqa: E731
+    labels = [{"over": f"p{i}", "text": text, "at": .25 + .32 * i} for i, text in enumerate(["7 h 10 m", "8 h 05 m", "6 h 20 m", "9 h", "7 h 45 m"])]
+    return [
+        {"id": "hook", "kind": "stage", "camera": cam("push", "still"), "transition": cut("cut"), "say": LINES_3D["hook"],
+         "stage": {"set": tone("lavender"), "shot": shot("wide"), "cast": [who(action="wave", expression="happy", speaking=True)],
+                   "people": {"count": 5, "seed": 3}, "props": prop("ball", x=-.82, depth=.55, size=.32, color=0) + prop("pillar", x=.86, depth=.75, size=.3, color=1)}},
+        {"id": "crowd", "kind": "stage", "camera": cam("pan", "still"), "transition": cut("cut"), "say": LINES_3D["crowd"],
+         "stage": {"set": tone("lavender"), "shot": shot("wide"), "cast": [who(action="point", expression="happy", speaking=True)],
+                   "people": {"count": 5, "seed": 3}, "labels": labels}},
+        {"id": "mine", "kind": "stage", "camera": cam("push", "still"), "transition": cut("cut"), "say": LINES_3D["mine"],
+         "stage": {"set": tone("lavender"), "shot": shot("medium"), "pedestal": True,
+                   "cast": [who(action="idle", expression="neutral", speaking=True, react={"at": .55, "expression": "surprised"})],
+                   "labels": [{"over": "c0", "text": "5 h 40 m", "sub": "slept last night", "at": .5}],
+                   "props": prop("coin", x=.75, depth=.2, size=.22, color=2)}},
+        {"id": "explains", "kind": "stage", "camera": cam("still"), "transition": cut("cut"), "say": LINES_3D["explains"],
+         "stage": {"set": tone("lavender"), "shot": shot("close", "medium"), "cast": [who(action="shrug", expression="worried", speaking=True)],
+                   "labels": [{"over": "c0", "text": "5 h 40 m", "at": 0}]}},
+        {"id": "everyone", "kind": "stage", "camera": cam("pull", "still"), "transition": cut("cut"), "say": LINES_3D["everyone"],
+         "stage": {"set": tone("lavender"), "shot": shot("wide"), "cast": [who(action="shrug", expression="surprised", speaking=True)],
+                   "people": {"count": 4, "seed": 7},
+                   "labels": [{"over": f"p{i}", "text": text, "at": .3 + .3 * i} for i, text in enumerate(["6 h 50 m", "8 h 30 m", "4 h 15 m", "7 h 20 m"])]}},
+        {"id": "want", "kind": "stage", "camera": cam("pull", "still"), "transition": cut("cut"), "say": LINES_3D["want"],
+         "stage": {"set": tone("lavender"), "shot": shot("medium"), "cast": [who(action="think", expression="thinking", speaking=True)],
+                   "props": prop("ring", x=-.8, depth=.6, size=.3, color=4) + prop("block", x=.8, depth=.5, size=.24, color=3)}},
+        {"id": "end", "kind": "end", "text": "What if?", "sub": "An original Kairos sample", "bars": 1.5},
+    ]
+
+
 def beats(data) -> list[dict]:
     """The sample's beats in the pack's own rules."""
     scenes = data["scenes"]
+    if data["base"] == "glossy-3d" and data["characters"]:
+        return beats_3d(data)
     cam = lambda *wanted: _pick(wanted, scenes["cameras"])         # noqa: E731
     cut = lambda *wanted: _pick(wanted, scenes["transitions"])     # noqa: E731
     if data["base"] == "motion-type" or not data["characters"]:
@@ -103,7 +159,7 @@ def project_options(data, pack_id, version) -> dict:
     options = style_pack_store.video_defaults(data)
     if data["base"] == "flat-2d" and data["characters"]:
         options["palette"] = data["look"]["palette"] if isinstance(data["look"]["palette"], str) else "dawn"
-    else:
+    elif data["base"] != "glossy-3d" or not data["characters"]:
         options.pop("cast", None)
     options.update(aspects=[ASPECT], style_pack={"id": pack_id, "version": version})
     return options
@@ -138,9 +194,8 @@ async def make(pack_id, version, owner: str, by: str = "") -> dict:
     if v["status"] == "approved":
         raise style_pack_store.ApprovalError(f"Version {version} of {meta['name']} is already approved.")
     data = style_pack_store.spec(pack_id, version)
-    if data["renderer"] != "2d-engine":
-        raise ValueError(f"{meta['name']} targets the {data['renderer']} renderer, which is not built yet (build unit 5); "
-                         "it cannot render a sample.")
+    if data["base"] == "voxel-3d":
+        raise ValueError(f"{meta['name']} is drawn by the voxel-3d base, which is not built yet (build unit 6); it cannot render a sample.")
     problems = style_pack_store.check_characters(data)
     if problems:
         raise ValueError("characters: " + " ".join(problems))
@@ -154,7 +209,8 @@ async def make(pack_id, version, owner: str, by: str = "") -> dict:
         return {**meta, "step": "sheets"}
     style_pack_store.set_sample_status(pack_id, version, "rendering")
     try:
-        project = video_store.create(TITLE, owner=owner, beats=copy.deepcopy(beats(data)), **project_options(data, pack_id, version))
+        title = TITLE_3D if data["base"] == "glossy-3d" and data["characters"] else TITLE
+        project = video_store.create(title, owner=owner, beats=copy.deepcopy(beats(data)), **project_options(data, pack_id, version))
         job = await video_render.render(project["id"], ASPECT, sample_of=(pack_id, version))
         if job["status"] != "ready":
             raise RuntimeError(job["status"])

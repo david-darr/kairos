@@ -134,6 +134,10 @@ class ValidationTests(unittest.TestCase):
                     p["beats"][0]["scene"] = {}
                 else:
                     p["beats"][0].pop("scene", None)
+                if kind == "stage":
+                    p["beats"][0]["stage"] = {}      # Pack B: every stage field has its default
+                else:
+                    p["beats"][0].pop("stage", None)
                 for transition in video_store.TRANSITIONS:
                     p["beats"][0]["transition"] = transition
                     video_store.validate(p)
@@ -797,7 +801,7 @@ assert(!allowedRequest('https://example.com/static/motion/engine.js', origin, ''
 '''
         subprocess.run(["node", "-e", source], cwd=ROOT, check=True, capture_output=True)
         worker = (ROOT / "electron/designRender.js").read_text(encoding="utf-8")
-        for protection in ("sandbox: true", "contextIsolation: true", "nodeIntegration: false", "callback(false)", "will-navigate", "will-download", "action: 'deny'", "stopped || win.isDestroyed()", "frames.length === 15", "toDataURL('image/jpeg', 0.92)"):
+        for protection in ("sandbox: true", "contextIsolation: true", "nodeIntegration: false", "callback(false)", "will-navigate", "will-download", "action: 'deny'", "stopped || win.isDestroyed()", "frames.length === size", "alpha ? 5 : 15", "toDataURL('image/jpeg', 0.92)"):
             self.assertIn(protection, worker)
 
     def test_prompt_and_skill_versions_and_lf(self):
@@ -1472,11 +1476,12 @@ class PackRegistryTests(unittest.TestCase):
     def test_pack_a_is_available_and_users_have_a_seam(self):
         self.assertTrue(style_packs.available("flat-2d"))
         self.assertTrue(style_packs.available("motion-type"))
-        self.assertFalse(style_packs.available("glossy-3d"))
+        self.assertTrue(style_packs.available("glossy-3d"))      # Pack B since unit 5
+        self.assertFalse(style_packs.available("voxel-3d"))
         self.assertEqual(style_packs.user_packs(), [])
         from services.content_studio import formats
         cost = formats.cost("flat-2d", 120)
-        self.assertEqual((cost["available"], cost["units"], cost["cheapest_units"], cost["ratio"]), (True, 6.0, 2.0, 3.0))
+        self.assertEqual((cost["available"], cost["units"], cost["cheapest_units"], cost["ratio"]), (True, 2.0, 2.0, 1.0))   # measured: the same 2D engine
         engine = (ROOT / "static/motion/scene.js").read_text(encoding="utf-8")
         for name, palette in style_packs.PALETTES.items():
             self.assertIn(f"{name}: {{ sky: ['{palette['sky'][0]}', '{palette['sky'][1]}']", engine, "scene.js palettes match the registry")
@@ -1504,7 +1509,7 @@ class CharacterToolTests(unittest.TestCase):
         self.assertIn("v2 draft", self.call("character_make", {"character_id": cid, "changes": {"palette": {"accent": "#abcdef"}}}))
         self.assertIn("Not run", self.call("character_make", {"name": "No Family"}))
         listing = self.call("character_list", {})
-        self.assertIn("Tool Pip (round)", listing)
+        self.assertIn("Tool Pip (round, 2D", listing)
         self.assertIn("Settings: meadow", listing)
         self.assertIn("scene={setting", tool_registry._REGISTRY["video_create"].description)
         with patch.object(character_sheet, "render", AsyncMock(side_effect=character_sheet.Unavailable("Needs the desktop app."))):

@@ -224,6 +224,10 @@ export async function mountContent(host, { signal } = {}) {
     notes.value = channel.notes || '';
     const voice = textInput('Narrator voice', { value: channel.voice || '', maxlength: '40', placeholder: 'For example, af_heart' });
     const pack = selectOf('Style pack', M.packOptions(data.styles?.available), channel.style_pack || '');
+    // Pack B: what renders this channel's 3D videos. Blender is offered only when it is installed on this computer.
+    const status3d = data.styles?.renderers;
+    const renderer = selectOf('3D renderer', M.rendererOptions(status3d, { inherit: true }), channel.renderer || '');
+    if (!status3d?.blender?.supported) renderer.querySelector('option[value="blender"]').disabled = channel.renderer !== 'blender';
     const youtube = channel.platform === 'youtube';
     const longWeek = el('input', { type: 'number', min: '0', max: '7', step: '1', 'aria-label': 'Long videos a week', value: String(channel.long_per_week ?? 1) });
     longWeek.value = String(channel.long_per_week ?? 1);
@@ -231,6 +235,7 @@ export async function mountContent(host, { signal } = {}) {
     const body = el('div', { class: 'sc-dialog' }, [
       note('The Editor renders this channel\'s videos in its style pack, look and aspect, and the Script Writer follows its voice notes.'),
       group({}, [row({ title: 'Style pack', description: 'How this channel\'s videos look and sound. Only approved packs are listed (Styles).', control: pack }),
+        row({ title: '3D renderer', description: status3d?.blender?.supported ? `For glossy 3D packs. three.js is built in and fast; Blender ${status3d.blender.version} is installed here: softer light, much slower.` : 'For glossy 3D packs. three.js is built in. Blender isn\'t installed on this computer, so it cannot be picked.', control: renderer }),
         row({ title: 'Look', description: 'A Studio video look id. Leave it empty to let the Editor choose.', control: look, stack: true }),
         row({ title: 'Aspect', control: aspect }), row({ title: 'Voice notes', control: notes, stack: true }),
         row({ title: 'Narrator voice', description: 'The Kokoro voice that narrates every video on this channel. Left empty, the first narrated video sets it.', control: voice, stack: true }),
@@ -239,7 +244,7 @@ export async function mountContent(host, { signal } = {}) {
       status.textContent = '';
       const week = Number(longWeek.value);
       if (youtube && (!Number.isInteger(week) || week < 0 || week > 7)) { status.textContent = 'Long videos a week is a whole number from 0 to 7.'; return; }
-      try { await send(`/channels/${channel.id}/edit`, { look: look.value.trim(), aspect: aspect.value, notes: notes.value.trim(), voice: voice.value.trim(), style_pack: pack.value, ...(youtube ? { long_per_week: week } : {}) }); }
+      try { await send(`/channels/${channel.id}/edit`, { look: look.value.trim(), aspect: aspect.value, notes: notes.value.trim(), voice: voice.value.trim(), style_pack: pack.value, renderer: renderer.value, ...(youtube ? { long_per_week: week } : {}) }); }
       catch (error) { status.textContent = M.loadFailure(error); return; }
       dialog.close(); toast('Look saved.'); await reload();
     }, 'primary');
@@ -596,6 +601,9 @@ export async function mountContent(host, { signal } = {}) {
     const caseSel = selectOf('Caption case', [['sentence', 'Sentence case'], ['upper', 'Upper case']], spec.captions.case);
     const captions = selectOf('Captions', [['on', 'On'], ['off', 'Off']], spec.captions.on ? 'on' : 'off');
     const voice = textInput('Narrator voice', { maxlength: '40', value: spec.voice.voice });
+    const three = spec.base === 'glossy-3d', status3d = data.styles?.renderers;
+    const renderer = three ? selectOf('3D renderer', M.rendererOptions(status3d), spec.renderer) : null;
+    if (renderer && !status3d?.blender?.supported) renderer.querySelector('option[value="blender"]').disabled = spec.renderer !== 'blender';
     const why = textInput('What changed', { maxlength: '300', placeholder: 'For example, calmer music for the night series' });
     const status = el('p', { class: 'set-error', role: 'alert' });
     const body = el('div', { class: 'sc-dialog' }, [note('Any change makes a new version, a draft until you approve its sample. Older versions stay as they were.'),
@@ -603,6 +611,7 @@ export async function mountContent(host, { signal } = {}) {
         row({ title: 'Director brief', description: 'The long notes the team follows when it makes a video in this pack.', control: brief, stack: true }),
         row({ title: 'Music mood', control: mood }), row({ title: 'Captions', control: captions }), row({ title: 'Caption case', control: caseSel }),
         row({ title: 'Narrator voice', description: 'A Kokoro voice id, for example af_heart.', control: voice, stack: true }),
+        three ? row({ title: '3D renderer', description: M.rendererText('blender', status3d).startsWith('Blender, but') ? 'three.js is built in. Blender isn\'t installed on this computer; install it yourself from blender.org to pick it.' : 'three.js is built in and fast. Blender is installed here: softer, more realistic light, much slower.', control: renderer }) : null,
         row({ title: 'What changed', control: why, stack: true })]), status]);
     const save = btn('Save new version', async () => {
       status.textContent = '';
@@ -614,6 +623,7 @@ export async function mountContent(host, { signal } = {}) {
       const on = captions.value === 'on';
       if (on !== spec.captions.on || caseSel.value !== spec.captions.case) changes.captions = { on, case: caseSel.value };
       if (voice.value.trim() !== spec.voice.voice) changes.voice = { voice: voice.value.trim() };
+      if (renderer && renderer.value !== spec.renderer) changes.renderer = renderer.value;
       if (!Object.keys(changes).length) { status.textContent = 'Change something first.'; return; }
       try { await sendTo(`${STYLES}/${encodeURIComponent(pack.id)}/versions`, { changes, note: why.value.trim() }); }
       catch (error) { status.textContent = M.loadFailure(error); return; }
@@ -675,7 +685,7 @@ export async function mountContent(host, { signal } = {}) {
     if (!got.packs.length) out.push(empty('No style packs yet. Write a brief, add the starter pack, or import a pack file.'));
     for (const pack of got.packs) {
       const spec = pack.spec;
-      const rows = M.packFacts(spec).map(([k, v]) => row({ title: k, description: v, stack: true }));
+      const rows = M.packFacts(spec, got.renderers).map(([k, v]) => row({ title: k, description: v, stack: true }));
       if (spec?.director_brief) {
         rows.push(row({ title: 'Director brief', stack: true, below: el('details', { class: 'sc-brief' }, [el('summary', { text: 'Show the brief' }), el('p', { class: 'sc-text', text: spec.director_brief })]) }));
       }

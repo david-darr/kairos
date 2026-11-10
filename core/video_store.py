@@ -34,12 +34,16 @@ def videos_dir() -> str:
 
 
 ASPECTS = {"16:9": (1920, 1080), "9:16": (1080, 1920), "1:1": (1080, 1080)}
-KINDS = ("title", "statement", "big-number", "list", "image", "quote", "split", "logo", "end", "scene")
+KINDS = ("title", "statement", "big-number", "list", "image", "quote", "split", "logo", "end", "scene", "stage")
 CAMERAS = ("still", "push", "pull", "pan", "shake")
 TRANSITIONS = ("cut", "whip", "zoom", "flip", "dither", "mosaic", "wipe")
 MOODS = ("energetic", "calm", "warm", "dark", "playful")
 ASSET = re.compile(r"assets/[a-f0-9]{64}\.(?:png|jpg|gif|webp)")
-FIELDS = {"id", "title", "look", "bpm", "fps", "aspects", "beats", "music", "narration", "cast", "palette", "style_pack", "chapters"}
+FIELDS = {"id", "title", "look", "bpm", "fps", "aspects", "beats", "music", "narration", "cast", "palette", "style_pack", "chapters",
+          "renderer"}
+# What draws a video's 3D stage beats (Pack B): three.js, built in (the default), or Blender when it is installed
+# (core/blender_tools.py); a Blender video falls back to three.js with a note when Blender is not found.
+RENDERERS_3D = ("threejs", "blender")
 ACTIONS = ("idle", "wave", "point", "walk", "jump", "shrug", "think", "nod")
 MAX_CAST, MAX_ON_SCREEN, MAX_PROPS = 6, 3, 6
 MAX_SECONDS = 120               # a video with music only
@@ -116,7 +120,7 @@ def validate(project: dict) -> dict:
         _error("beats", f"give 1 to {most} beats.")
     ids = set()
     allowed = {"id", "kind", "bars", "text", "sub", "number", "items", "image", "camera", "transition", "treatment",
-               "say", "spoken", "seconds", "scene"}
+               "say", "spoken", "seconds", "scene", "stage"}
     for i, b in enumerate(beats):
         path = f"beats[{i}]"
         if not isinstance(b, dict):
@@ -164,8 +168,17 @@ def validate(project: dict) -> dict:
             _scene(b.get("scene"), path + ".scene")
         elif "scene" in b:
             _error(path + ".scene", "only a scene beat has a scene; set kind to scene or remove it.")
+        if b["kind"] == "stage":
+            _stage(b.get("stage"), path + ".stage")
+        elif "stage" in b:
+            _error(path + ".stage", "only a stage beat (Pack B, 3D) has a stage; set kind to stage or remove it.")
     _cast(p, beats)
     _style_pack(p)
+    if "renderer" in p:
+        if p["renderer"] is None:
+            p.pop("renderer")
+        elif p["renderer"] not in RENDERERS_3D:
+            _error("renderer", "choose threejs (built in) or blender (only when Blender is installed); it draws the 3D stage beats.")
     if is_narrated or "narration" in p:
         p["narration"] = _narration(p.get("narration"))
     for i, b in enumerate(beats):
@@ -261,6 +274,108 @@ def _scene(value, path):
             _error(where + ".float", "use true or false.")
 
 
+def _stage(value, path):
+    """A Pack B stage shot: the studio set's tone, a shot size, up to three mascots, stand-in people, glossy props and
+    floating labels over heads (static/motion/stage.js builds it in 3D)."""
+    from core import character_store, style_packs
+    if not isinstance(value, dict):
+        _error(path, "give set, shot, cast, people, props and labels.")
+    for key in value.keys() - {"set", "shot", "pedestal", "cast", "people", "props", "labels"}:
+        _error(f"{path}.{key}", "unknown stage field; use set, shot, pedestal, cast, people, props or labels.")
+    value.setdefault("set", "lavender")
+    value.setdefault("shot", "medium")
+    value.setdefault("pedestal", False)
+    value.setdefault("cast", [])
+    value.setdefault("people", {"count": 0})
+    value.setdefault("props", [])
+    value.setdefault("labels", [])
+    if value["set"] not in style_packs.STAGE_SETS:
+        _error(path + ".set", "choose " + ", ".join(style_packs.STAGE_SETS) + ".")
+    if value["shot"] not in style_packs.SHOTS:
+        _error(path + ".shot", "choose " + ", ".join(style_packs.SHOTS) + ".")
+    if not isinstance(value["pedestal"], bool):
+        _error(path + ".pedestal", "use true or false.")
+    if not isinstance(value["cast"], list) or len(value["cast"]) > MAX_ON_SCREEN:
+        _error(path + ".cast", f"give at most {MAX_ON_SCREEN} characters on screen.")
+    seen, speaking = set(), 0
+    for i, member in enumerate(value["cast"]):
+        where = f"{path}.cast[{i}]"
+        if not isinstance(member, dict):
+            _error(where, "give {character, x, expression, action, speaking, facing, react}.")
+        for key in member.keys() - {"character", "x", "expression", "action", "speaking", "facing", "react"}:
+            _error(f"{where}.{key}", "unknown cast field; use character, x, expression, action, speaking, facing or react.")
+        if not isinstance(member.get("character"), str) or not re.fullmatch(r"[a-f0-9]{12}", member["character"]):
+            _error(where + ".character", "use a character id from the project's cast.")
+        if member["character"] in seen:
+            _error(where + ".character", "a character appears once per shot.")
+        seen.add(member["character"])
+        count = len(value["cast"])
+        member.setdefault("x", 0 if count == 1 else round(-.6 + 1.2 * i / (count - 1), 3))
+        _number(member["x"], where + ".x", -1, 1)
+        for key, choices, default in (("expression", character_store.EXPRESSIONS, "neutral"), ("action", ACTIONS, "idle"),
+                                      ("facing", style_packs.STAGE_FACINGS, "camera")):
+            member.setdefault(key, default)
+            if member[key] not in choices:
+                _error(f"{where}.{key}", "choose " + ", ".join(choices) + ".")
+        member.setdefault("speaking", False)
+        if not isinstance(member["speaking"], bool):
+            _error(where + ".speaking", "use true or false.")
+        speaking += member["speaking"]
+        if "react" in member:
+            react = member["react"]
+            if not isinstance(react, dict) or set(react) - {"at", "expression"}:
+                _error(where + ".react", "give {at, expression}: the seconds into the shot and the expression it changes to.")
+            react.setdefault("expression", "surprised")
+            _number(react.get("at"), where + ".react.at", 0, 60)
+            if react["expression"] not in character_store.EXPRESSIONS:
+                _error(where + ".react.expression", "choose " + ", ".join(character_store.EXPRESSIONS) + ".")
+    if speaking > 1:
+        _error(path + ".cast", "one narrator voice speaks at a time: mark at most one character speaking.")
+    people = value["people"]
+    if not isinstance(people, dict) or people.keys() - {"count", "seed"}:
+        _error(path + ".people", "give {count, seed}: how many stand-in people (0 to 8) and a number that varies them.")
+    people.setdefault("count", 0)
+    people.setdefault("seed", 0)
+    for key, high in (("count", style_packs.MAX_PEOPLE), ("seed", 999)):
+        if isinstance(people[key], bool) or not isinstance(people[key], int) or not 0 <= people[key] <= high:
+            _error(f"{path}.people.{key}", f"give a whole number from 0 to {high}.")
+    if not isinstance(value["props"], list) or len(value["props"]) > MAX_PROPS:
+        _error(path + ".props", f"give at most {MAX_PROPS} props.")
+    for i, prop in enumerate(value["props"]):
+        where = f"{path}.props[{i}]"
+        if not isinstance(prop, dict):
+            _error(where, "give {shape, x, depth, size, color}.")
+        for key in prop.keys() - {"shape", "x", "depth", "size", "color"}:
+            _error(f"{where}.{key}", "unknown prop field; use shape, x, depth, size or color.")
+        if prop.get("shape") not in style_packs.STAGE_PROPS:
+            _error(where + ".shape", "choose " + ", ".join(style_packs.STAGE_PROPS) + ".")
+        prop.setdefault("x", .7 if i % 2 else -.7)
+        prop.setdefault("depth", .5)
+        prop.setdefault("size", .4)
+        prop.setdefault("color", i % 5)
+        _number(prop["x"], where + ".x", -1, 1)
+        _number(prop["depth"], where + ".depth", 0, 1)
+        _number(prop["size"], where + ".size", .1, 1)
+        if isinstance(prop["color"], bool) or not isinstance(prop["color"], int) or not 0 <= prop["color"] <= 4:
+            _error(where + ".color", "give 0 to 4 (mint, violet, gold, coral, blue).")
+    if not isinstance(value["labels"], list) or len(value["labels"]) > style_packs.MAX_LABELS:
+        _error(path + ".labels", f"give at most {style_packs.MAX_LABELS} labels.")
+    for i, label in enumerate(value["labels"]):
+        where = f"{path}.labels[{i}]"
+        if not isinstance(label, dict) or label.keys() - {"over", "text", "sub", "at"}:
+            _error(where, "give {over, text, sub, at}: who it floats over (c0 for the first cast member, p0 for the first person), "
+                          "the number or word, a short line under it, and the seconds into the shot it appears.")
+        over = label.get("over")
+        if not isinstance(over, str) or not re.fullmatch(r"[cp][0-9]", over) or \
+                int(over[1]) >= (len(value["cast"]) if over[0] == "c" else people["count"]):
+            _error(where + ".over", "name a cast member on this shot (c0, c1, c2) or a stand-in person (p0 to p7).")
+        _text(label.get("text"), where + ".text", 16, True)
+        label.setdefault("sub", "")
+        _text(label["sub"], where + ".sub", 32)
+        label.setdefault("at", 0)
+        _number(label["at"], where + ".at", 0, 60)
+
+
 def _cast(p, beats):
     """The project's cast pins each character to one version; every scene uses only cast members. A draft can be
     cast while its sheet waits for the person, but a video renders only approved versions (core/video_render.py)."""
@@ -284,10 +399,23 @@ def _cast(p, beats):
             character_store.version_of(character_store.get(entry["character"]), entry["version"])
         except LookupError as error:
             _error(f"cast[{i}]", str(error).strip("'") + " Use character_list for ids and versions.")
+    forms = {}
+    for entry in cast:
+        try:
+            forms[entry["character"]] = character_store.form_of(character_store.spec(entry["character"], entry["version"]))
+        except LookupError:
+            forms[entry["character"]] = "2d"
     for i, b in enumerate(beats):
         for j, member in enumerate(b["scene"]["cast"] if b["kind"] == "scene" else []):
             if member["character"] not in pinned:
                 _error(f"beats[{i}].scene.cast[{j}].character", "add this character to the project's cast with its version first.")
+            if forms.get(member["character"]) == "3d":
+                _error(f"beats[{i}].scene.cast[{j}].character", "this is a 3D character; it plays stage beats. Cast a flat (2D) character in a scene.")
+        for j, member in enumerate(b["stage"]["cast"] if b["kind"] == "stage" else []):
+            if member["character"] not in pinned:
+                _error(f"beats[{i}].stage.cast[{j}].character", "add this character to the project's cast with its version first.")
+            if forms.get(member["character"]) != "3d":
+                _error(f"beats[{i}].stage.cast[{j}].character", "a stage beat casts 3D characters (make one with form 3d, such as Pip 3D).")
     if cast:
         p["cast"] = cast
     else:

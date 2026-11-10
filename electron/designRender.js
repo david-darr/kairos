@@ -16,7 +16,12 @@ const { BrowserWindow, session } = require('electron');
 const PARTITION = 'persist:design-render';
 // Render tokens name the account they were made for (core/design_render.sign): expiry.mac.account.mac.
 const JOB_PATH = /^\/api\/designs\/([a-f0-9]{12})\/boards\/([a-z0-9][a-z0-9-]{0,47})\/render\?rt=[0-9]{10}\.[A-Za-z0-9_-]{24}\.[a-z0-9]{1,32}\.[A-Za-z0-9_-]{24}(?:&v=\d{1,6})?$/;
-const VIDEO_PATH = /^\/api\/videos\/([a-f0-9]{12})\/player\?aspect=(16%3A9|9%3A16|1%3A1)&rt=[0-9]{10}\.[A-Za-z0-9_-]{24}\.[a-z0-9]{1,32}\.[A-Za-z0-9_-]{24}&v=[1-9][0-9]*$/;
+// `&layer=overlay` is the Blender renderer's overlay pass (core/video_blender.py): the same player with its 3D stage
+// shots left transparent, captured as PNG with alpha and the 3D pose of every frame.
+const VIDEO_PATH = /^\/api\/videos\/([a-f0-9]{12})\/player\?aspect=(16%3A9|9%3A16|1%3A1)&rt=[0-9]{10}\.[A-Za-z0-9_-]{24}\.[a-z0-9]{1,32}\.[A-Za-z0-9_-]{24}&v=[1-9][0-9]*(&layer=overlay)?$/;
+// Pack B's 3D stage (static/motion/stage3d.js) loads three.js and only these example files from static/vendor/three
+// (each listed with its hash in static/vendor/three/VENDORED.txt).
+const THREE_PATH = /^\/static\/vendor\/three\/(three\.module|three\.core|examples\/jsm\/(environments\/RoomEnvironment|lights\/RectAreaLight(UniformsLib|TexturesLib)|postprocessing\/(EffectComposer|RenderPass|ShaderPass|MaskPass|Pass|GTAOPass|OutputPass)|shaders\/(CopyShader|GTAOShader|PoissonDenoiseShader|OutputShader|HorizontalBlurShader|VerticalBlurShader)|math\/SimplexNoise))\.js$/;
 // A character's reference sheet (core/character_sheet.py): a PNG job on its own signed page.
 const SHEET_PATH = /^\/api\/characters\/([a-f0-9]{12})\/sheet\?v=[1-9][0-9]{0,2}&rt=[0-9]{10}\.[A-Za-z0-9_-]{24}\.[a-z0-9]{1,32}\.[A-Za-z0-9_-]{24}$/;
 let activeWindow = null, activeJob = '';
@@ -82,11 +87,11 @@ function allowedRequest(raw, origin, designId, videoId = '', playerPath = '', lo
   try {
     const url = new URL(raw);
     if (url.origin !== origin || url.username || url.password) return false;
-    if (characterId) return url.pathname + url.search === playerPath || /^\/static\/motion\/(kit|layout|rig|sheet)\.js$/.test(url.pathname);
+    if (characterId) return url.pathname + url.search === playerPath || /^\/static\/motion\/(kit|layout|rig|sheet|sheet3d|stage|stage3d)\.js$/.test(url.pathname) || THREE_PATH.test(url.pathname);
     if (videoId) {
       return (url.pathname + url.search === playerPath) ||
         (url.pathname.startsWith(`/api/videos/${videoId}/assets/`) && /^\/api\/videos\/[a-f0-9]{12}\/assets\/[a-f0-9]{64}\.(png|jpg|gif|webp)$/.test(url.pathname)) ||
-        /^\/static\/motion\/(engine|kit|layout|rig|scene)\.js$/.test(url.pathname) ||
+        /^\/static\/motion\/(engine|kit|layout|rig|scene|stage|stage3d)\.js$/.test(url.pathname) || THREE_PATH.test(url.pathname) ||
         (url.pathname.startsWith(`/api/design-fonts/${look}/`) && /^\/api\/design-fonts\/[a-z0-9_-]+\/[A-Za-z0-9_.-]+\.(woff2?|ttf|otf)$/.test(url.pathname));
     }
     return url.pathname.startsWith(`/api/designs/${designId}/`) || url.pathname.startsWith('/api/design-fonts/');
@@ -121,6 +126,8 @@ async function renderJob(origin, job, backendUrl, token) {
   // A long video (core/video_longform.py) is rendered one chapter at a time: `first` and `count` name the chapter's
   // frames inside the whole video's `frames`. One job captures at most 14,400 frames (8 minutes); a video is at most 20 minutes.
   if (video && (!/^[a-z0-9_-]{1,60}$/.test(current.look) || job.fps !== 30 || !Number.isInteger(job.frames) || job.frames < 1 || job.frames > 36000)) throw new Error('refused invalid video timing');
+  // Only the overlay pass captures PNG with alpha, and only from the overlay player.
+  if (video && job.alpha !== undefined && (job.alpha !== true || !match[3] || job.preview)) throw new Error('refused an invalid overlay job');
   if (video && !job.preview) {
     const first = job.first ?? 0, count = job.count ?? job.frames;
     if (!Number.isInteger(first) || !Number.isInteger(count) || first < 0 || count < 1 || count > 14400 || first + count > job.frames) throw new Error('refused invalid video frame range');
@@ -142,6 +149,8 @@ async function renderJob(origin, job, backendUrl, token) {
     await win.loadURL(origin + job.path);
     if (video) return await captureVideo(win, job, backendUrl, token);
     await Promise.race([painted, new Promise(resolve => setTimeout(resolve, 3000))]);
+    // A 3D sheet (static/motion/sheet3d.js) draws after three.js loads: wait for it, at most a minute.
+    if (sheet) await Promise.race([win.webContents.executeJavaScript('Promise.resolve(window.kdReady).then(() => 1)', true), new Promise(resolve => setTimeout(resolve, 60000))]).catch(() => 1);
     // Fonts first, then one frame, so the capture shows the real type.
     await win.webContents.executeJavaScript('document.fonts.ready.then(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))).then(() => 1)', true)
       .catch(() => 1);
@@ -216,15 +225,24 @@ async function captureVideo(win, job, backendUrl, token) {
     const elements = await evaluate(`Promise.resolve(window.kdDrawFrame(${t})).then(() => window.kdLayout(${t}))`);
     layouts.push({ time: t, elements });
   }
-  let frames = [], part = 0;
+  // The overlay pass: PNG with alpha, the 3D pose of each frame, and the stage models once (Blender builds them).
+  const alpha = job.alpha === true, size = alpha ? 5 : 15, mime = alpha ? 'image/png' : 'image/jpeg';
+  const stage = alpha ? await evaluate('JSON.stringify(window.kdStageModels ? window.kdStageModels() : {})') : null;
+  let frames = [], poses = [], part = 0;
   for (let i = 0; i < times.length; i++) {
     if (stopped || win.isDestroyed()) throw new Error('video cancelled');
-    const data = await evaluate(`Promise.resolve(window.kdDrawFrame(${times[i]})).then(() => document.getElementById('kd-canvas').toDataURL('image/jpeg', 0.92))`);
-    if (typeof data !== 'string' || !data.startsWith('data:image/jpeg;base64,')) throw new Error('motion player did not return a JPEG');
+    const grab = alpha
+      ? `Promise.resolve(window.kdDrawFrame(${times[i]})).then(() => JSON.stringify([document.getElementById('kd-canvas').toDataURL('image/png'), window.kdPose(${times[i]})]))`
+      : `Promise.resolve(window.kdDrawFrame(${times[i]})).then(() => document.getElementById('kd-canvas').toDataURL('image/jpeg', 0.92))`;
+    let data = await evaluate(grab);
+    if (alpha) { const [image, pose] = JSON.parse(data); data = image; poses.push(pose); }
+    if (typeof data !== 'string' || !data.startsWith(`data:${mime};base64,`)) throw new Error(`motion player did not return a ${alpha ? 'PNG' : 'JPEG'}`);
     frames.push(data.slice(data.indexOf(',') + 1));
-    if (frames.length === 15 || i === times.length - 1) {
-      await post(backendUrl, token, job, { type: 'application/json', body: JSON.stringify({ frames, layouts: part === 0 ? layouts : [] }) }, null, part++);
-      frames = [];
+    if (frames.length === size || i === times.length - 1) {
+      const packet = { frames, layouts: part === 0 ? layouts : [] };
+      if (alpha) { packet.poses = poses; if (part === 0) packet.stage = stage; }
+      await post(backendUrl, token, job, { type: 'application/json', body: JSON.stringify(packet) }, null, part++);
+      frames = []; poses = [];
     }
   }
   return { type: 'application/json', body: JSON.stringify({ frames: times.length }) };
@@ -310,4 +328,4 @@ function start({ backendUrl, token }) {
 
 function stop() { stopped = true; controller?.abort(); if (activeWindow && !activeWindow.isDestroyed()) activeWindow.destroy(); }
 
-module.exports = { start, stop, allowedRequest, JOB_PATH, VIDEO_PATH, SHEET_PATH, KD_ID, HIDE_RULES };
+module.exports = { start, stop, allowedRequest, JOB_PATH, VIDEO_PATH, SHEET_PATH, THREE_PATH, KD_ID, HIDE_RULES };

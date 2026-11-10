@@ -213,7 +213,8 @@ def check(project, aspect="16:9", layouts=None, frames=None, loudness=None, voic
                     notes.append(f"A caption in beat {box.get('beat', '?')} is not the script's words; narrate it again.")
                 continue
             if box.get("text"):
-                groups.setdefault(box.get("beat"), []).append(str(box["text"]))
+                # A floating label over a head (Pack B) is a figure read at a glance: one word, however it is spaced.
+                groups.setdefault(box.get("beat"), []).append("figure" if box.get("role") == "label" else str(box["text"]))
         for beat, texts in groups.items():
             if beat in lengths and len(" ".join(texts).split()) / lengths[beat] > 3.5:
                 notes.append(f"Beat {beat} reads faster than 3.5 words/s; shorten the copy or add bars.")

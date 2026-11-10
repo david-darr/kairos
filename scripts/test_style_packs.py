@@ -165,8 +165,12 @@ class PackFormat(Accounts):
                     data["look"] = {**good["look"], **change["look"]}
                 with self.assertRaisesRegex(ValueError, "^" + path.replace(".", r"\.")):
                     store.validate(data)
-        blender = store.validate({**good, "renderer": "blender", "base": "glossy-3d"})
+        flat_rules = {k: v for k, v in good.items() if k != "scenes"}
+        blender = store.validate({**flat_rules, "renderer": "blender", "base": "glossy-3d"})
         self.assertEqual(blender["base"], "glossy-3d", "3D renderers are recognised")
+        self.assertEqual(blender["scenes"]["settings"][0], "lavender", "a 3D pack's rules name studio sets")
+        with self.assertRaisesRegex(ValueError, "^scenes.settings"):
+            store.validate({**good, "renderer": "blender", "base": "glossy-3d"})   # Pack A's meadow is not a 3D set
 
     def test_every_change_is_a_new_version_and_old_versions_never_change(self):
         meta = store.duplicate(starter()["id"], name="Versioned pack")
@@ -206,13 +210,15 @@ class Approval(Accounts):
         done = approved_pack("Approved pack")
         entry = style_packs.get(done["id"])
         self.assertTrue(entry["available"])
-        self.assertEqual((entry["base"], entry["units_per_minute"]), ("flat-2d", 3.0), "drawn and costed like its base")
-        self.assertEqual(formats.cost(done["id"], 120)["units"], 6.0, "unit 2's cost check reads user packs from the registry")
-        three = store.create({**store.validate(copy.deepcopy(store.STARTER)), "name": "Shiny 3D", "renderer": "blender",
-                              "base": "glossy-3d", "characters": []})
-        self.assertFalse(style_packs.get(three["id"])["available"])
+        # Costed from its renderer's measured speed (the 2D engine, 1 unit a minute; Pack B unit 5).
+        self.assertEqual((entry["base"], entry["units_per_minute"]), ("flat-2d", 1.0), "drawn and costed like its base")
+        self.assertEqual(formats.cost(done["id"], 120)["units"], 2.0, "unit 2's cost check reads user packs from the registry")
+        three = store.create({**store.validate({**copy.deepcopy(store.STARTER_3D), "renderer": "blender"}), "name": "Shiny 3D", "characters": []})
+        self.assertFalse(style_packs.get(three["id"])["available"], "a 3D pack is available once approved, like any pack")
+        voxel = store.create({k: v for k, v in store.validate(copy.deepcopy(store.STARTER)).items() if k != "scenes"} |
+                             {"name": "Blocky", "renderer": "threejs", "base": "voxel-3d", "characters": []})
         with self.assertRaisesRegex(ValueError, "not built yet"):
-            run(style_pack_sample.make(three["id"], 1, owner="david"))
+            run(style_pack_sample.make(voxel["id"], 1, owner="david"))
 
     def test_no_tool_approves_and_the_approve_route_is_the_persons(self):
         names = [n for n in tool_registry._REGISTRY if "style_pack" in n]

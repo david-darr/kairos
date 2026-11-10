@@ -771,7 +771,7 @@ class FormatToolTests(unittest.TestCase):
         for text in ("Impossible ability", "Glimpse Lab", '"motion-type"', '"available": false'):
             self.assertIn(text, listing)
         # A port into a pack that is not built yet is proposed, but the checks say so and the Evaluator cannot accept it.
-        out = call("content_studio_propose_port", b["Researcher"], **example_port(card["id"], self.niche["id"], style_pack="glossy-3d"))
+        out = call("content_studio_propose_port", b["Researcher"], **example_port(card["id"], self.niche["id"], style_pack="voxel-3d"))
         self.assertIn("cannot be made yet", out)
         heavy = studio.list_ports()[0]
         self.assertEqual(heavy["checks"]["ok"], False)

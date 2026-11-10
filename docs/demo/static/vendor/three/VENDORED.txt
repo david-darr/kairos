@@ -1,0 +1,39 @@
+three.js, vendored for Pack B (glossy 3D mascot, Video Styles build spec unit 5), the built-in 3D renderer.
+Approved by David: the spike on 2026-11-09 ("vendoring three for the test"); into dev on 2026-11-10 ("just add both as options").
+
+Package:   three@0.186.1 from the npm registry (published 2026-09-24)
+Licence:   MIT (LICENSE in this folder, copied unchanged from the package)
+Source:    the same tarball the spike verified (branch spike/3d, 73144d78); nothing was downloaded for Pack B.
+           three-0.186.1.tgz, 4,648,523 bytes
+           sha1   6d50f70c2c437f844179bbb56d6f5b774e1ca38a (matches npm's dist.shasum)
+           sha512 integrity sha512-blFeqb49wRCSGUGj7gtpfnSGHy2lwDk94RhUmS1c/hTby70kvChbWpkJ4Pm1390LqzzvTmzgXKHPEafJwCb8jA==
+           sha256 8cd068708ea44f2c73c944b1cead2ba2f0d5c15c8fc194e5700f4e4f4a033fe7 (re-checked 2026-11-10 before copying)
+
+Only the files the 3D stage uses (static/motion/stage3d.js and the example files they import), copied unchanged from
+the package (build/ for the two modules, examples/jsm/ for the rest). 2,532,024 bytes in all. core/three_vendor.check()
+and the tests compare every file with this list; electron/designRender.js allows exactly these paths.
+
+  three.module.js                                         662,772  sha256 9052042d676cb0fdc1ddfefe193053f34b7ac0513a616fdac4535d49987812ea
+  three.core.js                                         1,458,113  sha256 9edde002b066a9a05676a6127f67735b62baf399bdea529f2f7e31657da769e6
+  LICENSE                                                   1,081  sha256 8b378ebe60e2fe500158cb0ac71cb5e8b7d92953c2abcc63a0eb90499653b5bc
+  examples/jsm/environments/RoomEnvironment.js              4,960  sha256 55f466192cc84298755a424c5e040345006b2ee1455589b3b54126c2ea4123f4
+  examples/jsm/lights/RectAreaLightTexturesLib.js         314,764  sha256 6dd4043bb052594357a5eeff13dc0519f0a80b100b97ec80c12808f887897bc1
+  examples/jsm/lights/RectAreaLightUniformsLib.js           1,014  sha256 494fef2d731ff1689050cc6040ad78d927c22b9125a12f532beb0374c2811c6e
+  examples/jsm/math/SimplexNoise.js                        15,148  sha256 4b1455617135e6b477de76244de07547d95570643379b72f4758e50161b06072
+  examples/jsm/postprocessing/EffectComposer.js             8,501  sha256 4e079a5886152d7e529a59aef644e968ab4d32c6a33ce016b36bf29b2eac26f7
+  examples/jsm/postprocessing/GTAOPass.js                  19,910  sha256 a277f848d1035c751c54d9706e579aeb74689126ced25723e53d52ac3f26f445
+  examples/jsm/postprocessing/MaskPass.js                   4,694  sha256 7cd08eee9d5d6f5578beaddbdcbe9c384f6873810af27f22ab7db3ceeb127aa3
+  examples/jsm/postprocessing/OutputPass.js                 4,184  sha256 02e4a261af34de71338185e9e87f0cbe5cba9115608d984363e1269dec1d2272
+  examples/jsm/postprocessing/Pass.js                       4,218  sha256 444b409c235ead986893c472e720da1b779a56985c7d10b279c7944b52bd61c5
+  examples/jsm/postprocessing/RenderPass.js                 4,280  sha256 817f6c3cdcd0fd41515d112359ea0532568eefb5aabd3b33903957ebca1b8a6a
+  examples/jsm/postprocessing/ShaderPass.js                 3,228  sha256 e2500a5913b26bbf5148ceaae644c6edcff06a18b01494ee37bf856353d2ab9d
+  examples/jsm/shaders/CopyShader.js                          729  sha256 a33057d5ac91c43304c186ac0e8816e62bb2ed471d3a00ff3018dfd5c0389718
+  examples/jsm/shaders/GTAOShader.js                       12,166  sha256 cdea7be60452f61105375d2c18e4da2e8ce7b39a89246b1bb8fbf79319d58cfd
+  examples/jsm/shaders/HorizontalBlurShader.js              1,667  sha256 a155715ca3bfe4fd1f9efc51f189fecd5c53160df47dd571a7d5936dc436ab0c
+  examples/jsm/shaders/OutputShader.js                      1,876  sha256 353479f77a8d7e2629d49ccac9fc2f5dbfdda5442e0adf867b00377a2fcb0cb2
+  examples/jsm/shaders/PoissonDenoiseShader.js              7,080  sha256 61da074a9ad8b2139dd164c96b8b62c299f056ce06c216e1f707c5151d997602
+  examples/jsm/shaders/VerticalBlurShader.js                1,639  sha256 67792abdf08ba2305fc2a2f45ca151f55b66a82f5aebbe45230246cdb72181d7
+
+Why each example file: RoomEnvironment (soft reflections), RectAreaLight* (soft area lights), EffectComposer, RenderPass,
+ShaderPass, MaskPass, Pass, CopyShader, OutputPass, OutputShader (the post-processing chain), GTAOPass, GTAOShader,
+PoissonDenoiseShader, SimplexNoise (ambient occlusion), HorizontalBlurShader, VerticalBlurShader (contact shadows).

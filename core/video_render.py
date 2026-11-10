@@ -8,11 +8,12 @@ import asyncio
 import io
 import math
 import secrets
+import time
 from urllib.parse import quote
 import weakref
 from PIL import Image
-from core import (accounts, design_render, design_render_bridge, ffmpeg_tools, video_audio, video_checks, video_longform, video_narration,
-                  video_plan, video_store)
+from core import (accounts, design_render, design_render_bridge, ffmpeg_tools, video_audio, video_blender, video_checks, video_longform,
+                  video_narration, video_plan, video_store)
 
 _jobs = {}
 _owners = {}  # job id -> the account that started it; a job is only visible to that account
@@ -206,11 +207,15 @@ def start(video_id, aspect, sample_of=None):
     problems = pack_problems(project, sample_of)
     if problems:
         raise ValueError("style_pack: " + " ".join(problems))
+    # Pack B with Blender (core/video_blender.py) renders in parts like a long video, chaptered or not.
+    renderer = video_blender.effective(project)
+    in_parts = video_store.chaptered(project) or renderer == "blender"
     if video_store.chaptered(project):
         # A long video renders chapter by chapter, resumably, and only after the person approved its plan.
         problems = video_plan.problems(project)
         if problems:
             raise ValueError("plan: " + " ".join(problems))
+    if in_parts:
         running = [j for j in jobs_for(video_id) if j.get("kind") == "long" and j["aspect"] == aspect
                    and j["status"] not in ("ready", "paused") and not j["status"].startswith("failed:")]
         if running:
@@ -219,8 +224,10 @@ def start(video_id, aspect, sample_of=None):
         raise RuntimeError(ffmpeg_tools.MISSING)
     if not design_render_bridge.available():
         raise design_render_bridge.Unavailable("Video rendering needs the Kairos desktop app. Open the desktop app and try again.")
-    if video_store.chaptered(project):
-        return video_longform.start(project, aspect, _register)
+    if in_parts:
+        job = video_longform.start(project, aspect, _register, renderer)
+        _jobs[job["id"]]["sample_of"] = sample_of
+        return status(job["id"])
     job_id = secrets.token_hex(8)
     state = {"id": job_id, "video_id": video_id, "aspect": aspect, "version": project["version"], "status": "queued"}
     return _register(job_id, state, _render(project, aspect, job_id))
@@ -294,7 +301,10 @@ async def _render(project, aspect, job_id):
                 seen += 1
             state["status"] = f"rendering {seen}/{total}"
 
+        captured = time.monotonic()
         await design_render_bridge.video(job, consume)
+        # The measured capture speed (frames a second through the render worker), for the render-speed estimates.
+        state["capture_fps"] = round(total / max(1e-6, time.monotonic() - captured), 1)
         state["status"] = "encoding"
         await asyncio.to_thread(encoder.finish)
         encoder = None
@@ -302,6 +312,7 @@ async def _render(project, aspect, job_id):
         notes = video_checks.check(project, aspect, layouts, samples, measured, voice or None)
         notes += character_notes(project, layouts, samples, [i / 30 for i in sorted(indices)])
         notes += pack_notes(project)
+        notes += video_blender.renderer_note(project)
         sheet = folder / f"sheet-{slug}.png"
         sheet.write_bytes(ffmpeg_tools.contact_sheet(samples, 4))
         thumb_path = folder / f"thumb-{slug}.png"
@@ -311,6 +322,7 @@ async def _render(project, aspect, job_id):
                 image.save(thumb_path, "PNG")
         temp.replace(out)
         state.update(status="ready", file=out.name, path=str(out), loudness=measured, notes=notes, narration=voice or None,
+                     renderer=video_blender.effective(project), stage=_stage_info(project),
                      seconds=round(video_store.duration(project), 2),
                      url=f"/api/videos/{project['id']}/renders/{out.name}", sheet=sheet.name, thumbnail=thumb_path.name)
     except asyncio.CancelledError:
@@ -326,6 +338,11 @@ async def _render(project, aspect, job_id):
         finally:
             if acquired:
                 lock.release()
+
+
+def _stage_info(project):
+    return {"renderer": video_blender.effective(project), "picked": project.get("renderer", "threejs")} \
+        if any(b["kind"] == "stage" for b in project["beats"]) else None
 
 
 async def preview(video_id, aspect, times=None):
@@ -350,6 +367,9 @@ async def preview(video_id, aspect, times=None):
     async with _machine():
         await design_render_bridge.video(_job(project, aspect, secrets.token_hex(8), times), consume)
     notes = video_checks.check(project, aspect, layouts, frames) + character_notes(project, layouts, frames, times) + pack_notes(project)
+    if video_blender.wants_blender(project):
+        notes.append("Preview drawn with three.js; the render uses Blender." if video_blender.effective(project) == "blender"
+                     else video_blender.renderer_note(project)[0])
     notes += [f"Preview only: {p}" for p in pack_problems(project)]
     _last_preview[video_id] = {"version": project["version"], "notes": list(dict.fromkeys(notes))}
     return frames

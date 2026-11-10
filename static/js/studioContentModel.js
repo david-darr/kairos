@@ -169,6 +169,7 @@ export const ASPECTS = [['', 'Platform default (9:16)'], ['9:16', '9:16 tall'], 
 export function channelLookText(channel, packs) {
   const bits = [];
   if (channel.style_pack) bits.push(`style ${packName(channel.style_pack, packs)}`);
+  if (channel.renderer) bits.push(`3D in ${channel.renderer === 'blender' ? 'Blender' : 'three.js'}`);
   if (channel.look) bits.push(`look ${channel.look}`);
   if (channel.aspect) bits.push(channel.aspect);
   if (channel.notes) bits.push('voice notes set');
@@ -496,9 +497,25 @@ export function packStatus(version) {
 }
 // What a channel can do with the pack: use its approved version, or nothing yet.
 export function packUseText(pack) {
-  const v = pack.approved_version, renderer = pack.spec?.renderer;
-  if (renderer && renderer !== '2d-engine') return 'Its renderer is not built yet, so it cannot render.';
+  const v = pack.approved_version;
+  if (pack.spec?.base === 'voxel-3d') return 'Its renderer is not built yet, so it cannot render.';
   return v ? `Channels and videos use version ${v}.` : 'Not approved yet, so no channel can use it.';
+}
+// Pack B's 3D renderer as Studio shows it: three.js is built in; Blender only when it is installed (routes/style_pack_routes.py `renderers`).
+export function rendererText(renderer, status) {
+  const blender = status?.blender;
+  if (renderer === 'blender') {
+    if (blender?.supported) return `Blender ${blender.version}, installed on this computer. Softer, more realistic light; much slower to render.`;
+    return `Blender, but ${blender?.found ? `this computer has Blender ${blender.version}, older than 4.2` : 'Blender isn\'t installed on this computer'}, so it renders with three.js.`;
+  }
+  return 'three.js, built into Kairos. Fast; nothing to install.';
+}
+export function rendererOptions(status, { inherit = false } = {}) {
+  const blender = status?.blender;
+  const out = inherit ? [['', 'The style pack\'s choice']] : [];
+  out.push(['threejs', 'three.js (built in)']);
+  out.push(['blender', blender?.supported ? `Blender ${blender.version} (installed)` : 'Blender (not installed)']);
+  return out;
 }
 export function packOriginText(origin) {
   const from = origin?.from && origin.kind !== 'starter' ? ` (${origin.from})` : '';
@@ -506,13 +523,15 @@ export function packOriginText(origin) {
     shared: 'Added from the shared library', reference: 'Made from a reference video' })[origin?.kind];
   return label ? label + from + '.' : '';
 }
-export function packFacts(spec) {
+export function packFacts(spec, renderers) {
   if (!spec) return [];
   const palette = typeof spec.look.palette === 'string' ? `${spec.look.palette} palette` : 'its own palette';
   return [
-    ['Look', `${spec.base === 'flat-2d' ? 'Flat 2D with characters' : 'Motion type'}, ${palette}, ${spec.look.lighting} light, design look ${spec.look.design_look}`],
+    ['Look', spec.base === 'glossy-3d' ? `Glossy 3D studio with a 3D mascot, design look ${spec.look.design_look}`
+      : `${spec.base === 'flat-2d' ? 'Flat 2D with characters' : 'Motion type'}, ${palette}, ${spec.look.lighting} light, design look ${spec.look.design_look}`],
+    ...(spec.base === 'glossy-3d' ? [['3D renderer', rendererText(spec.renderer, renderers)]] : []),
     ['Characters', spec.characters.length ? `${spec.characters.length} in its set (${spec.look.families.join(', ')} families)` : 'None'],
-    ['Scenes', `${spec.scenes.settings.join(', ')}; ${spec.scenes.shots.join(', ')} shots`],
+    [spec.base === 'glossy-3d' ? 'Studio sets' : 'Scenes', `${spec.scenes.settings.join(', ')}; ${spec.scenes.shots.join(', ')} shots`],
     ['Camera and cuts', `${spec.scenes.cameras.join(', ')}; ${spec.scenes.transitions.join(', ')}`],
     ['Pacing', `${spec.pacing.words_per_second} words a second, shots of ${spec.pacing.shot_seconds[0]} to ${spec.pacing.shot_seconds[1]} s, hook in ${spec.pacing.hook_seconds} s`],
     ['Captions', spec.captions.on ? `On, ${spec.captions.case === 'upper' ? 'upper case' : 'sentence case'}` : 'Off'],

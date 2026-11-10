@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from core import character_sheet, style_pack_brief, style_pack_sample, style_pack_store, style_packs
+from core import blender_tools, character_sheet, style_pack_brief, style_pack_sample, style_pack_store, style_packs
 from core.middleware import require_user
 
 router = APIRouter(prefix="/api/style-packs", tags=["style-packs"])
@@ -78,6 +78,8 @@ def list_packs(user: str = Depends(require_user)):
             "available": [{"id": p["id"], "name": p["name"]} for p in [{"id": k, **v} for k, v in style_packs.all_packs().items()]
                           if p["available"]],
             "starters": style_pack_store.starters(),
+            # Pack B's renderers: three.js always; Blender only when it is installed (core/blender_tools.py).
+            "renderers": blender_tools.status(),
             "pending": [{k: v for k, v in p.items() if k != "spec"} for p in style_pack_store.pending()]}
 
 
@@ -158,8 +160,8 @@ async def make_sample(pack_id: str, version: int, user: str = Depends(require_us
     if v["status"] == "approved":
         raise HTTPException(409, f"Version {version} is already approved.")
     data = _call(style_pack_store.spec, pack_id, version)
-    if data["renderer"] != "2d-engine":
-        raise HTTPException(422, f"{meta['name']} targets the {data['renderer']} renderer, which is not built yet.")
+    if data["base"] == "voxel-3d":
+        raise HTTPException(422, f"{meta['name']} is drawn by the voxel-3d base, which is not built yet.")
     try:
         if style_pack_sample.waiting_characters(data):
             return _public(await style_pack_sample.make(pack_id, version, owner=user, by=user))

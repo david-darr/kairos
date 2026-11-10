@@ -19,6 +19,13 @@ User-made style packs: --style-pack adds the shipped starter pack (Flat science 
 renders and checks its characters' sheets, test-approves them there, and makes the pack's own sample with
 core/style_pack_sample.make, the same call the Styles tab and the bots use, so the sample goes through the app's render
 path in the pack's palette, lighting, characters, rules, music and voice. --keep also copies the pack file it exports.
+
+Pack B (glossy 3D, Video Styles unit 5): --pack-b adds the shipped 3D starter pack (Glossy what-if) with Pip 3D, renders
+Pip 3D's 3D reference sheet through the worker and checks it, test-approves it in the temporary store, and makes the pack's
+sample with core/style_pack_sample.make. --renderer blender first makes a new version of the pack that picks Blender
+(the person's own install, found by core/blender_tools.py), so the sample goes through the Blender runner, its overlay
+pass and FFmpeg compositing; without Blender it renders with three.js and says so. --preview renders a few still frames
+of the sample's beats instead (for a look pass) and keeps them with --keep.
 """
 import argparse
 import asyncio
@@ -287,14 +294,38 @@ async def main(args):
         else:
             raise RuntimeError("Electron's render worker did not connect.")
         spec = PACK_A if args.pack_a else SAMPLE if args.sample else SMOKE
-        if args.style_pack or args.long_form:
+        if args.style_pack or args.long_form or args.pack_b:
             spec = {"aspects": [style_pack_sample.ASPECT], "characters": [], "beats": []}
         # Characters: made from the starting family, sheet rendered by the worker and checked, then approved here.
         cast, sheets = [], []
         pack = None
-        if args.style_pack or args.long_form:
-            pack = style_pack_store.install_starter(by="smoke")
-            for entry in style_pack_store.spec(pack["id"], 1)["characters"]:
+        if args.pack_b:
+            pack = style_pack_store.install_starter(style_pack_store.STARTER_3D_ID, by="smoke")
+            if args.renderer == "blender":
+                pack = style_pack_store.new_version(pack["id"], {"renderer": "blender"}, by="smoke", note="Render with Blender.")
+        pack_version = pack["versions"][-1]["version"] if pack else 1
+        if args.pack_b and args.preview:
+            data = style_pack_store.spec(pack["id"], pack_version)
+            project = video_store.create(style_pack_sample.TITLE_3D, owner="smoke", beats=style_pack_sample.beats(data),
+                                         **{k: v for k, v in style_pack_sample.project_options(data, pack["id"], pack_version).items() if k != "style_pack"})
+            project = await asyncio.to_thread(video_narration.prepare, project["id"])
+            outline = video_render.outline(project)
+            times = [b["start"] + (b["end"] - b["start"]) * f for b in outline[:-1] for f in (.3, .8)][:12]
+            began = time.time()
+            frames = await video_render.preview(project["id"], "16:9", times)
+            keep = Path(args.keep or tempfile.mkdtemp(prefix="pack-b-preview-"))
+            keep.mkdir(parents=True, exist_ok=True)
+            for t, raw in zip(times, frames):
+                (keep / f"preview-{t:06.2f}.jpg").write_bytes(raw)
+            (keep / "preview-contact.png").write_bytes(__import__("core.ffmpeg_tools", fromlist=["x"]).contact_sheet(frames, 4))
+            result.update(ok=True, job={"status": "ready", "seconds": video_store.duration(project), "narration": {"lines": 1},
+                                        "notes": video_render._last_preview.get(project["id"], {}).get("notes", [])},
+                          render_seconds=round(time.time() - began, 1), kept=str(keep), preview=True)
+            return
+        if args.style_pack or args.long_form or args.pack_b:
+            if not args.pack_b:
+                pack = style_pack_store.install_starter(by="smoke")
+            for entry in style_pack_store.spec(pack["id"], pack_version)["characters"]:
                 meta = await character_sheet.submit(entry["character"], entry["version"])
                 sheets.append({"id": meta["id"], "name": meta["name"], "metrics": character_store.version_of(meta, entry["version"])["metrics"]})
                 character_store.decide(meta["id"], entry["version"], True, "render smoke (test approval in a temporary store)")
@@ -311,7 +342,7 @@ async def main(args):
         options = {k: v for k, v in spec.items() if k not in ("title", "characters", "beats")}
         if cast:
             options["cast"] = [{"character": c, "version": 1} for c in cast]
-        project = None if args.style_pack or args.long_form else video_store.create(spec["title"], owner="smoke", beats=beats, **options)
+        project = None if args.style_pack or args.long_form or args.pack_b else video_store.create(spec["title"], owner="smoke", beats=beats, **options)
         if args.long_form:
             # The pack is test-approved here (in the app only the person approves), then the chaptered video is made in it.
             style_pack_store.submit(pack["id"], 1, {"by": "render smoke"})
@@ -355,7 +386,7 @@ async def main(args):
                 print(f"video-render-smoke: {round(time.time() - began)} s, {states}", flush=True)
         ticker = asyncio.create_task(progress())
         try:
-            if args.style_pack:
+            if args.style_pack or args.pack_b:
                 # The pack's own sample, exactly as Studio and the bots make it; the render job is caught for the report.
                 jobs = []
                 real_render = video_render.render
@@ -365,11 +396,12 @@ async def main(args):
                     jobs.append(job_)
                     return job_
                 style_pack_sample.video_render.render = caught
-                meta = await style_pack_sample.make(pack["id"], 1, owner="smoke", by="render smoke")
+                meta = await style_pack_sample.make(pack["id"], pack_version, owner="smoke", by="render smoke")
                 job = jobs[-1]
                 project = video_store.get(job["video_id"])
-                result["pack"] = {"id": pack["id"], "name": meta["name"], "step": meta["step"],
-                                  "status": style_pack_store.version_of(meta, 1)["status"]}
+                result["pack"] = {"id": pack["id"], "name": meta["name"], "step": meta["step"], "version": pack_version,
+                                  "renderer": style_pack_store.spec(pack["id"], pack_version)["renderer"],
+                                  "status": style_pack_store.version_of(meta, pack_version)["status"]}
             elif args.long_form:
                 job = await long_form_run(project, result)
             else:
@@ -389,9 +421,9 @@ async def main(args):
             stem = args.name or "narrated-sample"
             shutil.copy2(job["path"], keep / f"{stem}.mp4")
             for sheet in sheets:
-                shutil.copy2(character_store.sheet_path(sheet["id"], 1), keep / f"{stem}-character-sheet-{sheet['name'].lower()}.png")
+                shutil.copy2(character_store.sheet_path(sheet["id"], 1), keep / f"{stem}-character-sheet-{sheet['name'].lower().replace(' ', '-')}.png")
             if pack:
-                (keep / f"{stem}.kairos-style.json").write_bytes(style_pack_store.export_bytes(pack["id"], 1))
+                (keep / f"{stem}.kairos-style.json").write_bytes(style_pack_store.export_bytes(pack["id"], pack_version))
             shutil.copy2(folder / f"sheet-{slug}.png", keep / f"{stem}-contact-sheet.png")
             shutil.copy2(folder / f"thumb-{slug}.png", keep / f"{stem}-thumbnail.png")
             if args.long_form:
@@ -469,6 +501,9 @@ if __name__ == "__main__":
     parser.add_argument("--pack-a", action="store_true", dest="pack_a")
     parser.add_argument("--style-pack", action="store_true", dest="style_pack")
     parser.add_argument("--long-form", action="store_true", dest="long_form")
+    parser.add_argument("--pack-b", action="store_true", dest="pack_b")
+    parser.add_argument("--renderer", choices=("threejs", "blender"), default="threejs")
+    parser.add_argument("--preview", action="store_true")
     parsed = parser.parse_args()
     data = tempfile.mkdtemp(prefix="video-render-smoke-")
     os.environ["JARVIS_DATA_DIR"] = data

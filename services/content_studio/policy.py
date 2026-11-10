@@ -270,7 +270,7 @@ def port_findings(store, port, today=None):
         return {"ok": False, "findings": found + [{"check": "cost", "result": "reject",
                                                   "reason": "The port's style pack is no longer in this account."}], "cost": None}
     typical = (card["length_min_s"] + card["length_max_s"]) / 2
-    cost = formats.cost(port["style_pack"], min(typical, pack["max_seconds"]))
+    cost = formats.cost(port["style_pack"], min(typical, pack["max_seconds"]), port.get("renderer"))
     if not pack["available"]:
         found.append({"check": "cost", "result": "reject", "reason": f"{pack['name']} cannot be made yet. {pack['note']}"})
     elif card["length_min_s"] > pack["max_seconds"]:

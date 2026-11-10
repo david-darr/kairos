@@ -111,6 +111,7 @@ def _pipeline(args, ctx, bot, role):
     channels = [{"id": c["id"], "niche_id": c["niche_id"], "niche": c["niche_name"], "platform": c["platform"], "handle": c["handle"],
                  "paused": bool(c["paused"]), "look": c["look"], "aspect": c["aspect"] or "9:16",
                  "notes": c["notes"], "voice": c["voice"], "style_pack": c.get("style_pack") or "motion-type",
+                 "renderer_3d": c.get("renderer") or "the style pack's own",
                  "long_videos_a_week": studio.long_cap(c), "long_videos_last_7_days": studio.long_this_week(c["id"])}
                 for c in studio.list_channels(status="live")]
     strategies = {r: [{"id": s["id"], "name": s["name"], "default": bool(s["is_default"])}
@@ -132,9 +133,14 @@ def _pipeline(args, ctx, bot, role):
 
 
 def _characters():
-    """The account's Pack A characters: the version a video may cast (approved) and any waiting for the person."""
+    """The account's characters (Pack A flat, Pack B 3D): the version a video may cast (approved) and any waiting for the person."""
     from core import character_store
-    return [{"id": m["id"], "name": m["name"], "family": m["family"], "castable_version": character_store.approved_version(m),
+    def form(m):
+        try:
+            return character_store.form_of(character_store.spec(m["id"], m["versions"][-1]["version"]))
+        except LookupError:
+            return "2d"
+    return [{"id": m["id"], "name": m["name"], "family": m["family"], "form": form(m), "castable_version": character_store.approved_version(m),
              "waiting_for_person": [v["version"] for v in m["versions"] if v["status"] == "awaiting_approval"]}
             for m in character_store.list_all()]
 
@@ -194,6 +200,13 @@ def _pick(args, ctx, bot, role):
     if post["style_pack"] not in formats.STYLE_PACKS:
         tail += (f" It is made in the user-made style pack {formats.all_packs()[post['style_pack']]['name']}: the Editor passes "
                  f"style_pack={post['style_pack']} to video_create, which applies the pack's approved look, voice and characters.")
+    if _base(post["style_pack"]) == "glossy-3d":
+        castable = [c["name"] for c in _characters() if c["castable_version"] and c.get("form") == "3d"]
+        channel = studio.get_channel(post["channel_id"]) if post.get("channel_id") else {}
+        renderer = (channel or {}).get("renderer")
+        tail += (" It is a Glossy 3D post: the Script Writer writes stage beats (a studio set, the mascot, stand-in people and labels "
+                 "over heads) for " + (", ".join(castable) if castable else "a 3D character the Editor makes and the person approves first")
+                 + "." + (f" The channel renders 3D with {renderer}: the Editor passes renderer={renderer} to video_create." if renderer else ""))
     if _base(post["style_pack"]) == "flat-2d":
         castable = [c["name"] for c in _characters() if c["castable_version"]]
         tail += (" It is a Flat 2D post: the Script Writer writes scene beats for " + ", ".join(castable) + "." if castable else
@@ -285,7 +298,7 @@ def _pack_matches(post, render_ref):
     """A flat-2d post's video is made of scene beats with approved characters (the render itself refuses others); a post
     in a user-made pack is made in that pack's approved version."""
     user_pack = post["style_pack"] not in formats.STYLE_PACKS
-    if _base(post["style_pack"]) != "flat-2d" and not user_pack:
+    if _base(post["style_pack"]) not in ("flat-2d", "glossy-3d") and not user_pack:
         return
     match = _STUDIO_RENDER.match((render_ref or "").strip())
     if not match:
@@ -302,9 +315,12 @@ def _pack_matches(post, render_ref):
                               + post["style_pack"])
         if not style_pack_store.is_approved(pin["id"], pin["version"]):
             raise StudioError("the video uses a version of the style pack the person has not approved")
-    if _base(post["style_pack"]) != "flat-2d":
+    if _base(post["style_pack"]) == "glossy-3d":
+        if not any(b["kind"] == "stage" for b in project["beats"]) or not project.get("cast"):
+            raise StudioError("a Glossy 3D post needs stage beats with a cast 3D character; this video has none")
+    elif _base(post["style_pack"]) != "flat-2d":
         return
-    if not any(b["kind"] == "scene" for b in project["beats"]) or not project.get("cast"):
+    elif not any(b["kind"] == "scene" for b in project["beats"]) or not project.get("cast"):
         raise StudioError("a Flat 2D post needs scene beats with cast characters; this video has none")
     problems = video_render.cast_problems(project)
     if problems:

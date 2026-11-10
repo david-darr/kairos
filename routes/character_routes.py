@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from core import accounts, character_sheet, character_store, design_render
+from core import accounts, character_sheet, character_store, design_render, three_vendor
 from core.middleware import get_current_user, require_user
 
 router = APIRouter(prefix="/api/characters", tags=["characters"])
@@ -139,7 +139,7 @@ def sheet_page(character_id: str, request: Request, v: int = 1, rt: Optional[str
         with accounts.as_account(account):
             html = _call(character_sheet.page, character_id, v)
     origin = f"{request.url.scheme}://{request.url.netloc}"
-    csp = (f"default-src 'none'; script-src {origin}/static/motion/; style-src 'unsafe-inline'; img-src 'none'; "
+    csp = (f"default-src 'none'; script-src {three_vendor.script_src(origin)}; style-src 'unsafe-inline'; img-src 'none'; "
            f"connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'")
     return HTMLResponse(html, headers={"Content-Security-Policy": csp, "Cache-Control": "no-store",
                                        "X-Kairos-Design-Render": "1", "X-Frame-Options": "SAMEORIGIN"})

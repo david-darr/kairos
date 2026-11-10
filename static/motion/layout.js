@@ -1,7 +1,8 @@
 import { clamp, range, inOut, hash } from './kit.js';
+import { normalizeStage } from './stage.js';
 
 export const SIZES = { '16:9': [1920, 1080], '9:16': [1080, 1920], '1:1': [1080, 1080] };
-export const KINDS = ['title', 'statement', 'big-number', 'list', 'image', 'quote', 'split', 'logo', 'end', 'scene'];
+export const KINDS = ['title', 'statement', 'big-number', 'list', 'image', 'quote', 'split', 'logo', 'end', 'scene', 'stage'];
 export const CAMERAS = ['still', 'push', 'pull', 'pan', 'shake'];
 export const TRANSITIONS = ['cut', 'whip', 'zoom', 'flip', 'dither', 'mosaic', 'wipe'];
 export const LIMITS = { beats: 100, text: 180, sub: 160, number: 24, item: 100, items: 5, minBpm: 40, maxBpm: 240, minBars: .25, maxBars: 16 };
@@ -38,14 +39,15 @@ export function normalizeProject(input = {}) {
       captions: captionsOn && Array.isArray(b.spoken?.parts) ? b.spoken.parts.filter(part => Array.isArray(part) && Number.isFinite(part[0]) && Number.isFinite(part[1]) && part[1] > part[0])
         .map(([from, to, text]) => ({ start: start + from, end: start + to, text: str(text, 160) })).filter(c => c.text) : [] };
     // A Pack A scene keeps its setting, shot, cast and props, and the mouth shapes measured from its line.
-    if (kind === 'scene') {
-      result.scene = normalizeScene(b.scene);
+    if (kind === 'scene' || kind === 'stage') {
+      if (kind === 'scene') result.scene = normalizeScene(b.scene);
+      else result.stage = normalizeStage(b.stage);   // Pack B: a 3D studio shot (stage.js)
       result.mouth = typeof b.spoken?.mouth === 'string' && /^[XAEOMF]{1,2000}$/.test(b.spoken.mouth) ? b.spoken.mouth : '';
     }
     start = end; return result;
   });
   const characters = input.characters && typeof input.characters === 'object' ? input.characters : {};
-  return { id: str(input.id, 64), title: str(input.title, 180), look: str(input.look, 64), bpm, bar, fps: 30,
+  return { id: str(input.id, 64), title: str(input.title, 180), look: str(input.look, 64), bpm, bar, fps: 30, renderer: input.renderer === 'blender' ? 'blender' : 'threejs',
     palette: str(input.palette, 24) || 'dawn', characters, pack: normalizePack(input.pack),
     aspects: (Array.isArray(input.aspects) ? input.aspects : ['16:9']).filter(a => SIZES[a]), beats, duration: start,
     captioned: beats.some(b => b.captions.length) };
@@ -211,7 +213,7 @@ export function listMarker(box) {
 export const TYPE = {
   title: [210, 270], statement: [150, 195], 'big-number': [525, 750],
   list: [135, 165], quote: [135, 180], end: [180, 240],
-  image: [135, 180], split: [135, 180], logo: [150, 195], scene: [56, 104]
+  image: [135, 180], split: [135, 180], logo: [150, 195], scene: [56, 104], stage: [56, 104]
 };
 export function compositionAt(beats, index) {
   let previous = -1;
@@ -299,6 +301,7 @@ export function beatLayout(beat, aspect, measure, style = {}) {
     case 'quote':
       add(beat.text, x, top + .06, widthFraction, .54); add(beat.sub, x, top + .64, widthFraction, .11, 'body', 1); break;
     case 'scene':
+    case 'stage':
       // The scene carries the shot; its words are a short label across the top, clear of the cast.
       add(beat.text, .03, 0, .94, portrait ? .1 : .15, 'title', 0, TYPE.scene);
       for (const box of boxes) Object.assign(box, { align: 'center', composition: 'center' });

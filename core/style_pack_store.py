@@ -1,8 +1,9 @@
 """User-made style packs (Video Styles build spec, section 3 "User-made style packs"; the unit after unit 3).
 
 A style pack is data, per account and versioned: the look (scene palette, which character families, outline weight,
-lighting, the design look for type and captions), the renderer it targets (only our 2D engine runs today, on the
-motion-type or flat-2d base; Blender and Three.js are recognised and marked unavailable until build unit 5), its
+lighting, the design look for type and captions), the renderer it targets (our 2D engine on the motion-type or flat-2d
+base; three.js or Blender on the glossy-3d base, Pack B, where three.js is built in and Blender is used only when the
+person has it installed; the voxel-3d base is recognised and unavailable until unit 6), its
 character set (character specs by id and version, core/character_store.py), scene and transition rules, pacing, caption
 style, music and voice defaults, and a long free-text director brief. Nothing in a pack is code and nothing runs from
 one: every field is checked against fixed lists and ranges here, and the engine only reads numbers and names from it.
@@ -48,13 +49,18 @@ MAX_PACKS = 200
 MAX_CHARACTERS = 6
 BRIEF_LIMIT = 12000
 RENDERERS = ("2d-engine", "blender", "threejs")
-# The built-in pack each renderer's user packs are drawn by. Only the 2D engine runs today.
-BASES = {"2d-engine": ("motion-type", "flat-2d"), "blender": ("glossy-3d",), "threejs": ("voxel-3d",)}
+# The built-in pack each renderer's user packs are drawn by (the last is the default). Pack B (glossy-3d) runs on three.js,
+# built in, or on Blender when it is installed (core/blender_tools.py); a Blender pack still renders, with three.js and a
+# plain note, on a machine without Blender.
+BASES = {"2d-engine": ("motion-type", "flat-2d"), "blender": ("glossy-3d",), "threejs": ("voxel-3d", "glossy-3d")}
 SETTINGS = ("meadow", "city", "space", "room", "ocean", "lab")
 SHOTS = ("wide", "medium", "close")
 PROPS = ("sun", "moon", "star", "cloud", "lightbulb", "heart", "book", "planet", "drop", "leaf", "gear", "arrow",
          "question", "coin", "clock", "rocket", "tree", "house", "magnifier", "atom")
 CAMERAS = ("still", "push", "pull", "pan", "shake")
+# Pack B's studio (static/motion/stage.js): set tones and glossy props take the place of Pack A's settings and icons.
+STAGE_SETS = ("lavender", "peach", "mint", "sky", "night")
+STAGE_PROPS = ("ball", "block", "pillar", "ring", "coin")
 TRANSITIONS = ("cut", "whip", "zoom", "flip", "dither", "mosaic", "wipe")
 MOODS = ("energetic", "calm", "warm", "dark", "playful")
 LIGHTING = ("flat", "soft", "glow")
@@ -200,7 +206,9 @@ def validate(spec: dict) -> dict:
         _error("characters", "the motion-type base has no characters; use the flat-2d base for a character set.")
     scenes = s.setdefault("scenes", {})
     _fields(scenes, "scenes", SCENE_FIELDS)
-    for key, allowed in (("settings", SETTINGS), ("shots", SHOTS), ("props", PROPS), ("cameras", CAMERAS),
+    three_d = s["base"] in ("glossy-3d", "voxel-3d")
+    settings, props = (STAGE_SETS, STAGE_PROPS) if three_d else (SETTINGS, PROPS)
+    for key, allowed in (("settings", settings), ("shots", SHOTS), ("props", props), ("cameras", CAMERAS),
                          ("transitions", TRANSITIONS)):
         scenes[key] = _subset(scenes.get(key, list(allowed)), f"scenes.{key}", allowed, 0 if key == "props" else 1)
     pacing = s.setdefault("pacing", {})
@@ -253,6 +261,11 @@ def check_characters(spec) -> list[str]:
         if data["family"] not in spec["look"]["families"]:
             out.append(f"{meta['name']} is a {data['family']} character; this pack's families are "
                        + ", ".join(spec["look"]["families"]) + ".")
+        form = character_store.form_of(data)
+        if spec["base"] == "glossy-3d" and form != "3d":
+            out.append(f"{meta['name']} is a flat (2D) character; a glossy 3D pack casts 3D characters (form 3d), approved on their 3D sheet.")
+        elif spec["base"] == "flat-2d" and form != "2d":
+            out.append(f"{meta['name']} is a 3D character; a flat 2D pack casts flat characters.")
     return out
 
 
@@ -483,6 +496,8 @@ def video_defaults(data) -> dict:
            "narration": {"voice": data["voice"]["voice"], "captions": data["captions"]["on"]}}
     if data["characters"]:
         out["cast"] = [dict(e) for e in data["characters"]]
+    if data["base"] == "glossy-3d":
+        out["renderer"] = data["renderer"]        # three.js or Blender; a channel's own choice can override it
     return out
 
 
@@ -497,15 +512,16 @@ def rule_notes(project, data) -> list[str]:
             notes.append(f"{label} uses the {b.get('camera')} camera, which the {data['name']} pack does not use.")
         if i < len(project["beats"]) - 1 and b.get("transition", "cut") not in scenes["transitions"]:
             notes.append(f"{label} uses the {b.get('transition')} transition, which the {data['name']} pack does not use.")
-        if b["kind"] == "scene":
-            scene = b.get("scene") or {}
-            if scene.get("setting") not in scenes["settings"]:
-                notes.append(f"{label} is set in {scene.get('setting')}, outside the {data['name']} pack's settings.")
+        if b["kind"] in ("scene", "stage"):
+            scene = b.get("scene") or b.get("stage") or {}
+            place = scene.get("setting") if b["kind"] == "scene" else scene.get("set")
+            if place not in scenes["settings"]:
+                notes.append(f"{label} is set in {place}, outside the {data['name']} pack's settings.")
             if scene.get("shot") not in scenes["shots"]:
                 notes.append(f"{label} is a {scene.get('shot')} shot, outside the {data['name']} pack's shots.")
             for prop in scene.get("props", []):
-                if prop.get("icon") not in scenes["props"]:
-                    notes.append(f"{label} shows a {prop.get('icon')}, outside the {data['name']} pack's props.")
+                if (prop.get("icon") or prop.get("shape")) not in scenes["props"]:
+                    notes.append(f"{label} shows a {prop.get('icon') or prop.get('shape')}, outside the {data['name']} pack's props.")
             for member in scene.get("cast", []):
                 if not any(e["character"] == member["character"] for e in data["characters"]):
                     notes.append(f"{label} casts a character that is not in the {data['name']} pack's character set.")
@@ -562,7 +578,44 @@ STARTER = {
 }
 # The starter pack's cast: Kairos's own round, square and triangle designs (core/character_store.STARTERS), unchanged.
 STARTER_CHARACTERS = ("round", "square", "triangle")
-STARTERS = {STARTER_ID: {"spec": STARTER, "characters": STARTER_CHARACTERS}}
+# Pack B's starter: a glossy 3D "what if" series pack with Kairos's own round mascot rebuilt in 3D (Pip 3D). Generic name;
+# nothing in it resembles any channel's character (no dark round head in a yellow hoodie, no channel's name or set).
+STARTER_3D_ID = "glossy-what-if"
+STARTER_3D_BRIEF = (
+    "Glossy what-if series. Each episode asks one impossible question (what if you could see everyone's sleep, savings "
+    "or screen time floating over their heads?) and walks through it with our own glossy 3D mascot in a bright studio.\n\n"
+    "Before any spending: write the script and a timestamped shot plan, keep a source for every real figure, keep every "
+    "person fictional, and get the plan approved. Each episode needs its own question, research and payoff, never the same "
+    "setup with the same outcome.\n\n"
+    "Look: a soft-lit studio with a curved backdrop in one pastel tone per channel, glossy plastic materials, simple "
+    "faceless stand-in people in soft colours, a few glossy props, and big clean labels and numbers floating over heads, "
+    "drawn sharp in 2D. Our mascot is drawn from its approved 3D character sheet so it never drifts.\n\n"
+    "Camera: a wide shot to set the room, a medium shot for the mascot's reaction, a close shot for the punchline; slow "
+    "push-ins and gentle orbits, cut on the narration.\n\n"
+    "Pacing: about two and a half words a second, the question in the first five seconds, shots of two to six seconds, a "
+    "number on screen every time one is said.\n\n"
+    "Sound: a playful synthesized bed under one narrator voice, ducked while it speaks; captions on.\n\n"
+    "Quality: check sampled frames against the character's 3D sheet, keep labels and captions inside safe areas, and never "
+    "copy another channel's characters, mascots, logos, sets, titles or catchphrases.")
+STARTER_3D = {
+    "name": "Glossy what-if",
+    "summary": "A glossy 3D studio series: our own mascot, faceless stand-in people and numbers floating over their heads.",
+    "renderer": "threejs", "base": "glossy-3d",
+    # The palette colours the title and end cards, in the studio's lavender so a card does not jump out of the series.
+    "look": {"design_look": "nordic", "families": ["round"], "outline": 7, "lighting": "soft",
+             "palette": {"sky": ["#cfc4ea", "#eee8f8"], "far": "#b9acdf", "mid": "#a596d4", "near": "#8d7cc4",
+                         "ground": "#d8cfee", "prop": "#7cc6a4", "ink": "#2e2438", "glow": "#ffffff"}},
+    "scenes": {"settings": ["lavender", "peach", "mint", "sky"], "shots": ["wide", "medium", "close"],
+               "props": ["ball", "block", "pillar", "ring", "coin"], "cameras": ["still", "push", "pull", "pan"],
+               "transitions": ["cut", "zoom", "wipe"]},
+    "pacing": {"words_per_second": 2.6, "shot_seconds": [1.5, 6], "hook_seconds": 5.5},
+    "captions": {"on": True, "case": "sentence"},
+    "music": {"mood": "playful", "volume": .5},
+    "voice": {"voice": "af_heart"},
+    "director_brief": STARTER_3D_BRIEF,
+}
+STARTERS = {STARTER_ID: {"spec": STARTER, "characters": STARTER_CHARACTERS},
+            STARTER_3D_ID: {"spec": STARTER_3D, "characters": ("round",), "form": "3d"}}
 
 
 def _character_for(data: dict, by: str) -> dict:
@@ -587,18 +640,21 @@ def _character_for(data: dict, by: str) -> dict:
 
 
 def default_cast(data: dict, by: str = "") -> dict:
-    """A flat-2d pack with no character set gets one per family it allows (up to three): the newest approved character
-    of that family in this account, else Kairos's own starting design for it (made here as a draft)."""
-    if data["base"] != "flat-2d" or data["characters"]:
+    """A flat-2d or glossy-3d pack with no character set gets one per family it allows (up to three): the newest approved
+    character of that family and form (flat for 2D, 3D for Pack B) in this account, else Kairos's own starting design for
+    it (made here as a draft)."""
+    if data["base"] not in ("flat-2d", "glossy-3d") or data["characters"]:
         return data
+    form = "3d" if data["base"] == "glossy-3d" else "2d"
     cast = []
     for family in data["look"]["families"][:3]:
         found = None
         for meta in reversed(character_store.list_all()):
             version = character_store.approved_version(meta)
-            if meta["family"] == family and version:
+            if meta["family"] == family and version and character_store.form_of(character_store.spec(meta["id"], version)) == form:
                 found = {"character": meta["id"], "version": version}
-        cast.append(found or _character_for(character_store.starter(family), by))
+        starter = character_store.starter_3d(family) if form == "3d" else character_store.starter(family)
+        cast.append(found or _character_for(starter, by))
     return validate({**data, "characters": cast})
 
 
@@ -611,7 +667,8 @@ def install_starter(starter_id=STARTER_ID, by: str = "") -> dict:
     for meta in list_all():
         if meta.get("origin", {}).get("kind") == "starter" and meta["origin"].get("from") == starter_id:
             raise ApprovalError(f"This account already has the starter pack ({meta['name']}). Duplicate it to make another.")
-    cast = [_character_for(character_store.starter(family), by) for family in entry["characters"]]
+    make = character_store.starter_3d if entry.get("form") == "3d" else character_store.starter
+    cast = [_character_for(make(family), by) for family in entry["characters"]]
     return create({**copy.deepcopy(entry["spec"]), "characters": cast}, by=by, note="The starter pack.",
                   origin={"kind": "starter", "from": starter_id, "brief": entry["spec"]["director_brief"]})
 

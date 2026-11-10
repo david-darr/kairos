@@ -16,11 +16,12 @@ from .store import PLATFORMS, StudioError
 
 # The style packs a post can be made in (spec section 3) come from the registry in core/style_packs.py: Pack 0
 # (motion-type) and Pack A (flat-2d) are built; a port into a pack that is not built is refused as "cannot be made
-# yet" until its unit lands. `units_per_minute` is a planning estimate of render effort relative to Pack 0 (not
-# measured), used only so a long, heavy port does not beat a cheaper format by default. `max_seconds` is what the
+# yet" until its unit lands. `units_per_minute` is render effort relative to the 2D engine, from each renderer's
+# measured speed (core/style_packs.RENDER_SPEED), used so a long, heavy port does not beat a cheaper format by default
+# (Pack B in Blender costs far more than in three.js). `max_seconds` is what the
 # pack can make today. User-made packs (core/style_pack_store.py) join through style_packs.user_packs(): each is drawn by
 # its base pack and is available only once the person approved a version.
-from core.style_packs import BUILT_IN as STYLE_PACKS, all_packs
+from core.style_packs import BUILT_IN as STYLE_PACKS, RENDER_SPEED, all_packs, render_seconds_per_minute, units_per_minute
 COST_WARN_RATIO = 3.0      # a port this many times dearer than the cheapest pack that could make it is a warning
 STALE_DAYS = 45            # evidence checked longer ago than this is flagged as stale
 PORT_STATES = ("proposed", "accepted", "rejected", "retired")
@@ -157,17 +158,25 @@ def clean_port(data):
             "example_title": _text(data.get("example_title"), "example_title", 200)}
 
 
-def cost(pack_id, length_s):
-    """The cost to make a video of this length in a pack, against the cheapest pack that could make it today."""
+def cost(pack_id, length_s, renderer=None):
+    """The cost to make a video of this length in a pack (with `renderer`, or the pack's own), against the cheapest pack
+    that could make it today. Render time comes from the renderer's measured speed."""
     packs_now = all_packs()
     pack = packs_now[pack_id]
+    renderer = renderer if renderer in RENDER_SPEED and renderer in (pack.get("renderers") or [pack["renderer"]]) else pack["renderer"]
     minutes = max(length_s, 1) / 60
-    units = round(pack["units_per_minute"] * minutes, 2)
+    measured = pack["available"] and renderer in RENDER_SPEED
+    per_minute = units_per_minute(renderer) if measured else pack["units_per_minute"]
+    units = round(per_minute * minutes, 2)
     able = [p for p in packs_now.values() if p["available"] and p["max_seconds"] >= length_s]
     cheapest = round(min(p["units_per_minute"] for p in able) * minutes, 2) if able else None
-    return {"pack": pack_id, "pack_name": pack["name"], "available": pack["available"], "length_s": length_s,
-            "max_seconds": pack["max_seconds"], "units": units, "cheapest_units": cheapest,
-            "ratio": round(units / cheapest, 2) if cheapest else None, "estimate": "planning units, not measured"}
+    out = {"pack": pack_id, "pack_name": pack["name"], "available": pack["available"], "length_s": length_s, "renderer": renderer,
+           "max_seconds": pack["max_seconds"], "units": units, "cheapest_units": cheapest,
+           "ratio": round(units / cheapest, 2) if cheapest else None,
+           "estimate": ("render time from measured speed: " + RENDER_SPEED[renderer]["measured"]) if measured else "planning units, not measured"}
+    if measured:
+        out["render_minutes"] = round(render_seconds_per_minute(renderer) * minutes / 60, 1)
+    return out
 
 
 def packs():

@@ -38,7 +38,11 @@ PROPORTIONS = {"head": (.30, .55), "body_width": (.35, .80), "limb_length": (.18
                "eye_size": (.02, .06)}
 OUTLINE = (4, 14)          # outline weight in thousandths of the character's height
 STATES = ("draft", "awaiting_approval", "approved", "rejected")
-SPEC_FIELDS = {"name", "family", "proportions", "palette", "outline", "accessory", "parts", "views", "expressions", "mouths"}
+SPEC_FIELDS = {"name", "family", "proportions", "palette", "outline", "accessory", "parts", "views", "expressions", "mouths", "form"}
+# A character is drawn flat by the 2D rig (Pack A) or built in 3D by static/motion/stage.js (Pack B). The form is part of
+# the spec, so a 3D version is its own approved sheet: approving the flat Pip does not approve a 3D Pip. A spec without
+# `form` is 2D (every spec written before Pack B).
+FORMS = ("2d", "3d")
 HEX = re.compile(r"#[0-9a-f]{6}")
 NAME = re.compile(r"[A-Za-z][A-Za-z0-9 '-]{0,39}")
 MAX_VERSIONS = 50
@@ -102,6 +106,11 @@ def validate(spec: dict) -> dict:
     s["name"] = s["name"].strip()
     if s.get("family") not in FAMILIES:
         _error("family", "choose " + ", ".join(FAMILIES) + ".")
+    form = s.pop("form", "2d")
+    if form not in FORMS:
+        _error("form", "choose 2d (the flat rig) or 3d (the glossy 3D studio).")
+    if form == "3d":
+        s["form"] = "3d"
     if s["accessory"] not in ACCESSORIES:
         _error("accessory", "choose " + ", ".join(ACCESSORIES) + ".")
     props = s.get("proportions")
@@ -131,6 +140,22 @@ def starter(family: str, **changes) -> dict:
     if family not in STARTERS:
         _error("family", "choose " + ", ".join(FAMILIES) + ".")
     return merged(STARTERS[family], changes)
+
+
+# Pack B's mascots: the same family rebuilt in 3D from the same numbers (static/motion/stage.js builds the body and head
+# as one form, the leaf as a folded blade, the arms in front of the body). Named apart from the flat ones, since a
+# character's name is unique in an account and the 3D version is approved on its own sheet.
+STARTERS_3D = {family: {**spec, "name": spec["name"] + " 3D", "form": "3d"} for family, spec in STARTERS.items()}
+
+
+def starter_3d(family: str, **changes) -> dict:
+    if family not in STARTERS_3D:
+        _error("family", "choose " + ", ".join(FAMILIES) + ".")
+    return merged(STARTERS_3D[family], changes)
+
+
+def form_of(spec: dict) -> str:
+    return "3d" if spec.get("form") == "3d" else "2d"
 
 
 def merged(base: dict, changes: dict) -> dict:

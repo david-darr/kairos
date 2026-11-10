@@ -343,9 +343,12 @@ app.whenReady().then(async () => {
     await fill('Style pack', 'aaaaaaaaaaaa');
     assert.equal(await js("document.querySelector('[aria-label=\"Long videos a week\"]').value"), '1', 'One long video a week on YouTube by default');
     await fill('Long videos a week', '2');
+    // Pack B: the 3D renderer is shown plainly; without Blender on the computer it cannot be picked.
+    assert.deepEqual(await js("[...document.querySelector('[aria-label=\"3D renderer\"]').options].map(o=>[o.textContent, o.disabled])"),
+      [["The style pack's choice", false], ['three.js (built in)', false], ['Blender (not installed)', true]]);
     await click('.sc-dialog-panel button', 'Save look');
     await wait("!document.querySelector('[aria-label=\"Look id\"]')");
-    assert.deepEqual(last('/channels/1/edit').body, { look: 'sport', aspect: '16:9', notes: 'Calm, curious.', voice: 'af_heart', style_pack: 'aaaaaaaaaaaa', long_per_week: 2 });
+    assert.deepEqual(last('/channels/1/edit').body, { look: 'sport', aspect: '16:9', notes: 'Calm, curious.', voice: 'af_heart', style_pack: 'aaaaaaaaaaaa', renderer: '', long_per_week: 2 });
     await wait("document.querySelector('[data-channel-id=\"1\"]').textContent.includes('style Flat science explainer, look sport, 16:9, voice notes set')");
     await noOverflow(); await labels();
 

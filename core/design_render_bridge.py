@@ -296,8 +296,10 @@ async def video(job: dict, consumer) -> dict:
     job_id = job["id"]
     future = asyncio.get_running_loop().create_future()
     _pending[job_id] = future
+    # An overlay job (the Blender renderer's 2D pass, core/video_blender.py) sends PNG frames with alpha, each frame's 3D
+    # pose, and the stage models once; its consumer takes them as consumer(frames, layouts, poses, stage).
     state = {"next": 0, "count": 0, "consumer": consumer, "expected": len(job.get("times", [])) if job.get("preview") else job.get("count", job["frames"]),
-             "layouts": 0, "lock": asyncio.Lock(), "account": accounts.effective_account()}
+             "layouts": 0, "lock": asyncio.Lock(), "account": accounts.effective_account(), "alpha": job.get("alpha") is True}
     _video_parts[job_id] = state
     await _q().put({**job, "kind": "video"})
     limit = video_seconds(job)
@@ -338,8 +340,18 @@ async def complete_video(job_id: str, data: bytes, part=None, error=None) -> boo
             if not isinstance(encoded, list) or not 1 <= len(encoded) <= 15 or state["count"] + len(encoded) > state["expected"]:
                 raise ValueError("Video parts hold 1 to 15 requested JPEG frames.")
             frames = [base64.b64decode(value, validate=True) for value in encoded]
-            if any(not frame.startswith(b"\xff\xd8") or len(frame) > 8 * 1024 * 1024 for frame in frames):
-                raise ValueError("Video frames must be JPEGs under 8 MB.")
+            magic = b"\x89PNG" if state["alpha"] else b"\xff\xd8"
+            if any(not frame.startswith(magic) or len(frame) > 12 * 1024 * 1024 for frame in frames):
+                raise ValueError("Overlay frames must be PNGs under 12 MB." if state["alpha"] else "Video frames must be JPEGs under 8 MB.")
+            extra = []
+            if state["alpha"]:
+                poses = packet.get("poses")
+                if not isinstance(poses, list) or len(poses) != len(frames) or any(p is not None and not isinstance(p, dict) for p in poses):
+                    raise ValueError("Overlay parts carry one pose (or null) per frame.")
+                stage = packet.get("stage")
+                if state["next"] == 0 and not isinstance(stage, str):
+                    raise ValueError("The first overlay part carries the stage models.")
+                extra = [poses, json.loads(stage) if state["next"] == 0 else None]
             layouts = packet.get("layouts", [])
             if not isinstance(layouts, list) or state["layouts"] + len(layouts) > 120:
                 raise ValueError("Video layout samples must be a list of at most 120 samples.")
@@ -348,7 +360,7 @@ async def complete_video(job_id: str, data: bytes, part=None, error=None) -> boo
                     raise ValueError("Each video sample needs an elements list.")
             # The worker's result request has no sign-in: the consumer runs as the account that started the job.
             with accounts.as_account(state["account"]):
-                await state["consumer"](frames, layouts)
+                await state["consumer"](frames, layouts, *extra)
             state["count"] += len(frames)
             state["layouts"] += len(layouts)
             state["next"] += 1

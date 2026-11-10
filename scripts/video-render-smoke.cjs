@@ -53,7 +53,9 @@ app.whenReady().then(async () => {
   if (args.includes('--pack-a')) py.push('--pack-a');
   if (args.includes('--style-pack')) py.push('--style-pack');
   if (args.includes('--long-form')) py.push('--long-form');
-  for (const name of ['--models', '--keep', '--name']) if (flag(name)) py.push(name, flag(name));
+  if (args.includes('--pack-b')) py.push('--pack-b');
+  if (args.includes('--preview')) py.push('--preview');
+  for (const name of ['--models', '--keep', '--name', '--renderer']) if (flag(name)) py.push(name, flag(name));
   backend = spawn(python, py, { cwd: ROOT, env: { ...process.env, KAIROS_RENDER_TOKEN: token }, stdio: 'inherit', windowsHide: true });
   const exited = new Promise(resolve => backend.on('exit', code => resolve(code)));
   const backendUrl = `http://127.0.0.1:${port}`;
@@ -67,8 +69,10 @@ app.whenReady().then(async () => {
   if (code !== 0 || !result.ok) return finish(1, 'Video render smoke failed: ' + (result.error || `backend exited ${code}`));
   const job = result.job;
   const summary = { seconds: job.seconds, render_seconds: result.render_seconds, real_voice: result.real_voice, loudness: job.loudness,
-    narration: job.narration, notes: job.notes, sheets: result.sheets, sheet_match: result.sheet_match, pack: result.pack || null, kept: result.kept || null, long: result.long || null };
+    narration: job.narration, notes: job.notes, sheets: result.sheets, sheet_match: result.sheet_match, pack: result.pack || null, kept: result.kept || null, long: result.long || null,
+    renderer: job.renderer || null, capture_fps: job.capture_fps || null, fps: job.fps || null, measured: job.measured || null };
   console.log(JSON.stringify(summary, null, 2));
+  if (args.includes('--preview')) return finish(0, 'Preview frames kept in ' + result.kept);
   if (!job.narration || !job.narration.lines) return finish(1, 'The render has no narration track.');
   // Pack A: each character's sheet rendered and passed its own checks, and no frame drifted from its sheet.
   if (!(result.sheets || []).length || result.sheets.some(s => !s.metrics || !s.metrics.ok)) return finish(1, 'A character sheet did not render or failed its checks.');
@@ -89,6 +93,16 @@ app.whenReady().then(async () => {
     const strays = (job.notes || []).filter(n => /pack (does not use|keeps shots)|outside the .* pack|opening beat runs past/.test(n));
     if (strays.length) return finish(1, 'The sample strays from its own pack: ' + strays.join(' '));
     if (!(job.seconds >= 20 && job.seconds <= 30)) return finish(1, `The sample runs ${job.seconds} s, outside 20 to 30 s.`);
+  }
+  // Pack B: the 3D sheet passed its own checks, the sample went to the person, it is 20 to 30 s, and it rendered with the
+  // renderer asked for (Blender only when installed; otherwise three.js with a plain note).
+  if (args.includes('--pack-b')) {
+    if (!result.pack || result.pack.step !== 'sample' || result.pack.status !== 'awaiting_approval') return finish(1, 'The Pack B sample was not sent for approval.');
+    if (!(job.seconds >= 20 && job.seconds <= 30)) return finish(1, `The Pack B sample runs ${job.seconds} s, outside 20 to 30 s.`);
+    const want = flag('--renderer') || 'threejs', blenderMissing = (job.notes || []).some(n => /Blender isn't installed|needs Blender 4.2/.test(n));
+    if (job.renderer !== want && !(want === 'blender' && blenderMissing && job.renderer === 'threejs')) return finish(1, `The sample rendered with ${job.renderer}, not ${want}.`);
+    const strays = (job.notes || []).filter(n => /pack (does not use|keeps shots)|outside the .* pack|opening beat runs past/.test(n));
+    if (strays.length) return finish(1, 'The Pack B sample strays from its own pack: ' + strays.join(' '));
   }
   // A long video: refused before its plan was approved, stopped in its second chapter and resumed from there, joined into one
   // 3 to 5 minute video with YouTube chapters, inside its pack's rules.

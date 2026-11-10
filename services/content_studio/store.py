@@ -38,7 +38,7 @@ ASPECTS = ("9:16", "16:9", "1:1")
 # Columns added after the first release; a store made before them gains them when it opens.
 LATER_COLUMNS = {"snapshots": {"source": "TEXT NOT NULL DEFAULT 'manual'"},
                  "channels": {"look": "TEXT", "aspect": "TEXT", "notes": "TEXT NOT NULL DEFAULT ''", "voice": "TEXT", "style_pack": "TEXT",
-                              "long_per_week": "INTEGER"},
+                              "long_per_week": "INTEGER", "renderer": "TEXT"},
                  "posts": {"pick_reason": "TEXT NOT NULL DEFAULT ''", "tags": "TEXT NOT NULL DEFAULT ''",
                            "ai_label": "INTEGER NOT NULL DEFAULT 1", "format_id": "INTEGER REFERENCES formats(id)",
                            "port_id": "INTEGER REFERENCES ports(id)", "style_pack": "TEXT",
@@ -361,12 +361,23 @@ class Store:
                         "AND created_at > ?", (channel_id, now - WEEK))
         return row["n"] if row else 0
 
-    def edit_channel(self, channel_id, look=None, aspect=None, notes=None, voice=None, style_pack=None, long_per_week=None):
+    def edit_channel(self, channel_id, look=None, aspect=None, notes=None, voice=None, style_pack=None, long_per_week=None,
+                     renderer=None):
         """The channel's own look (a Studio video look id), aspect, voice notes, narrator voice (a Kokoro voice id) and
         style pack (a built-in or the account's own approved pack), so the Editor and Script Writer make each channel's
-        posts in its own style and the channel keeps one voice. None leaves a field as it is; "" clears it."""
+        posts in its own style and the channel keeps one voice. None leaves a field as it is; "" clears it.
+        `renderer` picks what draws a glossy 3D pack's videos on this channel: "threejs" (built in), "blender" (only when
+        Blender is installed, core/blender_tools.py), or "" for the pack's own choice."""
         self.get_channel(channel_id)
         changes = {}
+        if renderer is not None:
+            if renderer not in ("", "threejs", "blender"):
+                raise StudioError("the 3D renderer is threejs, blender, or empty for the style pack's own choice")
+            if renderer == "blender":
+                from core import blender_tools
+                if not blender_tools.find():
+                    raise StudioError(blender_tools.detect()["message"])
+            changes["renderer"] = renderer or None
         if style_pack is not None:
             style_pack = _clean_text(style_pack, "style pack", 40, False)
             if style_pack:

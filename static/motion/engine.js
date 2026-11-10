@@ -1,5 +1,6 @@
 import { clamp, expoOut, pop, inOut, hash, seededRandom, zoomAbout, scrim, card, windowReveal, BAYER, contrast, readable, luminance, rgb } from './kit.js';
 import { drawScene, sceneBoxes, groundLine, packCard, drawCardSky, drawCardWorld } from './scene.js';
+import { stageModel, stagePose, labelsAt, actorBoxes } from './stage.js';
 import { normalizeProject, dimensions, safeArea, captionBand, captionAt, fitText, frameTime, beatAt, transitionAt, beatLayout, cameraAt, beatElapsed, transitionTransform, visibleBox, compositionAt, revealElapsed, listMarker } from './layout.js';
 
 function lookTokens(canvas, supplied) {
@@ -78,7 +79,19 @@ export function mount(canvas, input, options = {}) {
   const cardStyle = packLook ? { ...style, bg: packLook.bg, backdrop: packLook.backdrop, text: packLook.text, dim: packLook.dim, accent: packLook.accent,
     second: packLook.second, surface: packLook.surface, onAccent: packLook.onAccent, rule: packLook.rule, pattern: 'flat', reportBg: packLook.worstBg,
     palette: [packLook.text, packLook.dim, packLook.accent] } : style;
-  const styleOf = beat => beat.kind === 'scene' ? style : cardStyle;
+  const styleOf = beat => beat.kind === 'scene' || beat.kind === 'stage' ? style : cardStyle;
+  // Pack B (stage.js): 3D studio shots. three.js draws them here; with the Blender renderer this page is the overlay
+  // pass instead (options.layer 'overlay'): stage shots stay transparent, everything else draws as usual, transitions
+  // into and out of a stage shot are cuts, and the 3D pose of every frame is reported for Blender (kdPose).
+  const overlay = options.layer === 'overlay', hasStage = project.beats.some(b => b.kind === 'stage');
+  const models = new Map(), poses = new Map();
+  let stage3d = null;
+  const modelOf = beat => { if (!models.has(beat.id)) models.set(beat.id, stageModel(beat, project.characters)); return models.get(beat.id); };
+  const poseOf = (beat, seconds) => {
+    const key = `${beat.id}:${seconds.toFixed(5)}`;
+    if (!poses.has(key)) { if (poses.size > 64) poses.clear(); poses.set(key, stagePose(modelOf(beat), beat, seconds, w, h, project.captioned)); }
+    return poses.get(key);
+  };
   const measureCtx = buffer(doc, 1, 1).getContext('2d');
   const measure = (text, size, role) => { measureCtx.font = font(style, size, role); return measureCtx.measureText(text).width; };
   const images = new Map(), samples = new Map(), plans = new Map();
@@ -108,14 +121,23 @@ export function mount(canvas, input, options = {}) {
     await Promise.all([doc.fonts.load(font(style, 96, 'title')), doc.fonts.load(font(style, 48, 'body')),
       ...[...new Set(project.beats.map(b => b.image).filter(Boolean))].map(loadImage)]);
     await doc.fonts.ready;
+    if (hasStage && !overlay) {
+      const { StageRenderer } = await import('./stage3d.js');
+      stage3d = new StageRenderer(w, h, { ss: options.ss || 2 });
+      for (const beat of project.beats) if (beat.kind === 'stage') stage3d.build(modelOf(beat));
+    }
     for (const beat of project.beats) plan(beat);
     loaded = true; drawFrame(0);
   })();
 
   function background(g, beat, p) {
     const style = styleOf(beat);
-    g.fillStyle = style.bg; g.fillRect(0, 0, w, h);
     const seconds = p * (beat.end - beat.start);
+    if (beat.kind === 'stage') {
+      if (!overlay) g.drawImage(stage3d.render(modelOf(beat), poseOf(beat, seconds)), 0, 0);
+      return;
+    }
+    g.fillStyle = style.bg; g.fillRect(0, 0, w, h);
     // A Pack A scene draws its own layered setting, props and cast (scene.js); the look keeps the type.
     if (beat.kind === 'scene') { drawScene(g, beat, project, w, h, groundLine(h, band, project.captioned), seconds, p); return; }
     if (packLook) drawCardSky(g, packLook, w, h, safe.y + safe.h);
@@ -202,8 +224,44 @@ export function mount(canvas, input, options = {}) {
     const step = quarter / subdivisions, delay = box.delay * step * 2;
     return { local, step, delay, length: Math.min(.38, Math.max(.05, (beat.end - beat.start) * .18)), words };
   }
+  // Floating numbers over heads: a card with the figure and a short line, popped in at the label's time, drawn by the
+  // 2D engine so the type stays sharp and on-look in both renderers.
+  const labelInk = '#231b2e', labelCard = '#ffffff';
+  function stageLabels(beat, seconds) {
+    const pose = poseOf(beat, seconds), out = [];
+    for (const label of labelsAt(modelOf(beat), beat, pose, seconds, w, h)) {
+      const big = Math.round(Math.min(w, h) * .062), small = Math.round(Math.min(w, h) * .03), pad = big * .32;
+      const width = Math.max(measure(label.text, big, 'title'), label.sub ? measure(label.sub, small, 'body') : 0) + pad * 2;
+      const height = big * 1.05 + (label.sub ? small * 1.3 : 0) + pad * 1.4;
+      const floor = (project.captioned ? band.y : h) - 12;
+      const x = clamp(label.x - width / 2, safe.x, safe.x + safe.w - width);
+      let y = clamp(label.y - height, safe.y, floor - height);
+      for (let pass = 0; pass < out.length; pass++) {
+        const hit = out.find(o => x < o.box.x + o.box.w + 8 && o.box.x < x + width + 8 && y < o.box.y + o.box.h + 8 && o.box.y < y + height + 8);
+        if (!hit) break;
+        y = hit.box.y - height - 10;
+      }
+      out.push({ ...label, box: { x, y: Math.max(0, y), w: width, h: height }, big, small, pad });
+    }
+    return out;
+  }
+  function drawLabels(g, beat, seconds) {
+    for (const l of stageLabels(beat, seconds)) {
+      const { x, y, w: bw, h: bh } = l.box;
+      g.save();
+      g.translate(x + bw / 2, y + bh); g.scale(l.k, l.k); g.translate(-(x + bw / 2), -(y + bh));
+      g.globalAlpha = clamp(l.k * 1.4);
+      card(g, x, y, bw, bh, labelCard, Math.min(28, bh / 3), 'rgba(35, 27, 46, .35)');
+      g.beginPath(); g.moveTo(x + bw / 2 - 14, y + bh - 1); g.lineTo(x + bw / 2, y + bh + 16); g.lineTo(x + bw / 2 + 14, y + bh - 1); g.fillStyle = labelCard; g.fill();
+      g.fillStyle = labelInk; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+      g.font = font(style, l.big, 'title'); g.fillText(l.text, x + bw / 2, y + l.pad * .7 + l.big * .88);
+      if (l.sub) { g.font = font(style, l.small, 'body'); g.globalAlpha *= .8; g.fillText(l.sub, x + bw / 2, y + l.pad * .7 + l.big * 1.05 + l.small * 1.05); }
+      g.restore();
+    }
+  }
   function foreground(g, beat, t) {
     const style = styleOf(beat);
+    if (beat.kind === 'stage') drawLabels(g, beat, beatElapsed(beat, t));
     if (beat.kind === 'image') {
       g.fillStyle = style.bg; g.fillRect(safe.x, safe.y + safe.h * .50, safe.w, safe.h * .50);
     }
@@ -217,7 +275,7 @@ export function mount(canvas, input, options = {}) {
     for (const box of plan(beat).filter(b => b.kind === 'text')) {
       const state = textState(box, beat, t);
       if (state.local < state.delay) continue;
-      if (beat.kind === 'scene') {
+      if (beat.kind === 'scene' || beat.kind === 'stage') {
         // A scene's label sits on a card in the look's background, so it reads over any sky.
         const lineW = Math.max(...box.lines.map(line => measure(line, box.size, box.role)));
         const k = expoOut(state.local / state.length), pad = box.size * .28;
@@ -246,7 +304,7 @@ export function mount(canvas, input, options = {}) {
         }
       });
       g.restore();
-      if (box.role !== 'body' && beat.kind !== 'scene') {
+      if (box.role !== 'body' && beat.kind !== 'scene' && beat.kind !== 'stage') {
         g.fillStyle = style.rule || style.accent;   // the rule is decoration: a pack's prop colour even where it would not read as text
         const k = expoOut(state.local / state.length);
         g.fillRect(box.x, Math.min(safe.y + safe.h - 8, box.y + box.h + 8), Math.min(box.w * .24, 240) * k, 6);
@@ -273,7 +331,10 @@ export function mount(canvas, input, options = {}) {
     const beat = beatAt(project, t);
     // The end-card hold also suppresses any incoming or outgoing transition.
     if (beat.kind === 'end' && t >= Math.max(beat.start, beat.end - 1.5)) return { t, beat, transition: null };
-    return { t, beat, transition: transitionAt(project, t) };
+    const tr = transitionAt(project, t);
+    // In the Blender overlay pass a stage shot's picture comes from Blender underneath, so its transitions are cuts.
+    if (tr && overlay && (project.beats[tr.from].kind === 'stage' || project.beats[tr.to].kind === 'stage')) return { t, beat, transition: null };
+    return { t, beat, transition: tr };
   }
   function composite(layer, tr, incoming, foregroundOnly = false) {
     const tf = transitionTransform(tr.kind, tr.p, incoming, w, h), k = inOut(tr.p);
@@ -338,7 +399,8 @@ export function mount(canvas, input, options = {}) {
     if (!loaded) throw new Error('Await mount.ready before drawing');
     const { t, beat, transition: tr } = active(time);
     ctx.resetTransform(); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; ctx.filter = 'none';
-    ctx.fillStyle = style.bg; ctx.fillRect(0, 0, w, h);
+    if (overlay) ctx.clearRect(0, 0, w, h);
+    else { ctx.fillStyle = style.bg; ctx.fillRect(0, 0, w, h); }
     if (!tr) {
       const layer = renderLayer(beat, t, 0); ctx.drawImage(layer.bg, 0, 0); ctx.drawImage(layer.fg, 0, 0); drawCaption(t); return;
     }
@@ -381,6 +443,21 @@ export function mount(canvas, input, options = {}) {
         }
         result.push(publicBox);
       }
+      // A stage shot's cast, projected from the 3D pose, and its floating labels as text.
+      if (b.kind === 'stage' && !tr) {
+        const seconds = beatElapsed(b, t), pose = poseOf(b, seconds), model = modelOf(b);
+        for (const box of actorBoxes(model, b, pose, w, h)) {
+          if (box.kind !== 'character') continue;
+          const member = b.stage.cast[Number(box.key.slice(1))];
+          result.push({ beat: b.id, kind: 'character', stage: true, character: box.character, shot: b.stage.shot, x: box.x, y: box.y, w: box.w, h: box.h,
+            height: box.height, short: Math.min(w, h), body: box.body, head: box.head, expression: member?.expression, action: member?.action });
+        }
+        for (const l of stageLabels(b, seconds)) {
+          if (l.k < .05) continue;
+          result.push({ beat: b.id, kind: 'text', role: 'label', text: [l.text, l.sub].filter(Boolean).join(' '), fontSize: l.small || l.big,
+            x: l.box.x, y: l.box.y, w: l.box.w, h: l.box.h, color: labelInk, bg: labelCard });
+        }
+      }
       // A scene's cast and props, in frame pixels, for the sheet-match checks (only outside transitions).
       if (b.kind === 'scene' && !tr) {
         const p = clamp(beatElapsed(b, t) / (b.end - b.start));
@@ -392,8 +469,18 @@ export function mount(canvas, input, options = {}) {
       color: c.color, bg: style.bg, truncated: c.fit.truncated });
     return result;
   }
-  return { ready, duration: project.duration, drawFrame, layout,
-    info: { duration: project.duration, fps: 30, width: w, height: h, aspect, beats: project.beats.map(({ id, start, end }) => ({ id, start, end })) } };
+  // The 3D pose at a time, for the Blender renderer: the stage shot on screen with every transform and the camera, or null.
+  function pose(time) {
+    if (!loaded) throw new Error('Await mount.ready before requesting a pose');
+    const { t, beat } = active(time);
+    if (beat.kind !== 'stage') return null;
+    const p = poseOf(beat, beatElapsed(beat, t));
+    return { beat: beat.id, camera: p.camera, groups: p.groups };
+  }
+  const stageModels = () => Object.fromEntries(project.beats.filter(b => b.kind === 'stage').map(b => [b.id, modelOf(b)]));
+  return { ready, duration: project.duration, drawFrame, layout, pose, stageModels, stageInfo: () => stage3d && { ...stage3d.info, lost: stage3d.lost },
+    info: { duration: project.duration, fps: 30, width: w, height: h, aspect, layer: overlay ? 'overlay' : 'full',
+      renderer: hasStage ? (overlay ? 'blender' : 'threejs') : '2d-engine', beats: project.beats.map(({ id, start, end }) => ({ id, start, end })) } };
 }
 
 // A module import for Studio does not mount anything unless the player marker exists.
@@ -401,8 +488,10 @@ const projectElement = typeof document !== 'undefined' && document.getElementByI
 if (projectElement && document.getElementById('kd-canvas')) {
   try {
     const params = new URLSearchParams(location.search);
-    const m = mount(document.getElementById('kd-canvas'), JSON.parse(projectElement.textContent), { aspect: params.get('aspect') || undefined });
+    const m = mount(document.getElementById('kd-canvas'), JSON.parse(projectElement.textContent), { aspect: params.get('aspect') || undefined,
+      layer: params.get('layer') === 'overlay' ? 'overlay' : 'full' });
     window.kdInfo = m.info; window.kdDrawFrame = m.drawFrame; window.kdLayout = m.layout; window.kdReady = m.ready;
+    window.kdPose = m.pose; window.kdStageModels = m.stageModels; window.kdStageInfo = m.stageInfo;
     if (params.has('play')) m.ready.then(() => preview(m));
   } catch (error) { window.kdReady = Promise.reject(error); }
 }

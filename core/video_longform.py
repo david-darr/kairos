@@ -20,6 +20,11 @@ used are removed when a render finishes; Studio shows the disk the parts and vid
 
 Only a plan the person approved renders (core/video_plan.py). Several long renders never run at once: each chapter and
 the join take the render machine in turn (core/video_render._machine), so a Short can render between two chapters.
+
+Pack B with Blender (core/video_blender.py) renders through this same machinery: an unchaptered Blender video is one
+part (no plan approval needed, as for any Short), a chaptered one a part per chapter; each part is made by the overlay
+pass, Blender and FFmpeg's composite instead of one worker capture. The parts' keys name the renderer, so a three.js
+part is never reused for a Blender render or the other way round.
 """
 from __future__ import annotations
 
@@ -35,7 +40,8 @@ from pathlib import Path
 
 from PIL import Image
 
-from core import design_render_bridge, design_systems, ffmpeg_tools, video_audio, video_checks, video_narration, video_plan, video_store
+from core import (design_render_bridge, design_systems, ffmpeg_tools, style_packs, video_audio, video_blender, video_checks, video_narration,
+                  video_plan, video_store)
 from core.atomic_io import read_json, write_json_atomic
 from core.constants import STATIC_DIR
 
@@ -45,7 +51,7 @@ TYPICAL_FPS = 45.0     # measured 47.6 and 48.2 on the 3.5-minute Flat 2D sample
 SAMPLES_PER_CHAPTER = 4
 SHEET_SAMPLES = 12
 YOUTUBE_MIN_CHAPTERS, YOUTUBE_MIN_SECONDS = 3, 10   # YouTube's chapter rules (support.google.com/youtube/answer/9884579)
-ENGINE_FILES = ("engine.js", "kit.js", "layout.js", "rig.js", "scene.js")
+ENGINE_FILES = ("engine.js", "kit.js", "layout.js", "rig.js", "scene.js", "stage.js", "stage3d.js")
 _engine = {}
 
 
@@ -62,8 +68,9 @@ def _parts(video_id, aspect) -> Path:
 
 
 def engine_hash() -> str:
-    """The motion engine's files, so an app update that draws differently renders the parts again."""
-    paths = [Path(STATIC_DIR) / "motion" / name for name in ENGINE_FILES]
+    """The motion engine's files (and the Blender script), so an app update that draws differently renders the parts again."""
+    from core import blender_tools
+    paths = [Path(STATIC_DIR) / "motion" / name for name in ENGINE_FILES] + [blender_tools.SCRIPT]
     stamp = tuple((str(p), p.stat().st_mtime_ns, p.stat().st_size) for p in paths if p.is_file())
     if _engine.get("stamp") != stamp:
         digest = hashlib.sha256()
@@ -79,12 +86,24 @@ def _look(look):
     return hashlib.sha256(json.dumps(system.get("tokens") if system else None, sort_keys=True).encode()).hexdigest()[:16]
 
 
-def chapter_keys(project, aspect) -> list[str]:
+def spans_of(project) -> list[dict]:
+    """The parts a render is made of: the chapters, or (a Blender video without chapters) the whole video as one part."""
+    if video_store.chaptered(project):
+        return video_store.chapter_spans(project)
+    total = math.ceil(video_store.duration(project) * 30 - 1e-7)
+    return [{"id": "all", "title": project["title"], "first": 0, "last": len(project["beats"]), "start": 0.,
+             "end": video_store.duration(project), "first_frame": 0, "frames": total}]
+
+
+def chapter_keys(project, aspect, renderer=None) -> list[str]:
     """The key of each chapter's part (see the module notes): equal keys draw equal frames."""
-    beats, spans = project["beats"], video_store.chapter_spans(project)
+    renderer = renderer or video_blender.effective(project)
+    beats, spans = project["beats"], spans_of(project)
     shared = {"engine": engine_hash(), "look": project["look"], "tokens": _look(project["look"]), "aspect": aspect,
               "bpm": project["bpm"], "captions": (project.get("narration") or {}).get("captions", True),
               "palette": project.get("palette"), "cast": project.get("cast"), "style_pack": project.get("style_pack")}
+    if renderer == "blender":       # kept out of older keys, so unit 4's three-free parts keep their names
+        shared.update(renderer="blender", samples=video_blender.SAMPLES)
     keys = []
     for span in spans:
         first, last = span["first"], span["last"]
@@ -213,15 +232,18 @@ def describe(video_id) -> list[dict]:
 
 # -- rendering ---------------------------------------------------------------------------------------------------------
 
-def start(project, aspect, register) -> dict:
+def start(project, aspect, register, renderer=None) -> dict:
     """Queue a long render (or resume one: finished chapters on disk are reused). `register(job_id, state, coro)` puts
-    the job in core/video_render's job table, so Studio's job routes and Cancel work on it."""
-    problems = video_plan.problems(project)
-    if problems:
-        raise ValueError("plan: " + " ".join(problems))
+    the job in core/video_render's job table, so Studio's job routes and Cancel work on it. renderer "blender" renders
+    each part with Blender (core/video_blender.py), chaptered or not."""
+    renderer = renderer or video_blender.effective(project)
+    if video_store.chaptered(project):
+        problems = video_plan.problems(project)
+        if problems:
+            raise ValueError("plan: " + " ".join(problems))
     job_id = secrets.token_hex(8)
     state = {"id": job_id, "video_id": project["id"], "aspect": aspect, "version": project["version"], "status": "queued",
-             "kind": "long", "chapters": [], "frames_done": 0, "frames_total": 0, "fps": None, "eta_seconds": None}
+             "kind": "long", "renderer": renderer, "chapters": [], "frames_done": 0, "frames_total": 0, "fps": None, "eta_seconds": None}
     return register(job_id, state, _run(project, aspect, state))
 
 
@@ -242,7 +264,10 @@ async def _thread(function, *args):
 
 
 def _sample_times(project, span):
-    """Frame times inside the chapter kept for the checks and the contact sheet: the middle of up to four of its shots."""
+    """Frame times inside the chapter kept for the checks and the contact sheet: the middle of up to four of its shots.
+    A video rendered as one part (Blender without chapters) keeps twelve frames spread over it, as a normal render does."""
+    if span["id"] == "all":
+        return sorted({span["first_frame"] + round(i * (span["frames"] - 1) / 11) for i in range(12)})
     beats, starts, at = project["beats"], [], 0.
     for b in beats:
         starts.append((at, at + video_store.beat_seconds(b, project["bpm"])))
@@ -258,6 +283,8 @@ async def _chapter(project, aspect, span, key, parts, state, index):
     """Render one chapter's frames into its part. Returns (frames, seconds spent capturing)."""
     from core import video_render
     sample_frames = _sample_times(project, span)
+    if state.get("renderer") == "blender":
+        return await _blender_chapter(project, aspect, span, key, parts, state, index, sample_frames)
     temp = parts / f"{key}.partial.mp4"
     encoder = await asyncio.to_thread(ffmpeg_tools.Encoder, temp, None)
     seen, began = 0, time.monotonic()
@@ -307,6 +334,28 @@ async def _chapter(project, aspect, span, key, parts, state, index):
         temp.unlink(missing_ok=True)
 
 
+async def _blender_chapter(project, aspect, span, key, parts, state, index, sample_frames):
+    """A part made by Blender: the overlay pass, Blender's frames and FFmpeg's composite (core/video_blender.py)."""
+    made = await video_blender.chapter(project, aspect, span, key, parts, state, index, sample_frames)
+    temp = made["temp"]
+    try:
+        counted = await asyncio.to_thread(ffmpeg_tools.count_frames, temp)
+        if counted != span["frames"]:
+            raise RuntimeError(f"chapter {span['title']} has {counted} frames, not {span['frames']}")
+        for frame_index, raw in made["samples"]:
+            (parts / f"{key}-{frame_index}.jpg").write_bytes(raw)
+        write_json_atomic(str(parts / f"{key}.json"), {
+            "frames": span["frames"], "first_frame": span["first_frame"], "seconds": round(made["seconds"], 2),
+            "fps": round(span["frames"] / made["seconds"], 2) if made["seconds"] else None, "samples": [i for i, _ in made["samples"]],
+            "layouts": made["layouts"][:120], "at": time.time(), "renderer": "blender", "measured": made["measured"]})
+        temp.replace(parts / f"{key}.mp4")
+    finally:
+        temp.unlink(missing_ok=True)
+    video_blender.tidy(made["folder"])
+    state.setdefault("measured", []).append(made["measured"])
+    return span["frames"], made["seconds"]
+
+
 async def _run(project, aspect, state):
     from core import video_render
     lock = video_render._machine()
@@ -319,15 +368,17 @@ async def _run(project, aspect, state):
             if video_store.narrated(project):
                 state["status"] = "narrating"
                 project = await _thread(video_narration.prepare, video_id)
-            problems = video_plan.problems(project) + video_render.cast_problems(project) + video_render.pack_problems(project)
-            if not video_store.chaptered(project):
+            blender = state.get("renderer") == "blender"
+            problems = (video_plan.problems(project) if video_store.chaptered(project) else []) + video_render.cast_problems(project) \
+                + video_render.pack_problems(project, state.get("sample_of"))
+            if not video_store.chaptered(project) and not blender:
                 problems.append("the video no longer has chapters; render it as a normal video.")
             if problems:
                 raise ValueError(" ".join(problems))
             if aspect not in project["aspects"]:
                 raise ValueError("aspect: the video no longer has this aspect.")
         state["version"] = project["version"]
-        spans, keys = video_store.chapter_spans(project), chapter_keys(project, aspect)
+        spans, keys = spans_of(project), chapter_keys(project, aspect, state.get("renderer"))
         parts.mkdir(parents=True, exist_ok=True)
         for leftover in parts.glob("*.partial.mp4"):
             leftover.unlink(missing_ok=True)
@@ -340,11 +391,12 @@ async def _run(project, aspect, state):
         state["reused"] = sum(c["state"] == "done" for c in state["chapters"])
         state["resumed"] = bool(resumed and state["reused"])
         state["_frames_run"], state["_seconds_run"] = 0, 0.
-        state["fps"] = stored.get("fps")
+        state["fps"] = stored.get("fps") if stored.get("renderer", "threejs") == state.get("renderer", "threejs") else None
+        state["fps"] = state["fps"] or style_packs.RENDER_SPEED.get("blender" if state.get("renderer") == "blender" else "2d-engine", {}).get("fps")
         _eta(state)
 
         def persist(status, **extra):
-            _save_record(video_id, aspect, {"aspect": aspect, "version": project["version"], "status": status,
+            _save_record(video_id, aspect, {"aspect": aspect, "version": project["version"], "status": status, "renderer": state.get("renderer"),
                                             "started_at": stored.get("started_at") if resumed else began,
                                             "frames_total": state["frames_total"], "fps": state.get("fps"),
                                             "chapters": [{k: c[k] for k in ("id", "title", "key", "start", "end", "frames", "state")}
@@ -441,7 +493,8 @@ async def _join(project, aspect, spans, keys, parts, state):
         notes = video_checks.check(project, aspect, layouts, frames, measured, voice or None)
         notes += video_render.character_notes(project, layouts, frames, times)
         notes += video_render.pack_notes(project)
-        text, problems = youtube_chapters(project)
+        notes += video_blender.renderer_note(project)
+        text, problems = youtube_chapters(project) if video_store.chaptered(project) else ("", [])
         notes += problems
         picks = samples if len(samples) <= SHEET_SAMPLES else [samples[round(i * (len(samples) - 1) / (SHEET_SAMPLES - 1))] for i in range(SHEET_SAMPLES)]
         (renders / f"sheet-{slug}.png").write_bytes(ffmpeg_tools.contact_sheet([raw for _, raw in picks], 4))
@@ -452,10 +505,12 @@ async def _join(project, aspect, spans, keys, parts, state):
                 image.thumbnail((480, 480))
                 image.save(renders / f"thumb-{slug}.png", "PNG")
         temp.replace(out)
-        chapters_file(video_id, out.name).write_text(text + "\n", encoding="utf-8")
+        if video_store.chaptered(project):
+            chapters_file(video_id, out.name).write_text(text + "\n", encoding="utf-8")
     finally:
         temp.unlink(missing_ok=True)
     return {"file": out.name, "path": str(out), "loudness": measured, "notes": list(dict.fromkeys(notes)), "narration": voice or None,
             "seconds": round(video_store.duration(project), 2), "url": f"/api/videos/{video_id}/renders/{out.name}",
             "sheet": f"sheet-{slug}.png", "thumbnail": f"thumb-{slug}.png", "chapters_text": text,
-            "chapters_file": chapters_file(video_id, out.name).name}
+            "chapters_file": chapters_file(video_id, out.name).name if video_store.chaptered(project) else None,
+            "renderer": state.get("renderer")}
