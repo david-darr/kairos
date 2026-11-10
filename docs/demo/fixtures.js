@@ -1379,9 +1379,12 @@
     if (route === "/api/phone/outbound") return { calls: [], blocked: [] };
     // Free realtime voice (a Gemini key): not set up in the demo.
     if (route === "/api/models/free-voice") return { configured: false, endpoint_id: null, model: null, key_page: "https://aistudio.google.com/apikey" };
-    // Voice engines (ElevenLabs on your key, VoiceStudio on this computer): neither is set up in the demo.
-    if (route === "/api/voice-engines") return { active: "", elevenlabs: { has_key: false, key_page: "https://elevenlabs.io/app/settings/api-keys", models: ["eleven_flash_v2_5", "eleven_multilingual_v2"], price_per_1k: { eleven_flash_v2_5: 0.04, eleven_multilingual_v2: 0.08 }, verified: false },
-      voicestudio: { url: "http://127.0.0.1:3900", has_key: false, repo: "https://github.com/debpalash/VoiceStudio", verified: false } };
+    // The Voice (Settings > Speech): Kairos Voice, the default; no OpenAI or ElevenLabs key and no Voicebox in the demo.
+    if (route === "/api/voice-engines") return { choice: "kairos", notice: "", kairos: { kokoro_ready: false, kokoro_reason: "Kokoro is not downloaded" },
+      gpt_live: { available: false, endpoint_id: null, price_per_minute: 0.05, key_page: "https://platform.openai.com/api-keys", verified: false },
+      elevenlabs: { has_key: false, key_page: "https://elevenlabs.io/app/settings/api-keys", models: ["eleven_flash_v2_5", "eleven_multilingual_v2"], price_per_1k: { eleven_flash_v2_5: 0.04, eleven_multilingual_v2: 0.08 }, verified: false },
+      voicebox: { url: "http://127.0.0.1:17493", repo: "https://github.com/jamiepine/voicebox", verified: false }, compatible: { url: "", voices: [] } };
+    if (route === "/api/voice-engines/pronunciations") return { items: [] };
     // Bots onboarding and voice (Phase 6): the welcome and tour are already seen here, and no voice engine is set up.
     if (route === "/api/bot-onboarding") return { welcome_seen: true, tour: { done: true, step: 0, variant: "simple" }, hints_seen: [], notices: {}, setup_checked_at: now };
     if (route === "/api/bot-onboarding/setup") return { checked_at: now, checks: [

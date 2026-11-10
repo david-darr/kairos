@@ -27,6 +27,13 @@ SPACY_MODEL = "en_core_web_sm"
 # Python modules Kokoro's phonemes need (core/speech_optional.py names them in Settings > Speech when one is missing).
 MODULES = ("misaki", "spacy", SPACY_MODEL, "num2words")
 
+# The account's Pronunciations (core/pronunciations.py, Settings > Speech > More options): `(word, british) -> phonemes
+# or None`, asked for every word before misaki's own reading. A test can replace it.
+def LEXICON(word, british):
+    from core import pronunciations
+    return pronunciations.lookup(word, british)
+
+
 # Tried before the spelling rules for a word misaki does not know. None: nothing installed (see the module docstring).
 FALLBACK = None
 
@@ -74,8 +81,9 @@ def reset() -> None:
         _g2p.clear()
 
 
-def phonemize(text: str, lang: str = "en-us") -> str:
-    """Kokoro phonemes for `text`. Unknown words are guessed (never dropped silently, never a crash)."""
+def phonemize(text: str, lang: str = "en-us", lexicon: bool = True) -> str:
+    """Kokoro phonemes for `text`. Unknown words are guessed (never dropped silently, never a crash). A word in the
+    account's Pronunciations is said its listed way (`lexicon=False` skips them, for turning a respelling into phonemes)."""
     british = lang == "en-gb"
     g2p = _load(british)
     text = expand(text)
@@ -87,7 +95,10 @@ def phonemize(text: str, lang: str = "en-us") -> str:
         # misaki leaves a word it cannot read as None, marks an unreadable part of a word with UNK, and reads some
         # abbreviations it does not know ("Inc.") as nothing at all. None of those may vanish from the sentence.
         lettered = any(c.isalpha() for c in tk.text)
-        if ps is None or (lettered and (UNK in ps or not ps)):
+        listed = _listed(tk.text, british) if lexicon and lettered else None
+        if listed:
+            ps = listed
+        elif ps is None or (lettered and (UNK in ps or not ps)):
             ps = _unknown(tk.text, british)
         ps = ps.replace(UNK, "")                  # an unreadable symbol inside "10:30" is just left out
         out.append(ps + (" " if tk.whitespace else ""))
@@ -151,6 +162,14 @@ def expand(text: str) -> str:
     text = _st(text)
     text = _ABBREV.sub(_abbrev, text)
     return _UNIT.sub(lambda m: m.group(1) + " " + _UNITS[m.group(2)][0 if m.group(1) == "1" else 1], text)
+
+
+def _listed(word: str, british: bool):
+    try:
+        return LEXICON(word, british) if LEXICON is not None else None
+    except Exception:
+        logger.exception("kokoro: the pronunciation list failed on %r", word)
+        return None
 
 
 def _unknown(word: str, british: bool) -> str:

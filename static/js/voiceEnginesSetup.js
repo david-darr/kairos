@@ -210,3 +210,33 @@ export function compatibleSetup(state, { isAdmin = false, onChanged = () => {}, 
     el('p', { class: 'free-voice-limits', text: 'Any voice server on this computer that speaks the OpenAI speech API. If it cannot list its voices, type their names, separated by commas.' }),
     el('div', { class: 'free-voice-key' }, [url, names, save]), said]);
 }
+
+// More options: Pronunciations (core/pronunciations.py). A word and how to say it, as a respelling ("shi-VAWN": syllables
+// split by hyphens, the stressed one in capitals) or, under Phonemes, Kokoro's own symbols. Kairos Voice says every listed
+// word that way. Saved together; a respelling is turned into phonemes when it is saved.
+export function pronunciationsSetup(items = [], { onSaved = () => {}, request = api } = {}) {
+  const list = el('div', { class: 'speech-pronunciations', 'data-voice-engine': 'pronunciations' });
+  const said = status();
+  const line = (item = {}) => {
+    const word = el('input', { type: 'text', 'aria-label': 'Word', placeholder: 'Word, like Siobhan', value: item.word || '', 'data-pron': 'word' });
+    const say = el('input', { type: 'text', 'aria-label': 'How to say it', placeholder: 'How to say it, like shi-VAWN', value: item.typed ? '' : (item.say || ''), 'data-pron': 'say' });
+    const phonemes = el('input', { type: 'text', 'aria-label': 'Phonemes', placeholder: 'Phonemes, only if you know them', value: item.typed ? item.phonemes : '', spellcheck: 'false', 'data-pron': 'phonemes' });
+    const node = el('div', { class: 'speech-pronunciation', 'data-pron-row': '' }, [word, say,
+      el('button', { type: 'button', class: 'btn quiet', text: 'Remove', onclick: () => node.remove() }),
+      el('details', { class: 'speech-pronunciation-advanced' }, [el('summary', { text: 'Phonemes' }), phonemes,
+        ...(item.phonemes ? [el('span', { class: 'meta', text: `Said as ${item.phonemes}` })] : [])])]);
+    return node;
+  };
+  list.append(...items.map(line));
+  const add = el('button', { type: 'button', class: 'btn quiet', text: 'Add a word', 'data-voice-engine': 'pronunciation-add', onclick: () => { const node = line(); list.append(node); node.querySelector('input').focus(); } });
+  const save = el('button', { type: 'button', class: 'btn primary', text: 'Save pronunciations', 'data-voice-engine': 'pronunciation-save' });
+  save.addEventListener('click', async () => {
+    const value = [...list.querySelectorAll('[data-pron-row]')].map(row => ({ word: row.querySelector('[data-pron="word"]').value.trim(),
+      say: row.querySelector('[data-pron="say"]').value.trim(), phonemes: row.querySelector('[data-pron="phonemes"]').value.trim() }));
+    save.disabled = true; said.say('Saving...');
+    try { const next = await request('/api/voice-engines/pronunciations', { method: 'PUT', toast: false, body: JSON.stringify({ items: value }) }); said.say('Saved. Kairos Voice says these words this way now.', 'ok'); onSaved(next.items); }
+    catch (error) { said.say(error?.message || 'The pronunciations could not be saved.', 'error'); }
+    finally { save.disabled = false; }
+  });
+  return el('div', { class: 'free-voice-setup voice-engine-setup' }, [list, el('div', { class: 'free-voice-key' }, [add, save]), said]);
+}

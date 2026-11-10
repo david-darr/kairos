@@ -278,7 +278,7 @@ module.exports = async ({ js, win, waitFor, delay, navigate, demoState, writes, 
         applies: choice.textContent.includes('Calls, Open Mic, replies read aloud, voice notes, phone calls and Discord voice') && choice.textContent.includes('its own voice or call mode'),
         moreFirst: panel.children[0] === choice, moreClosed: !more.open, moreLabel: more.querySelector('summary').textContent,
         technicalOutside: /Voicebox|Recognition model|GPU|runtime|model ID|Kokoro ·/i.test(outside),
-        inMore: ['Voicebox', 'Recognition model', 'Voice picker'].every(t => more.textContent.includes(t)) && !!more.querySelector('#speech-voice'),
+        inMore: ['Voicebox', 'Recognition model', 'Voice picker', 'Pronunciations'].every(t => more.textContent.includes(t)) && !!more.querySelector('#speech-voice'),
         voicebox: more.querySelector('[data-voice-engine="voicebox-url"]')?.value, studio: /VoiceStudio/i.test(panel.textContent), dash: /\u2014/.test(panel.textContent) }; })()`);
     assert.deepEqual(shape, { options: ['kairos', 'gpt_live', 'elevenlabs'], checked: 'kairos',
       lines: ['Free and private', 'About 5 cents a minute on your OpenAI key', 'About 4 cents a minute of speech on your ElevenLabs key'], applies: true,
@@ -293,6 +293,12 @@ module.exports = async ({ js, win, waitFor, delay, navigate, demoState, writes, 
     assert.ok(await js("document.querySelector('.speech-voice-choice').textContent.includes('per 1,000 characters') && document.querySelector('.speech-voice-choice').textContent.includes('sent to ElevenLabs')"), 'Speech: ElevenLabs shows its cost and privacy copy with the key');
     await js("document.querySelector('[data-voice-choice=\"kairos\"]').click()");
     countSaves('speech voice choice without a key (no saves)', await saves(picks), []);
+    // Pronunciations (More options): nothing seeded; Add a word gives a word, a respelling and an advanced phoneme field.
+    picks = await mark();
+    await js("document.querySelector('[data-voice-engine=\"pronunciation-add\"]').click()");
+    assert.deepEqual(await js("[...document.querySelectorAll('.speech-pronunciations [data-pron-row] input')].map(i => i.dataset.pron + ':' + i.placeholder)"),
+      ['word:Word, like Siobhan', 'say:How to say it, like shi-VAWN', 'phonemes:Phonemes, only if you know them'], 'Speech: Pronunciations add a word with how to say it, phonemes under Advanced');
+    countSaves('speech pronunciation row (no saves until Save)', await saves(picks), []);
     assert.equal(await value('#speech-input-device'), '', 'Speech: starts on the system default microphone');
     let from = await mark();
     await setValue('#speech-input-device', 'dev-head-222222', 'change');

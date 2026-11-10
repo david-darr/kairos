@@ -249,6 +249,8 @@ export async function renderSpeechPanel(content, status) {
     if (engines && root.isConnected) parts.unshift(engines);
     const voiceSection = await drawVoice();
     if (voiceSection && root.isConnected) parts.splice(engines ? 1 : 0, 0, voiceSection);
+    const sayings = await drawPronunciations();
+    if (sayings && root.isConnected) parts.splice((engines ? 1 : 0) + (voiceSection ? 1 : 0), 0, sayings);
     if (state.engine_available && state.acceleration?.supported) parts.push(drawRuntime(state));
     const freeVoice = await drawFreeVoice();
     if (freeVoice && root.isConnected) parts.push(freeVoice);
@@ -281,6 +283,16 @@ export async function renderSpeechPanel(content, status) {
       row({ title: 'Another voice server', description: 'Any server on this computer that speaks the OpenAI speech API.', control: state.choice === 'compatible' ? pill('In use', 'ok') : pill('Not in use', 'muted') }),
       compatibleSetup(state, { isAdmin: admin, onChanged: redraw }),
     ]);
+  }
+
+  // More options: how Kairos Voice says particular words (names it gets wrong).
+  async function drawPronunciations() {
+    const found = await api('/api/voice-engines/pronunciations', { toast: false }).catch(() => null);
+    if (!found) return null;
+    const { pronunciationsSetup } = await import('../voiceEnginesSetup.js');
+    return group({ title: 'Pronunciations', cls: 'speech-pronunciations-group',
+      description: 'Words Kairos Voice says wrong, like a name. Write how to say it with hyphens between syllables and the stressed one in capitals, like shi-VAWN for Siobhan.' },
+      [pronunciationsSetup(found.items || [])]);
   }
 
   // More options: the GPU runtime folder for recognition (the same setting Call settings offers; an admin sets it).

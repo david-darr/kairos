@@ -155,3 +155,35 @@ async def save_compatible(body: Compatible, user: str = Depends(require_admin)):
     except ValueError as error:
         raise HTTPException(422, str(error)) from None
     return _state()
+
+
+class Pronunciation(BaseModel):
+    word: str = Field(default="", max_length=60)
+    say: str = Field(default="", max_length=120)
+    phonemes: str = Field(default="", max_length=160)
+
+
+class Pronunciations(BaseModel):
+    items: list[Pronunciation] = Field(default_factory=list, max_length=200)
+
+
+@router.get("/pronunciations")
+async def pronunciations_list(user: str = Depends(require_user)):
+    from core import pronunciations
+    return {"items": pronunciations.items()}
+
+
+@router.put("/pronunciations")
+async def pronunciations_save(body: Pronunciations, user: str = Depends(require_user)):
+    """Replace the account's list. A respelling is turned into phonemes here (misaki loads once, so off the event loop)."""
+    import asyncio
+    from core import accounts, pronunciations
+    entries = [item.model_dump() for item in body.items]
+    account = accounts.effective_account()
+    def run():
+        with accounts.as_account(account):
+            return pronunciations.save(entries)
+    try:
+        return {"items": await asyncio.to_thread(run)}
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from None
