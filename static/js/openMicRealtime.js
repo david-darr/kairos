@@ -15,9 +15,11 @@ export async function createRealtimeOpenMic(sessionId, { onState, onError } = {}
       api('/api/agent-calls/realtime-choices', { toast: false }),
       api('/api/agent-calls/realtime-settings', { toast: false }).catch(() => null)]);
   } catch { return null; }
-  if (agent?.call_mode !== 'realtime') return null;
+  // "live" is the older GPT-Live call mode: GPT-Live is now one of the realtime choices.
+  if (agent?.call_mode !== 'realtime' && agent?.call_mode !== 'live') return null;
   const own = prefs?.bots?.[agent.id] || {};
-  const choice = (choices || []).find(item => item.id === (own.endpoint_id || prefs?.endpoint_id));
+  const choice = agent.call_mode === 'live' ? (choices || []).find(item => item.provider === 'openai_live')
+    : (choices || []).find(item => item.id === (own.endpoint_id || prefs?.endpoint_id));
   // The call's summary is written by the chat's own model, as for any call.
   const summaryEndpoint = session.model_endpoint_id || agent.endpoint_id;
   if (!choice || !summaryEndpoint) return null;

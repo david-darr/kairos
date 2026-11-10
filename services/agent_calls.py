@@ -447,9 +447,6 @@ async def finalize(call):
     # One summary per call, including short calls. Never replace a slice of
     # the user's ordinary messages or dump dialogue when summarization fails.
     async with _locks.setdefault(call['id'], asyncio.Lock()):
-        if call.get('live_id'):
-            from services import call_live
-            await call_live.close(call)
         if call.get('realtime'):
             from services import realtime_session
             await realtime_session.close_for(call)

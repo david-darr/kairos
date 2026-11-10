@@ -510,9 +510,10 @@ class AccountTests(RealtimeCase):
         other = "rt" + uuid.uuid4().hex[:6]
         with accounts.as_account(other):
             other_endpoint = model_endpoints.create_endpoint("Mine", URLS["openai"], "", "sk-OTHER-account-key", kind="api")["id"]
-            self.assertEqual([c["id"] for c in realtime_session.choices()], [other_endpoint])
+            # an OpenAI key offers OpenAI Realtime and, on the same key, GPT-Live
+            self.assertEqual([c["id"] for c in realtime_session.choices()], [other_endpoint, realtime_voice.LIVE_PREFIX + other_endpoint])
         mine = {c["id"] for c in realtime_session.choices()}
-        self.assertEqual(mine, set(self.endpoints.values()))
+        self.assertEqual(mine, set(self.endpoints.values()) | {realtime_voice.LIVE_PREFIX + self.endpoints["openai"]})
         self.assertNotIn(other_endpoint, mine)
         # a session opened for this account uses this account's key
         mock = await self.provider("openai")
@@ -529,7 +530,7 @@ class AccountTests(RealtimeCase):
         for key in KEYS.values():
             self.assertNotIn(key, text)
         self.assertNotIn("api.openai.com", text)
-        self.assertEqual({c["provider"] for c in choices}, {"openai", "xai", "gemini"})
+        self.assertEqual({c["provider"] for c in choices}, {"openai", "xai", "gemini", "openai_live"})
         self.assertTrue(all("price_per_minute" in c and "voices" in c for c in choices))
 
     async def test_a_custom_host_needs_the_realtime_mark_and_a_key(self):
@@ -584,7 +585,7 @@ class RouteTests(RealtimeCase):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             choices = (await client.get("/api/agent-calls/realtime-choices")).json()
-            self.assertEqual({c["provider"] for c in choices}, {"openai", "xai", "gemini"})
+            self.assertEqual({c["provider"] for c in choices}, {"openai", "xai", "gemini", "openai_live"})
             saved = await client.put("/api/agent-calls/realtime-settings", json={"endpoint_id": self.endpoints["gemini"], "voice": "Kore"})
             self.assertEqual(saved.json()["endpoint_id"], self.endpoints["gemini"])
             bad = await client.put("/api/agent-calls/realtime-settings", json={"endpoint_id": "no way!"})

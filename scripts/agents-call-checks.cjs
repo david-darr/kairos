@@ -39,7 +39,7 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
       window.__callTest.urls.push(String(url));
       const t=window.__callTest, path=String(url), json=data=>new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json'}});
       if(path==='/api/agent-calls/choices')return json([{id:'fast',name:'Fast conversation',kind:'local',model:'llama3.2'}]);
-      if(path==='/api/agent-calls/live-choices')return json([]);
+      if(path==='/api/agent-calls/realtime-choices')return json([]);
       if(path==='/api/agent-calls/voices')return json({url:'',protocol:'voicestudio',models:[],voices:[]});
       if(path.startsWith('/api/agent-calls/pending/'))return json([]);
       if(path==='/api/agent-calls') {
@@ -109,9 +109,9 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   await js("(()=>{const s=document.querySelector('.agent-call [aria-label=\"Call input mode\"]');s.value='automatic';s.dispatchEvent(new Event('change'))})()");
   await js("document.querySelector('[aria-label=\"Speech recognition model\"]').value='small.en';document.querySelector('[aria-label=\"Speech recognition model\"]').dispatchEvent(new Event('change'))");
   await capture('agents-call-setup');
-  await js("document.querySelector('[aria-label=\"Call mode\"]').value='cloud';document.querySelector('[aria-label=\"Call mode\"]').dispatchEvent(new Event('change'))");
-  assert.ok(await js("document.querySelector('.agent-call-setup button[type=submit]').disabled&&!document.querySelector('[aria-label=\"Use paid cloud voice for this call\"]').checked"),'Cloud mode stays off without credentials and per-call consent');
-  assert.ok(await js("document.querySelector('.agent-call-privacy').textContent.includes('OpenAI')"),'Cloud privacy disclosure matches the actual mode');
+  await js("document.querySelector('[aria-label=\"Call mode\"]').value='realtime';document.querySelector('[aria-label=\"Call mode\"]').dispatchEvent(new Event('change'))");
+  assert.ok(await js("document.querySelector('.agent-call-setup button[type=submit]').disabled&&!document.querySelector('[aria-label=\"Use paid cloud voice for this call\"]').checked"),'Realtime mode stays off without credentials and per-call consent');
+  assert.ok(await js("document.querySelector('.agent-call-privacy').textContent.includes('provider you chose')"),'Realtime privacy disclosure matches the actual mode');
   await capture('agents-call-cloud-setup');
   await js("document.querySelector('[aria-label=\"Call mode\"]').value='local';document.querySelector('[aria-label=\"Call mode\"]').dispatchEvent(new Event('change'))");
   await waitFor("!document.querySelector('.agent-call-setup button[type=submit]').disabled");await js("document.querySelector('.agent-call-setup').requestSubmit()");

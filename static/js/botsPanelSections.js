@@ -109,11 +109,13 @@ export function visibilityFacts(status) {
 }
 
 // Voice and alerts: what can really be chosen on this setup.
-export function voiceFacts(agent, catalog, liveChoices, realtimeChoices) {
+// "live" is the older GPT-Live call mode; GPT-Live is now one of the realtime choices, so it shows as Realtime.
+export function voiceFacts(agent, catalog, realtimeChoices) {
   const voices = Array.isArray(catalog?.voices) ? catalog.voices.map(v => ({ id: String(v.id ?? v.name ?? v), name: String(v.name ?? v.id ?? v) })) : [];
-  const live = Array.isArray(liveChoices) ? liveChoices.length > 0 : false;
   const realtime = Array.isArray(realtimeChoices) ? realtimeChoices.length > 0 : false;
-  const mode = agent.call_mode === 'live' && !live ? 'turns' : agent.call_mode === 'realtime' && !realtime ? 'turns' : agent.call_mode || 'turns';
+  const live = Array.isArray(realtimeChoices) && realtimeChoices.some(c => c && c.provider === 'openai_live');
+  const wanted = agent.call_mode === 'live' ? 'realtime' : agent.call_mode || 'turns';
+  const mode = wanted === 'realtime' && !realtime ? 'turns' : wanted;
   return { voices, hasVoices: voices.length > 0, liveAvailable: live, realtimeAvailable: realtime, realtimeChoices: Array.isArray(realtimeChoices) ? realtimeChoices : [], callMode: mode };
 }
 
@@ -615,18 +617,18 @@ function voiceSection(ctx) {
       onChange: v => ctx.update({ notifications: v }) })] }),
     caps('Voice'),
     loading(async () => {
-      const [catalog, live, realtime] = await Promise.all([ctx.ui.api('/api/agent-calls/voices', { toast: false }).catch(() => null), ctx.ui.api('/api/agent-calls/live-choices', { toast: false }).catch(() => []), ctx.ui.api('/api/agent-calls/realtime-choices', { toast: false }).catch(() => [])]);
-      const facts = voiceFacts(ctx.state.agent, catalog, live, realtime);
+      const [catalog, realtime] = await Promise.all([ctx.ui.api('/api/agent-calls/voices', { toast: false }).catch(() => null), ctx.ui.api('/api/agent-calls/realtime-choices', { toast: false }).catch(() => [])]);
+      const facts = voiceFacts(ctx.state.agent, catalog, realtime);
       const voice = ctx.ui.customSelect({ 'aria-label': 'Voice' }, [h('option', { value: '', text: facts.hasVoices ? 'Default voice' : 'No voice connected' }), ...facts.voices.map(v => h('option', { value: v.id, text: v.name }))]);
       voice.value = ctx.state.agent.voice_id || ''; voice.disabled = !facts.hasVoices;
       voice.addEventListener('change', () => ctx.update({ voice_id: voice.value || null }));
-      const mode = Segmented({ label: 'Call mode', value: facts.callMode, options: [{ value: 'turns', label: 'Local' }, { value: 'live', label: 'Live' }, { value: 'realtime', label: 'Realtime' }],
-        onChange: v => { if (v === 'live' && !facts.liveAvailable) { ctx.ui.toast('Live calls need an OpenAI connection with an API key.', 'error'); ctx.rerender(); return; } if (v === 'realtime' && !facts.realtimeAvailable) { ctx.rerender(); import('./freeVoiceSetup.js').then(({ openFreeVoiceSetup }) => openFreeVoiceSetup({ onConnected: () => { ctx.update({ call_mode: 'realtime' }); } })).catch(() => ctx.ui.toast('Realtime calls need an API connection with a key for OpenAI, xAI or Google.', 'error')); return; } ctx.update({ call_mode: v }); } });
+      const mode = Segmented({ label: 'Call mode', value: facts.callMode, options: [{ value: 'turns', label: 'Local' }, { value: 'realtime', label: 'Realtime' }],
+        onChange: v => { if (v === 'realtime' && !facts.realtimeAvailable) { ctx.rerender(); import('./freeVoiceSetup.js').then(({ openFreeVoiceSetup }) => openFreeVoiceSetup({ onConnected: () => { ctx.update({ call_mode: 'realtime' }); } })).catch(() => ctx.ui.toast('Realtime calls need an API connection with a key for OpenAI, xAI or Google.', 'error')); return; } ctx.update({ call_mode: v }); } });
       return h('div', {}, [
         Card({ children: [
           SwitchRow({ title: 'Speak its replies', hint: facts.hasVoices ? 'It reads each reply aloud in its voice.' : 'Saved. It speaks once a voice is connected.', checked: !!ctx.state.agent.speak_replies, onChange: v => ctx.update({ speak_replies: v }) }),
           h('div', { class: 'bots-row' }, [h('span', { class: 'bots-row-main' }, [h('span', { class: 'bots-row-title', text: 'Voice' }), h('span', { class: 'bots-row-hint', text: facts.hasVoices ? 'Used for spoken replies and calls.' : 'Connect a voice server to choose one.' })]), voice]),
-          h('div', { class: 'bots-row bots-stack-row' }, [mode, h('span', { class: 'bots-row-hint', text: facts.realtimeAvailable ? 'Local runs speech, thinking and voice on your setup. Realtime is a speech-to-speech model on your own key (OpenAI, Grok or Gemini): the quickest, cleanest back-and-forth, billed per minute. Real work still goes to this bot.' : facts.liveAvailable ? 'Local waits for you to finish. Live listens as you talk.' : 'Local is the call mode available on this setup. Realtime needs an OpenAI, xAI or Google API connection with a key. A free Gemini key works: choose Realtime to set one up.' })])] }),
+          h('div', { class: 'bots-row bots-stack-row' }, [mode, h('span', { class: 'bots-row-hint', text: facts.realtimeAvailable ? `Local runs speech, thinking and voice on your setup. Realtime is a speech-to-speech model on your own key (OpenAI Realtime${facts.liveAvailable ? ', GPT-Live' : ''}, Grok or Gemini): the quickest, cleanest back-and-forth, billed per minute. Real work still goes to this bot.` : 'Local is the call mode available on this setup. Realtime needs an OpenAI, xAI or Google API connection with a key. A free Gemini key works: choose Realtime to set one up.' })])] }),
       ]);
     }, 'Voice settings'),
   ]);

@@ -1,4 +1,5 @@
-"""Realtime speech-to-speech providers (build spec 6b, Track A): one adapter per provider.
+"""Realtime speech-to-speech providers (build spec 6b, Track A): one adapter per provider (OpenAI Realtime, xAI Grok
+Voice, Gemini Live, OpenAI GPT-Live).
 
 An adapter knows only a provider's WIRE FORMAT: where to connect, how to log in, the first messages, how to wrap
 audio and tool results, and how to read what comes back as a few NORMALIZED events. Sessions (services/realtime_session.py)
@@ -13,6 +14,8 @@ Normalized events (dicts, `type`):
   tool_call    call_id, name, args
   response_started / turn_done
   error        message
+  delegation   delegation_id   work the model handed to the backend (GPT-Live); it carries no task text
+  usage / closed  seconds      billed seconds so far / at the end (GPT-Live)
 
 UNVERIFIED WITHOUT REAL KEYS: every message name below was written from the providers' public docs and aggregator
 docs (OpenAI Realtime GA, xAI's OpenAI-compatible realtime, Google's Gemini Live WebSocket guide). The mock-server
@@ -72,6 +75,9 @@ class Adapter:
     default_voice = ""
     verified = False                # nothing here has met a real provider yet
     truncates = False               # accepts "the person only heard this much of the reply"
+    queues_when_busy = True         # hold updates until the reply in progress is done (turn-based providers)
+    barge_in_on_user_text = False   # no speech-started event: the person's words arriving mid-reply mean they cut in
+    delegates = False               # real work arrives as delegation events (GPT-Live) instead of a do_work tool call
 
     def url(self, model: str) -> str:
         raise NotImplementedError
@@ -88,9 +94,19 @@ class Adapter:
     def tool_result(self, call_id: str, name: str, output: str) -> list:
         raise NotImplementedError
 
-    def inject(self, text: str) -> list:
-        """Messages that make the model say something about `text` now (finished work)."""
+    def inject(self, text: str, ref: Optional[str] = None) -> list:
+        """Messages that make the model say something about `text` now (finished work). `ref`: the delegation it answers."""
         raise NotImplementedError
+
+    def started(self, delegation_id: str, text: str) -> list:
+        return []
+
+    def close_messages(self) -> list:
+        """Sent before the socket closes, to finalise billing (GPT-Live); the session waits briefly for "closed"."""
+        return []
+
+    def mute(self, value: bool) -> list:
+        return []
 
     def truncate(self, item_id: str, played_ms: int) -> list:
         return []
@@ -135,7 +151,7 @@ class OpenAIRealtime(Adapter):
         return [{"type": "conversation.item.create", "item": {"type": "function_call_output", "call_id": call_id, "output": output}},
                 {"type": "response.create"}]
 
-    def inject(self, text):
+    def inject(self, text, ref=None):
         return [{"type": "conversation.item.create", "item": {"type": "message", "role": "system",
                                                                "content": [{"type": "input_text", "text": text}]}},
                 {"type": "response.create"}]
@@ -228,7 +244,7 @@ class GeminiLive(Adapter):
     def tool_result(self, call_id, name, output):
         return [{"toolResponse": {"functionResponses": [{"id": call_id, "name": name, "response": {"output": output}}]}}]
 
-    def inject(self, text):
+    def inject(self, text, ref=None):
         return [{"realtimeInput": {"text": text}}]
 
     def parse(self, raw):
@@ -261,7 +277,109 @@ class GeminiLive(Adapter):
         return events
 
 
-ADAPTERS = {a.name: a for a in (OpenAIRealtime(), XAIRealtime(), GeminiLive())}
+class OpenAILive(Adapter):
+    """OpenAI GPT-Live (`gpt-live-1`, released 2026-09-10) on the Live sessions WebSocket, `wss://api.openai.com/v1/live/sessions`
+    (not /v1/realtime). Written from OpenAI's model page and its Live guides (getting started, WebSockets, delegation,
+    conversations, server controls), read 2026-11-09. Transport: OpenAI recommends WebRTC for browsers but documents this
+    WebSocket for servers; Kairos uses the WebSocket from its backend, like the other three adapters, so the key stays on
+    the server and the same session serves calls, Open Mic and the phone.
+
+    How it differs from the Realtime adapters:
+    - It starts with `session.start` (model, instructions, audio format and voice, delegation mode), all fixed for the
+      session; `session.started` is the ready signal. Audio is `session.input_audio.append` / `session.output_audio.delta`,
+      one PCM format for both directions (24 kHz PCM16 here).
+    - Real work is DELEGATED, not a tool call: with `delegation: {"type": "client"}` the model emits
+      `session.delegation.created` (an id, no task text) whenever something needs the backend. Kairos builds the request
+      from the trusted transcript, hands it to the chat's own model and tools (agent_calls.delegate), and returns the
+      result with `session.commentary.append` (said aloud, paraphrased) against that delegation id. Live speech and the
+      work run independently; GPT-Live makes its own short acknowledgement meanwhile.
+    - It is full duplex with no speech-started, turn-done or truncate event, so barge-in is inferred (see
+      `barge_in_on_user_text`) and nothing is queued until the model is idle.
+    - Closing is `session.close`, then wait for `session.closed`, which carries the final billed `usage.seconds`.
+    UNVERIFIED WITHOUT A REAL KEY: OpenAI's pages give no full event reference for the WebSocket; event names and fields
+    here are the ones its guides quote. The voice list is the conversations guide's English table plus the default."""
+    name = "openai_live"
+    label = "OpenAI GPT-Live"
+    host_hints = ()                  # never chosen by address: offered beside OpenAI Realtime on any official OpenAI key
+    rate_in = 24000
+    rate_out = 24000
+    default_model = "gpt-live-1"
+    voices = ("marin", "quartz", "ripple", "vesper", "willow", "stone", "gleam", "meridian", "beacon", "delta", "cinder")
+    default_voice = "marin"
+    price_per_minute = 0.05          # OpenAI's model page: $0.05 a minute, billed per second; delegated work is billed apart
+    endpoint = "wss://api.openai.com/v1/live/sessions"
+    queues_when_busy = False         # full duplex: an update can be sent while it talks
+    barge_in_on_user_text = True
+    delegates = True
+
+    def url(self, model):
+        return BASE_OVERRIDE.get(self.name) or self.endpoint
+
+    def setup(self, instructions, voice, model):
+        return [{"type": "session.start", "event_id": _event_id(), "session": {
+            "model": model or self.default_model, "instructions": instructions, "store": False,
+            "audio": {"format": {"type": "audio/pcm", "rate": self.rate_in}, "output": {"voice": voice or self.default_voice}},
+            "delegation": {"type": "client", "acknowledgement_delay_ms": 800}}}]
+
+    def audio(self, pcm16):
+        return json.dumps({"type": "session.input_audio.append", "audio": _b64(pcm16)})
+
+    def tool_result(self, call_id, name, output):
+        return []                    # no function tools on this adapter; work arrives as delegations
+
+    def started(self, delegation_id: str, text: str) -> list:
+        """Progress the model may use but does not read out (it already acknowledged on its own)."""
+        return [{"type": "session.thinking.append", "event_id": _event_id(), "delegation_id": delegation_id, "content": text[:1800]}]
+
+    def inject(self, text, ref=None):
+        # Said aloud in the model's own words. A null delegation id is the documented way to give it a greeting.
+        return [{"type": "session.commentary.append", "event_id": _event_id(), "delegation_id": ref or None, "content": text[:1800]}]
+
+    def close_messages(self):
+        return [{"type": "session.close"}]
+
+    def mute(self, value: bool) -> list:
+        return [{"type": "session.input_audio.mute" if value else "session.input_audio.unmute", "event_id": _event_id()}]
+
+    def parse(self, raw):
+        message = _json(raw)
+        if not message:
+            return []
+        kind = message.get("type", "")
+        if kind == "session.started":
+            return [Event("ready")]
+        if kind == "session.output_audio.delta":
+            try:
+                pcm = base64.b64decode(message.get("delta") or "")
+            except ValueError:
+                return []
+            return [Event("audio", pcm=pcm, item_id=None)]
+        if kind == "session.output_transcript.delta":
+            return [Event("assistant_text", delta=str(message.get("delta") or ""), item_id=None)]
+        if kind == "session.input_transcript.delta":
+            return [Event("user_text", delta=str(message.get("delta") or ""))]
+        if kind == "session.delegation.created":
+            delegation = message.get("delegation") or {}
+            if delegation.get("target", "client") != "client" or not delegation.get("id"):
+                return []
+            return [Event("delegation", delegation_id=str(delegation["id"])[:120], offset_ms=message.get("offset_ms"))]
+        if kind == "session.usage.updated":
+            return [Event("usage", seconds=(message.get("usage") or {}).get("seconds"))]
+        if kind == "session.closed":
+            return [Event("closed", seconds=(message.get("usage") or {}).get("seconds"), reason=message.get("reason"))]
+        if kind == "error":
+            error = message.get("error") if isinstance(message.get("error"), dict) else message
+            return [Event("error", message=str(error.get("message") or "Provider error"), code=error.get("code"))]
+        return []
+
+
+def _event_id() -> str:
+    import uuid
+    return "kairos_" + uuid.uuid4().hex[:20]
+
+
+ADAPTERS = {a.name: a for a in (OpenAIRealtime(), XAIRealtime(), GeminiLive(), OpenAILive())}
+LIVE_PREFIX = "live:"         # a realtime choice id for GPT-Live on an OpenAI connection: "live:<connection id>"
 
 
 def adapter(name: str) -> Adapter:

@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field
 from core.middleware import get_current_user, require_admin, require_user
 from services import agent_calls as calls
 from core import call_voices, voice_fillers
-from services import call_live
 from services import realtime_session
 from core import realtime_settings, realtime_usage
 
@@ -31,7 +30,7 @@ class Turn(BaseModel):
 
 class VoiceServer(BaseModel):
     url: str = Field(max_length=300)
-    protocol: Literal['voicestudio','compatible','kokoro']
+    protocol: Literal['voicestudio','compatible','kokoro','elevenlabs']
 
 class Speak(BaseModel):
     text: str = Field(min_length=1, max_length=1600)
@@ -50,24 +49,6 @@ async def timing(ident: str, body: Timing, user: str = Depends(require_user)):
     if body.trace and len(body.trace)<=16:calls.logger.debug('call voice trace call=%s %s',ident,json.dumps(body.trace))
     calls.logger.info('call audio timing call=%s speech_end_to_audio_ms=%s first_audio_ms=%s',ident,body.end_to_audio_ms,body.first_audio_ms)
     return {'ok':True}
-
-class Live(BaseModel):
-    endpoint_id: str
-    sdp: str = Field(min_length=1,max_length=60000)
-    voice: Literal['marin','cedar','coral','sage','ash'] = 'marin'
-    paid_consent: bool = False
-
-@router.get('/live-choices')
-async def live_choices(user: str = Depends(require_user)):
-    return call_live.choices()
-
-@router.post('/{ident}/live')
-async def live(ident: str, body: Live, user: str = Depends(require_user)):
-    call=calls.require(ident,user)
-    if call['ended']:raise HTTPException(409,'Call ended.')
-    try:return await call_live.start(call,body.endpoint_id,body.sdp,body.voice,body.paid_consent)
-    except ValueError as error:raise HTTPException(422,str(error)) from error
-    except Exception:raise HTTPException(502,'Cloud voice could not connect. Check API access, billing and the selected connection.')
 
 @router.get('/realtime-choices')
 async def realtime_choices(user: str = Depends(require_user)):
@@ -118,7 +99,7 @@ async def realtime(socket: WebSocket, ident: str):
         if not first.get('consent'):raise ValueError('Enable paid realtime voice explicitly before starting this call.')
         if call['ended'] or call.get('room_id'):raise ValueError('Realtime voice is not available for this call.')
         if first.get('endpoint_id') not in {c['id'] for c in realtime_session.choices()}:
-            raise ValueError('Add an API connection with a key for OpenAI, xAI or Google in Settings > Models.')
+            raise ValueError('Add an API connection with a key for OpenAI (Realtime or GPT-Live), xAI or Google in Settings > Models.')
         session=realtime_session.RealtimeSession(call,first['endpoint_id'],str(first.get('voice') or ''),sink)
         await session.start()
         while True:
@@ -129,7 +110,7 @@ async def realtime(socket: WebSocket, ident: str):
             except ValueError:continue
             kind=event.get('type')
             if kind=='played':await session.played(event.get('item_id'),float(event.get('ms') or 0))
-            elif kind=='mute':session.muted=bool(event.get('value'))
+            elif kind=='mute':await session.set_muted(bool(event.get('value')))
             elif kind=='end':break
     except (ValueError,asyncio.TimeoutError) as error:
         await sink({'type':'error','message':str(error) if isinstance(error,ValueError) else 'Realtime voice startup timed out.'})

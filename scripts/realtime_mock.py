@@ -11,8 +11,8 @@ from websockets.asyncio.server import serve
 
 
 class MockRealtime:
-    def __init__(self, provider: str, auto_ready: bool = True):
-        self.provider, self.auto_ready = provider, auto_ready
+    def __init__(self, provider: str, auto_ready: bool = True, close_usage=12.5):
+        self.provider, self.auto_ready, self.close_usage = provider, auto_ready, close_usage
         self.received: list = []
         self.headers: dict = {}
         self.path = ""
@@ -41,6 +41,11 @@ class MockRealtime:
                 self.received.append(message)
                 if self.auto_ready and (message.get("type") == "session.update" or "setup" in message):
                     await self.push({"type": "session.updated"} if "setup" not in message else {"setupComplete": {}})
+                # GPT-Live (Live sessions): session.start -> session.started; session.close -> session.closed with usage
+                if self.auto_ready and message.get("type") == "session.start":
+                    await self.push({"type": "session.started", "session": {"id": "live_mock", **(message.get("session") or {})}})
+                if message.get("type") == "session.close" and self.close_usage is not None:
+                    await self.push({"type": "session.closed", "reason": "close_requested", "usage": {"seconds": self.close_usage}})
         except Exception:
             pass
 
@@ -82,6 +87,18 @@ def openai_text(delta: str, item_id: str = "item1") -> dict:
 
 def openai_tool(call_id: str, args: dict, name: str = "do_work") -> dict:
     return {"type": "response.function_call_arguments.done", "call_id": call_id, "name": name, "arguments": json.dumps(args)}
+
+
+def live_audio(pcm: bytes) -> dict:
+    return {"type": "session.output_audio.delta", "delta": b64(pcm)}
+
+
+def live_said(delta: str, who: str = "output") -> dict:
+    return {"type": f"session.{who}_transcript.delta", "delta": delta, "start_ms": 0, "end_ms": 0}
+
+
+def live_delegation(ident: str) -> dict:
+    return {"type": "session.delegation.created", "offset_ms": 1200, "delegation": {"id": ident, "type": "delegation", "target": "client"}}
 
 
 def gemini_audio(pcm: bytes) -> dict:

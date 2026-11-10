@@ -150,14 +150,18 @@ async def _session(account: str, record: dict, mode: str, message: str = "") -> 
 def realtime_choice(account: str, bot: dict) -> Optional[dict]:
     """{'endpoint_id', 'voice'} when this bot's calls run in realtime mode (its Local | Realtime setting, a realtime
     connection chosen for it and still valid), else None. Choosing the connection is the person's paid consent."""
-    if (bot or {}).get("call_mode") != "realtime":
+    mode = (bot or {}).get("call_mode")
+    if mode not in ("realtime", "live"):         # "live": the older GPT-Live mode, now GPT-Live as a realtime choice
         return None
     from core import realtime_settings
     from services import realtime_session
     with accounts.as_account(account):
         chosen = realtime_settings.for_bot(bot.get("id") or "")
-        valid = {c["id"] for c in realtime_session.choices()}
-    return chosen if chosen["endpoint_id"] in valid else None
+        offered = realtime_session.choices()
+    if mode == "live":
+        live = next((c for c in offered if c.get("provider") == "openai_live"), None)
+        return {"endpoint_id": live["id"], "voice": None} if live else None
+    return chosen if chosen["endpoint_id"] in {c["id"] for c in offered} else None
 
 
 async def live_problem(account: str, record: dict, bot: dict) -> str:

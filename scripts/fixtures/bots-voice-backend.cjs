@@ -13,7 +13,6 @@ module.exports = ({ state }) => {
       if (route === '/api/bot-voice/live-settings') return settings(s);
       if (s.callsEnabled) {
         if (route === '/api/agent-calls/choices') return [{ id: 'voice-check-model', name: 'Voice check model', model: 'fixture', kind: 'local' }];
-        if (route === '/api/agent-calls/live-choices') return [];
         if (route === '/api/agent-calls/voices') return { url: '', protocol: 'compatible', voices: [], models: [] };
         if (route.startsWith('/api/agent-calls/pending/')) return [];
         if (route === '/api/speech/status') return { engine_available: true, call_model: 'small.en', acceleration: { supported: false }, models: [{ name: 'small.en', label: 'Small', size_mb: 1, downloaded: true }] };

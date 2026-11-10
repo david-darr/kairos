@@ -18,7 +18,7 @@ from core.session_manager import session_manager
 from core.voice_dialogue import SpeechFilter, Conversation
 from core import call_voices
 from core.middleware import require_admin, require_user
-from services import agent_calls as calls, call_live
+from services import agent_calls as calls
 from services.agent_service import agent_service
 from routes.call_routes import router
 
@@ -151,39 +151,6 @@ class Calls(unittest.IsolatedAsyncioTestCase):
             calls.delegate(self.record,'Queued work','Do requested work','queued')
             calls.stop_work(self.record,'queued');await asyncio.gather(future,return_exceptions=True)
             self.assertTrue(future.cancelled());status.assert_called_once_with('queued','backlog',note='Stopped from voice call')
-
-    async def test_live_requires_explicit_paid_consent_and_official_key(self):
-        with self.assertRaisesRegex(ValueError,'explicitly'):await call_live.start(self.record,'x','sdp','marin',False)
-        with patch.object(call_live,'choices',return_value=[]),self.assertRaisesRegex(ValueError,'API key'):await call_live.start(self.record,'x','sdp','marin',True)
-        self.assertNotIn('live_id',self.record)
-
-    async def test_live_transcript_preserves_fragments_times_and_deduplicates(self):
-        event={'type':'session.input_transcript.delta','event_id':'a','delta':'Build a','start_ms':10,'end_ms':30}
-        call_live.transcript(self.record,event);call_live.transcript(self.record,event)
-        call_live.transcript(self.record,{**event,'event_id':'b','delta':' course.','start_ms':31,'end_ms':70})
-        self.assertEqual(''.join(m['content'] for m in self.record['messages']),'Build a course.')
-        self.assertEqual(self.record['messages'][0]['fragments'][1]['start_ms'],31)
-        self.assertEqual(len(session_manager.get_session(self.parent)['messages']),1)
-
-    async def test_live_webrtc_key_stays_server_side_and_close_drains_final_events(self):
-        sent=[];requests=[];events=asyncio.Queue()
-        class Socket:
-            async def __aenter__(self):return self
-            async def __aexit__(self,*args):pass
-            def __aiter__(self):return self
-            async def __anext__(self):return await events.get()
-            async def send(self,value):
-                sent.append(json.loads(value))
-                if sent[-1]['type']=='session.close':await events.put(json.dumps({'type':'session.closed','usage':{'seconds':4}}))
-        def request(value):requests.append(value);return httpx.Response(201,json={'session':{'id':'live_fake'},'transport':{'type':'webrtc','sdp':'answer'}})
-        client=httpx.AsyncClient(transport=httpx.MockTransport(request))
-        with patch.object(call_live,'choices',return_value=[{'id':'official'}]),patch.object(call_live.model_endpoints,'resolve_runtime',return_value=('https://api.openai.com/v1','summary','fake-secret',4096)),patch.object(call_live.httpx,'AsyncClient',return_value=client),patch.object(call_live,'connect',return_value=Socket()):
-            answer=await call_live.start(self.record,'official','offer','marin',True)
-            self.assertEqual(answer,{'sdp':'answer'});self.assertNotIn('fake-secret',json.dumps(answer))
-            config=json.loads(requests[0].content)['session'];self.assertEqual(config['delegation'],{'type':'client'})
-            self.assertEqual(config['client']['data_channel']['allowed_client_events'],['session.close']);self.assertFalse(config['store'])
-            self.record['ended']=True;await call_live.close(self.record)
-        self.assertTrue(self.record['live_finalized']);self.assertEqual(self.record['live_usage'],{'seconds':4})
 
     async def test_finished_work_update_does_not_fabricate_a_user_message(self):
         _=[event async for event in calls.turn(self.record,'Verified work result: task is done.','work-one',work_update=True)]
@@ -367,30 +334,11 @@ class ProviderContracts(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(str(requests[0].url),'https://api.openai.com/v1/responses')
             finally:await conversation.close()
 
-    async def test_voicestudio_stream_uses_real_sample_rate_and_default_not_alias(self):
-        sent=[]
-        class Socket:
-            values=iter([json.dumps({'type':'start','sample_rate':48000,'channels':1,'format':'pcm16'}),b'\x00\x00\x01\x00',json.dumps({'type':'done'})])
-            async def __aenter__(self):return self
-            async def __aexit__(self,*args):pass
-            async def send(self,data):sent.append(json.loads(data))
-            async def recv(self):return next(self.values)
-        with patch.object(call_voices,'configuration',return_value={'url':'http://127.0.0.1:8000','protocol':'voicestudio'}),patch.object(call_voices,'connect',return_value=Socket()):
-            events=[s async for s in call_voices.pcm('Hello','pockettts','default')]
-        self.assertEqual(events,[{'sample_rate':48000},{'audio':b'\x00\x00\x01\x00'}]);self.assertIsNone(sent[0]['voice']);self.assertEqual(sent[0]['engine'],'pockettts')
-
-    async def test_voicestudio_rejects_invalid_audio_metadata(self):
-        class Socket:
-            async def __aenter__(self):return self
-            async def __aexit__(self,*args):pass
-            async def send(self,data):pass
-            async def recv(self):return json.dumps({'type':'start','sample_rate':999999,'channels':2,'format':'pcm16'})
-        with patch.object(call_voices,'configuration',return_value={'url':'http://127.0.0.1:8000','protocol':'voicestudio'}),patch.object(call_voices,'connect',return_value=Socket()),self.assertRaises(ValueError):
-            _=[s async for s in call_voices.pcm('Hello','pockettts','default')]
-
     async def test_catalog_filters_unavailable_engines_and_fake_alias_voices(self):
         client=httpx.AsyncClient(transport=httpx.MockTransport(lambda request:httpx.Response(200,json={'data':[{'id':'tts-1'}]} if request.url.path.endswith('/models') else {'voices':[{'id':'alloy','type':'openai_alias'},{'id':'profile','name':'My voice','type':'profile'}],'engines':[{'id':'pockettts','available':True},{'id':'omnivoice','available':False}]})))
-        with patch.object(call_voices,'configuration',return_value={'url':'http://127.0.0.1:8000','protocol':'voicestudio'}),patch.object(call_voices.httpx,'AsyncClient',return_value=client):result=await call_voices.catalog()
-        self.assertEqual(result['models'],['pockettts']);self.assertEqual([v['id'] for v in result['voices']],['default','profile'])
+        # VoiceStudio's streaming speech route is tested against a mock server in test_voice_engines.py
+        from core import voicestudio_voice
+        with patch.object(call_voices,'configuration',return_value={'url':'http://127.0.0.1:8000','protocol':'voicestudio'}),patch.object(voicestudio_voice,'TRANSPORT',client._transport):result=await call_voices.catalog()
+        self.assertEqual(result['models'],['tts-1','pockettts']);self.assertEqual([v['id'] for v in result['voices']],['default','profile'])
 
 if __name__=='__main__':unittest.main()
