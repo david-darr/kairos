@@ -150,5 +150,16 @@ const { pathToFileURL } = require('node:url');
   assert.equal(M.decisionTitle({ kind: 'retire', subject_type: 'format', subject_name: 'Weak format' }), 'Retire format Weak format');
   for (const text of [M.formatLength(10, 600), M.evidenceText({ checked: 'x' }), M.costText({ units: 1, ratio: null })]) assert.ok(!text.includes('—'), 'no em-dashes');
 
+  // Characters (Pack A): status pills, what a video may cast, and a new version's changes from the dialog.
+  assert.deepEqual(M.characterStatus('awaiting_approval'), ['Waiting for your OK', 'accent']);
+  assert.deepEqual(M.characterStatus('approved'), ['Approved', 'ok']);
+  assert.equal(M.castableText({ approved_version: 2 }), 'Videos can cast version 2.');
+  assert.equal(M.castableText({ approved_version: null }), 'No approved version yet, so no video can use it.');
+  assert.equal(M.sheetUrl('abcdef123456', 3), '/api/characters/abcdef123456/versions/3/sheet.png');
+  const spec = { name: 'Pip', accessory: 'leaf', palette: { body: '#f4a259', body_shade: '#e0843d', head: '#f7c08a', accent: '#7cc6a4' } };
+  assert.deepEqual(M.characterChanges(spec, { body: '#F4A259', accent: '#123456', accessory: 'leaf', name: 'Pip' }), { palette: { accent: '#123456' } });
+  assert.deepEqual(M.characterChanges(spec, { body: 'red', accessory: 'cap', name: ' Pippa ' }), { accessory: 'cap', name: 'Pippa' });
+  assert.deepEqual(M.characterChanges(spec, {}), {});
+
   console.log('studio content model ok');
 })().catch(error => { console.error(error); process.exit(1); });

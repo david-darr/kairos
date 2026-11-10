@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Character sheet</title>
+<style>html,body{margin:0;padding:0;background:#f6f3ee;overflow:hidden}
+/* The render window may be smaller than the sheet (it cannot be taller than the screen): the canvas fills it and the
+   capture is resized to the sheet's own size, so its proportions are exact either way. */
+#kd-sheet{display:block;width:100vw;height:100vh}</style>
+</head>
+<body>
+<canvas id="kd-sheet" aria-label="Character sheet"></canvas>
+<!--KD-SHEET-->
+<script type="module" src="/static/motion/sheet.js"></script>
+</body>
+</html>

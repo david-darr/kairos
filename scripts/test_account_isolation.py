@@ -136,12 +136,14 @@ def fill(account):
                                                  "checked": date.today().isoformat()}]})
     account.ids.setdefault("format", []).append(str(card["id"]))
     account.seeded["format cards"] = "file"
+    # Pack A characters (Video Styles unit 3) are made through their route; the marker is the character's name.
+    account.seed("characters", "POST", "/api/characters", {"family": "round", "name": m}, "character")
 
 
 ID_PARAMS = {"session": "session", "note": "note", "event": "event", "document": "document", "doc": "document",
              "project": "project", "endpoint": "endpoint", "task": "task", "routine": "task", "agent": "agent",
              "bot": "agent", "design": "design", "skill": "skill", "slug": "skill", "hook": "hook", "trigger": "trigger",
-             "format_id": "format"}
+             "format_id": "format", "character_id": "character"}
 
 
 # Fields the edit routes accept; extra ones are ignored. A route that refuses the body (422) proves nothing

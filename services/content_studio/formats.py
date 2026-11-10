@@ -14,20 +14,12 @@ from datetime import date
 
 from .store import PLATFORMS, StudioError
 
-# The style packs a post can be made in (spec section 3). Only Pack 0 exists today; the others are later build units,
-# so a port into them is refused as "cannot be made yet" until their unit lands. `units_per_minute` is a planning
-# estimate of render effort relative to Pack 0 (not measured: spec section 3 says render times are unmeasured), used
-# only so a long, heavy port does not beat a cheaper format by default. `max_seconds` is what the pack can make today.
-STYLE_PACKS = {
-    "motion-type": {"name": "Motion type", "available": True, "units_per_minute": 1.0, "max_seconds": 480,
-                    "note": "Kinetic type, numbers, lists and photos with narration. Exists today; up to 8 minutes until long-form lands."},
-    "flat-2d": {"name": "Flat 2D explainer", "available": False, "units_per_minute": 3.0, "max_seconds": 480,
-                "note": "Original geometric characters and layered scenes. Not built yet (build unit 3)."},
-    "glossy-3d": {"name": "Glossy 3D mascot", "available": False, "units_per_minute": 10.0, "max_seconds": 480,
-                  "note": "Our own 3D mascot. Not built yet (build unit 5, needs the 3D decision)."},
-    "voxel-3d": {"name": "Blocky voxel 3D", "available": False, "units_per_minute": 8.0, "max_seconds": 480,
-                 "note": "A generic cube world with our own blocks and characters. Not built yet (build unit 6)."},
-}
+# The style packs a post can be made in (spec section 3) come from the registry in core/style_packs.py: Pack 0
+# (motion-type) and Pack A (flat-2d) are built; a port into a pack that is not built is refused as "cannot be made
+# yet" until its unit lands. `units_per_minute` is a planning estimate of render effort relative to Pack 0 (not
+# measured), used only so a long, heavy port does not beat a cheaper format by default. `max_seconds` is what the
+# pack can make today. User-made packs join through style_packs.user_packs() in a later unit.
+from core.style_packs import BUILT_IN as STYLE_PACKS, all_packs
 COST_WARN_RATIO = 3.0      # a port this many times dearer than the cheapest pack that could make it is a warning
 STALE_DAYS = 45            # evidence checked longer ago than this is flagged as stale
 PORT_STATES = ("proposed", "accepted", "rejected", "retired")
@@ -155,8 +147,8 @@ def clean_port(data):
                          "supports": _text(item.get("supports"), f"audience_evidence[{n}].supports", 300),
                          "checked": _day(item.get("checked"), f"audience_evidence[{n}].checked")})
     pack = _text(data.get("style_pack"), "style_pack", 40)
-    if pack not in STYLE_PACKS:
-        raise StudioError(f"style_pack is one of {', '.join(STYLE_PACKS)}")
+    if pack not in all_packs():
+        raise StudioError(f"style_pack is one of {', '.join(all_packs())}")
     return {"audience_match": _text(data.get("audience_match"), "audience_match (why the audiences match)", 500),
             "audience_evidence": evidence, "premise": _text(data.get("premise"), "premise (the new wording)", 200),
             "subject": _text(data.get("subject"), "subject", 200), "mascot": _text(data.get("mascot"), "mascot (ours, or none)", 80),
@@ -166,10 +158,11 @@ def clean_port(data):
 
 def cost(pack_id, length_s):
     """The cost to make a video of this length in a pack, against the cheapest pack that could make it today."""
-    pack = STYLE_PACKS[pack_id]
+    packs_now = all_packs()
+    pack = packs_now[pack_id]
     minutes = max(length_s, 1) / 60
     units = round(pack["units_per_minute"] * minutes, 2)
-    able = [p for p in STYLE_PACKS.values() if p["available"] and p["max_seconds"] >= length_s]
+    able = [p for p in packs_now.values() if p["available"] and p["max_seconds"] >= length_s]
     cheapest = round(min(p["units_per_minute"] for p in able) * minutes, 2) if able else None
     return {"pack": pack_id, "pack_name": pack["name"], "available": pack["available"], "length_s": length_s,
             "max_seconds": pack["max_seconds"], "units": units, "cheapest_units": cheapest,
@@ -177,7 +170,7 @@ def cost(pack_id, length_s):
 
 
 def packs():
-    return [{"id": k, **v} for k, v in STYLE_PACKS.items()]
+    return [{"id": k, **v} for k, v in all_packs().items()]
 
 
 def is_stale(day, today=None):

@@ -6,6 +6,7 @@ import io
 import json
 import math
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -96,7 +97,7 @@ class ValidationTests(unittest.TestCase):
         self.bad(project(beats=project()["beats"] * 21), "beats")
 
     def test_beat_fields(self):
-        cases = [("id", ""), ("id", "../"), ("id", 1), ("kind", "scene"), ("kind", None),
+        cases = [("id", ""), ("id", "../"), ("id", 1), ("kind", "panel"), ("kind", None),
                  ("bars", .25), ("bars", 8.5), ("bars", .75), ("bars", True), ("bars", float("inf")),
                  ("text", "x" * 141), ("text", 3), ("sub", "x" * 101), ("items", ["x"] * 6),
                  ("items", "x"), ("items", ["x" * 61]), ("items", [3]), ("image", "https://x"),
@@ -129,6 +130,10 @@ class ValidationTests(unittest.TestCase):
                 p = project()
                 p["beats"][0].update(kind=kind, camera=camera, items=["x" * 60] * 5, text="x" * 140,
                                       sub="x" * 100, number="42%", image="assets/" + "a" * 64 + ".png")
+                if kind == "scene":
+                    p["beats"][0]["scene"] = {}
+                else:
+                    p["beats"][0].pop("scene", None)
                 for transition in video_store.TRANSITIONS:
                     p["beats"][0]["transition"] = transition
                     video_store.validate(p)
@@ -1168,6 +1173,311 @@ assert.equal(L.LIMITS.beats, 100);
         worker = (ROOT / "electron/designRender.js").read_text(encoding="utf-8")
         self.assertIn("job.frames > 14400", worker, "the worker takes a 480-second video")
         self.assertEqual(video_store.NARRATED_MAX_SECONDS * 30, 14400)
+
+
+# -- Pack A: characters, sheets, scene beats, mouth timing and the sheet-match checks (Video Styles unit 3) ----------
+
+from core import character_checks, character_sheet, character_store, style_packs, video_mouth  # noqa: E402
+from routes import character_routes  # noqa: E402
+
+
+def character(family="round", **changes):
+    return character_store.create(character_store.starter(family, **changes))
+
+
+def approved(family="round", **changes):
+    meta = character(family, **changes)
+    character_store.set_sheet(meta["id"], 1, b"\x89PNG fake", {"ok": True})
+    return character_store.decide(meta["id"], 1, True, "alice")
+
+
+def scene_project(cid, **changes):
+    return project(cast=[{"character": cid, "version": 1}], beats=[
+        {"id": "talk", "kind": "scene", "say": "Hello there, friend.",
+         "scene": {"setting": "meadow", "cast": [{"character": cid, "speaking": True, "action": "wave"}], "props": [{"icon": "sun"}]}},
+        {"id": "end", "kind": "end", "bars": 1, "text": "Bye"}], **changes)
+
+
+class CharacterStoreTests(unittest.TestCase):
+    def test_spec_format_is_complete_and_checked(self):
+        spec = character_store.starter("square", name="Unit Square")
+        for key in ("proportions", "palette", "outline", "parts", "views", "expressions", "mouths"):
+            self.assertIn(key, spec)
+        self.assertEqual(spec["views"], ["front", "three_quarter", "side", "back"])
+        self.assertEqual(spec["expressions"], ["neutral", "happy", "surprised", "worried", "thinking"])
+        self.assertEqual(spec["mouths"], ["rest", "A", "E", "O", "MBP", "FV"])
+        for bad, path in [({"palette": {"body": "orange"}}, "palette.body"), ({"family": "hexagon"}, "family"),
+                          ({"outline": 30}, "outline"), ({"proportions": {"head": .9}}, "proportions.head"),
+                          ({"accessory": "crown"}, "accessory"), ({"views": ["front"]}, "views"), ({"name": "!"}, "name"),
+                          ({"cape": True}, "cape")]:
+            with self.subTest(path=path), self.assertRaisesRegex(ValueError, "^" + re.escape(path)):
+                character_store.merged(spec, bad)
+        flat = dict(spec["palette"], **{k: "#111111" for k in ("body", "body_shade", "head", "limb", "eye")})
+        with self.assertRaisesRegex(ValueError, "at least 6 different colours"):
+            character_store.merged(spec, {"palette": flat})
+
+    def test_every_change_is_a_new_version_and_approval_is_one_way(self):
+        meta = character("triangle", name="Version Tri")
+        cid = meta["id"]
+        with self.assertRaisesRegex(ValueError, "already has a character named"):
+            character("round", name="version tri")
+        with self.assertRaisesRegex(ValueError, "nothing changed"):
+            character_store.new_version(cid, {"name": "Version Tri"})
+        with self.assertRaises(character_store.ApprovalError):
+            character_store.decide(cid, 1, True, "alice")            # a draft has no sheet to approve
+        character_store.set_sheet(cid, 1, b"\x89PNG one", {"ok": True})
+        self.assertEqual([p["id"] for p in character_store.pending()].count(cid), 1)
+        character_store.decide(cid, 1, True, "alice")
+        with self.assertRaises(character_store.ApprovalError):
+            character_store.set_sheet(cid, 1, b"\x89PNG two", {"ok": True})
+        meta = character_store.new_version(cid, {"palette": {"accent": "#123456"}}, note="New accent")
+        self.assertEqual([(v["version"], v["status"]) for v in meta["versions"]], [(1, "approved"), (2, "draft")])
+        self.assertEqual(character_store.spec(cid, 1)["palette"]["accent"], character_store.STARTERS["triangle"]["palette"]["accent"])
+        self.assertEqual(character_store.spec(cid, 2)["palette"]["accent"], "#123456")
+        self.assertEqual(character_store.approved_version(meta), 1)
+        character_store.set_sheet(cid, 2, b"\x89PNG three", {"ok": True})
+        meta = character_store.decide(cid, 2, False, "alice", "Too dark")
+        self.assertEqual((meta["versions"][1]["status"], meta["versions"][1]["reason"]), ("rejected", "Too dark"))
+        self.assertTrue(character_store.is_approved(cid, 1))
+        self.assertFalse(character_store.is_approved(cid, 2))
+        with self.assertRaises(LookupError):
+            character_store.get("../../etc")
+
+
+class SceneValidationTests(unittest.TestCase):
+    def test_scene_beats_cast_and_palette(self):
+        cid = character(name="Scene Pip")["id"]
+        p = video_store.validate(scene_project(cid))
+        self.assertEqual(p["palette"], "dawn")
+        member = p["beats"][0]["scene"]["cast"][0]
+        self.assertEqual((member["view"], member["expression"], member["facing"], member["x"]), ("front", "neutral", "right", .5))
+        bad = [(lambda q: q.pop("cast"), "beats[0].scene.cast[0].character"),
+               (lambda q: q.update(cast=[{"character": "0" * 12, "version": 1}]), "cast[0]"),
+               (lambda q: q.update(cast=[{"character": cid, "version": 9}]), "cast[0]"),
+               (lambda q: q.update(palette="neon"), "palette"),
+               (lambda q: q["beats"][0]["scene"].update(setting="volcano"), "beats[0].scene.setting"),
+               (lambda q: q["beats"][0]["scene"].update(shot="extreme"), "beats[0].scene.shot"),
+               (lambda q: q["beats"][0]["scene"]["props"].append({"icon": "logo"}), "beats[0].scene.props[1].icon"),
+               (lambda q: q["beats"][0]["scene"]["cast"][0].update(action="dance"), "beats[0].scene.cast[0].action"),
+               (lambda q: q["beats"][0]["scene"]["cast"][0].update(turn="up"), "beats[0].scene.cast[0].turn"),
+               (lambda q: q["beats"][1].update(scene={}), "beats[1].scene")]
+        for change, path in bad:
+            with self.subTest(path=path):
+                q = scene_project(cid)
+                change(q)
+                with self.assertRaisesRegex(ValueError, "^" + re.escape(path)):
+                    video_store.validate(q)
+        two = character("square", name="Scene Bo")["id"]
+        q = scene_project(cid)
+        q["cast"].append({"character": two, "version": 1})
+        q["beats"][0]["scene"]["cast"].append({"character": two, "speaking": True})
+        with self.assertRaisesRegex(ValueError, "one narrator voice"):
+            video_store.validate(q)
+
+    def test_spoken_mouth_is_measured_not_written(self):
+        cid = character(name="Mouth Pip")["id"]
+        q = scene_project(cid)
+        key = video_store.speech_key("af_heart", q["beats"][0]["say"])
+        q["narration"] = {"voice": "af_heart", "captions": True}
+        q["beats"][0]["spoken"] = {"key": key, "seconds": 1.0, "parts": [[.25, 1.25, "Hello there, friend."]], "mouth": "X" * 8 + "AEOM" * 7}
+        self.assertEqual(video_store.validate(q)["beats"][0]["spoken"]["mouth"][:9], "XXXXXXXXA")
+        for mouth in ("XYZ", "A" * 80, 7):
+            q["beats"][0]["spoken"]["mouth"] = mouth
+            with self.subTest(mouth=mouth), self.assertRaisesRegex(ValueError, r"beats\[0\]\.spoken"):
+                video_store.validate(q)
+
+
+class MouthTests(unittest.TestCase):
+    def test_shapes_follow_the_envelope(self):
+        rate, t = 24000, np.arange(24000) / 24000
+        line = np.concatenate([np.zeros(4800), np.sin(2 * np.pi * 180 * t[:7200]) * .5, np.zeros(1600),
+                               np.random.RandomState(3).randn(4800) * .08, np.sin(2 * np.pi * 2600 * t[:7200]) * .3])
+        codes = video_mouth.shapes((line * 32767).astype("<i2"), rate)
+        self.assertEqual(len(codes), math.ceil(len(line) / 800))
+        self.assertTrue(codes.startswith("XXXXX"), codes)
+        self.assertIn("M", codes, "a short silence inside speech closes the lips")
+        self.assertIn("F", codes, "quiet noise shows the teeth")
+        self.assertTrue({"O", "A"} & set(codes[6:14]) and {"E", "A"} & set(codes[-8:]), codes)
+        self.assertEqual(codes, video_mouth.shapes((line * 32767).astype("<i2"), rate), "deterministic")
+        self.assertEqual(video_mouth.shapes(np.zeros(2400, dtype="<i2")), "XXX")
+        beat = video_mouth.for_beat((line * 32767).astype("<i2"), video_store.LEAD, rate)
+        self.assertEqual(beat, "X" * 8 + codes + "X")
+
+    def test_narration_times_the_mouth_of_scene_beats_only(self):
+        cid = character(name="Narrated Pip")["id"]
+        q = scene_project(cid)
+        q.pop("id")
+        q["beats"].insert(0, {"id": "intro", "kind": "title", "text": "Hi", "say": "A title line."})
+        made = video_store.create(**q, owner="alice")
+        voice = FakeVoice()
+        prepared = video_narration.prepare(made["id"], voice)
+        intro, talk = prepared["beats"][0], prepared["beats"][1]
+        self.assertNotIn("mouth", intro["spoken"])
+        self.assertRegex(talk["spoken"]["mouth"], r"^X{8}[AEOMF]+X$")
+        # A beat measured before it became a scene gets its mouth from the line already spoken, without speaking again.
+        current = video_store.get(made["id"])
+        current["beats"][0].update(kind="scene", scene={"cast": [{"character": cid}]})
+        video_store.save(made["id"], current)
+        calls = len(voice.calls)
+        again = video_narration.prepare(made["id"], voice)
+        self.assertEqual(len(voice.calls), calls)
+        self.assertIn("mouth", again["beats"][0]["spoken"])
+
+
+class SheetMatchTests(unittest.TestCase):
+    """The sheet-match measurement on a synthetic figure drawn like the rig draws it."""
+    def figure(self, spec, height=500, size=(1200, 800), feet=(600, 760), outline_px=None):
+        im = Image.new("RGB", size, "#fff1df")
+        d = ImageDraw.Draw(im)
+        pal, o = spec["palette"], outline_px or round(spec["outline"] / 1000 * height)
+        centre, body_h = character_checks.body_centre(spec, height)
+        cx, cy = feet[0], feet[1] + centre
+        bw = spec["proportions"]["body_width"] * height
+        d.rectangle((cx - bw / 2 - 40, cy - 60, cx - bw / 2 + 10, feet[1]), fill=pal["limb"], outline=pal["outline"], width=o)
+        d.ellipse((cx - bw / 2, cy - body_h / 2, cx + bw / 2, cy + body_h / 2), fill=pal["body"], outline=pal["outline"], width=o)
+        head = spec["proportions"]["head"] * height
+        d.ellipse((cx - head / 2, feet[1] - height, cx + head / 2, feet[1] - height + head), fill=pal["head"], outline=pal["outline"], width=o)
+        out = io.BytesIO()
+        im.save(out, "JPEG", quality=92)
+        box = {"kind": "character", "beat": "talk", "character": "c1", "shot": "medium", "view": "front", "x": cx - bw, "y": feet[1] - height * 1.1,
+               "w": bw * 2, "h": height * 1.15, "height": height, "body": {"cx": cx, "cy": cy, "w": bw, "h": body_h}, "short": size[1] * 1.35}
+        return out.getvalue(), box
+
+    def test_a_matching_figure_passes_and_drift_is_named(self):
+        spec = character_store.starter("round")
+        frame, box = self.figure(spec)
+        cast = {"c1": {"spec": spec, "name": "Pip", "metrics": {"body_ratio": round(character_checks.body_centre(spec, 1)[1] / 2, 3)}}}
+        self.assertEqual(character_checks.frame_notes(frame, [box], cast), [])
+        wrong = {"c1": {**cast["c1"], "spec": {**spec, "palette": {**spec["palette"], "body": "#00ff00", "body_shade": "#00dd00"}}}}
+        self.assertTrue(any("body colour is off the approved sheet" in n for n in character_checks.frame_notes(frame, [box], wrong)))
+        thick, box2 = self.figure(spec, outline_px=12)
+        self.assertTrue(any("outline measures" in n for n in character_checks.frame_notes(thick, [box2], cast)))
+        self.assertTrue(any("outside the wide shot" in n for n in character_checks.frame_notes(frame, [{**box, "shot": "wide", "short": 900}], cast)))
+        # A caption over the body's lower edge: nothing to measure there, so no false alarm.
+        caption = {"kind": "text", "x": 0, "y": box["body"]["cy"] + 40, "w": 1200, "h": 60}
+        self.assertEqual(character_checks.frame_notes(thick, [box2, caption], cast), [])
+
+
+class SheetRenderTests(unittest.TestCase):
+    def test_layout_page_and_submit(self):
+        meta = character(name="Sheet Pip")
+        page = character_sheet.page(meta["id"], 1)
+        self.assertIn('id="kd-sheet-data"', page)
+        self.assertIn('/static/motion/sheet.js', page)
+        self.assertNotIn("<!--KD-SHEET-->", page)
+        cells = character_sheet.LAYOUT
+        self.assertEqual([c["view"] for c in cells["views"]], list(character_store.VIEWS))
+        self.assertEqual([c["mouth"] for c in cells["mouths"]], list(character_store.MOUTHS))
+        for cell in cells["views"] + cells["expressions"] + cells["mouths"]:
+            self.assertLessEqual(cell["x"] + cell["w"], cells["w"])
+            self.assertLessEqual(cell["y"] + cell["h"], cells["h"])
+        path = character_sheet.path_for(meta["id"], 1)
+        self.assertRegex(path, r"^/api/characters/[a-f0-9]{12}/sheet\?v=1&rt=")
+        worker = (ROOT / "electron/designRender.js").read_text(encoding="utf-8")
+        self.assertIn("SHEET_PATH", worker)
+        with patch.object(character_checks, "sheet_metrics", return_value={"ok": False, "problems": ["The sheet's front view is empty."]}):
+            with self.assertRaisesRegex(ValueError, "front view is empty"):
+                run(character_sheet.submit(meta["id"], 1, png=b"\x89PNG x"))
+        with patch.object(character_checks, "sheet_metrics", return_value={"ok": True, "problems": []}):
+            done = run(character_sheet.submit(meta["id"], 1, png=b"\x89PNG x"))
+        self.assertEqual(done["versions"][0]["status"], "awaiting_approval")
+        self.assertFalse(done["notified"], "no Content Studio Producer in this account")
+
+
+class CharacterRouteTests(unittest.TestCase):
+    def setUp(self):
+        self.app = FastAPI()
+        self.app.include_router(character_routes.router)
+        self.app.include_router(video_routes.router)
+        self.app.dependency_overrides[require_user] = lambda: "alice"
+        self.client = TestClient(self.app)
+
+    def test_make_version_sheet_and_approve(self):
+        made = self.client.post("/api/characters", json={"family": "square", "name": "Route Bo"})
+        self.assertEqual(made.status_code, 200, made.text)
+        cid = made.json()["id"]
+        self.assertEqual(self.client.post("/api/characters", json={"family": "blob"}).status_code, 422)
+        self.assertEqual(self.client.post(f"/api/characters/{cid}/versions/1/approve").status_code, 409, "a draft cannot be approved")
+        with patch.object(character_sheet, "render", AsyncMock(return_value=b"\x89PNG x")), \
+                patch.object(character_checks, "sheet_metrics", return_value={"ok": True, "problems": []}):
+            sent = self.client.post(f"/api/characters/{cid}/versions/1/sheet")
+        self.assertEqual(sent.status_code, 200, sent.text)
+        self.assertEqual(sent.json()["versions"][0]["sheet_url"], f"/api/characters/{cid}/versions/1/sheet.png")
+        self.assertEqual(self.client.get(f"/api/characters/{cid}/versions/1/sheet.png").content, b"\x89PNG x")
+        self.assertIn(cid, [p["id"] for p in self.client.get("/api/characters").json()["pending"]])
+        approved_ = self.client.post(f"/api/characters/{cid}/versions/1/approve").json()
+        self.assertEqual(approved_["approved_version"], 1)
+        version = self.client.post(f"/api/characters/{cid}/versions", json={"changes": {"accessory": "cap"}, "note": "A cap"}).json()
+        self.assertEqual([v["status"] for v in version["versions"]], ["approved", "draft"])
+        # The sheet page: a signed-in person, or the worker's signed token; never anyone else.
+        self.assertEqual(self.client.get(f"/api/characters/{cid}/sheet?v=1&rt=bad").status_code, 404)
+        signed = self.client.get(character_sheet.path_for(cid, 1))
+        self.assertEqual(signed.status_code, 200)
+        self.assertIn("script-src", signed.headers["content-security-policy"])
+        # The worker's token is made for one version: it does not open another.
+        self.assertEqual(self.client.get(character_sheet.path_for(cid, 1).replace("v=1", "v=2")).status_code, 404)
+
+    def test_render_needs_approved_cast_and_the_player_gets_the_specs(self):
+        draft = character(name="Player Pip")["id"]
+        p = scene_project(draft)
+        p.pop("id")
+        made = self.client.post("/api/videos", json=p)
+        self.assertEqual(made.status_code, 200, made.text)
+        vid = made.json()["id"]
+        self.assertIn("is draft; a video may only use an approved version", " ".join(video_render.cast_problems(made.json())))
+        with self.assertRaisesRegex(ValueError, "^cast: Player Pip version 1 is draft"):
+            video_render.start(vid, "16:9")
+        page = video_routes.player_page(video_store.get(vid))
+        data = json.loads(page.split('id="kd-project">')[1].split("</script>")[0])
+        self.assertEqual(data["characters"][draft]["spec"]["name"], "Player Pip")
+        self.assertEqual(data["palette"], "dawn")
+        self.assertIn("is not approved yet", " ".join(video_render.character_notes(video_store.get(vid), [], [b"x"], [0.])))
+        character_store.set_sheet(draft, 1, b"\x89PNG", {"ok": True})
+        character_store.decide(draft, 1, True, "alice")
+        self.assertEqual(video_render.cast_problems(video_store.get(vid)), [])
+
+
+class PackRegistryTests(unittest.TestCase):
+    def test_pack_a_is_available_and_users_have_a_seam(self):
+        self.assertTrue(style_packs.available("flat-2d"))
+        self.assertTrue(style_packs.available("motion-type"))
+        self.assertFalse(style_packs.available("glossy-3d"))
+        self.assertEqual(style_packs.user_packs(), [])
+        from services.content_studio import formats
+        cost = formats.cost("flat-2d", 120)
+        self.assertEqual((cost["available"], cost["units"], cost["cheapest_units"], cost["ratio"]), (True, 6.0, 2.0, 3.0))
+        engine = (ROOT / "static/motion/scene.js").read_text(encoding="utf-8")
+        for name, palette in style_packs.PALETTES.items():
+            self.assertIn(f"{name}: {{ sky: ['{palette['sky'][0]}', '{palette['sky'][1]}']", engine, "scene.js palettes match the registry")
+
+    def test_layout_samples_stay_under_the_worker_limit(self):
+        line = "A short spoken line."
+        long = video_store.validate(project(beats=[{"id": f"b{i}", "kind": "statement", "text": "x", "say": line} for i in range(100)]))
+        long["version"] = 1
+        job = video_render._job(long, "16:9", "j1", frame_times=[0, 1, 2])
+        self.assertLessEqual(len(job["layoutTimes"]), video_render.LAYOUT_SAMPLES)
+        self.assertTrue({0, 1, 2} <= set(job["layoutTimes"]), "frames kept for the checks always get their layout")
+
+
+class CharacterToolTests(unittest.TestCase):
+    def setUp(self):
+        self.ctx = tool_registry.ToolContext(session_id="characters-" + self._testMethodName, agent_id=None, turn_taint=TurnTaint())
+
+    def call(self, name, args):
+        return run(tool_registry._REGISTRY[name].handler(args, self.ctx))
+
+    def test_design_list_and_scene_docs(self):
+        made = self.call("character_make", {"family": "round", "name": "Tool Pip", "changes": {"accessory": "scarf"}})
+        self.assertIn("Version 1 is a draft. Run character_sheet", made)
+        cid = re.search(r"id ([a-f0-9]{12})", made).group(1)
+        self.assertIn("v2 draft", self.call("character_make", {"character_id": cid, "changes": {"palette": {"accent": "#abcdef"}}}))
+        self.assertIn("Not run", self.call("character_make", {"name": "No Family"}))
+        listing = self.call("character_list", {})
+        self.assertIn("Tool Pip (round)", listing)
+        self.assertIn("Settings: meadow", listing)
+        self.assertIn("scene={setting", tool_registry._REGISTRY["video_create"].description)
+        with patch.object(character_sheet, "render", AsyncMock(side_effect=character_sheet.Unavailable("Needs the desktop app."))):
+            self.assertIn("Not run: Needs the desktop app.", self.call("character_sheet", {"character_id": cid, "version": 2}))
 
 
 if __name__ == "__main__":

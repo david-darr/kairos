@@ -49,6 +49,7 @@ app.whenReady().then(async () => {
   const python = path.join(ROOT, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
   const py = ['-B', '-X', 'utf8', path.join(__dirname, 'video_render_smoke.py'), '--port', String(port), '--out', out];
   if (args.includes('--sample')) py.push('--sample');
+  if (args.includes('--pack-a')) py.push('--pack-a');
   for (const name of ['--models', '--keep', '--name']) if (flag(name)) py.push(name, flag(name));
   backend = spawn(python, py, { cwd: ROOT, env: { ...process.env, KAIROS_RENDER_TOKEN: token }, stdio: 'inherit', windowsHide: true });
   const exited = new Promise(resolve => backend.on('exit', code => resolve(code)));
@@ -63,8 +64,15 @@ app.whenReady().then(async () => {
   if (code !== 0 || !result.ok) return finish(1, 'Video render smoke failed: ' + (result.error || `backend exited ${code}`));
   const job = result.job;
   const summary = { seconds: job.seconds, render_seconds: result.render_seconds, real_voice: result.real_voice, loudness: job.loudness,
-    narration: job.narration, notes: job.notes, kept: result.kept || null };
+    narration: job.narration, notes: job.notes, sheets: result.sheets, sheet_match: result.sheet_match, kept: result.kept || null };
   console.log(JSON.stringify(summary, null, 2));
   if (!job.narration || !job.narration.lines) return finish(1, 'The render has no narration track.');
+  // Pack A: each character's sheet rendered and passed its own checks, and no frame drifted from its sheet.
+  if (!(result.sheets || []).length || result.sheets.some(s => !s.metrics || !s.metrics.ok)) return finish(1, 'A character sheet did not render or failed its checks.');
+  const drift = (job.notes || []).filter(n => /approved sheet|outside the .* shot|could not be found where the rig/.test(n));
+  if (drift.length) return finish(1, 'Frames do not match the approved sheets: ' + drift.join(' '));
+  const match = result.sheet_match || {};
+  if (!(match.frames_with_characters > 0)) return finish(1, 'No sampled frame had a character to compare with its sheet.');
+  if (!(match.wrong_palette_notes > 0)) return finish(1, 'The sheet-match check did not notice a wrong palette.');
   finish(0, 'Video render smoke passed.');
 });

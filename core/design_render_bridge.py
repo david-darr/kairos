@@ -136,6 +136,27 @@ async def render(design_id: str, slug: str, kind: str = "png", *, scale: int = 1
     return result
 
 
+async def sheet(path: str, w: int, h: int) -> bytes:
+    """A character's reference sheet PNG (core/character_sheet.py): the same offscreen PNG capture as a board, on
+    the sheet page's signed path (electron/designRender.js SHEET_PATH allows only it and the rig modules)."""
+    if not available():
+        raise Unavailable(NEEDS_APP)
+    job_id = secrets.token_hex(8)
+    future = asyncio.get_running_loop().create_future()
+    _pending[job_id] = future
+    await _q().put({"id": job_id, "kind": "png", "path": path, "w": int(w), "h": int(h), "scale": 1, "grow": False,
+                    "paged": False, "min_h": 0, "hide": []})
+    try:
+        result = await asyncio.wait_for(future, timeout=JOB_SECONDS)
+    except asyncio.TimeoutError:
+        raise Unavailable("The desktop app did not finish the character sheet in time. Try again.") from None
+    finally:
+        _pending.pop(job_id, None)
+    if not result.startswith(b"\x89PNG"):
+        raise RuntimeError("The render window returned something other than a PNG.")
+    return result
+
+
 def _keep_height(design_id: str, slug: str, png: bytes, scale: int) -> None:
     """A website or email board's page, measured by the render window: the
     PNG is as tall as the page (electron/designRender.js), so the board takes

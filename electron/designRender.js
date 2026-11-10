@@ -17,12 +17,14 @@ const PARTITION = 'persist:design-render';
 // Render tokens name the account they were made for (core/design_render.sign): expiry.mac.account.mac.
 const JOB_PATH = /^\/api\/designs\/([a-f0-9]{12})\/boards\/([a-z0-9][a-z0-9-]{0,47})\/render\?rt=[0-9]{10}\.[A-Za-z0-9_-]{24}\.[a-z0-9]{1,32}\.[A-Za-z0-9_-]{24}(?:&v=\d{1,6})?$/;
 const VIDEO_PATH = /^\/api\/videos\/([a-f0-9]{12})\/player\?aspect=(16%3A9|9%3A16|1%3A1)&rt=[0-9]{10}\.[A-Za-z0-9_-]{24}\.[a-z0-9]{1,32}\.[A-Za-z0-9_-]{24}&v=[1-9][0-9]*$/;
+// A character's reference sheet (core/character_sheet.py): a PNG job on its own signed page.
+const SHEET_PATH = /^\/api\/characters\/([a-f0-9]{12})\/sheet\?v=[1-9][0-9]{0,2}&rt=[0-9]{10}\.[A-Za-z0-9_-]{24}\.[a-z0-9]{1,32}\.[A-Za-z0-9_-]{24}$/;
 let activeWindow = null, activeJob = '';
 let running = false, stopped = false, controller = null, configured = false;
 // The content's height: the bottom of the body's last child (the viewer script measures the same way).
 const MEASURE = `(() => { let bottom = 0; for (const c of document.body.children) { if (c.tagName === 'SCRIPT') continue; const r = c.getBoundingClientRect(); if (r.height) bottom = Math.max(bottom, r.bottom + (parseFloat(getComputedStyle(c).marginBottom) || 0)); } return Math.ceil(bottom + scrollY); })()`;
 // The board the current job renders: the request filter allows only its routes.
-const current = { designId: '', videoId: '', path: '', look: '' };
+const current = { designId: '', videoId: '', path: '', look: '', characterId: '' };
 const KD_ID = /^[a-z][a-z0-9-]{0,47}$/;
 // What a PNG job may hide, for the PowerPoint background picture (core/design_pptx.py): an element's
 // text, its own box paint, or all of it. Fixed rules; only ids that match KD_ID are used.
@@ -76,14 +78,15 @@ const LAYOUT = `(() => {
   return JSON.stringify({ w: document.documentElement.scrollWidth, h: document.documentElement.scrollHeight, elements: out });
 })()`;
 
-function allowedRequest(raw, origin, designId, videoId = '', playerPath = '', look = '') {
+function allowedRequest(raw, origin, designId, videoId = '', playerPath = '', look = '', characterId = '') {
   try {
     const url = new URL(raw);
     if (url.origin !== origin || url.username || url.password) return false;
+    if (characterId) return url.pathname + url.search === playerPath || /^\/static\/motion\/(kit|layout|rig|sheet)\.js$/.test(url.pathname);
     if (videoId) {
       return (url.pathname + url.search === playerPath) ||
         (url.pathname.startsWith(`/api/videos/${videoId}/assets/`) && /^\/api\/videos\/[a-f0-9]{12}\/assets\/[a-f0-9]{64}\.(png|jpg|gif|webp)$/.test(url.pathname)) ||
-        /^\/static\/motion\/(engine|kit|layout)\.js$/.test(url.pathname) ||
+        /^\/static\/motion\/(engine|kit|layout|rig|scene)\.js$/.test(url.pathname) ||
         (url.pathname.startsWith(`/api/design-fonts/${look}/`) && /^\/api\/design-fonts\/[a-z0-9_-]+\/[A-Za-z0-9_.-]+\.(woff2?|ttf|otf)$/.test(url.pathname));
     }
     return url.pathname.startsWith(`/api/designs/${designId}/`) || url.pathname.startsWith('/api/design-fonts/');
@@ -99,18 +102,20 @@ function configure(origin) {
   isolated.setDevicePermissionHandler(() => false);
   isolated.on('will-download', event => event.preventDefault());
   isolated.webRequest.onBeforeRequest((details, callback) =>
-    callback({ cancel: !allowedRequest(details.url, origin, current.designId, current.videoId, current.path, current.look) }));
+    callback({ cancel: !allowedRequest(details.url, origin, current.designId, current.videoId, current.path, current.look, current.characterId) }));
   return isolated;
 }
 
 async function renderJob(origin, job, backendUrl, token) {
   const video = job.kind === 'video';
-  const match = (video ? VIDEO_PATH : JOB_PATH).exec(String(job.path || ''));
+  const sheet = job.kind === 'png' && SHEET_PATH.test(String(job.path || ''));
+  const match = (video ? VIDEO_PATH : sheet ? SHEET_PATH : JOB_PATH).exec(String(job.path || ''));
   const w = Math.max(64, Math.min(4000, Number(job.w) || 0));
   let h = Math.max(64, Math.min(8000, Number(job.h) || 0));
   if (!match || (!video && !['png', 'pdf', 'layout'].includes(job.kind))) throw new Error('refused an invalid render job');
-  current.designId = video ? '' : match[1];
+  current.designId = video || sheet ? '' : match[1];
   current.videoId = video ? match[1] : '';
+  current.characterId = sheet ? match[1] : '';
   current.path = String(job.path);
   current.look = String(job.look || '');
   if (video && (!/^[a-z0-9_-]{1,60}$/.test(current.look) || job.fps !== 30 || !Number.isInteger(job.frames) || job.frames < 1 || job.frames > 14400)) throw new Error('refused invalid video timing');
@@ -294,4 +299,4 @@ function start({ backendUrl, token }) {
 
 function stop() { stopped = true; controller?.abort(); if (activeWindow && !activeWindow.isDestroyed()) activeWindow.destroy(); }
 
-module.exports = { start, stop, allowedRequest, JOB_PATH, VIDEO_PATH, KD_ID, HIDE_RULES };
+module.exports = { start, stop, allowedRequest, JOB_PATH, VIDEO_PATH, SHEET_PATH, KD_ID, HIDE_RULES };

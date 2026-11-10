@@ -88,3 +88,25 @@ with `x` for Windows filenames. Each sheet has dark/light rows for every beat. A
 sheets sample frame 0 and every beat at 60%. Pixel checks cover variance (including
 frame 0), >8% non-background coverage, type floors, contrast and determinism.
 The visual suite is intentionally not run as part of this lane's implementation.
+
+## Pack A: characters and scenes (Video Styles unit 3)
+
+`rig.js` draws a character from its versioned spec (core/character_store.py): round, square or
+triangle body, dot eyes, head, body and two-bone arms and legs, four views (front, three-quarter,
+side, back), five expressions and six mouth shapes. `drawCharacter(g, spec, x, feetY, height, state)`
+returns the figure's box; `figureBox` gives the same box without drawing. Blinks are seeded per
+character and beat; `mouthAt` reads the narration's measured mouth string (one code a frame: X rest,
+A, E, O, M for M/B/P, F for F/V, from core/video_mouth.py); `viewAt` steps a head turn through the
+neighbouring views; `poseAt` gives the action's bone angles and its squash and stretch (scale curves
+from the feet). Everything is a function of (spec, time), so frames are deterministic.
+
+`scene.js` draws a `scene` beat: a setting (meadow, city, space, room, ocean, lab) as four parallax
+layers (sky, far, mid, near) in the project's palette (dawn, mint, dusk, night, paper), icon props,
+and up to three cast members sized by shot (wide 30%, medium 46%, close 74% of the short side). The
+camera moves each layer by its depth. `layout()` reports each character (`kind: 'character'` with
+its body centre, height and outline width) and prop outside transitions, for the sheet-match checks.
+The player receives the cast's specs as `characters` (routes/video_routes.py). A scene's `text` is a
+short label on a card at the top.
+
+`sheet.js` + `sheet.html` render a character's reference sheet (every view, expression and mouth
+shape, the palette) in the render worker as a PNG job; the layout comes from core/character_sheet.py.

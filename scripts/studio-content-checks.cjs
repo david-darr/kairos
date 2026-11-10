@@ -83,7 +83,7 @@ function content(method, p, body) {
   if (/^\/channels\/\d+\/restore$/.test(p)) { Object.assign(channel, { status: 'live', archive_reason: null }); return [200, channel]; }
   if (/^\/channels\/\d+\/resume$/.test(p)) { channel.paused = 0; store.findings = store.findings.filter(f => f.channel_id !== id); return [200, channel]; }
   if (p === '/pipeline') return [200, { items: store.items }];
-  if (p === '/approvals') return [200, { posts: store.approvals }];
+  if (p === '/approvals') return [200, { posts: store.approvals, characters: pending() }];
   if (p === '/watch') return [200, { findings: store.findings }];
   if (p === '/settings') { if (method === 'PUT') Object.assign(store.settings, body); return [200, { ...store.settings, team_bot_ids: store.team }]; }
   if (p === '/posts' && method === 'GET') return [200, { posts: store.posted }];
@@ -125,6 +125,30 @@ const populate = () => {
     posted: [{ id: 24, title: 'Already live', posted_url: 'https://youtu.be/LIVE1234567' }, { id: 25, title: 'Second live', posted_url: 'https://youtu.be/LIVE7654321' }] });
 };
 
+// Pack A characters (routes/character_routes.py): one character with an approved version and a draft.
+const PIXEL = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==', 'base64');
+const pipSpec = { name: 'Pip', family: 'round', accessory: 'leaf', outline: 7, palette: { body: '#f4a259', body_shade: '#e0843d', head: '#f7c08a', accent: '#7cc6a4' } };
+const cast = { characters: [{ id: 'abcdefabcdef', name: 'Pip', family: 'round', approved_version: 1, versions: [
+  { version: 1, status: 'approved', note: 'First version.', reason: '', sheet: true, sheet_url: '/api/characters/abcdefabcdef/versions/1/sheet.png' },
+  { version: 2, status: 'draft', note: 'Warmer orange', reason: '', sheet: false, sheet_url: null }] }] };
+const pending = () => cast.characters.flatMap(c => c.versions.filter(v => v.status === 'awaiting_approval').map(v => ({ id: c.id, name: c.name, family: c.family, ...v })));
+function characters(method, p, body) {
+  if (p === '/api/characters' && method === 'GET') return [200, { characters: cast.characters, pending: pending() }];
+  if (p === '/api/characters' && method === 'POST') {
+    const c = { id: 'bbbbbbbbbbbb', name: body.name || 'Bo', family: body.family, approved_version: null, versions: [{ version: 1, status: 'draft', note: 'First version.', reason: '', sheet: false, sheet_url: null }] };
+    cast.characters.push(c); return [200, c];
+  }
+  const m = /^\/api\/characters\/([a-f0-9]{12})(?:\/versions(?:\/(\d+))?(?:\/(sheet|approve|reject))?)?$/.exec(p);
+  const c = m && cast.characters.find(x => x.id === m[1]);
+  if (!c) return [404, { detail: 'No such character.' }];
+  const v = m[2] && c.versions.find(x => x.version === Number(m[2]));
+  if (!m[2] && p.endsWith('/versions')) { c.versions.push({ version: c.versions.length + 1, status: 'draft', note: body.note, reason: '', sheet: false, sheet_url: null }); return [200, c]; }
+  if (m[3] === 'sheet') { Object.assign(v, { status: 'awaiting_approval', sheet: true, sheet_url: `/api/characters/${c.id}/versions/${v.version}/sheet.png` }); return [200, c]; }
+  if (m[3] === 'approve') { v.status = 'approved'; c.approved_version = v.version; return [200, c]; }
+  if (m[3] === 'reject') { Object.assign(v, { status: 'rejected', reason: body.reason }); return [200, c]; }
+  return [200, { ...c, spec: pipSpec }];
+}
+
 function json(res, value, status = 200) { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)); }
 async function serve(req, res) {
   const url = new URL(req.url, 'http://localhost'), p = url.pathname;
@@ -135,6 +159,8 @@ async function serve(req, res) {
       body = raw ? JSON.parse(raw) : {};
       writes.push({ path: p, method: req.method, body });
     }
+    if (/^\/api\/characters\/[a-f0-9]{12}\/versions\/\d+\/sheet\.png$/.test(p)) { res.writeHead(200, { 'Content-Type': 'image/png' }); res.end(PIXEL); return; }
+    if (p.startsWith('/api/characters')) { const [status, value] = characters(req.method, p, body); return json(res, value, status); }
     if (p.startsWith('/api/content-studio/')) { const [status, value] = content(req.method, p.slice('/api/content-studio'.length), body); return json(res, value, status); }
     if (p === '/api/system/custom-tabs') return json(res, [customTab]);
     if (p === '/api/tab-studio/looks') return json(res, { default: 'sport', looks: [{ id: 'sport', name: 'Sport' }] });
@@ -369,6 +395,42 @@ app.whenReady().then(async () => {
     assert.equal(writes.filter(w => w.path.includes('/formats')).length, 0, 'Formats only reads');
     await capture('desktop-formats'); await noOverflow(); await labels();
 
+    // 5c. Characters (Pack A): versions with their sheets; making a sheet sends it to Approvals, where only the person approves.
+    await tab('characters');
+    await wait("!!document.querySelector('.sc-character')");
+    const ctext = await js("document.querySelector('.sc-character').textContent");
+    for (const part of ['Pip', 'Round family. Videos can cast version 1.', 'Version 2', 'Draft, no sheet yet', 'Warmer orange', 'Version 1', 'Approved']) assert.ok(ctext.includes(part), part);
+    assert.ok(await js("!!document.querySelector('[data-character-version=\"abcdefabcdef-1\"] img.sc-sheet-thumb')"), 'An approved version shows its sheet');
+    await capture('desktop-characters'); await noOverflow(); await labels();
+    await click('.sc button', 'Make the sheet of Pip version 2');
+    await wait("document.querySelector('.sc-tab[data-tab=approvals]').textContent==='Approvals 1'");
+    assert.ok(last('/api/characters/abcdefabcdef/versions/2/sheet'));
+    await tab('approvals');
+    await wait("!!document.querySelector('[data-sheet=\"abcdefabcdef-2\"]')");
+    assert.ok(await js("document.querySelector('[data-sheet=\"abcdefabcdef-2\"] img').alt.includes('every view, expression and mouth shape')"));
+    await capture('desktop-sheet-approval'); await labels();
+    await click('.sc button', 'Approve Pip, version 2');
+    await wait("!document.querySelector('[data-sheet]')");
+    assert.ok(last('/api/characters/abcdefabcdef/versions/2/approve'));
+    await tab('characters');
+    await wait("!!document.querySelector('.sc-character') && document.querySelector('.sc-character').textContent.includes('Videos can cast version 2.')");
+    await click('.sc button', 'New version of Pip');
+    await wait("!!document.querySelector('.sc-dialog [aria-label=Accessory]')");
+    await click('.sc-dialog-panel button', 'Save new version');
+    await wait("document.querySelector('.sc-dialog .set-error').textContent.includes('Change something first')");
+    await fill('Accessory', 'cap'); await fill('What changed', 'A cap for winter');
+    await click('.sc-dialog-panel button', 'Save new version');
+    await wait("!document.querySelector('.sc-dialog')");
+    assert.deepEqual(last('/api/characters/abcdefabcdef/versions').body, { changes: { accessory: 'cap' }, note: 'A cap for winter' });
+    await click('.sc button', 'New character');
+    await wait("!!document.querySelector('.sc-dialog [aria-label=Family]')");
+    await fill('Family', 'square'); await fill('Name', 'Bo');
+    await click('.sc-dialog-panel button', 'Make character');
+    await wait("!document.querySelector('.sc-dialog')");
+    assert.deepEqual(last('/api/characters').body, { family: 'square', name: 'Bo' });
+    assert.ok(!(await js("document.querySelector('.sc-body').textContent")).includes('\u2014'), 'No em-dashes in the copy');
+    await pause(1100);
+
     // 6. Scoreboard: needs more data, scores, awaiting decisions with Confirm / Reject.
     await tab('scoreboard');
     await wait("!!document.querySelector('[data-score-row=Cooking]')");
@@ -439,7 +501,7 @@ app.whenReady().then(async () => {
 
     // 8. Phone layout: nothing spills sideways and every control is at least 44px.
     win.setContentSize(390, 1000); await pause(350);
-    for (const name of ['approvals', 'pipeline', 'channels', 'formats', 'scoreboard', 'report']) {
+    for (const name of ['approvals', 'pipeline', 'channels', 'formats', 'characters', 'scoreboard', 'report']) {
       await tab(name); await pause(250); await noOverflow(); await labels();
       assert.deepEqual(await js("[...document.querySelectorAll('.sc button,.sc select,.sc input:not([type=checkbox]),.sc textarea')].filter(n=>n.getBoundingClientRect().height>0 && n.getBoundingClientRect().height<43).map(n=>n.outerHTML.slice(0,90))"), [], `Phone targets in ${name}`);
       await capture('phone-' + name);
@@ -454,7 +516,7 @@ app.whenReady().then(async () => {
     store.forbidden = false;
 
     assert.deepEqual(errors, []); assert.deepEqual(outside, []);
-    console.log(JSON.stringify({ ok: true, output, writes: writes.length, checks: ['empty state and template deep link', 'add channel', 'warning shown and resolved', 'archive and restore', 'youtube connections and privacy', 'channel look', 'pipeline board', 'details', 'post to youtube', 'approve', 'edit', 'reject with note', 'redraft', 'batch approval', 'scoreboard needs more data', 'niche proposal', 'team settings', 'decisions confirm and reject', 'format cards and ports', 'report', 'csv mapping and import', '390 phone', '403', 'offline'] }));
+    console.log(JSON.stringify({ ok: true, output, writes: writes.length, checks: ['empty state and template deep link', 'add channel', 'warning shown and resolved', 'archive and restore', 'youtube connections and privacy', 'channel look', 'pipeline board', 'details', 'post to youtube', 'approve', 'edit', 'reject with note', 'redraft', 'batch approval', 'scoreboard needs more data', 'niche proposal', 'team settings', 'decisions confirm and reject', 'format cards and ports', 'characters and sheet approval', 'report', 'csv mapping and import', '390 phone', '403', 'offline'] }));
   } catch (error) {
     console.error(error.stack);
     if (win && !win.isDestroyed()) fs.writeFileSync(path.join(output, 'failure.png'), (await win.webContents.capturePage()).toPNG());

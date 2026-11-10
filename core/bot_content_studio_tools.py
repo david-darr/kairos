@@ -17,6 +17,11 @@ Formats (Video Styles build spec section 2): the Researcher writes format cards 
 match, distance from the source, cost to make, the series rule) and accepts or rejects it (check_port, decide_port);
 a pick from an accepted port records the 'port-proven-format' strategy, the format and the style pack on the post.
 
+Characters (Video Styles unit 3): a post in the flat-2d style pack is made of scene beats with the account's own Pack A
+characters. The pipeline lists them with the version each video may cast (the newest one the person approved); the
+Editor designs a missing one with character_make and sends its sheet with character_sheet, and only the person
+approves it. A flat-2d render is recorded only when its video has scene beats and every cast version is approved.
+
 Policy checks (services/content_studio/policy.py) run at the pick, when a script is saved and when a post is queued:
 sameness against the channel's last 30 posts, no narrator presented as a health, legal, money or political expert, no
 distress or rescue hooks, no cross-posting between the team's own channels, and the AI label on every post. The
@@ -106,7 +111,16 @@ def _pipeline(args, ctx, bot, role):
         "channels": channels, "strategies": strategies, "niches_wanted": wanted,
         "formats": [{"id": f["id"], "name": f["name"]} for f in studio.list_formats("active")],
         "ports_accepted": [{"id": p["id"], "format": p["format_name"], "niche_id": p["niche_id"], "style_pack": p["style_pack"]}
-                           for p in studio.list_ports(status="accepted")]})
+                           for p in studio.list_ports(status="accepted")],
+        "characters": _characters()})
+
+
+def _characters():
+    """The account's Pack A characters: the version a video may cast (approved) and any waiting for the person."""
+    from core import character_store
+    return [{"id": m["id"], "name": m["name"], "family": m["family"], "castable_version": character_store.approved_version(m),
+             "waiting_for_person": [v["version"] for v in m["versions"] if v["status"] == "awaiting_approval"]}
+            for m in character_store.list_all()]
 
 
 def _drafted(post_id):
@@ -152,6 +166,11 @@ def _pick(args, ctx, bot, role):
                                           "mascot", "style_pack", "thumbnail", "checks")} if port else None),
             "pick_checks": early})
     tail = " The Script Writer writes it next."
+    if post["style_pack"] == "flat-2d":
+        castable = [c["name"] for c in _characters() if c["castable_version"]]
+        tail += (" It is a Flat 2D post: the Script Writer writes scene beats for " + ", ".join(castable) + "." if castable else
+                 " It is a Flat 2D post and no character is approved yet: the Editor designs one (character_make, character_sheet) "
+                 "and the person approves its sheet before the video can render.")
     if card:
         tail += (f" It is an episode of the format \"{card['name']}\" in the {post['style_pack']} style pack: give it its own "
                  "concept, script and opening, and keep every name, mascot, line and look of the source out of it.")
@@ -234,6 +253,25 @@ def _channel_voice(post, render_ref):
     return ""
 
 
+def _pack_matches(post, render_ref):
+    """A flat-2d post's video is made of scene beats with approved characters (the render itself refuses others)."""
+    if post["style_pack"] != "flat-2d":
+        return
+    match = _STUDIO_RENDER.match((render_ref or "").strip())
+    if not match:
+        raise StudioError("a Flat 2D post's render_ref is its Studio render link, so the cast can be checked")
+    from core import video_render, video_store
+    try:
+        project = video_store.get(match.group(1))
+    except LookupError:
+        raise StudioError("that Studio render's video is not in this account")
+    if not any(b["kind"] == "scene" for b in project["beats"]) or not project.get("cast"):
+        raise StudioError("a Flat 2D post needs scene beats with cast characters; this video has none")
+    problems = video_render.cast_problems(project)
+    if problems:
+        raise StudioError(" ".join(problems))
+
+
 def _render(args, ctx, bot, role):
     post = _drafted(args["post_id"])
     if not post["script_ref"]:
@@ -247,6 +285,7 @@ def _render(args, ctx, bot, role):
     if args["status"] == "ok":
         if not studio.evidence(args["post_id"], "shot_plan"):
             raise StudioError("record the shot plan first (content_studio_save_shot_plan with the plan video_narrate returned)")
+        _pack_matches(post, args.get("render_ref"))
         note = _channel_voice(post, args.get("render_ref"))
     for key in ("tags", "caption", "thumbnail"):
         if args.get(key) is not None:

@@ -5,7 +5,19 @@ const MOTION_URL = '/static/motion/engine.js';
 
 const BASE = '/api/tab-studio';
 const ASPECTS = ['16:9', '9:16', '1:1'];
-const KINDS = ['title', 'statement', 'big-number', 'list', 'image', 'quote', 'split', 'logo', 'end'];
+const KINDS = ['title', 'statement', 'big-number', 'list', 'image', 'quote', 'split', 'logo', 'end', 'scene'];
+const NEW_SCENE = { setting: 'meadow', shot: 'medium', cast: [], props: [] };
+// A Pack A video's cast: each character's spec at the version the project pins (routes/character_routes.py).
+const castCache = new Map();
+async function castSpecs(p) {
+  const out = {};
+  for (const entry of p.cast || []) {
+    const key = `${entry.character}:${entry.version}`;
+    if (!castCache.has(key)) castCache.set(key, api(`/api/characters/${encodeURIComponent(entry.character)}/versions/${Number(entry.version)}`).catch(e => { castCache.delete(key); throw e; }));
+    out[entry.character] = { version: entry.version, spec: (await castCache.get(key)).spec };
+  }
+  return out;
+}
 const CAMERAS = ['still', 'push', 'pull', 'pan', 'shake'];
 const TRANSITIONS = ['cut', 'whip', 'zoom', 'flip', 'dither', 'mosaic', 'wipe'];
 const MOODS = ['energetic', 'calm', 'warm', 'dark', 'playful'];
@@ -80,7 +92,8 @@ async function preview(canvas, p, aspect) {
     const style = el('style', { id: 'studio-font-' + p.look, text: data.font_css });
     document.head.append(style);
   }
-  const player = mount(canvas, p, { aspect, tokens: data.variables, assetsBase: `/api/videos/${p.id}/assets/` });
+  const characters = p.cast?.length ? await castSpecs(p) : {};
+  const player = mount(canvas, { ...p, characters }, { aspect, tokens: data.variables, assetsBase: `/api/videos/${p.id}/assets/` });
   await player.ready;
   return player;
 }
@@ -356,14 +369,25 @@ async function editor(host, id, looks, back, parentDisposed) {
     // so switching kinds back keeps what was typed.
     const kind = beat.kind, pictured = ['image', 'split', 'logo'].includes(kind);
     const only = (node, shown) => { node.hidden = !shown; return node; };
-    inspector.append(el('h3', { text: `Beat ${selected + 1}` }), field('Kind', select('Beat kind', KINDS, beat.kind, v => { setBeat('kind', v); drawInspector(); }), path + '.kind'),
+    inspector.append(el('h3', { text: `Beat ${selected + 1}` }), field('Kind', select('Beat kind', KINDS, beat.kind, v => {
+      // A scene needs its scene; another kind must not keep one.
+      changed(p => { const b = p.beats[selected]; b.kind = v; if (v === 'scene') b.scene ||= structuredClone(NEW_SCENE); else delete b.scene; }); drawInspector();
+    }), path + '.kind'),
       textField('Text', 'text', 140, true), only(textField('Supporting text', 'sub', 100), !['big-number', 'list'].includes(kind)),
       only(textField('Number', 'number', 140), kind === 'big-number'));
     const items = el('textarea', { rows: 5, 'aria-label': 'List items, one per line', value: (beat.items || []).join('\n') });
     items.value = (beat.items || []).join('\n');
     const itemField = field('List items, one per line', items, path + '.items', `${(beat.items || []).length}/5 items; 60 characters each`);
     items.addEventListener('input', () => { const lines = items.value ? items.value.split('\n') : []; setBeat('items', lines); itemField.querySelector('.meta').textContent = `${lines.length}/5 items; ${lines.map(s => s.length + '/60').join(', ')} characters`; });
-    inspector.append(only(itemField, kind === 'list'), textField('Narration (the line spoken over this beat)', 'say', 400, true));
+    // A scene's setting, shot, cast and props as JSON (the Editor bot usually writes these; character ids come from the cast).
+    const sceneText = el('textarea', { rows: 8, 'aria-label': 'Scene as JSON', spellcheck: 'false' });
+    sceneText.value = JSON.stringify(beat.scene || NEW_SCENE, null, 1);
+    const sceneField = field('Scene (setting, shot, cast, props)', sceneText, path + '.scene', 'Settings: meadow, city, space, room, ocean, lab. Shots: wide, medium, close.');
+    sceneText.addEventListener('input', () => {
+      try { const value = JSON.parse(sceneText.value); setBeat('scene', value); sceneField.querySelector('.meta').textContent = 'Saved.'; }
+      catch { sceneField.querySelector('.meta').textContent = 'Not valid JSON yet; nothing saved.'; }
+    });
+    inspector.append(only(itemField, kind === 'list'), only(sceneField, kind === 'scene'), textField('Narration (the line spoken over this beat)', 'say', 400, true));
     const bars = el('input', { type: 'number', min: .5, max: 8, step: .5, value: beat.bars, 'aria-label': 'Beat bars', oninput: event => setBeat('bars', Number(event.target.value)) });
     inspector.append(field('Bars', bars, path + '.bars', beat.say ? 'This beat is narrated, so it lasts as long as its spoken line; bars do not change it.'
       : '0.5 to 8, in half-bar steps. Total video: at most 120 seconds, or 480 when narrated.'),
@@ -473,7 +497,7 @@ async function editor(host, id, looks, back, parentDisposed) {
     el('div', { class: 'studio-columns' }, [el('aside', { 'aria-label': 'Beat sequence' }, [el('h3', { text: 'Beats' }), el('p', { class: 'meta', text: 'Drag to reorder, use Move buttons, or Alt + Arrow keys.' }), list,
       field('Add beat by kind', addKind), button('Add beat', () => {
         if (state.p.beats.length >= maxBeats(state.p)) throw Error(`A video can have at most ${maxBeats(state.p)} beats.`);
-        changed(p => p.beats.push({ id: beatId(), kind: addKind.value, text: '', bars: 1 })); selected = state.p.beats.length - 1; drawBeats(); drawInspector();
+        changed(p => p.beats.push({ id: beatId(), kind: addKind.value, text: '', bars: 1, ...(addKind.value === 'scene' ? { scene: structuredClone(NEW_SCENE) } : {}) })); selected = state.p.beats.length - 1; drawBeats(); drawInspector();
       })]), el('section', { class: 'studio-centre', 'aria-label': 'Preview and rendering' }, [
       field('Preview aspect', select('Preview aspect', ASPECTS, aspect, value => { aspect = value; remount(); })), stage, previewError,
       el('div', { class: 'studio-actions' }, [play, el('label', { class: 'studio-check' }, [el('input', { type: 'checkbox', checked: looping, onchange: e => { looping = e.target.checked; } }), el('span', { text: 'Loop' })]), clock]),

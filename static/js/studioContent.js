@@ -7,9 +7,13 @@ import * as M from './studioContentModel.js';
 // rows and pills. Approving only marks a post approved; preparing it for the platform comes with the Kairos Browser.
 // A YouTube post can also go out through the person's own Google project when they connect posting (Channels tab).
 // Formats shows the Researcher's format cards and the ports the Evaluator checked; the bots write them, this only reads.
+// Characters (Pack A) lists each character's versions with their reference sheets: a sheet waiting for you is also in
+// Approvals, and only you approve it (routes/character_routes.py). A video may only use an approved version.
 
 const BASE = '/api/content-studio';
-const TABS = [['approvals', 'Approvals'], ['pipeline', 'Pipeline'], ['channels', 'Channels'], ['formats', 'Formats'], ['scoreboard', 'Scoreboard'], ['report', 'Report']];
+const TABS = [['approvals', 'Approvals'], ['pipeline', 'Pipeline'], ['channels', 'Channels'], ['formats', 'Formats'], ['characters', 'Characters'], ['scoreboard', 'Scoreboard'], ['report', 'Report']];
+const CHARACTERS = '/api/characters';
+const sendTo = (path, body = {}) => api(path, { method: 'POST', body: JSON.stringify(body), toast: false });
 const get = path => api(BASE + path);
 const send = (path, body = {}) => api(BASE + path, { method: 'POST', body: JSON.stringify(body), toast: false });
 const put = (path, body) => api(BASE + path, { method: 'PUT', body: JSON.stringify(body), toast: false });
@@ -82,7 +86,7 @@ export async function mountContent(host, { signal } = {}) {
     const value = (name, fallback) => { const r = results[names.indexOf(name)]; return r.status === 'fulfilled' ? r.value : fallback; };
     data = { ...(data || {}), niches: value('niches', { niches: [] }).niches, maxLive: value('niches', {}).max_live,
       channels: value('channels', { channels: [] }).channels, items: value('pipeline', { items: [] }).items,
-      approvals: value('approvals', { posts: [] }).posts, findings: value('watch', { findings: [] }).findings,
+      approvals: value('approvals', { posts: [] }).posts, sheets: value('approvals', {}).characters || [], findings: value('watch', { findings: [] }).findings,
       hasTeam: (value('settings', {}).team_bot_ids || []).length > 0, settings: value('settings', {}),
       yt: value('analytics/youtube/status', null), ytPost: value('posting/youtube/status', null),
       failed: names.filter((n, i) => results[i].status === 'rejected' && !n.includes('youtube')) };
@@ -335,8 +339,9 @@ export async function mountContent(host, { signal } = {}) {
   // -- approvals -------------------------------------------------------------------------------
 
   function approvalsView() {
-    if (!data.approvals.length) return [empty('Nothing is waiting for you. Posts appear here when the Producer brings them for approval.')];
-    const out = [note('Approving marks a post approved. Preparing it for the platform comes later, so approved posts wait in the Pipeline until then.')];
+    const sheets = data.sheets.map(sheetCard);
+    if (!data.approvals.length) return sheets.length ? sheets : [empty('Nothing is waiting for you. Posts appear here when the Producer brings them for approval.')];
+    const out = [...sheets, note('Approving marks a post approved. Preparing it for the platform comes later, so approved posts wait in the Pipeline until then.')];
     const count = data.approvals.length;
     if (data.settings?.batch_approval && count > 1) {
       out.push(el('div', { class: 'sc-actions sc-batch' }, [btn(`Approve all ${count}`, async () => {
@@ -389,6 +394,92 @@ export async function mountContent(host, { signal } = {}) {
     };
     view();
     return node;
+  }
+
+  // -- characters (Pack A) -------------------------------------------------------------------------
+
+  // A sheet waiting for the person: the picture, then Approve or Reject with a note.
+  function sheetCard(v) {
+    const node = el('article', { class: 'sc-post sc-sheet', 'data-sheet': `${v.id}-${v.version}`, 'aria-label': `${v.name} character sheet` });
+    const title = `${v.name}, version ${v.version}`;
+    const header = el('header', { class: 'sc-post-head' }, [el('h3', { class: 'sc-post-title', text: `Character sheet: ${title}` }),
+      el('div', { class: 'sc-post-pills' }, [pill(M.characterStatus(v.status)[0], 'accent'), pill(v.family, 'muted')])]);
+    const image = el('img', { class: 'sc-sheet-img', src: M.sheetUrl(v.id, v.version), alt: `Reference sheet of ${title}: every view, expression and mouth shape, and the palette`, loading: 'lazy' });
+    const view = () => node.replaceChildren(header, image, v.note ? el('p', { class: 'sc-dim', text: v.note }) : null,
+      note('Approving lets videos cast this version. Every frame is drawn from the same numbers, so it stays this character.'),
+      el('div', { class: 'sc-actions' }, [
+        btn('Approve', async () => { await sendTo(`${CHARACTERS}/${v.id}/versions/${v.version}/approve`); toast(`${v.name} version ${v.version} approved.`); await reload(); }, 'primary', { 'aria-label': `Approve ${title}` }),
+        btn('Reject', () => asking(), 'quiet danger', { 'aria-label': `Reject ${title}` })]));
+    const asking = () => {
+      const reason = el('textarea', { rows: 3, 'aria-label': 'What should change?', maxlength: '500', placeholder: 'What should change? The next version follows it.' });
+      node.replaceChildren(header, image, reason, el('div', { class: 'sc-actions' }, [
+        btn('Reject sheet', async () => { await sendTo(`${CHARACTERS}/${v.id}/versions/${v.version}/reject`, { reason: reason.value.trim() }); toast('Rejected.'); await reload(); }, 'danger'),
+        btn('Cancel', () => view(), 'quiet')]));
+      reason.focus();
+    };
+    view();
+    return node;
+  }
+
+  function newCharacterDialog() {
+    const family = selectOf('Family', M.FAMILIES, 'round');
+    const name = textInput('Name', { maxlength: '40', placeholder: 'For example, Pip' });
+    const status = el('p', { class: 'set-error', role: 'alert' });
+    const body = el('div', { class: 'sc-dialog' }, [
+      note('Kairos starts from its own round, square or triangle design with dot eyes. Change the colours in a new version. Never another channel\'s characters.'),
+      group({}, [row({ title: 'Family', control: family }), row({ title: 'Name', control: name, stack: true })]), status]);
+    const make = btn('Make character', async () => {
+      status.textContent = '';
+      try { await sendTo(CHARACTERS, { family: family.value, ...(name.value.trim() ? { name: name.value.trim() } : {}) }); }
+      catch (error) { status.textContent = M.loadFailure(error); return; }
+      dialog.close(); toast('Character made. Make its sheet to send it for approval.'); await draw();
+    }, 'primary');
+    const dialog = openPanelDialog({ title: 'New character', body, footer: el('div', {}, [make]), className: 'sc-dialog-panel' });
+  }
+
+  async function versionDialog(character) {
+    const got = await api(`${CHARACTERS}/${character.id}`), spec = got.spec;
+    const colour = (key, label) => { const node = el('input', { type: 'color', 'aria-label': label, value: spec.palette[key] }); return [key, label, node]; };
+    const colours = [colour('body', 'Body'), colour('body_shade', 'Body shade'), colour('head', 'Head'), colour('accent', 'Accent')];
+    const accessory = selectOf('Accessory', M.ACCESSORIES, spec.accessory);
+    const name = textInput('Name', { value: spec.name, maxlength: '40' });
+    const why = textInput('What changed', { maxlength: '300', placeholder: 'For example, warmer orange for the autumn series' });
+    const status = el('p', { class: 'set-error', role: 'alert' });
+    const body = el('div', { class: 'sc-dialog' }, [note('Any change makes a new version. Older versions stay as they were, and videos keep the version they cast.'),
+      group({}, [row({ title: 'Name', control: name, stack: true }), ...colours.map(([, label, node]) => row({ title: label, control: node })),
+        row({ title: 'Accessory', control: accessory }), row({ title: 'What changed', control: why, stack: true })]), status]);
+    const save = btn('Save new version', async () => {
+      status.textContent = '';
+      const changes = M.characterChanges(spec, { ...Object.fromEntries(colours.map(([key, , node]) => [key, node.value])), accessory: accessory.value, name: name.value });
+      if (!Object.keys(changes).length) { status.textContent = 'Change something first.'; return; }
+      try { await sendTo(`${CHARACTERS}/${character.id}/versions`, { changes, note: why.value.trim() }); }
+      catch (error) { status.textContent = M.loadFailure(error); return; }
+      dialog.close(); toast('New version saved as a draft.'); await draw();
+    }, 'primary');
+    const dialog = openPanelDialog({ title: `New version of ${character.name}`, body, footer: el('div', {}, [save]), className: 'sc-dialog-panel' });
+  }
+
+  async function charactersView() {
+    const got = await api(CHARACTERS);
+    const out = [el('div', { class: 'sc-bar' }, [note('Characters for the Flat 2D style pack. Each version has a reference sheet you approve; videos can only use an approved version.'),
+      btn('New character', () => newCharacterDialog())])];
+    if (!got.characters.length) out.push(empty('No characters yet. Make one here, or the Editor makes one when a channel uses the Flat 2D pack.'));
+    for (const character of got.characters) {
+      const rows = [...character.versions].reverse().map(v => {
+        const [label, tone] = M.characterStatus(v.status), controls = [pill(label, tone)];
+        if (v.status === 'draft' || v.status === 'rejected') controls.push(btn('Make sheet', async () => {
+          await sendTo(`${CHARACTERS}/${character.id}/versions/${v.version}/sheet`); toast('Sheet made. It is waiting for your OK in Approvals.'); await reload();
+        }, '', { 'aria-label': `Make the sheet of ${character.name} version ${v.version}` }));
+        if (v.status === 'awaiting_approval') controls.push(btn('Review', () => select('approvals'), 'primary', { 'aria-label': `Review ${character.name} version ${v.version}` }));
+        const below = v.sheet_url ? el('a', { href: v.sheet_url, target: '_blank', rel: 'noopener', class: 'sc-sheet-link' },
+          [el('img', { class: 'sc-sheet-thumb', src: v.sheet_url, alt: `Sheet of ${character.name} version ${v.version}`, loading: 'lazy' })]) : null;
+        return row({ title: `Version ${v.version}`, description: [v.note, v.reason ? `Rejected: ${v.reason}` : ''].filter(Boolean).join(' ') || ' ',
+          control: controls, below, attrs: { 'data-character-version': `${character.id}-${v.version}` } });
+      });
+      out.push(group({ title: character.name, description: `${character.family[0].toUpperCase() + character.family.slice(1)} family. ${M.castableText(character)}`, cls: 'sc-character',
+        actions: [btn('New version', () => versionDialog(character), 'quiet', { 'aria-label': `New version of ${character.name}` })] }, rows));
+    }
+    return out;
   }
 
   // -- scoreboard ------------------------------------------------------------------------------
@@ -556,9 +647,9 @@ export async function mountContent(host, { signal } = {}) {
   async function draw() {
     if (!data) return;
     if (!data.niches.length && !data.channels.length) { root.replaceChildren(emptyState()); return; }
-    tab ||= data.approvals.length ? 'approvals' : 'pipeline';
+    tab ||= data.approvals.length || data.sheets.length ? 'approvals' : 'pipeline';
     const bar = el('div', { class: 'sc-tabs', role: 'tablist', 'aria-label': 'Content sections' }, TABS.map(([id, name]) => {
-      const count = id === 'approvals' && data.approvals.length ? ` ${data.approvals.length}` : '';
+      const waiting = data.approvals.length + data.sheets.length, count = id === 'approvals' && waiting ? ` ${waiting}` : '';
       const node = el('button', { type: 'button', role: 'tab', class: 'sc-tab', id: `sc-tab-${id}`, 'aria-selected': String(id === tab), 'aria-controls': 'sc-body', 'data-tab': id, text: name + count });
       node.addEventListener('click', () => select(id));
       return node;
@@ -571,7 +662,7 @@ export async function mountContent(host, { signal } = {}) {
     const panel = el('div', { class: 'sc-body', id: 'sc-body', role: 'tabpanel', 'aria-labelledby': `sc-tab-${tab}` }, [el('p', { role: 'status', text: 'Loading...' })]);
     root.replaceChildren(...[alerts(), data.failed.length ? el('p', { class: 'set-error', role: 'alert', text: 'Some parts did not load. Try again in a moment.' }) : null, bar, panel].filter(Boolean));
     const shown = tab;
-    const build = { approvals: approvalsView, pipeline: pipelineView, channels: channelsView, formats: formatsView, scoreboard: scoreboardView, report: reportView }[shown];
+    const build = { approvals: approvalsView, pipeline: pipelineView, channels: channelsView, formats: formatsView, characters: charactersView, scoreboard: scoreboardView, report: reportView }[shown];
     try {
       const content = await build();
       if (alive() && tab === shown && panel.isConnected) panel.replaceChildren(...content);

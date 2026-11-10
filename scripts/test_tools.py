@@ -59,6 +59,9 @@ CLAUDE_APPROVED_BEFORE = {f"mcp__hive_mind__{name}" for name in (
     # Content Studio, reviewed 2026-11-10: a post's appeal evidence, YouTube's most-popular list (Researcher only) and the
     # format cards with their ports (build unit 2). Role-gated to the team's bots and fenced as data.
     'content_studio_post_evidence content_studio_youtube_trending content_studio_formats '
+    # Pack A characters, reviewed 2026-11-10 (Video Styles unit 3): the account's character list and the scene vocabulary,
+    # fenced as data. Designing a character and rendering its sheet are writes and still ask; approving is the person's alone.
+    'character_list '
     # Phase 4 teams, reviewed 2026-10-29: reads of the bot's own peers, assignments, rooms and team, fenced as data.
     'list_peers assignment_status list_room_targets search_team_memory list_team_setup read_incidents '
     # Phase 5 front desk (front-desk bot only, core/front_desk_tools.guard_call) and Phase 6 data, reviewed 2026-10-29:

@@ -656,6 +656,39 @@ class PolicyTests(unittest.TestCase):
         self.assertIn("content_studio_submit_post", call("content_studio_record_render", self.bots["Editor"], post_id=second["id"],
                                                          status="ok", render_ref=narrated("af_heart")))
 
+    def test_a_flat_2d_render_needs_scenes_with_approved_characters(self):
+        from core import character_store, video_store
+        pip = character_store.create(character_store.starter("round", name="Team Pip"))
+        cid = pip["id"]
+        pipeline_ = call("content_studio_pipeline", self.bots["Editor"])
+        self.assertIn('"name": "Team Pip"', pipeline_)
+        self.assertIn('"castable_version": null', pipeline_)
+        post = studio.create_post(self.channel["id"], "Why the sky is blue", script_ref="Pip explains the sky.", style_pack="flat-2d")
+        studio.add_evidence(post["id"], "shot_plan", {"plan": "00:00-00:03 hello"})
+
+        def video(scene=True):
+            beats = ([{"id": "a", "kind": "scene", "bars": 1, "scene": {"cast": [{"character": cid}]}}] if scene
+                     else [{"id": "a", "kind": "title", "text": "Sky", "bars": 1}])
+            p = video_store.create("Sky", look="sport", owner="david", beats=beats, cast=[{"character": cid, "version": 1}])
+            return f"/api/videos/{p['id']}/renders/16-9-v1.mp4"
+        self.assertIn("needs scene beats", call("content_studio_record_render", self.bots["Editor"], post_id=post["id"], status="ok", render_ref=video(False)))
+        self.assertIn("render_ref is its Studio render link", call("content_studio_record_render", self.bots["Editor"], post_id=post["id"],
+                                                                     status="ok", render_ref="/generated-files/sky.mp4"))
+        self.assertIn("is draft; a video may only use an approved version",
+                      call("content_studio_record_render", self.bots["Editor"], post_id=post["id"], status="ok", render_ref=video()))
+        character_store.set_sheet(cid, 1, b"\x89PNG", {"ok": True})
+        character_store.decide(cid, 1, True, "david")
+        self.assertIn("content_studio_submit_post", call("content_studio_record_render", self.bots["Editor"], post_id=post["id"],
+                                                         status="ok", render_ref=video()))
+        self.assertIn('"castable_version": 1', call("content_studio_pipeline", self.bots["Editor"]))
+        souls = {b["name"]: b["soul"] for b in team.build()["bots"]}
+        self.assertIn("character_make", souls["Editor"])
+        self.assertIn("speaking true", souls["Editor"])
+        self.assertIn("scene beat", souls["Script Writer"])
+        self.assertIn("flat-2d", souls["Evaluator"])
+        for soul in souls.values():
+            self.assertNotIn("—", soul)
+
     def test_instructions_carry_the_narration_and_policy_rules(self):
         souls = {b["name"]: b["soul"] for b in team.build()["bots"]}
         for soul in souls.values():

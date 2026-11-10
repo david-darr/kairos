@@ -1,4 +1,5 @@
 import { clamp, expoOut, pop, inOut, hash, seededRandom, zoomAbout, scrim, card, windowReveal, BAYER, contrast, readable, luminance, rgb } from './kit.js';
+import { drawScene, sceneBoxes, groundLine } from './scene.js';
 import { normalizeProject, dimensions, safeArea, captionBand, captionAt, fitText, frameTime, beatAt, transitionAt, beatLayout, cameraAt, beatElapsed, transitionTransform, visibleBox, compositionAt, revealElapsed, listMarker } from './layout.js';
 
 function lookTokens(canvas, supplied) {
@@ -108,6 +109,8 @@ export function mount(canvas, input, options = {}) {
   function background(g, beat, p) {
     g.fillStyle = style.bg; g.fillRect(0, 0, w, h);
     const seconds = p * (beat.end - beat.start);
+    // A Pack A scene draws its own layered setting, props and cast (scene.js); the look keeps the type.
+    if (beat.kind === 'scene') { drawScene(g, beat, project, w, h, groundLine(h, band, project.captioned), seconds, p); return; }
     const gradient = g.createLinearGradient(0, 0, w, h);
     gradient.addColorStop(0, style.bg); gradient.addColorStop(1, style.backdrop);
     g.fillStyle = gradient; g.fillRect(0, 0, w, h);
@@ -200,6 +203,15 @@ export function mount(canvas, input, options = {}) {
     for (const box of plan(beat).filter(b => b.kind === 'text')) {
       const state = textState(box, beat, t);
       if (state.local < state.delay) continue;
+      if (beat.kind === 'scene') {
+        // A scene's label sits on a card in the look's background, so it reads over any sky.
+        const lineW = Math.max(...box.lines.map(line => measure(line, box.size, box.role)));
+        const k = expoOut(state.local / state.length), pad = box.size * .28;
+        g.save(); g.globalAlpha = .9 * k;
+        card(g, box.x - pad + (box.align === 'center' ? (box.w - lineW) / 2 : 0), box.y + (box.h - box.lines.length * box.lineHeight) / 2 - pad * .6,
+          lineW + pad * 2, box.lines.length * box.lineHeight + pad * 1.2, style.bg, Math.min(style.radius, 24), style.bg);
+        g.restore();
+      }
       const ink = readable(box.role === 'number' ? style.accent : box.role === 'body' ? style.dim : style.text, style.bg, style.palette);
       g.save(); g.beginPath(); g.rect(box.x, box.y, box.w, box.h); g.clip();
       g.font = font(style, box.size, box.role); g.textAlign = 'left'; g.textBaseline = 'alphabetic';
@@ -220,7 +232,7 @@ export function mount(canvas, input, options = {}) {
         }
       });
       g.restore();
-      if (box.role !== 'body') {
+      if (box.role !== 'body' && beat.kind !== 'scene') {
         g.fillStyle = style.accent;
         const k = expoOut(state.local / state.length);
         g.fillRect(box.x, Math.min(safe.y + safe.h - 8, box.y + box.h + 8), Math.min(box.w * .24, 240) * k, 6);
@@ -350,6 +362,11 @@ export function mount(canvas, input, options = {}) {
           publicBox.highlightColor = readable(style.accent, style.bg, style.palette);
         }
         result.push(publicBox);
+      }
+      // A scene's cast and props, in frame pixels, for the sheet-match checks (only outside transitions).
+      if (b.kind === 'scene' && !tr) {
+        const p = clamp(beatElapsed(b, t) / (b.end - b.start));
+        result.push(...sceneBoxes(b, project, w, h, groundLine(h, band, project.captioned), p * (b.end - b.start), p));
       }
     }
     const c = caption(t);

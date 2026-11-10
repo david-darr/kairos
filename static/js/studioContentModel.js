@@ -450,3 +450,31 @@ export function buildImport(rows, mapping, posts, { defaultLength = null } = {})
   });
   return { body: { rows: out }, problems };
 }
+
+// -- characters (Pack A, Video Styles unit 3) -----------------------------------------------------------------------
+// A character version moves draft -> waiting for your OK (its sheet was rendered) -> approved or rejected.
+export const FAMILIES = [['round', 'Round'], ['square', 'Square'], ['triangle', 'Triangle']];
+export const ACCESSORIES = [['none', 'None'], ['scarf', 'Scarf'], ['antenna', 'Antenna'], ['leaf', 'Leaf'], ['cap', 'Cap'], ['bow', 'Bow']];
+export function characterStatus(status) {
+  return ({ draft: ['Draft, no sheet yet', 'muted'], awaiting_approval: ['Waiting for your OK', 'accent'], approved: ['Approved', 'ok'],
+    rejected: ['Rejected', 'warn'] })[status] || [status || '', 'muted'];
+}
+export const sheetUrl = (id, version) => `/api/characters/${encodeURIComponent(id)}/versions/${Number(version)}/sheet.png`;
+// What a video may cast: the newest approved version, else none.
+export function castableText(character) {
+  const v = character.approved_version;
+  return v ? `Videos can cast version ${v}.` : 'No approved version yet, so no video can use it.';
+}
+// Only the colours the dialog changed become a new version's changes.
+export function characterChanges(spec, form) {
+  const changes = {}, palette = {};
+  for (const key of ['body', 'body_shade', 'head', 'accent']) {
+    const value = String(form[key] || '').toLowerCase();
+    if (/^#[0-9a-f]{6}$/.test(value) && value !== spec.palette[key]) palette[key] = value;
+  }
+  if (Object.keys(palette).length) changes.palette = palette;
+  if (form.accessory && form.accessory !== spec.accessory) changes.accessory = form.accessory;
+  const name = String(form.name || '').trim();
+  if (name && name !== spec.name) changes.name = name;
+  return changes;
+}

@@ -282,7 +282,9 @@ def submit_post(post_id: int, user: str = Depends(require_user)):
 
 @router.get("/approvals")
 def approvals(user: str = Depends(require_user)):
-    return {"posts": pipeline.approval_queue(studio)}
+    """Posts waiting for the person, and character sheets waiting for their OK (approved at /api/characters)."""
+    from core import character_store
+    return {"posts": pipeline.approval_queue(studio), "characters": character_store.pending()}
 
 
 @router.post("/posts/{post_id}/approve")

@@ -34,12 +34,14 @@ def videos_dir() -> str:
 
 
 ASPECTS = {"16:9": (1920, 1080), "9:16": (1080, 1920), "1:1": (1080, 1080)}
-KINDS = ("title", "statement", "big-number", "list", "image", "quote", "split", "logo", "end")
+KINDS = ("title", "statement", "big-number", "list", "image", "quote", "split", "logo", "end", "scene")
 CAMERAS = ("still", "push", "pull", "pan", "shake")
 TRANSITIONS = ("cut", "whip", "zoom", "flip", "dither", "mosaic", "wipe")
 MOODS = ("energetic", "calm", "warm", "dark", "playful")
 ASSET = re.compile(r"assets/[a-f0-9]{64}\.(?:png|jpg|gif|webp)")
-FIELDS = {"id", "title", "look", "bpm", "fps", "aspects", "beats", "music", "narration"}
+FIELDS = {"id", "title", "look", "bpm", "fps", "aspects", "beats", "music", "narration", "cast", "palette"}
+ACTIONS = ("idle", "wave", "point", "walk", "jump", "shrug", "think", "nod")
+MAX_CAST, MAX_ON_SCREEN, MAX_PROPS = 6, 3, 6
 MAX_SECONDS = 120               # a video with music only
 NARRATED_MAX_SECONDS = 480      # a narrated Short or mid-length video; long-form chapters are a later unit
 MAX_BEATS, NARRATED_MAX_BEATS = 40, 100
@@ -104,7 +106,7 @@ def validate(project: dict) -> dict:
         _error("beats", f"give 1 to {most} beats.")
     ids = set()
     allowed = {"id", "kind", "bars", "text", "sub", "number", "items", "image", "camera", "transition", "treatment",
-               "say", "spoken", "seconds"}
+               "say", "spoken", "seconds", "scene"}
     for i, b in enumerate(beats):
         path = f"beats[{i}]"
         if not isinstance(b, dict):
@@ -148,6 +150,11 @@ def validate(project: dict) -> dict:
         for field, choices in (("camera", CAMERAS), ("transition", TRANSITIONS)):
             if field in b and b[field] not in choices:
                 _error(path + "." + field, "choose " + ", ".join(choices) + ".")
+        if b["kind"] == "scene":
+            _scene(b.get("scene"), path + ".scene")
+        elif "scene" in b:
+            _error(path + ".scene", "only a scene beat has a scene; set kind to scene or remove it.")
+    _cast(p, beats)
     if is_narrated or "narration" in p:
         p["narration"] = _narration(p.get("narration"))
     for i, b in enumerate(beats):
@@ -166,6 +173,108 @@ def validate(project: dict) -> dict:
         _error("music.mood", "choose " + ", ".join(MOODS) + ".")
     _number(music.get("volume"), "music.volume", 0, 1)
     return p
+
+
+def _scene(value, path):
+    """A Pack A scene: a setting drawn as parallax layers, a shot size, up to three cast members and a few props."""
+    from core import character_store, style_packs
+    if not isinstance(value, dict):
+        _error(path, "give setting, shot, cast and props.")
+    for key in value.keys() - {"setting", "shot", "cast", "props"}:
+        _error(f"{path}.{key}", "unknown scene field; use setting, shot, cast or props.")
+    value.setdefault("setting", "meadow")
+    value.setdefault("shot", "medium")
+    value.setdefault("cast", [])
+    value.setdefault("props", [])
+    if value["setting"] not in style_packs.SETTINGS:
+        _error(path + ".setting", "choose " + ", ".join(style_packs.SETTINGS) + ".")
+    if value["shot"] not in style_packs.SHOTS:
+        _error(path + ".shot", "choose " + ", ".join(style_packs.SHOTS) + ".")
+    if not isinstance(value["cast"], list) or len(value["cast"]) > MAX_ON_SCREEN:
+        _error(path + ".cast", f"give at most {MAX_ON_SCREEN} characters on screen.")
+    seen, speaking = set(), 0
+    for i, member in enumerate(value["cast"]):
+        where = f"{path}.cast[{i}]"
+        if not isinstance(member, dict):
+            _error(where, "give {character, x, view, expression, action, speaking}.")
+        for key in member.keys() - {"character", "x", "view", "expression", "action", "speaking", "facing", "turn"}:
+            _error(f"{where}.{key}", "unknown cast field; use character, x, view, expression, action, speaking, facing or turn.")
+        if not isinstance(member.get("character"), str) or not re.fullmatch(r"[a-f0-9]{12}", member["character"]):
+            _error(where + ".character", "use a character id from the project's cast.")
+        if member["character"] in seen:
+            _error(where + ".character", "a character appears once per scene.")
+        seen.add(member["character"])
+        member.setdefault("x", round((i + 1) / (len(value["cast"]) + 1), 3))
+        _number(member["x"], where + ".x", 0, 1)
+        for key, choices, default in (("view", character_store.VIEWS, "front"), ("expression", character_store.EXPRESSIONS, "neutral"),
+                                      ("action", ACTIONS, "idle"), ("facing", ("left", "right"), "right")):
+            member.setdefault(key, default)
+            if member[key] not in choices:
+                _error(f"{where}.{key}", "choose " + ", ".join(choices) + ".")
+        if "turn" in member and member["turn"] not in character_store.VIEWS:
+            _error(where + ".turn", "the view the head turns to: " + ", ".join(character_store.VIEWS) + ".")
+        member.setdefault("speaking", False)
+        if not isinstance(member["speaking"], bool):
+            _error(where + ".speaking", "use true or false.")
+        speaking += member["speaking"]
+    if speaking > 1:
+        _error(path + ".cast", "one narrator voice speaks at a time: mark at most one character speaking.")
+    if not isinstance(value["props"], list) or len(value["props"]) > MAX_PROPS:
+        _error(path + ".props", f"give at most {MAX_PROPS} props.")
+    for i, prop in enumerate(value["props"]):
+        where = f"{path}.props[{i}]"
+        if not isinstance(prop, dict):
+            _error(where, "give {icon, x, y, size}.")
+        for key in prop.keys() - {"icon", "x", "y", "size", "float"}:
+            _error(f"{where}.{key}", "unknown prop field; use icon, x, y, size or float.")
+        if prop.get("icon") not in style_packs.PROPS:
+            _error(where + ".icon", "choose " + ", ".join(style_packs.PROPS) + ".")
+        prop.setdefault("x", .5)
+        prop.setdefault("y", .3)
+        prop.setdefault("size", .1)
+        prop.setdefault("float", False)
+        _number(prop["x"], where + ".x", 0, 1)
+        _number(prop["y"], where + ".y", 0, 1)
+        _number(prop["size"], where + ".size", .03, .35)
+        if not isinstance(prop["float"], bool):
+            _error(where + ".float", "use true or false.")
+
+
+def _cast(p, beats):
+    """The project's cast pins each character to one version; every scene uses only cast members. A draft can be
+    cast while its sheet waits for the person, but a video renders only approved versions (core/video_render.py)."""
+    from core import character_store, style_packs
+    scenes = [b for b in beats if b["kind"] == "scene"]
+    cast = p.get("cast", [])
+    if not isinstance(cast, list) or len(cast) > MAX_CAST:
+        _error("cast", f"give at most {MAX_CAST} characters, each {{character, version}}.")
+    pinned = set()
+    for i, entry in enumerate(cast):
+        if not isinstance(entry, dict) or set(entry) != {"character", "version"}:
+            _error(f"cast[{i}]", "give {character, version}.")
+        if not isinstance(entry["character"], str) or not re.fullmatch(r"[a-f0-9]{12}", entry["character"]):
+            _error(f"cast[{i}].character", "use a character id from character_list.")
+        if entry["character"] in pinned:
+            _error(f"cast[{i}].character", "each character is cast once, at one version.")
+        pinned.add(entry["character"])
+        if isinstance(entry["version"], bool) or not isinstance(entry["version"], int) or entry["version"] < 1:
+            _error(f"cast[{i}].version", "use a version number of that character.")
+        try:
+            character_store.version_of(character_store.get(entry["character"]), entry["version"])
+        except LookupError as error:
+            _error(f"cast[{i}]", str(error).strip("'") + " Use character_list for ids and versions.")
+    for i, b in enumerate(beats):
+        for j, member in enumerate(b["scene"]["cast"] if b["kind"] == "scene" else []):
+            if member["character"] not in pinned:
+                _error(f"beats[{i}].scene.cast[{j}].character", "add this character to the project's cast with its version first.")
+    if cast:
+        p["cast"] = cast
+    else:
+        p.pop("cast", None)
+    if scenes or "palette" in p:
+        p.setdefault("palette", "dawn")
+        if p["palette"] not in style_packs.PALETTES:
+            _error("palette", "choose " + ", ".join(style_packs.PALETTES) + ".")
 
 
 def clauses(text):
@@ -229,7 +338,7 @@ def _timing(b, narration, path):
         return
     spoken = b.get("spoken")
     if spoken is not None:
-        ok = (isinstance(spoken, dict) and set(spoken) == {"key", "seconds", "parts"} and isinstance(spoken["key"], str)
+        ok = (isinstance(spoken, dict) and set(spoken) - {"mouth"} == {"key", "seconds", "parts"} and isinstance(spoken["key"], str)
               and isinstance(spoken["parts"], list) and isinstance(spoken["seconds"], (int, float))
               and not isinstance(spoken["seconds"], bool) and math.isfinite(spoken["seconds"])
               and 0 < spoken["seconds"] <= 60 and 1 <= len(spoken["parts"]) <= 40)
@@ -238,6 +347,9 @@ def _timing(b, narration, path):
                 ok = ok and (isinstance(part, list) and len(part) == 3 and isinstance(part[2], str) and len(part[2]) <= SAY_LIMIT
                              and all(isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) for x in part[:2])
                              and 0 <= part[0] < part[1] <= LEAD + spoken["seconds"] + 1e-6)
+        if ok and "mouth" in spoken:
+            ok = (isinstance(spoken["mouth"], str) and re.fullmatch(r"[XAEOMF]{1,2000}", spoken["mouth"]) is not None
+                  and len(spoken["mouth"]) <= math.ceil((LEAD + spoken["seconds"]) * 30) + 2)
         if not ok:
             _error(path + ".spoken", "leave spoken to the narration step (video_narrate); it is measured, not written.")
         if spoken["key"] != speech_key(narration["voice"], b["say"]):

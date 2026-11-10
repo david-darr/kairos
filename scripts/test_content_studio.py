@@ -734,7 +734,8 @@ class FormatCards(unittest.TestCase):
         rows = {f["name"]: f for f in board["formats"]}
         self.assertEqual((rows["Strong format"]["kind"], rows["Strong format"]["eligible"], rows["list"]["kind"]), ("card", True, "label"))
         self.assertGreater(rows["Strong format"]["score"], rows["Weak format"]["score"])
-        self.assertEqual([p["id"] for p in board["style_packs"]], ["motion-type"])
+        # Packs that are built (Pack 0, and Pack A since unit 3) are listed; the unbuilt ones only once used.
+        self.assertEqual([p["id"] for p in board["style_packs"]], ["motion-type", "flat-2d"])
         self.assertEqual(board["style_packs"][0]["posts_scored"], 31)
         first = review.run_review(s, NOW1, dry_run=False)
         self.assertFalse(any(p["subject_type"] == "format" for p in first["proposals"]), "behind once is not enough")

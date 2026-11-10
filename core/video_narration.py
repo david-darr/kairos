@@ -19,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-from core import video_store
+from core import video_mouth, video_store
 
 RATE = 24000
 OUT_RATE = 48000
@@ -112,11 +112,17 @@ def prepare(video_id, synthesize=None):
         return project
     voice = project["narration"]["voice"]
     todo = missing(project)
-    if not todo:
+    lips = [b["id"] for b in project["beats"] if b["kind"] == "scene" and "spoken" in b and "mouth" not in b["spoken"]
+            and b["id"] not in todo]
+    if not todo and not lips:
         return project
-    speak_one = synthesize or _ready(voice).synthesize
+    speak_one = (synthesize or _ready(voice).synthesize) if todo else None
     measured = {}
     for b in project["beats"]:
+        if b["id"] in lips:
+            # Measured before it became a scene: its mouth shapes come from the line already spoken.
+            measured[b["id"]] = {**b["spoken"], "mouth": video_mouth.for_beat(read_clip(video_id, b["spoken"]["key"]), video_store.LEAD, RATE)}
+            continue
         if b["id"] not in todo:
             continue
         key = video_store.speech_key(voice, b["say"])
@@ -124,6 +130,9 @@ def prepare(video_id, synthesize=None):
         _write(clip_path(video_id, key), samples)
         measured[b["id"]] = {"key": key, "seconds": round(len(samples) / RATE, 3),
                              "parts": [[round(video_store.LEAD + s, 3), round(video_store.LEAD + e, 3), t] for s, e, t in parts]}
+        if b["kind"] == "scene":
+            # A speaking character's mouth follows this line's own audio envelope (core/video_mouth.py).
+            measured[b["id"]]["mouth"] = video_mouth.for_beat(samples, video_store.LEAD, RATE)
     with video_store._lock("video:" + video_id):
         current = video_store.get(video_id)
         changed = False

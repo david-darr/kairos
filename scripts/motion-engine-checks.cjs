@@ -30,8 +30,13 @@ const project = { id: 'motion-check', title: 'Spring season', bpm: 120, fps: 30,
   { id: 'logo', kind: 'logo', image: 'assets/mark.svg', text: 'Your team starts here', bars: 1, transition: 'dither' },
   { id: 'half', kind: 'image', image: 'assets/field.svg', treatment: 'halftone', text: 'Make your mark', bars: 1, transition: 'mosaic' },
   { id: 'dither', kind: 'image', image: 'assets/field.svg', treatment: 'dither', text: 'A season to remember', bars: 1, transition: 'zoom' },
+  { id: 'scene', kind: 'scene', text: 'Meet the coach', bars: 2, camera: 'push', transition: 'wipe', spoken: { mouth: 'XXXXXXXXAAEEOOMMFFAAOO' },
+    scene: { setting: 'meadow', shot: 'medium', cast: [{ character: 'abcdefabcdef', action: 'wave', expression: 'happy', speaking: true }],
+      props: [{ icon: 'sun', x: .8, y: .2, size: .12 }] } },
   { id: 'end', kind: 'end', text: 'Sign up by March 1', sub: 'psasoccer.org', bars: 2, camera: 'shake' }
-] };
+], palette: 'mint', characters: { abcdefabcdef: { version: 1, spec: { name: 'Pip', family: 'round', accessory: 'leaf', outline: 7,
+  proportions: { head: .42, body_width: .62, limb_length: .26, limb_width: .055, eye_size: .036 },
+  palette: { body: '#f4a259', body_shade: '#e0843d', head: '#f7c08a', limb: '#5b4a6b', eye: '#231b2e', mouth: '#8c3b4a', outline: '#2e2438', accent: '#7cc6a4', cheek: '#f08a8a' } } } } };
 const looks = {
   dark: { '--ds-bg': '#101418', '--ds-surface': '#1b2129', '--ds-text': '#ffffff', '--ds-text-dim': '#b4bdc8', '--ds-accent': '#c6ff3d', '--ds-accent-2': '#ff5a1f', '--ds-on-accent': '#101418', '--ds-font-display': 'Impact, sans-serif', '--ds-font-sans': 'Arial, sans-serif', '--ds-radius-m': '4px', '--ds-label-case': 'upper', '--ds-display-weight': '400', '--ds-pattern': 'stripes' },
   light: { '--ds-bg': '#fbf3f6', '--ds-surface': '#ffffff', '--ds-text': '#3b2a3f', '--ds-text-dim': '#6e5a72', '--ds-accent': '#a54a7c', '--ds-accent-2': '#8fb9a8', '--ds-on-accent': '#ffffff', '--ds-font-display': 'Georgia, serif', '--ds-font-sans': 'Arial, sans-serif', '--ds-radius-m': '20px', '--ds-label-case': 'none', '--ds-display-weight': '500', '--ds-display-style': 'italic', '--ds-pattern': 'dots' }
@@ -54,7 +59,7 @@ function serve(req, res) {
     res.writeHead(image ? 200 : 404, { 'Content-Type': 'image/svg+xml' }); res.end(image || ''); return;
   }
   const name = path.posix.basename(url.pathname);
-  if (url.pathname === `/static/motion/${name}` && ['engine.js', 'kit.js', 'layout.js'].includes(name)) {
+  if (url.pathname === `/static/motion/${name}` && ['engine.js', 'kit.js', 'layout.js', 'rig.js', 'scene.js'].includes(name)) {
     res.setHeader('Content-Type', 'text/javascript'); res.end(fs.readFileSync(path.join(root, 'static/motion', name))); return;
   }
   res.writeHead(404); res.end();
@@ -125,6 +130,18 @@ app.whenReady().then(async () => {
             if (row.align !== 'left' || row.size < 59.39 || row.x !== rows[0].x || marker.x !== firstMarker.x
               || Math.abs(gap - 24*Math.max(1, row.size/90)) > 1e-6 || marker.x+marker.radius >= row.x || marker.x-marker.radius < safe.x) layoutErrors.push({composition,row,marker});
           }
+        }
+        // Pack A: the scene draws its character where the layout says, in the spec's body colour.
+        const sceneBeat = kdInfo.beats.find(b => b.id === 'scene'), st = sceneBeat.start + (sceneBeat.end - sceneBeat.start) * .6;
+        kdDrawFrame(st);
+        const figure = kdLayout(st).find(b => b.kind === 'character');
+        if (!figure) errors.push({t: st, error: 'no character in the scene layout'});
+        else {
+          const px = g.getImageData(Math.round(figure.body.cx), Math.round(figure.body.cy + figure.body.h * .3), 1, 1).data;
+          const want = K.rgb('#f4a259'), shade = K.rgb('#e0843d');
+          const near = c => Math.hypot(px[0]-c[0], px[1]-c[1], px[2]-c[2]) < 40;
+          if (!near(want) && !near(shade)) errors.push({t: st, error: 'body colour missing at the body', px: [...px]});
+          if (figure.character !== 'abcdefabcdef' || figure.mouth === undefined) errors.push({t: st, error: 'character box fields', figure});
         }
         const designedTimes = [0, ...kdInfo.beats.map(b=>b.start+(b.end-b.start)*.60)];
         const capture = () => {

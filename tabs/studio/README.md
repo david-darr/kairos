@@ -91,3 +91,12 @@ server history. Review this interaction before editing in multiple windows.
 A chat card can show a first-frame preview without Studio being on. Render
 discovery uses the tab's authenticated helper route, so an off or never-on
 Studio tab cannot supply its inline MP4 button until it is enabled.
+
+## Characters (Pack A)
+
+Content > Characters lists the account's characters for the Flat 2D style pack, each version with
+its reference sheet and status. New character starts from Kairos's own round, square or triangle
+design; New version changes colours, accessory or name (any change is a new version, older ones stay).
+Make sheet renders the sheet in the desktop app and sends it to Approvals, where only the person
+approves or rejects it (`/api/characters`, routes/character_routes.py). A video can only render a
+cast version that is approved. The beat editor has a `scene` kind with its scene as JSON.

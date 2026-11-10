@@ -1,7 +1,7 @@
 import { clamp, range, inOut, hash } from './kit.js';
 
 export const SIZES = { '16:9': [1920, 1080], '9:16': [1080, 1920], '1:1': [1080, 1080] };
-export const KINDS = ['title', 'statement', 'big-number', 'list', 'image', 'quote', 'split', 'logo', 'end'];
+export const KINDS = ['title', 'statement', 'big-number', 'list', 'image', 'quote', 'split', 'logo', 'end', 'scene'];
 export const CAMERAS = ['still', 'push', 'pull', 'pan', 'shake'];
 export const TRANSITIONS = ['cut', 'whip', 'zoom', 'flip', 'dither', 'mosaic', 'wipe'];
 export const LIMITS = { beats: 100, text: 180, sub: 160, number: 24, item: 100, items: 5, minBpm: 40, maxBpm: 240, minBars: .25, maxBars: 16 };
@@ -37,11 +37,33 @@ export function normalizeProject(input = {}) {
       treatment: ['halftone', 'dither'].includes(b.treatment) ? b.treatment : 'none',
       captions: captionsOn && Array.isArray(b.spoken?.parts) ? b.spoken.parts.filter(part => Array.isArray(part) && Number.isFinite(part[0]) && Number.isFinite(part[1]) && part[1] > part[0])
         .map(([from, to, text]) => ({ start: start + from, end: start + to, text: str(text, 160) })).filter(c => c.text) : [] };
+    // A Pack A scene keeps its setting, shot, cast and props, and the mouth shapes measured from its line.
+    if (kind === 'scene') {
+      result.scene = normalizeScene(b.scene);
+      result.mouth = typeof b.spoken?.mouth === 'string' && /^[XAEOMF]{1,2000}$/.test(b.spoken.mouth) ? b.spoken.mouth : '';
+    }
     start = end; return result;
   });
+  const characters = input.characters && typeof input.characters === 'object' ? input.characters : {};
   return { id: str(input.id, 64), title: str(input.title, 180), look: str(input.look, 64), bpm, bar, fps: 30,
+    palette: str(input.palette, 24) || 'dawn', characters,
     aspects: (Array.isArray(input.aspects) ? input.aspects : ['16:9']).filter(a => SIZES[a]), beats, duration: start,
     captioned: beats.some(b => b.captions.length) };
+}
+const ONE = (v, list, fallback) => list.includes(v) ? v : fallback;
+const unit = (v, fallback) => clamp(finite(v, fallback), 0, 1);
+// Defensive copy of a scene beat (the backend validates it; core/video_store.py _scene).
+export function normalizeScene(input) {
+  const s = input && typeof input === 'object' ? input : {};
+  return { setting: ONE(s.setting, ['meadow', 'city', 'space', 'room', 'ocean', 'lab'], 'meadow'), shot: ONE(s.shot, ['wide', 'medium', 'close'], 'medium'),
+    cast: (Array.isArray(s.cast) ? s.cast : []).slice(0, 3).filter(m => m && typeof m.character === 'string').map((m, i, all) => ({
+      character: m.character.slice(0, 12), x: unit(m.x, (i + 1) / (all.length + 1)),
+      view: ONE(m.view, ['front', 'three_quarter', 'side', 'back'], 'front'), turn: ONE(m.turn, ['front', 'three_quarter', 'side', 'back'], undefined),
+      expression: ONE(m.expression, ['neutral', 'happy', 'surprised', 'worried', 'thinking'], 'neutral'),
+      action: ONE(m.action, ['idle', 'wave', 'point', 'walk', 'jump', 'shrug', 'think', 'nod'], 'idle'), speaking: m.speaking === true,
+      facing: m.facing === 'left' ? 'left' : 'right' })),
+    props: (Array.isArray(s.props) ? s.props : []).slice(0, 6).filter(v => v && typeof v.icon === 'string').map(v => ({
+      icon: str(v.icon, 20), x: unit(v.x, .5), y: unit(v.y, .3), size: clamp(finite(v.size, .1), .03, .35), float: v.float === true })) };
 }
 export function dimensions(aspect) {
   const [width, height] = SIZES[aspect] || SIZES['16:9']; return { width, height, aspect: SIZES[aspect] ? aspect : '16:9' };
@@ -179,7 +201,7 @@ export function listMarker(box) {
 export const TYPE = {
   title: [210, 270], statement: [150, 195], 'big-number': [525, 750],
   list: [135, 165], quote: [135, 180], end: [180, 240],
-  image: [135, 180], split: [135, 180], logo: [150, 195]
+  image: [135, 180], split: [135, 180], logo: [150, 195], scene: [56, 104]
 };
 export function compositionAt(beats, index) {
   let previous = -1;
@@ -266,6 +288,11 @@ export function beatLayout(beat, aspect, measure, style = {}) {
       add(beat.text, x, .42, widthFraction, .40); add(beat.sub, x, .86, widthFraction, .14, 'body', 1); break;
     case 'quote':
       add(beat.text, x, top + .06, widthFraction, .54); add(beat.sub, x, top + .64, widthFraction, .11, 'body', 1); break;
+    case 'scene':
+      // The scene carries the shot; its words are a short label across the top, clear of the cast.
+      add(beat.text, .03, 0, .94, portrait ? .1 : .15, 'title', 0, TYPE.scene);
+      for (const box of boxes) Object.assign(box, { align: 'center', composition: 'center' });
+      break;
     default:
       if (beat.kind === 'title') {
         const titleTop = composition === 'bottom' ? .09 : composition === 'center' ? .045 : 0;

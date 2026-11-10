@@ -3,12 +3,20 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
-from core import (creative_direction, design_store, design_systems, design_tools, ffmpeg_tools, image_gen, video_narration,
-                  video_render, video_store)
+from core import (character_sheet, character_store, creative_direction, design_store, design_systems, design_tools, ffmpeg_tools,
+                  image_gen, style_packs, video_narration, video_render, video_store)
 from core.tool_registry import ALL, READ, WRITE, ToolResult, _object, _str, register
 from core.untrusted import wrap_untrusted
 
 LINKED_TOOLS = frozenset({"video_outline", "video_edit", "video_add_image", "video_preview", "video_render", "video_narrate"})
+SCENES = ("Pack A (flat 2D with characters): cast approved characters (character_list; make one with character_make, then "
+          "character_sheet sends its sheet to the person, and only an approved version can be rendered) as cast=[{character, version}] "
+          "and palette (dawn, mint, dusk, night or paper; one per channel). A scene beat is kind scene with scene={setting: meadow, city, "
+          "space, room, ocean or lab; shot: wide, medium or close; cast: up to 3 of {character, x 0-1, view front|three_quarter|side|back, "
+          "turn (the view the head turns to mid-beat), expression neutral|happy|surprised|worried|thinking, action idle|wave|point|walk|"
+          "jump|shrug|think|nod, speaking true for the one who says the beat's line, facing left|right}; props: up to 6 of {icon, x, y, "
+          "size, float}} and optional short text as a label. The speaking character's mouth follows the narration. Mix scene beats with "
+          "the other kinds (a big-number or list between scenes). ")
 FLOW = ("Workflow: creative_direction(type=video) -> video_create with a beat sheet (one idea per beat, "
         "3 to 8 words on screen, 1 to 2 bars each, end card last; vary the kinds: at most half statements, a big-number "
         "for a figure, a list, a quote, and an image or split beat with a photo from image_search) -> video_preview -> "
@@ -84,10 +92,13 @@ _NARRATION = {"type": "object", "properties": {"voice": _str("Kokoro voice id, e
                                                "captions": {"type": "boolean"}}}
 
 
-@register("video_create", FLOW + NARRATION + "Create a video project with a chosen look and beats; returns a Studio link. Pick a look with creative_direction(type=video) first.",
+@register("video_create", FLOW + NARRATION + SCENES + "Create a video project with a chosen look and beats; returns a Studio link. Pick a look with creative_direction(type=video) first.",
           _object({"title": _str("Video title"), "look": _str("Look id from creative_direction"),
                    "beats": {"type": "array", "items": {"type": "object"}, "minItems": 1, "maxItems": video_store.NARRATED_MAX_BEATS},
                    "narration": _NARRATION,
+                   "cast": {"type": "array", "maxItems": video_store.MAX_CAST, "items": {"type": "object", "properties": {
+                       "character": _str("Character id from character_list"), "version": {"type": "integer"}}}},
+                   "palette": {"type": "string", "enum": list(style_packs.PALETTES)},
                    "aspects": {"type": "array", "items": _ASPECT}, "bpm": {"type": "number", "minimum": 60, "maximum": 180},
                    "music": {"type": "object", "properties": {"mood": {"type": "string", "enum": list(video_store.MOODS)},
                                                               "volume": {"type": "number", "minimum": 0, "maximum": 1}}}},
@@ -108,7 +119,7 @@ async def _create(args, ctx):
         for i, beat in enumerate(beats):
             if isinstance(beat, dict):
                 beat.setdefault("id", f"b{i + 1}")
-    options = {k: args[k] for k in ("aspects", "bpm", "music", "narration") if k in args}
+    options = {k: args[k] for k in ("aspects", "bpm", "music", "narration", "cast", "palette") if k in args}
     project = video_store.create(args.get("title"), look=look, beats=beats, owner=owner, chat_key_=key, **options)
     title = project["title"].replace("[", "").replace("]", "").replace("\n", " ")
     step = "video_narrate for the shot plan, " if video_store.narrated(project) else ""
@@ -137,11 +148,11 @@ def edit(project, ops):
             raise ValueError(f"ops[{n}]: give an operation object.")
         kind = op.get("op")
         if kind == "project":
-            if op.get("field") not in ("title", "look", "bpm", "aspects", "music", "narration") or "value" not in op:
-                raise ValueError(f"ops[{n}].field: project edits title, look, bpm, aspects, music or narration with value.")
+            if op.get("field") not in ("title", "look", "bpm", "aspects", "music", "narration", "cast", "palette") or "value" not in op:
+                raise ValueError(f"ops[{n}].field: project edits title, look, bpm, aspects, music, narration, cast or palette with value.")
             draft[op["field"]] = op["value"]
         elif kind == "set":
-            if op.get("field") not in ("kind", "bars", "text", "sub", "number", "items", "image", "camera", "transition", "treatment", "say") or "value" not in op:
+            if op.get("field") not in ("kind", "bars", "text", "sub", "number", "items", "image", "camera", "transition", "treatment", "say", "scene") or "value" not in op:
                 raise ValueError(f"ops[{n}].field: choose a beat field from video_outline and give value.")
             if op["field"] == "say" and op["value"] in (None, ""):
                 draft["beats"][index(op.get("id"))].pop("say", None)   # an empty line takes the narration off that beat
@@ -171,7 +182,7 @@ def edit(project, ops):
 
 @register("video_edit", "Change a video atomically. ops: set {op:set,id,field,value} (field say sets or, with an empty value, removes a narration line); "
           "insert {op:insert,before|after,beat}; remove {op:remove,id}; move {op:move,id,before|after}; "
-          "project {op:project,field,value} for title,look,bpm,aspects,music,narration. "
+          "project {op:project,field,value} for title,look,bpm,aspects,music,narration,cast,palette; a scene beat's whole scene is set with field scene. "
           "Use beat ids from video_outline. A bad operation changes nothing. Preview again after edits.",
           _object({"video_id": _ID, "ops": {"type": "array", "items": {"type": "object"}}}, ("ops",)), surfaces=ALL, effect=WRITE)
 @_guard
@@ -257,3 +268,72 @@ async def _render(args, ctx):
         lines += [f"[{published['filename']}]({published['url']})", "Loudness: " + json.dumps(result["loudness"])]
         lines += result["notes"]
     return _safe(ctx, "\n".join(lines))
+
+
+# -- Pack A characters (Video Styles unit 3) ------------------------------------------------------------------------
+
+def _character_line(meta):
+    versions = ", ".join(f"v{v['version']} {v['status'].replace('_', ' ')}" for v in meta["versions"])
+    return f"- {meta['name']} ({meta['family']}), id {meta['id']}: {versions}"
+
+
+@register("character_list", "List this account's Pack A characters with their versions and approval status, and what a scene can use "
+          "(families, settings, palettes, props, actions). Cast only an approved version in a video.",
+          _object({}), surfaces=ALL, effect=READ)
+@_guard
+async def _characters(args, ctx):
+    lines = ["Characters:"] + ([_character_line(m) for m in character_store.list_all()] or ["- none yet; make one with character_make."])
+    lines += ["Families (starting designs): " + ", ".join(f"{f} ({character_store.STARTERS[f]['name']})" for f in character_store.FAMILIES),
+              "Settings: " + ", ".join(style_packs.SETTINGS), "Palettes: " + ", ".join(style_packs.PALETTES),
+              "Props: " + ", ".join(style_packs.PROPS), "Actions: " + ", ".join(video_store.ACTIONS),
+              "Views: " + ", ".join(character_store.VIEWS), "Expressions: " + ", ".join(character_store.EXPRESSIONS)]
+    return _safe(ctx, "\n".join(lines))
+
+
+def _taken_names():
+    """Names on the Content Studio format cards' do-not-use lists: another channel's characters are never ours."""
+    try:
+        from services.content_studio import studio
+        return {n.lower() for card in studio.list_formats(None) for n in card.get("do_not_use", [])}
+    except Exception:
+        return set()
+
+
+@register("character_make", "Design an original Pack A character, or change one (which makes a new version). New: family (round, square or "
+          "triangle; each starts from Kairos's own design) and name, with any changes to palette (hex: body, body_shade, head, limb, eye, "
+          "mouth, outline, accent, cheek), proportions (head, body_width, limb_length, limb_width, eye_size, as shares of height), "
+          "outline (4 to 14 thousandths of height) and accessory (none, scarf, antenna, leaf, cap, bow). Change: character_id and changes. "
+          "Never copy another channel's or brand's character; names on a format card's do-not-use list are refused. "
+          "Then character_sheet sends the sheet to the person; only they approve it.",
+          _object({"character_id": _str("A character to change; leave out to make a new one"),
+                   "family": {"type": "string", "enum": list(character_store.FAMILIES)}, "name": _str("The character's name"),
+                   "changes": {"type": "object", "description": "palette, proportions, outline, accessory or name"},
+                   "note": _str("What changed and why")}), surfaces=ALL, effect=WRITE)
+@_guard
+async def _design(args, ctx):
+    changes = dict(args.get("changes") or {})
+    if args.get("name"):
+        changes["name"] = args["name"]
+    if str(changes.get("name", "")).strip().lower() in _taken_names():
+        raise ValueError("name: that name belongs to a source channel on a format card; give the character our own name.")
+    if args.get("character_id"):
+        meta = character_store.new_version(args["character_id"], changes, by="model", note=args.get("note", ""))
+    else:
+        if not args.get("family"):
+            raise ValueError("family: choose round, square or triangle for a new character.")
+        meta = character_store.create(character_store.starter(args["family"], **changes), by="model", note=args.get("note", ""))
+    v = meta["versions"][-1]["version"]
+    return _safe(ctx, _character_line(meta) + f"\nVersion {v} is a draft. Run character_sheet with character_id {meta['id']} and version {v} "
+                      "to render its sheet and send it to the person for approval.")
+
+
+@register("character_sheet", "Render a character version's reference sheet (every view, expression and mouth shape, the palette) with the same "
+          "rig the videos use, check it, and send it to the person for approval in Studio > Content > Characters (and their Inbox when the "
+          "Content Studio team is set up). Needs the desktop app. Only the person approves.",
+          _object({"character_id": _str("Character id"), "version": {"type": "integer"}}, ("character_id", "version")), surfaces=ALL, effect=WRITE)
+@_guard
+async def _sheet(args, ctx):
+    meta = await character_sheet.submit(args["character_id"], args["version"])
+    sheet = character_store.sheet_path(meta["id"], args["version"])
+    return ToolResult(_safe(ctx, f"The sheet of {meta['name']} version {args['version']} is waiting for the person's approval in "
+                                 "Studio > Content > Characters."), [sheet.read_bytes()], image_fallback="")

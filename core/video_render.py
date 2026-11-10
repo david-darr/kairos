@@ -51,16 +51,66 @@ def _aspect(project, aspect):
     return video_store.ASPECTS[aspect]
 
 
-def _job(project, aspect, job_id, times=None):
+LAYOUT_SAMPLES = 120   # the most layout samples the render worker takes (electron/designRender.js)
+
+
+def _job(project, aspect, job_id, times=None, frame_times=()):
+    """The worker's job. Layout is sampled a quarter, half and three quarters into each beat, and at every frame
+    kept for the checks (`frame_times`), so a sampled frame can be compared with what the rig drew there."""
     w, h = _aspect(project, aspect)
     version = project["version"]
     token = design_render.sign(project["id"], f"video:{aspect}:{version}", 900)
-    samples = sorted({round(b["start"] + (b["end"] - b["start"]) * f, 6)
-                      for b in outline(project) for f in (.25, .5, .75)})
+    duration = video_store.duration(project)
+    kept = sorted({round(t, 6) for t in list(frame_times) + list(times or []) if 0 <= t < duration})
+    beats = sorted({round(b["start"] + (b["end"] - b["start"]) * f, 6)
+                    for b in outline(project) for f in (.25, .5, .75)} - set(kept))
+    room = max(0, LAYOUT_SAMPLES - len(kept))
+    if len(beats) > room:   # a long video: an even spread of the beat samples (100 beats would be 300)
+        beats = [beats[round(i * (len(beats) - 1) / max(1, room - 1))] for i in range(room)] if room else []
+    samples = sorted(set(kept[:LAYOUT_SAMPLES]) | set(beats))
     return {"id": job_id, "kind": "video", "path": f"/api/videos/{project['id']}/player?aspect={quote(aspect, safe='')}&rt={token}&v={version}",
             "w": w, "h": h, "look": project["look"], "fps": 30,
-            "frames": math.ceil(video_store.duration(project) * 30 - 1e-7),
+            "frames": math.ceil(duration * 30 - 1e-7),
             "preview": times is not None, "times": times or [], "layoutTimes": samples}
+
+
+def cast_problems(project):
+    """Why a video cannot render with its cast: a character missing, or a version the person has not approved."""
+    from core import character_store
+    out = []
+    for entry in project.get("cast", []):
+        try:
+            meta = character_store.get(entry["character"])
+            status = character_store.version_of(meta, entry["version"])["status"]
+        except LookupError as error:
+            out.append(str(error).strip("'"))
+            continue
+        if status != "approved":
+            out.append(f"{meta['name']} version {entry['version']} is {status.replace('_', ' ')}; a video may only use an approved "
+                       "version. Approve its sheet in Studio > Content > Characters, or cast an approved version.")
+    return out
+
+
+def character_notes(project, layouts, frames, times):
+    """Sheet-match checks (section 5) on sampled frames: each character the layout reports at a frame's time."""
+    from core import character_checks, character_store
+    if not project.get("cast") or not frames:
+        return []
+    try:
+        cast = character_store.resolve(project["cast"])
+    except LookupError as error:
+        return [str(error).strip("'")]
+    by_time = {round(s.get("time", -1), 6): s.get("elements", []) for s in layouts or []}
+    notes, measured = [], 0
+    for frame, t in zip(frames, times):
+        boxes = [b for b in by_time.get(round(t, 6), []) if b.get("kind") in ("character", "prop", "text")]
+        if any(b.get("kind") == "character" for b in boxes):
+            measured += 1
+            notes += character_checks.frame_notes(frame, boxes, cast)
+    for key, entry in cast.items():
+        if not entry["approved"]:
+            notes.append(f"{entry['name']} version {entry['version']} is not approved yet; this preview cannot be rendered.")
+    return list(dict.fromkeys(notes))
 
 
 def wait_seconds(project):
@@ -94,6 +144,9 @@ def start(video_id, aspect):
     """Return a reviewable job id immediately; fail before queuing without FFmpeg."""
     project = video_store.get(video_id)
     _aspect(project, aspect)
+    problems = cast_problems(project)
+    if problems:
+        raise ValueError("cast: " + " ".join(problems))
     if not ffmpeg_tools.find():
         raise RuntimeError(ffmpeg_tools.MISSING)
     if not design_render_bridge.available():
@@ -154,9 +207,10 @@ async def _render(project, aspect, job_id):
         out = folder / f"{slug}-v{n}.mp4"
         temp = out.with_name(out.stem + ".partial.mp4")
         encoder = ffmpeg_tools.Encoder(temp, wav)
-        job = _job(project, aspect, job_id)
-        total, seen = job["frames"], 0
+        total = math.ceil(video_store.duration(project) * 30 - 1e-7)
         indices = {round(i * (total - 1) / 11) for i in range(12)}
+        job = _job(project, aspect, job_id, frame_times=[i / 30 for i in indices])
+        seen = 0
         thumb_index = min(total - 1, thumb_frame(project, job["fps"]))
         samples, layouts, thumb = [], [], None
         state["status"] = f"rendering 0/{total}"
@@ -184,6 +238,7 @@ async def _render(project, aspect, job_id):
         encoder = None
         measured = await _thread_done(ffmpeg_tools.loudness, temp)
         notes = video_checks.check(project, aspect, layouts, samples, measured, voice or None)
+        notes += character_notes(project, layouts, samples, [i / 30 for i in sorted(indices)])
         sheet = folder / f"sheet-{slug}.png"
         sheet.write_bytes(ffmpeg_tools.contact_sheet(samples, 4))
         thumb_path = folder / f"thumb-{slug}.png"
@@ -231,5 +286,6 @@ async def preview(video_id, aspect, times=None):
         layouts.extend(samples)
     async with _machine():
         await design_render_bridge.video(_job(project, aspect, secrets.token_hex(8), times), consume)
-    _last_preview[video_id] = {"version": project["version"], "notes": video_checks.check(project, aspect, layouts, frames)}
+    notes = video_checks.check(project, aspect, layouts, frames) + character_notes(project, layouts, frames, times)
+    _last_preview[video_id] = {"version": project["version"], "notes": list(dict.fromkeys(notes))}
     return frames

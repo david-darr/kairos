@@ -179,5 +179,43 @@ const path = require('node:path');
   // Long words stay whole when shrinking fits them (a Studio preview broke "opening" mid-word).
   const charWidth = (s, size) => Array.from(s).length * size * .55;
   assert.ok(L.fitText('Valid opening', { w: 500, h: 600 }, { min: 40, max: 200, measure: charWidth }).lines.every(l => !/^g$/.test(l) && !l.endsWith('openin')));
-  console.log(`Motion engine pure checks passed (${boxesChecked} fitted text boxes; all kinds/aspects/cameras/transitions).`);
+  // Pack A: the rig's timing is deterministic and the scene beat is normalized defensively.
+  const R = await import(moduleURL('rig.js')), S = await import(moduleURL('scene.js'));
+  const blinks = Array.from({ length: 300 }, (_, i) => R.blinkAt('pip:b1', i / 30));
+  assert.deepEqual(blinks, Array.from({ length: 300 }, (_, i) => R.blinkAt('pip:b1', i / 30)), 'blinks are seeded');
+  assert.ok(blinks.some(b => b === 1) && blinks.filter(b => b > 0).length < 40, 'a few short blinks in ten seconds');
+  assert.equal(R.mouthAt('XXXXXXXXAEOMF', 8 / 30), 'A');
+  assert.equal(R.mouthAt('XXXXXXXXAEOMF', 11 / 30), 'MBP');
+  assert.equal(R.mouthAt('XXXXXXXXAEOMF', 12 / 30), 'FV');
+  assert.equal(R.mouthAt('XA', 5), 'rest');
+  assert.equal(R.mouthAt('', 0), 'rest');
+  assert.deepEqual([0, .5, .6, .7].map(t => R.viewAt('front', 'side', t, .5)), ['front', 'front', 'three_quarter', 'side']);
+  assert.equal(R.viewAt('front', undefined, 9, 0), 'front');
+  const jump = Array.from({ length: 48 }, (_, i) => R.poseAt('jump', i / 30));
+  assert.ok(Math.min(...jump.map(p => p.sy)) < .9 && Math.max(...jump.map(p => p.sy)) > 1.1, 'squash and stretch on a hop');
+  assert.ok(Math.max(...jump.map(p => p.lift)) > .2, 'the hop leaves the ground');
+  assert.ok(R.poseAt('wave', 1).arm[1][0] > 2, 'a wave raises the arm');
+  const pip = { family: 'round', outline: 7, proportions: { head: .42, body_width: .62, limb_length: .26, limb_width: .055, eye_size: .036 }, palette: {} };
+  const geo = R.geometry(pip, 1000);
+  // core/character_checks.body_centre places the body's centre the same way.
+  assert.ok(Math.abs((geo.bodyTop + geo.bodyBottom) / 2 - (-1000 + 420 * .82 + -260 * .9) / 2) < 1e-9);
+  const box = R.figureBox(pip, 500, 900, 400, { pose: R.poseAt('idle', 0) });
+  assert.ok(box.y < 900 - 400 && box.body.cy < 900 && box.body.cy > 900 - 400 && Math.abs(box.outline - 2.8) < 1e-9);
+  const sc = L.normalizeScene({ setting: 'volcano', shot: 'huge', cast: [{ character: 'abc', action: 'dance', view: 'up', x: 9 }, null, { nope: 1 }],
+    props: Array(9).fill({ icon: 'sun', size: 9 }) });
+  assert.deepEqual([sc.setting, sc.shot, sc.cast.length, sc.cast[0].action, sc.cast[0].view, sc.cast[0].x, sc.props.length, sc.props[0].size],
+    ['meadow', 'medium', 1, 'idle', 'front', 1, 6, .35]);
+  const sp = L.normalizeProject({ palette: 'dusk', characters: { abcdefabcdef: { version: 1, spec: pip } }, beats: [
+    { id: 's', kind: 'scene', seconds: 3, text: 'A label', spoken: { mouth: 'XXAAO' }, scene: { shot: 'wide', cast: [{ character: 'abcdefabcdef', speaking: true }] } }] });
+  assert.equal(sp.beats[0].mouth, 'XXAAO');
+  assert.equal(L.normalizeProject({ beats: [{ id: 's', kind: 'scene', spoken: { mouth: '<script>' } }] }).beats[0].mouth, '');
+  const boxes = S.sceneBoxes(sp.beats[0], sp, 1920, 1080, 900, 1, .3);
+  const figure = boxes.find(b => b.kind === 'character');
+  assert.equal(figure.shot, 'wide');
+  assert.ok(Math.abs(figure.height / 1080 - .30) < .03, 'a wide shot is about 30% of the short side');
+  assert.equal(S.sceneBoxes({ ...sp.beats[0], scene: { cast: [{ character: 'unknown00000' }] } }, sp, 1920, 1080, 900, 1, .3).length, 0, 'no spec, nothing drawn');
+  const label = L.beatLayout(sp.beats[0], '16:9', charWidth, { captioned: true });
+  assert.equal(label.length, 1);
+  assert.ok(label[0].y + label[0].h <= 1080 * .25 && label[0].align === 'center', 'a scene label stays at the top');
+  console.log(`Motion engine pure checks passed (${boxesChecked} fitted text boxes; all kinds/aspects/cameras/transitions; Pack A rig and scenes).`);
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -9,6 +9,11 @@ loudness pass, the checks and the contact sheet. It writes what happened to --ou
 Data goes to a temporary folder. With --models pointing at a folder that holds Kokoro's downloaded model files, the
 real Kokoro voice speaks (read only); without it a tone stands in for the voice so the suite runs on any machine.
 --keep copies the MP4, contact sheet, thumbnail and project JSON to a folder (the morning sample).
+
+Pack A (Video Styles unit 3): every run also makes characters from Kairos's starting family, renders each one's
+reference sheet through the same worker (a PNG job on the sheet page), checks it, approves it in the temporary
+store (a test approval: in the app only the person approves) and casts it in scene beats, so the render covers the
+rig, the mouth shapes timed from the narration and the sheet-match checks. --pack-a renders the Pack A sample.
 """
 import argparse
 import asyncio
@@ -47,9 +52,45 @@ SAMPLE = {
     ],
 }
 SMOKE = {
-    "title": "Narration smoke", "look": "sport", "aspects": ["16:9"],
+    "title": "Narration smoke", "look": "sport", "aspects": ["16:9"], "characters": ["round"], "palette": "mint",
     "beats": [{"id": "one", "kind": "title", "text": "Narrated", "say": "One short line. And a second one, after a comma."},
+              {"id": "talk", "kind": "scene", "say": "Hello there. I am a character.",
+               "scene": {"setting": "meadow", "shot": "medium", "cast": [{"character": 0, "action": "wave", "expression": "happy", "speaking": True}],
+                         "props": [{"icon": "sun", "x": .8, "y": .2, "size": .12}]}},
               {"id": "two", "kind": "end", "text": "Done", "bars": 1}],
+}
+# Pack A sample: an original, harmless explainer told by two of Kairos's own characters (Pip, round; Bo, square).
+# Facts: Rayleigh scattering (scattering goes as one over the wavelength to the fourth power, so blue at about 450 nm
+# scatters several times more than red at about 700 nm) and the redder sky at sunset; standard physics, not checked
+# against a source in this run.
+PACK_A = {
+    "title": "Why the sky is blue", "look": "nordic", "aspects": ["16:9"], "characters": ["round", "square"], "palette": "dawn",
+    "music": {"mood": "playful", "volume": .6}, "narration": {"voice": "af_heart", "captions": True},
+    "beats": [
+        {"id": "hello", "kind": "scene", "camera": "push", "transition": "whip", "say": "Hi, I'm Pip. Ever wondered why the sky is blue?",
+         "scene": {"setting": "meadow", "shot": "wide", "cast": [{"character": 0, "x": .35, "action": "wave", "expression": "happy", "speaking": True},
+                                                                  {"character": 1, "x": .68, "action": "idle", "expression": "neutral", "view": "three_quarter", "facing": "left"}],
+                   "props": [{"icon": "sun", "x": .82, "y": .18, "size": .13}, {"icon": "cloud", "x": .2, "y": .2, "size": .12, "float": True}]}},
+        {"id": "white", "kind": "scene", "camera": "pan", "transition": "dither", "text": "Sunlight is every colour",
+         "say": "Sunlight looks white, but it is really every colour of the rainbow mixed together.",
+         "scene": {"setting": "meadow", "shot": "medium", "cast": [{"character": 1, "x": .4, "action": "point", "expression": "happy", "speaking": True}],
+                   "props": [{"icon": "sun", "x": .8, "y": .25, "size": .16}]}},
+        {"id": "scatter", "kind": "scene", "camera": "pull", "transition": "zoom",
+         "say": "The air is full of tiny molecules, and they bounce short blue waves around far more than long red ones.",
+         "scene": {"setting": "lab", "shot": "medium", "cast": [{"character": 0, "x": .38, "action": "think", "expression": "thinking", "speaking": True}],
+                   "props": [{"icon": "atom", "x": .72, "y": .32, "size": .16, "float": True}, {"icon": "arrow", "x": .72, "y": .58, "size": .1}]}},
+        {"id": "everywhere", "kind": "scene", "camera": "still", "transition": "wipe",
+         "say": "So blue light reaches your eyes from every part of the sky.",
+         "scene": {"setting": "meadow", "shot": "close", "cast": [{"character": 1, "x": .5, "action": "nod", "expression": "surprised", "speaking": True, "turn": "three_quarter"}],
+                   "props": [{"icon": "star", "x": .15, "y": .2, "size": .08, "float": True}]}},
+        {"id": "sunset", "kind": "scene", "camera": "pan", "transition": "mosaic",
+         "say": "At sunset, light crosses much more air. The blue gets scattered away, and reds and oranges are left.",
+         "scene": {"setting": "ocean", "shot": "wide", "cast": [{"character": 0, "x": .3, "action": "walk", "expression": "happy", "speaking": True, "view": "three_quarter"},
+                                                                  {"character": 1, "x": .7, "action": "jump", "expression": "happy"}],
+                   "props": [{"icon": "sun", "x": .5, "y": .55, "size": .14}]}},
+        {"id": "end", "kind": "end", "text": "Look up today", "sub": "An original Kairos explainer", "bars": 1.5,
+         "say": "Next time you look up, you'll know why."},
+    ],
 }
 
 
@@ -75,9 +116,9 @@ async def main(args):
     import uvicorn
     from fastapi import FastAPI
     from fastapi.staticfiles import StaticFiles
-    from core import design_render_bridge, speech_optional, video_narration, video_render, video_store
+    from core import character_sheet, character_store, design_render_bridge, speech_optional, video_narration, video_render, video_store
     from core.constants import STATIC_DIR
-    from routes import design_routes, video_routes
+    from routes import character_routes, design_routes, video_routes
 
     real_voice = bool(args.models)
     if real_voice:
@@ -86,6 +127,7 @@ async def main(args):
         video_narration._ready = lambda voice: tone_voice()
     app = FastAPI()
     app.include_router(video_routes.router)
+    app.include_router(character_routes.router)
     app.include_router(design_routes.render_router)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=args.port, log_level="warning"))
@@ -98,8 +140,45 @@ async def main(args):
             await asyncio.sleep(.1)
         else:
             raise RuntimeError("Electron's render worker did not connect.")
-        spec = SAMPLE if args.sample else SMOKE
-        project = video_store.create(spec["title"], owner="smoke", **{k: v for k, v in spec.items() if k != "title"})
+        spec = PACK_A if args.pack_a else SAMPLE if args.sample else SMOKE
+        # Characters: made from the starting family, sheet rendered by the worker and checked, then approved here.
+        cast, sheets = [], []
+        for family in spec.get("characters", []):
+            meta = character_store.create(character_store.starter(family), by="smoke")
+            meta = await character_sheet.submit(meta["id"], 1)
+            sheets.append({"id": meta["id"], "name": meta["name"], "metrics": meta["versions"][0]["metrics"]})
+            character_store.decide(meta["id"], 1, True, "render smoke (test approval in a temporary store)")
+            cast.append(meta["id"])
+        beats = json.loads(json.dumps(spec["beats"]))
+        for beat in beats:
+            for member in beat.get("scene", {}).get("cast", []):
+                member["character"] = cast[member["character"]]
+        options = {k: v for k, v in spec.items() if k not in ("title", "characters", "beats")}
+        if cast:
+            options["cast"] = [{"character": c, "version": 1} for c in cast]
+        project = video_store.create(spec["title"], owner="smoke", beats=beats, **options)
+        result["sheets"] = sheets
+        # Prove the sheet-match checks measured real frames: count the frames with a character in them, and run the
+        # same frames against a deliberately wrong palette, which must be named.
+        checked = {}
+        real_notes = video_render.character_notes
+
+        def watched(project_, layouts, frames, times):
+            notes = real_notes(project_, layouts, frames, times)
+            if frames and len(frames) == 12:
+                by_time = {round(x.get("time", -1), 6): x.get("elements", []) for x in layouts}
+                checked["frames_with_characters"] = sum(any(b.get("kind") == "character" for b in by_time.get(round(t, 6), [])) for t in times)
+                from core import character_checks
+                cast_now = character_store.resolve(project_.get("cast", []))
+                wrong = {k: {**v, "spec": {**v["spec"], "palette": {**v["spec"]["palette"], "body": "#00ff00", "body_shade": "#00cc00",
+                                                                       "head": "#0000ff", "outline": "#ff00ff"}}} for k, v in cast_now.items()}
+                tampered = []
+                for frame, t in zip(frames, times):
+                    boxes = [b for b in by_time.get(round(t, 6), []) if b.get("kind") in ("character", "prop")]
+                    tampered += character_checks.frame_notes(frame, boxes, wrong)
+                checked["wrong_palette_notes"] = len(tampered)
+            return notes
+        video_render.character_notes = watched
         began = time.time()
 
         async def progress():
@@ -117,13 +196,15 @@ async def main(args):
             raise RuntimeError(job["status"])
         project = video_store.get(project["id"])
         folder = video_store._folder(project["id"]) / "renders"
-        result.update(ok=True, project=project, files=sorted(p.name for p in folder.iterdir()))
+        result.update(ok=True, project=project, files=sorted(p.name for p in folder.iterdir()), sheet_match=checked)
         if args.keep:
             keep = Path(args.keep)
             keep.mkdir(parents=True, exist_ok=True)
             slug = spec["aspects"][0].replace(":", "-")
             stem = args.name or "narrated-sample"
             shutil.copy2(job["path"], keep / f"{stem}.mp4")
+            for sheet in sheets:
+                shutil.copy2(character_store.sheet_path(sheet["id"], 1), keep / f"{stem}-character-sheet-{sheet['name'].lower()}.png")
             shutil.copy2(folder / f"sheet-{slug}.png", keep / f"{stem}-contact-sheet.png")
             shutil.copy2(folder / f"thumb-{slug}.png", keep / f"{stem}-thumbnail.png")
             (keep / f"{stem}-project.json").write_text(json.dumps(project, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -149,6 +230,7 @@ if __name__ == "__main__":
     parser.add_argument("--keep")
     parser.add_argument("--name")
     parser.add_argument("--sample", action="store_true")
+    parser.add_argument("--pack-a", action="store_true", dest="pack_a")
     parsed = parser.parse_args()
     data = tempfile.mkdtemp(prefix="video-render-smoke-")
     os.environ["JARVIS_DATA_DIR"] = data

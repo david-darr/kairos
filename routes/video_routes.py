@@ -27,6 +27,8 @@ class VideoBody(BaseModel):
     aspects: list[str] = Field(default=["16:9"], min_length=1, max_length=3)
     music: dict[str, Any] = Field(default={"mood": "energetic", "volume": .7})
     narration: Optional[dict[str, Any]] = None
+    cast: Optional[list[dict[str, Any]]] = None      # Pack A: characters pinned to versions
+    palette: Optional[str] = Field(None, max_length=24)
     id: Optional[str] = None
     owner: Optional[str] = None
     chat_ids: list[str] = []
@@ -36,7 +38,8 @@ class VideoBody(BaseModel):
     updated: Optional[float] = None
 
     def project(self):
-        return {k: v for k, v in self.model_dump().items() if k in video_store.FIELDS and (k not in ("id", "narration") or v is not None)}
+        return {k: v for k, v in self.model_dump().items()
+                if k in video_store.FIELDS and (k not in ("id", "narration", "cast", "palette") or v is not None)}
 
 
 class RenderBody(BaseModel):
@@ -131,6 +134,14 @@ def player_page(project):
     if not system:
         raise HTTPException(422, "look: this video's look is no longer available.")
     data = {k: v for k, v in project.items() if k in video_store.FIELDS}
+    if project.get("cast"):
+        # Each cast member's spec at its pinned version: the rig draws only from these numbers.
+        from core import character_store
+        try:
+            data["characters"] = {cid: {"version": c["version"], "spec": c["spec"]}
+                                  for cid, c in character_store.resolve(project["cast"]).items()}
+        except LookupError as error:
+            raise HTTPException(422, "cast: " + str(error).strip("'")) from None
     data_json = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     css = design_systems.tokens_css(system["tokens"]) + design_systems.font_faces(system["id"], "/api/design-fonts")
     page = page.replace("<!--KD-PROJECT-->", '<script type="application/json" id="kd-project">' + data_json + '</script>')
