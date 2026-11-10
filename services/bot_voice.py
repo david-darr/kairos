@@ -98,7 +98,9 @@ async def selection(voice_id=None):
         raise VoiceError("A voice note needs a local voice engine", 409)
     voice = voice_id or catalog["voices"][0]["id"]
     if voice not in {v["id"] for v in catalog["voices"]}:
-        raise VoiceError("That voice is unavailable. Choose a voice again.", 409)
+        # The bot's voice belongs to another engine (the account switched, say, from Kokoro to ElevenLabs): speak in
+        # this engine's first voice rather than going silent, until a voice is chosen again.
+        voice = catalog["voices"][0]["id"]
     return catalog["models"][0], voice
 
 

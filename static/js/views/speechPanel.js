@@ -242,11 +242,27 @@ export async function renderSpeechPanel(content, status) {
     if (deviceSection && root.isConnected) parts.push(deviceSection);
     const voiceSection = await drawVoice();
     if (voiceSection && root.isConnected) parts.push(voiceSection);
+    const engines = await drawVoiceEngines(isAdmin, () => draw());
+    if (engines && root.isConnected) parts.push(engines);
     const freeVoice = await drawFreeVoice();
     if (freeVoice && root.isConnected) parts.push(freeVoice);
 
     parts.push(note('Larger models are more accurate and slower. Transcription runs on the processor, so a long recording on a modest machine takes a few seconds.'));
     root.replaceChildren(...parts);
+  }
+
+  // ElevenLabs and VoiceStudio as the reading voice (voiceEnginesSetup.js); Kokoro and the device voice stay the fallback.
+  async function drawVoiceEngines(admin, redraw) {
+    const state = await api('/api/voice-engines', { toast: false }).catch(() => null);
+    if (!state) return null;
+    const { elevenLabsSetup, voiceStudioSetup } = await import('../voiceEnginesSetup.js');
+    return group({ title: 'Voice engines', cls: 'speech-voice-engines',
+      description: 'Choose who speaks: ElevenLabs on your own key, or VoiceStudio running on this computer. Each sentence is spoken as soon as it is written. If the engine fails, Kokoro (when downloaded) or the device voice takes over.' }, [
+      row({ title: 'ElevenLabs', description: 'Studio-quality voices, including your own cloned voice, on your ElevenLabs account.', control: state.active === 'elevenlabs' ? pill('In use', 'ok') : state.elevenlabs?.has_key ? pill('Key saved', 'muted') : pill('Not set up', 'muted') }),
+      elevenLabsSetup(state, { onChanged: redraw }),
+      row({ title: 'VoiceStudio', description: 'A free, fully local alternative to ElevenLabs that you install and run yourself.', control: state.active === 'voicestudio' ? pill('In use', 'ok') : pill('Not in use', 'muted') }),
+      voiceStudioSetup(state, { isAdmin: admin, onChanged: redraw }),
+    ]);
   }
 
   // Free realtime voice (freeVoiceSetup.js): realtime speech-to-speech on a free Gemini key, set up in a few steps.
