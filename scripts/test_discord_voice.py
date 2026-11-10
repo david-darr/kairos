@@ -579,10 +579,14 @@ class Lifecycle(unittest.IsolatedAsyncioTestCase):
 
 
 class RingRouting(unittest.IsolatedAsyncioTestCase):
+    """ring_me and notify_me_by_call follow the call order in Settings > Reach me (services/reach_me.py)."""
+
     def setUp(self):
+        from core import reach_me as reach_settings
+        from services import reach_me as reach_service
         self.ctx = SimpleNamespace(invocation_id="inv-9")
         self.calls = []
-        self.preference = "app"
+        self.order = ["phone", "app", "discord", "telegram"]
         self.phone_ready = False
 
         async def ring_user(account, bot_id, reason, ident):
@@ -594,49 +598,56 @@ class RingRouting(unittest.IsolatedAsyncioTestCase):
             return "phoned"
         self.discord = AsyncMock(side_effect=lambda account, bot_id, reason, ident: self.calls.append(("discord", reason)) or "joined")
         for item in (patch("core.tool_registry._bot_scope", lambda ctx: {"bot_id": "bot-kip"}),
-                     patch.object(phone_tools, "_preference", lambda: self.preference),
-                     patch.object(phone_tools, "_phone_ready", lambda: self.phone_ready),
+                     patch.object(reach_service, "_bot", lambda account, bot_id, strict=True: dict(AGENT)),
+                     patch.object(reach_service, "_phone_ready", lambda account: self.phone_ready),
+                     patch.object(reach_settings, "order_for", lambda bot_id, kind, account=None: list(self.order)),
+                     patch.object(reach_settings, "quiet_until", lambda account=None, now=None: None),
                      patch.object(phone_tools.rings, "ring_user", ring_user),
                      patch.object(phone_tools.phone_calls, "call_user", phone_call),
-                     patch.object(dv, "call_user", self.discord)):
+                     patch.object(dv, "call_user", self.discord),
+                     patch.object(dv, "pick_bot", lambda account: {"id": "discord-bot"})):
             item.start()
             self.addCleanup(item.stop)
 
-    async def test_the_default_is_the_app_ring_and_phone_calls_are_unchanged(self):
+    async def test_the_default_order_phones_when_a_phone_is_set_up_and_rings_in_the_app_otherwise(self):
         self.assertEqual(await phone_tools.tool_ring({"reason": "r"}, self.ctx), "rang")
         self.assertEqual(await phone_tools.tool_call({"message": "m"}, self.ctx), "rang")
         self.phone_ready = True
         self.assertEqual(await phone_tools.tool_call({"message": "m"}, self.ctx), "phoned")
-        self.assertEqual(await phone_tools.tool_ring({"reason": "r"}, self.ctx), "rang")
+        self.assertEqual(await phone_tools.tool_ring({"reason": "r"}, self.ctx), "phoned")
         self.assertNotIn("discord", [c[0] for c in self.calls])
 
-    async def test_discord_preference_joins_the_voice_channel(self):
-        self.preference = "discord"
+    async def test_discord_first_joins_the_voice_channel(self):
+        self.order = ["discord", "phone", "app"]
         self.assertEqual(await phone_tools.tool_ring({"reason": "r"}, self.ctx), "joined")
         self.phone_ready = True
         self.assertEqual(await phone_tools.tool_call({"message": "m"}, self.ctx), "joined")
         self.assertEqual([c[0] for c in self.calls], ["discord", "discord"])
 
-    async def test_discord_not_available_falls_back_to_the_app_ring(self):
-        self.preference = "discord"
+    async def test_discord_not_available_falls_back_to_the_next_way(self):
+        self.order = ["discord", "phone", "app"]
         self.discord.side_effect = dv.VoiceRefused("not set up", unavailable=True)
         self.assertEqual(await phone_tools.tool_ring({"reason": "r"}, self.ctx), "rang")
         self.phone_ready = True
         self.assertEqual(await phone_tools.tool_call({"message": "m"}, self.ctx), "phoned")
 
     async def test_a_discord_limit_is_reported_not_worked_around(self):
-        self.preference = "discord"
+        self.order = ["discord", "phone", "app"]
         self.discord.side_effect = dv.VoiceRefused("Today's limit is used up.")
         self.phone_ready = True
         for result in (await phone_tools.tool_ring({"reason": "r"}, self.ctx), await phone_tools.tool_call({"message": "m"}, self.ctx)):
             self.assertEqual(result, "Not sent: Today's limit is used up.")
         self.assertEqual(self.calls, [])
 
-    async def test_phone_preference_for_the_ring_tool(self):
-        self.preference = "phone"
-        self.assertEqual(await phone_tools.tool_ring({"reason": "r"}, self.ctx), "rang", "no phone connection: the app ring")
-        self.phone_ready = True
-        self.assertEqual(await phone_tools.tool_ring({"reason": "r"}, self.ctx), "phoned")
+    async def test_the_old_ring_preference_seeds_the_call_order(self):
+        from core import reach_me as reach_settings
+        try:
+            settings_store.update_settings(ring_preference="discord")
+            self.assertEqual(reach_settings._legacy_call_order(None)[0], "discord")
+            settings_store.update_settings(ring_preference="app")
+            self.assertEqual(reach_settings._legacy_call_order(None), reach_settings.DEFAULT_CALL)
+        finally:
+            settings_store.update_settings(ring_preference="app")
 
     def test_the_preference_is_a_setting_that_defaults_to_the_app(self):
         self.assertEqual(settings_store.DEFAULTS["ring_preference"], "app")

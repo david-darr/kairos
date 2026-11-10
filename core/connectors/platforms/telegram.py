@@ -82,6 +82,16 @@ class Telegram(Connector):
             require(await client.post(f"{API}/bot{self.setting('bot_token')}/sendMessage",
                                       json={"chat_id": conversation, "text": text}), "Sending to Telegram")
 
+    async def send_voice(self, conversation: str, ogg: bytes, seconds: float, caption: str = "") -> None:
+        """A voice message (OGG with Opus, which Telegram shows as a playable voice note). Telegram bots cannot place
+        calls, so this is the "call" on Telegram (services/reach_me.py)."""
+        data = {"chat_id": conversation, "duration": str(max(1, round(seconds)))}
+        if caption:
+            data["caption"] = caption[:1024]
+        async with self.http(timeout=120) as client:
+            require(await client.post(f"{API}/bot{self.setting('bot_token')}/sendVoice", data=data,
+                                      files={"voice": ("voice.ogg", ogg, "audio/ogg")}), "Sending a voice message")
+
     async def send_file(self, conversation: str, path: str) -> bool:
         async with self.http(timeout=120) as client:
             with open(path, "rb") as handle:

@@ -285,7 +285,35 @@
       + "\n\n## How to run this\n\nUse the computer tool. Stop for the person where marked; the computer's safety checks still apply.\n";
     return { name: 'example-com-click', description, body, steps, labels, content: `---\ndescription: ${description}\n---\n\n${body}` };
   }
+  // Settings > Reach me: Telegram is connected in the demo; nothing is ever sent.
+  function reachMe() {
+    const r = state.reachMe ||= { message: ["app", "telegram", "discord", "whatsapp", "imessage", "signal", "sms"],
+      call: ["phone", "app", "discord", "telegram"], quiet: { enabled: false, start: "22:00", end: "07:00" }, bots: {}, paused: null, stops: [],
+      log: [{ at: Date.now() / 1000 - 3600, kind: "message", bot_id: "a1", bot_name: "Kip", ok: true, channel: "telegram", note: "", tried: [{ channel: "app", reason: "No phone has Kairos notifications on and no Kairos window is open." }] }] };
+    const ready = { telegram: "Sends to 1234567 through \"My Telegram\".", app: "A Kairos window is open. No phone has Kairos notifications on." };
+    const labels = { app: "In the Kairos app", telegram: "Telegram", discord: "Discord DM", whatsapp: "WhatsApp", imessage: "iMessage (BlueBubbles)", signal: "Signal", sms: "SMS text" };
+    const callLabels = { phone: "Phone call", app: "Ring in the Kairos app", discord: "Discord voice channel", telegram: "Telegram voice message" };
+    return { ...r, quiet_now: false,
+      message_channels: Object.entries(labels).map(([id, label]) => ({ id, label, ready: !!ready[id], detail: ready[id] || `No ${label} channel is set up (Settings > Channels).` })),
+      call_channels: Object.entries(callLabels).map(([id, label]) => ({ id, label, ready: id === "app" || id === "telegram",
+        detail: id === "app" ? "Rings any open Kairos window. On a phone it is a notification, not a call screen." : id === "telegram" ? "Sends a voice message in the bot's voice. Telegram bots cannot place calls." : "Not set up." })) };
+  }
+  function reachMeMutate(route, method, body) {
+    reachMe();
+    const r = state.reachMe;
+    if (route === "/api/reach-me" && method === "PUT") {
+      for (const key of ["message", "call", "bots"]) if (body[key] !== undefined) r[key] = body[key];
+      if (body.quiet) r.quiet = { ...r.quiet, ...body.quiet };
+      return reachMe();
+    }
+    if (route === "/api/reach-me/pause" && method === "POST") {
+      r.paused = body.paused ? { at: Date.now() / 1000, channel: "settings", by: "settings" } : null;
+      return reachMe();
+    }
+    return undefined;
+  }
   function mutate(route, method, body = {}, query = {}) {
+    if (route.startsWith("/api/reach-me")) { const answer = reachMeMutate(route, method, body); if (answer !== undefined) return answer; }
     if (route.startsWith("/api/vault/") || route.startsWith("/api/file-checkpoints/vault-")) { const answer = vaultMutate(route, method, body); if (answer !== undefined) return answer; }
     const organization = route.match(/^\/api\/agents\/conversations\/(agent|team)\/([^/]+)$/);
     if (organization && method === 'POST') {
@@ -1371,6 +1399,7 @@
     // Phone notification devices; the shell's "need you" row only looks for one whose last push failed.
     if (route === "/api/notifications") return { devices: [] };
     if (route === "/api/rings/pending") return { rings: [], outbound: 0 };
+    if (route === "/api/reach-me") return reachMe();
     // Settings > Phone (phone calls): not set up in the demo.
     if (route === "/api/phone") return { connection: { configured: false }, fields: { twilio: ["account_sid", "auth_token"], telnyx: ["api_key", "public_key", "connection_id"] } };
     if (route === "/api/agent-calls/choices") return [];

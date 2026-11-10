@@ -192,6 +192,9 @@ const SECTION_GROUPS = [
       { id: "phone", label: "Phone", render: renderPhonePanel,
         description: "Call a bot from your own mobile, and let your bots call or text you, through your own Twilio or Telnyx number.",
         keywords: ["phone", "call", "calls", "sms", "text", "twilio", "telnyx", "number", "mobile", "voice call", "kip"] },
+      { id: "reach-me", label: "Reach me", render: (body) => import("./settingsReachMe.js").then(m => m.renderReachMePanel(body)),
+        description: "Where your bots message and call you, in your order: the app, Telegram, Discord, WhatsApp, iMessage, Signal, texts or a phone call. Quiet hours, each bot, and one STOP for everything.",
+        keywords: ["reach me", "message me", "call me", "notify", "telegram", "whatsapp", "discord", "imessage", "signal", "stop", "unsubscribe", "quiet hours", "do not disturb", "voice message"] },
       { id: "shortcuts", label: "Shortcuts", render: renderShortcutsPanel,
         description: "Keys and commands that save a trip to the mouse.",
         keywords: ["keyboard", "hotkey", "command palette", "keys"] },
@@ -614,7 +617,7 @@ function visibleSections() {
     if (section) sections.set(id, { ...section, label, keywords: [...section.keywords, section.label.toLowerCase()] });
   }
   return [
-    ['general', 'General', ['appearance', 'layout', 'notifications', 'speech', 'shortcuts', 'phone']],
+    ['general', 'General', ['appearance', 'layout', 'notifications', 'speech', 'shortcuts', 'phone', 'reach-me']],
     ['models', 'Models', ['added-models', 'add-models']],
     ['connections', 'Connections', ['integrations', 'images', 'channels', 'remote']],
     ['agents', 'Agents', ['agent-tools', 'permissions', 'hooks', 'computer-use']],

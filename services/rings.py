@@ -131,6 +131,8 @@ def _sweep(account: str, rings: list, now: float) -> None:
 
 def create(account: str, bot_id: str, reason, invocation_id: str, now: Optional[float] = None) -> dict:
     """Start a ring for the account's own user. Raises RingRefused with the reason in words."""
+    from core import reach_me
+    reach_me.refuse_if_paused(account, RingRefused)
     now = time.time() if now is None else now
     owner = owner_of(account)
     agent = _bot(account, bot_id, owner)

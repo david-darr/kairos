@@ -133,6 +133,7 @@ export async function renderPhonePanel(content) {
       field('Public address', input('public_url', 'text', 'https://my-pc.tailnet.ts.net:8422'),
         'An https address your provider can reach, such as one from Remote Access or your own tunnel. Kairos does not open one for you. Leave empty for texts only.'),
       paths ? row({ title: 'Paste into your provider', description: paths.voice, stack: true }) : null,
+      paths && paths.sms ? row({ title: 'For texts you send back', description: `${paths.sms}. Set it as the number's incoming-message webhook, so a STOP you text pauses every bot (Settings > Reach me).`, stack: true }) : null,
     ]),
     group({ title: 'Incoming call PIN', description: 'Caller ID can be faked, so when you call in, Kairos asks for this PIN on the keypad (then #) before it connects you. Three tries a call, and five wrong tries in an hour lock incoming calls. Calls Kairos places to you never ask.' }, [
       field('PIN (4 to 8 digits)', input('pin', 'password', saved.pin_set ? 'Saved. Leave empty to keep it.' : '4 to 8 digits'), 'Stored hashed and never shown again.'),
@@ -144,6 +145,7 @@ export async function renderPhonePanel(content) {
       row({ title: 'Conversation model', description: 'A fast API or local model, like the one used in app calls.', control: modelSelect }),
     ]),
     note('Calls from a bot to you always start with "This is <bot>, an AI assistant from Kairos." and go only to your mobile.'),
+    note('Texting US numbers: carriers block texts from numbers that are not registered. Before bots text you, register your Kairos number for A2P 10DLC in your Twilio or Telnyx account (Sole Proprietor if you have no business tax ID) or use a verified toll-free number. Approval can take days to weeks, and the provider charges its own fees.'),
     group({ title: 'Calls to other people', description: 'A bot can phone someone for you, such as a restaurant or a client. You approve every call before it is placed, at every approval level. The call opens with "Hi, this is <bot>, an AI assistant calling on behalf of <your name>. This call is transcribed." While it runs you see a live transcript, answer the bot\'s questions and can hang up. A summary lands in the bot\'s conversation afterwards.' }, [
       row({ title: 'Calls to other people', description: 'Off by default.', control: others }),
       field('Your name for calls', input('caller_name', 'text', 'David Darr'), 'Said at the start of every call to someone else, so they know who it is for.'),

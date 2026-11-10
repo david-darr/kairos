@@ -341,7 +341,7 @@ export async function renderChannelsPanel(body, _status, page) {
           ? `Joins channel ${bot.voice_channel_id} only. Needs an allowed user above, and the voice add-ons installed.`
           : "Off. Paste a voice channel's ID (Copy Channel ID) from a server this bot is in.", control: [voiceId, saveVoice] }),
         voiceErr,
-        row({ title: "When a bot calls you", description: "Where bot calls reach you. If that is not available, they ring inside Kairos.", control: [ringPref, saveRingPref] }),
+        row({ title: "When a bot calls you", description: "Which way bot calls try first. The whole order, quiet hours and STOP are in Settings > Reach me.", control: [ringPref, saveRingPref] }),
       ]),
       group({ title: "Channel overrides", description: "Per-channel behaviour, and extra delivery targets for tasks." },
         [...(overrideRows.length ? overrideRows : [empty("No overrides. The bot follows its allow list everywhere.")])]),

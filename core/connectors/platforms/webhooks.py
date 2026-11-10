@@ -10,11 +10,38 @@ import base64
 import hashlib
 import hmac
 import json
+import os
+import re
+import time
 from collections import OrderedDict
 from urllib.parse import parse_qsl
 
 from core.connectors import register
-from core.connectors.base import Connector, Field, Inbound, require
+from core.connectors.base import Connector, ConnectorError, Field, Inbound, require
+
+WINDOW_SECONDS = 24 * 3600
+OUTSIDE_WINDOW_CODE = "131047"   # Meta: "Re-engagement message", more than 24 hours since the person last wrote
+TEMPLATE_PARAM_LIMIT = 900       # kept under Meta's per-variable limit; unverified against a live account
+NO_TEMPLATE = ("WhatsApp allows free text only within 24 hours of your last message to this number, and no approved "
+               "message template is set (Settings > Channels > WhatsApp).")
+
+
+def _digits(number) -> str:
+    return "".join(ch for ch in str(number or "") if ch.isdigit())
+
+
+def _template_text(text, limit: int) -> str:
+    """Meta refuses template variables with new lines, tabs or more than four spaces in a row."""
+    cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
+    return cleaned if len(cleaned) <= limit else cleaned[:limit - 1].rstrip() + "\u2026"
+
+
+# Settings copy for texting in the US (Calls and Texts to Users research, section 4.5). No prices: they change and
+# belong to the provider.
+SMS_US_HELP = ("Texting US numbers: carriers block texts from numbers that are not registered. Before bots text you, "
+               "register this number for A2P 10DLC in your provider account (Sole Proprietor if you have no business "
+               "tax ID) or use a verified toll-free number. Approval can take days to weeks, and the provider charges "
+               "its own fees.")
 
 URL_HELP = "The address that reaches this connector's webhook from the internet, exactly as the platform will call it."
 
@@ -54,7 +81,7 @@ class TwilioSMS(Connector):
     fields = (
         Field("account_sid", "Account SID", placeholder="AC..."),
         Field("auth_token", "Auth token", secret=True),
-        Field("from_number", "Twilio number", placeholder="+15551234567"),
+        Field("from_number", "Twilio number", placeholder="+15551234567", help=SMS_US_HELP),
         Field("public_url", "Public webhook URL", help=URL_HELP + " Set it as the number's incoming-message webhook."),
         Field("default_to", "Notify (number)", required=False),
     )
@@ -96,11 +123,58 @@ class WhatsAppCloud(Connector):
         Field("app_secret", "App secret", secret=True, help="Signs every webhook; requests without a valid signature are refused."),
         Field("verify_token", "Verify token", secret=True, help="Any string; enter the same one in Meta's webhook setup."),
         Field("default_to", "Notify (number)", required=False),
+        Field("template_name", "Message template", required=False, placeholder="kairos_update",
+              help=("WhatsApp lets a business send free text only within 24 hours of your last message to it. After that "
+                    "it needs a message template you registered and Meta approved in your WhatsApp Business account. "
+                    "Enter its name, and Kairos sends that template instead. With none, a bot's message goes to the "
+                    "next way in Settings > Reach me.")),
+        Field("template_language", "Template language", required=False, default="en_US", placeholder="en_US",
+              help="The language code the template was approved in."),
+        Field("template_params", "Template variables", required=False, default="bot,message", placeholder="bot,message",
+              help=("What fills the template's body variables, in order: bot (the bot's name) and message (its text, "
+                    "shortened to fit). Use none for a template without variables.")),
     )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.sent = _Sent()
+
+    # -- the 24-hour customer service window ------------------------------------------------------------
+
+    def _window_file(self) -> str:
+        from core import accounts
+        from core.connectors import store
+        return os.path.join(accounts.account_dir(store.account_of(self.record)), "whatsapp_windows.json")
+
+    def opened(self, number: str):
+        """When this number last wrote to us (the 24-hour window opens then), or None when not known."""
+        from core.atomic_io import read_json
+        value = (read_json(self._window_file(), {}).get(self.record.get("id", ""), {}) or {}).get(_digits(number))
+        return float(value) if isinstance(value, (int, float)) else None
+
+    def note_inbound(self, number: str, at=None) -> None:
+        from core.atomic_io import read_json, write_json_atomic
+        path = self._window_file()
+        data = read_json(path, {})
+        mine = data.setdefault(self.record.get("id", ""), {})
+        mine[_digits(number)] = time.time() if at is None else at
+        if len(mine) > 200:
+            for key in sorted(mine, key=mine.get)[:-200]:
+                mine.pop(key, None)
+        write_json_atomic(path, data)
+
+    def window_open(self, number: str, now=None):
+        """True inside the 24 hours (with five minutes to spare), False after, None when never seen."""
+        opened = self.opened(number)
+        if opened is None:
+            return None
+        return (time.time() if now is None else now) - opened < WINDOW_SECONDS - 300
+
+    def template(self) -> dict:
+        name = self.setting("template_name").strip()
+        params = [p.strip().lower() for p in (self.setting("template_params", "bot,message") or "").split(",") if p.strip()]
+        return {"name": name, "language": self.setting("template_language", "en_US").strip() or "en_US",
+                "params": [] if params in (["none"], []) else [p for p in params if p in ("bot", "message")]}
 
     async def handle_webhook(self, method, headers, query, body):
         if method == "GET":
@@ -115,6 +189,11 @@ class WhatsAppCloud(Connector):
         for entry in payload.get("entry") or []:
             for change in entry.get("changes") or []:
                 for message in (change.get("value") or {}).get("messages") or []:
+                    if message.get("from"):
+                        try:
+                            self.note_inbound(message["from"])     # any message opens the 24-hour window
+                        except Exception:
+                            pass
                     if message.get("type") != "text":
                         continue
                     replied = (message.get("context") or {}).get("id")
@@ -123,11 +202,40 @@ class WhatsAppCloud(Connector):
                                                  replying_to=self.sent.text(replied)))
         return 200, b"ok", "text/plain"
 
-    async def send(self, conversation: str, text: str) -> None:
+    async def send(self, conversation: str, text: str, bot_name: str = "Kairos") -> str:
+        """Free text inside the 24-hour window; the approved template outside it. 'text' or 'template': what went.
+        Outside the window with no template set, a ConnectorError says so plainly (Meta would refuse the text)."""
+        template = self.template()
+        window = self.window_open(conversation)
+        if window is False:
+            if not template["name"]:
+                raise ConnectorError(NO_TEMPLATE)
+            await self.send_template(conversation, text, bot_name, template)
+            return "template"
+        try:
+            await self._post(conversation, {"type": "text", "text": {"body": text}}, text)
+            return "text"
+        except ConnectorError as error:
+            if OUTSIDE_WINDOW_CODE not in str(error):
+                raise
+            if not template["name"]:
+                raise ConnectorError(NO_TEMPLATE) from None
+        await self.send_template(conversation, text, bot_name, template)
+        return "template"
+
+    async def send_template(self, conversation: str, text: str, bot_name: str, template: dict) -> None:
+        values = {"bot": _template_text(bot_name, 60), "message": _template_text(text, TEMPLATE_PARAM_LIMIT)}
+        body = {"name": template["name"], "language": {"code": template["language"]}}
+        if template["params"]:
+            body["components"] = [{"type": "body", "parameters": [{"type": "text", "text": values[p] or "-"}
+                                                                  for p in template["params"]]}]
+        await self._post(conversation, {"type": "template", "template": body}, text)
+
+    async def _post(self, conversation: str, payload: dict, text: str) -> None:
         async with self.http(headers={"Authorization": f"Bearer {self.setting('access_token')}"}) as api:
             data = require(await api.post(f"https://graph.facebook.com/v21.0/{self.setting('phone_number_id')}/messages",
-                                          json={"messaging_product": "whatsapp", "to": conversation, "type": "text",
-                                                "text": {"body": text}}), "Sending to WhatsApp")
+                                          json={"messaging_product": "whatsapp", "to": conversation, **payload}),
+                           "Sending to WhatsApp")
             for message in data.get("messages") or []:
                 self.sent.remember(message.get("id"), text)
 

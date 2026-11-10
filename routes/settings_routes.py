@@ -98,6 +98,10 @@ async def set_ring_preference(body: SetRingPreferenceRequest, user: str = Depend
     if body.preference not in RING_PREFERENCES:
         raise HTTPException(status_code=422, detail=f"preference must be one of {list(RING_PREFERENCES)}")
     settings_store.update_settings(ring_preference=body.preference)
+    from core import reach_me
+    saved = reach_me.load()
+    if saved["saved"]:       # Settings > Reach me holds the call order now; this choice goes first in it
+        reach_me.save({"call": [body.preference] + [c for c in saved["call"] if c != body.preference]})
     return {"ok": True, "ring_preference": body.preference}
 
 

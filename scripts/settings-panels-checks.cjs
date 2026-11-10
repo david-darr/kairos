@@ -565,6 +565,40 @@ module.exports = async ({ js, win, waitFor, delay, navigate, demoState, writes, 
     await close();
   }
 
+  // -- 8b. Reach me (core/reach_me.py): the order, a channel switch, quiet hours, a bot's choice and the pause ---------
+  {
+    await open('reach-me');
+    const body = () => js("document.querySelector('.settings-window .set-body').textContent");
+    const order = (kind) => js(`[...document.querySelectorAll('.settings-window [data-reach-order=${kind}] [data-reach-channel]')].map(n => n.dataset.reachChannel)`);
+    assert.ok((await body()).includes('only a real phone call'), 'Reach me: the honest line on what reaches a locked phone');
+    assert.ok((await body()).includes('Nothing works when this computer is off or asleep'), 'Reach me: says the PC must be on');
+    assert.deepEqual((await order('message')).slice(0, 2), ['app', 'telegram'], 'Reach me: messages start in the app, then Telegram');
+    let from = await mark();
+    await js(`document.querySelector('.settings-window [data-reach-order=message] [data-reach-channel=telegram] button[aria-label="Move Telegram up"]').click()`);
+    await waitFor(`document.querySelector('.settings-window [data-reach-order=message] [data-reach-channel]')?.dataset.reachChannel === 'telegram'`);
+    countSaves('reach me move up', await saves(from), ['PUT /api/reach-me {"message":["telegram","app","discord","whatsapp","imessage","signal","sms"]}']);
+    from = await mark();
+    await clickSwitch('Use Discord DM'); await delay(150);
+    countSaves('reach me channel off', await saves(from), ['PUT /api/reach-me {"message":["telegram","app","whatsapp","imessage","signal","sms"]}']);
+    await clickSwitch('Quiet hours'); await delay(150);
+    assert.equal(await switchOn('Quiet hours'), true, 'Reach me: quiet hours turn on');
+    await js(`(() => { const s = document.querySelector('.settings-window [data-reach-bot$=":message"]'); if (s) { s.value = 'never'; s.dispatchEvent(new Event('change', { bubbles: true })); } })()`);
+    await delay(150);
+    from = await mark();
+    await clickSwitch('Bots may reach me'); await delay(150);
+    countSaves('reach me pause', await saves(from), ['POST /api/reach-me/pause {"paused":true}']);
+    assert.ok((await body()).includes('Paused'), 'Reach me: the pause says so');
+    await reopen('reach-me');
+    assert.equal((await order('message'))[0], 'telegram', 'Reach me: the order survives a reopen');
+    assert.equal(await switchOn('Quiet hours'), true, 'Reach me: quiet hours survive a reopen');
+    assert.equal(await switchOn('Bots may reach me'), false, 'Reach me: the pause survives a reopen');
+    const never = await js(`document.querySelector('.settings-window [data-reach-bot$=":message"]')?.value ?? 'none'`);
+    assert.ok(never === 'never' || never === 'none', 'Reach me: a bot set to never stays never');
+    await clickSwitch('Bots may reach me'); await delay(150);
+    assert.equal(await switchOn('Bots may reach me'), true, 'Reach me: START from the switch');
+    await close();
+  }
+
   // -- 9. Efficiency: reopen latency and requests ------------------------------------------------------------------
   {
     await stub({ auth: true });

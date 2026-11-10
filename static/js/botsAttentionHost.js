@@ -30,7 +30,7 @@ export const KIND_LABELS = {
   question: 'Question', approval: 'Approval', review: 'Review', report: 'Report', done: 'Finished',
   'turn-failed': 'Could not finish', 'routine-failed': 'Routine failed', 'routine-deferred': 'Routine delayed',
   incident: 'Incident', 'sign-in': 'Sign-in needed', 'delegation-settled': 'Handoff settled', mention: 'Mention',
-  spend: 'Spend', brief: 'Brief', 'missed-call': 'Missed call',
+  spend: 'Spend', brief: 'Brief', 'missed-call': 'Missed call', message: 'Message',
 };
 export const kindLabel = kind => KIND_LABELS[kind] || 'Update';
 

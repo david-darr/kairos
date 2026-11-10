@@ -51,6 +51,10 @@ async def send_to_channel(channel_id: str, text: str) -> bool:
     delivery miss shouldn't fail whatever produced the text."""
     if channel_id == "discord":
         return await discord_channel.send_direct_message(text)
+    if channel_id.startswith("reach:"):
+        # A bot's message_me (services/reach_me.py): the account's Reach me order, with fallback, at send time.
+        from services import reach_me
+        return await reach_me.outbox_send(channel_id[len("reach:"):], text)
     if channel_id.startswith("conn:"):
         from core.connectors import hub
         return await hub.deliver(channel_id[len("conn:"):], text)

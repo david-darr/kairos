@@ -384,6 +384,27 @@ class AccountIsolation(unittest.TestCase):
                 asyncio.run(agent_routing.direct(agent, "hello", "conn:x", "Slack"))
             self.assertEqual(seen[-1], expected, f"{name}'s connector chat")
 
+    def test_reach_me_and_its_stop_are_each_accounts_own(self):
+        # Settings > Reach me (core/reach_me.py): the orders, quiet hours, per-bot choices and the one STOP.
+        from core import accounts, reach_me
+        david, bea = self.accounts["david"], self.accounts["bea"]
+        r = call(bea.client, "PUT", "/api/reach-me", json={"message": ["telegram", "app"], "call": ["app"],
+                                                         "quiet": {"enabled": True, "start": "21:00", "end": "06:00"}})[0]
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(call(bea.client, "POST", "/api/reach-me/pause", json={"paused": True})[0].status_code, 200)
+        mine = call(david.client, "GET", "/api/reach-me")[0].json()
+        self.assertIsNone(mine["paused"], "bea's STOP never pauses david's bots")
+        self.assertFalse(mine["quiet"]["enabled"])
+        self.assertEqual(mine["message"], list(reach_me.MESSAGE_CHANNELS))
+        hers = call(bea.client, "GET", "/api/reach-me")[0].json()
+        self.assertEqual((hers["message"], hers["call"], hers["quiet"]["start"]), (["telegram", "app"], ["app"], "21:00"))
+        self.assertTrue(hers["paused"])
+        with accounts.as_account(auth_manager.account_id("david")):
+            self.assertIsNone(reach_me.paused())
+        with accounts.as_account(auth_manager.account_id("bea")):
+            self.assertTrue(reach_me.paused())
+        call(bea.client, "POST", "/api/reach-me/pause", json={"paused": False})
+
     def test_system_status_names_only_the_callers_discord_bots(self):
         from core.channels import discord_channel
         david, bea = self.accounts["david"], self.accounts["bea"]

@@ -251,6 +251,15 @@ def _check_model(endpoint_id: Optional[str], override: Optional[str], effort: Op
     return override, effort
 
 
+
+def _reach_paused() -> bool:
+    """The one STOP (core/reach_me.py) for the current account."""
+    try:
+        from core import reach_me
+        return bool(reach_me.paused())
+    except Exception:
+        return False
+
 class AdmissionDenied(ValueError):
     """Background work was refused; its message is safe to show the caller."""
 
@@ -1054,6 +1063,8 @@ class AgentService:
         agent = self.get(agent_id) or {"name": "An agent"}
         events.emit(event, f"{agent['name']} {verb}: {title}", agent_id=agent_id, **extra)
         channel = agent.get("deliver_to_channel")
+        if channel and _reach_paused():
+            channel = None      # the person replied STOP (Settings > Reach me): the feed keeps it, no channel message
         if channel:
             from core import outbox
             text = (f"**{agent['name']}** {verb}: {title}" + (f"\n{body[:1500]}" if body else "")

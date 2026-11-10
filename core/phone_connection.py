@@ -107,8 +107,8 @@ def webhook_paths(record: dict) -> dict:
     """The addresses to paste into the provider, built from the person's public address."""
     base = record.get("public_url") or ""
     if record["provider"] == "twilio":
-        return {"voice": base + "/api/phone/twilio/voice"}
-    return {"voice": base + "/api/phone/telnyx/events"}
+        return {"voice": base + "/api/phone/twilio/voice", "sms": base + "/api/phone/twilio/sms"}
+    return {"voice": base + "/api/phone/telnyx/events", "sms": base + "/api/phone/telnyx/events"}
 
 
 def accounts_to_scan() -> list[str]:

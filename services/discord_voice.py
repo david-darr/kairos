@@ -461,7 +461,9 @@ def notify_voice_state(bot_id: str, user_id: str, before_channel_id, after_chann
 
 async def call_user(account: str, agent_id: str, reason, invocation_id: str) -> str:
     """A bot ringing the person (ring_me, notify_me_by_call) when they prefer Discord. Raises VoiceRefused."""
+    from core import reach_me
     from services.agent_service import agent_service
+    reach_me.refuse_if_paused(account, VoiceRefused)
     text = " ".join(str(reason or "").replace("\x00", " ").split())[:phone_calls.MAX_MESSAGE]
     with accounts.as_account(account):
         agent = agent_service.get(agent_id)

@@ -55,6 +55,10 @@ class PhoneRefused(Exception):
     """A bot's call or text that Kairos will not place; the message is shown to the bot as-is."""
 
 
+class PhoneLimit(PhoneRefused):
+    """A daily limit or the pause between calls: Reach me reports it and does not work around it on another channel."""
+
+
 def disclosure(bot_name: str) -> str:
     return f"This is {bot_name or 'a Kairos bot'}, an AI assistant from Kairos."
 
@@ -246,6 +250,8 @@ async def telnyx_event(headers: dict, body: bytes):
         payload, event = data.get("payload") or {}, data.get("event_type", "")
     except (ValueError, AttributeError):
         return _text(400, "bad body")
+    if event.startswith("message."):
+        return await _telnyx_message(headers, body, event, payload)
     outgoing = payload.get("direction") == "outgoing"
     found = connection.find_by_number(payload.get("from") if outgoing else payload.get("to"))
     if not found or found[1]["provider"] != "telnyx":
@@ -317,6 +323,60 @@ async def telnyx_event(headers: dict, body: bytes):
             await provider.hangup(ccid)
     except ProviderError:
         logger.warning("phone: a Telnyx call-control action failed (event %s)", event)
+    return _text(200, "ok")
+
+
+# -- texts the person sends back (only STOP and START mean anything here) ----------------------------------
+
+def _stop_or_start(account: str, record: dict, sender, text) -> None:
+    """A reply from the verified mobile: STOP or START pauses or resumes every bot's messages and calls for the
+    account (core/reach_me.py). Any other text is ignored: bots do not chat over the Phone connection's texts."""
+    if not connection.same_number(sender, record.get("user_number")):
+        return
+    from core import reach_me
+    with accounts.as_account(account):
+        command = reach_me.command_of(text, sms=True)
+        if command:
+            reach_me.handle_reply(text, "sms", sms=True)
+            logger.info("phone: the person texted %s", command.upper())
+
+
+async def twilio_sms(headers: dict, body: bytes):
+    """POST /api/phone/twilio/sms: Twilio's incoming-message webhook for the Kairos number. Twilio itself answers
+    STOP and START and blocks texts after STOP; this records it for every channel. -> (status, content, media type)."""
+    params = parse_form(body)
+    found = connection.find_by_number(params.get("To"))
+    if not found or found[1]["provider"] != "twilio" or not found[1].get("public_url"):
+        return _text(403, "forbidden")
+    account, record = found
+    provider = provider_for(account, record)
+    try:
+        provider.verify_voice(provider.base + "/api/phone/twilio/sms", body, headers)
+    except SignatureError:
+        return _text(403, "forbidden")
+    if _replays.seen(("twilio-sms", headers_get(headers, "X-Twilio-Signature"))):
+        return _text(403, "replayed")
+    _stop_or_start(account, record, params.get("From"), params.get("Body"))
+    return _xml(b'<?xml version="1.0" encoding="UTF-8"?><Response/>')
+
+
+async def _telnyx_message(headers: dict, body: bytes, event: str, payload: dict):
+    """Telnyx messaging events on the same webhook address (set it on the number's messaging profile)."""
+    recipients = payload.get("to") if isinstance(payload.get("to"), list) else []
+    to = (recipients[0] or {}).get("phone_number") if recipients and isinstance(recipients[0], dict) else ""
+    found = connection.find_by_number(to)
+    if not found or found[1]["provider"] != "telnyx":
+        return _text(403, "forbidden")
+    account, record = found
+    try:
+        provider_for(account, record).verify_event(body, headers)
+    except SignatureError:
+        return _text(403, "forbidden")
+    if _replays.seen(("telnyx", headers_get(headers, "telnyx-signature-ed25519"))):
+        return _text(403, "replayed")
+    if event == "message.received":
+        sender = (payload.get("from") or {}).get("phone_number") if isinstance(payload.get("from"), dict) else ""
+        _stop_or_start(account, record, sender, payload.get("text"))
     return _text(200, "ok")
 
 
@@ -536,7 +596,7 @@ def _reserve(owner: str, bot_id: str, kind: str, invocation_id: str) -> list:
         if not result.get("ok"):
             for done in taken:
                 bot_outbound.finalize(owner, done, invocation_id, bot_outbound.RELEASED)
-            raise PhoneRefused(f"Today's limit for {'calls' if kind == 'call' else 'texts'} to you "
+            raise PhoneLimit(f"Today's limit for {'calls' if kind == 'call' else 'texts'} to you "
                                f"({CAPS[kind][scope]} per {'account' if scope == 'account' else 'bot'}) is used up.")
         taken.append(who)
     return taken
@@ -559,6 +619,8 @@ def _clean_message(text) -> str:
 
 async def call_user(account: str, bot_id: str, message, invocation_id: str) -> str:
     """A bot calls the account's own verified mobile number. Nothing else can be dialled."""
+    from core import reach_me
+    reach_me.refuse_if_paused(account, PhoneRefused)
     record = connection.get(account)
     if not record or not record.get("enabled"):
         raise PhoneRefused("No Phone connection is set up for this account.")
@@ -569,7 +631,7 @@ async def call_user(account: str, bot_id: str, message, invocation_id: str) -> s
     owner = account      # the allowance is the account's, whoever its user is called
     now = time.time()
     if now - _last_call.get(account, 0) < CALL_COOLDOWN_SECONDS:
-        raise PhoneRefused("A call to you was placed a moment ago. Wait a few minutes before calling again.")
+        raise PhoneLimit("A call to you was placed a moment ago. Wait a few minutes before calling again.")
     taken = _reserve(owner, bot_id, "call", invocation_id)
     provider = provider_for(account, record)
     token = mint("outbound", account, OUTBOUND_TTL, message=text, bot_id=bot_id)
@@ -590,28 +652,47 @@ async def call_user(account: str, bot_id: str, message, invocation_id: str) -> s
     return f"Calling you now. It will open with: {disclosure(bot.get('name'))}"
 
 
-async def text_user(account: str, bot_id: str, message, invocation_id: str) -> str:
-    """A bot texts the account's own mobile number: through the account's Twilio SMS connector when it has one,
-    else through the Phone connection."""
-    from core.connectors import hub, store
-    from core.connectors.base import ConnectorError
+def text_target(account: str) -> tuple:
+    """(number, SMS connector record or None) for texting the account's own mobile; ('', None) when none is set up.
+    Through the account's Twilio SMS connector when it has one, else the Phone connection."""
+    from core.connectors import store
     record = connection.get(account)
-    text = _clean_message(message)
     target = (record or {}).get("user_number") if record and record.get("enabled") else ""
     with accounts.as_account(account):
         sms = next((r for r in store.list_records() if r["kind"] == "sms" and r.get("enabled") and store.mine(r)), None)
     if not target and sms:
         target = connection.normalize_number(((sms.get("settings") or {}).get("default_to")))
+    return target, sms
+
+
+async def send_text(account: str, text: str) -> None:
+    """Send one text to the account's own mobile, with no allowance of its own (the caller has taken it). Raises
+    ProviderError or ConnectorError when the provider refused it, PhoneRefused when nothing is set up."""
+    from core.connectors import hub
+    target, sms = text_target(account)
     if not target:
+        raise PhoneRefused("No number to text is set up for this account.")
+    if sms:
+        adapter = hub.adapters.get(sms["id"]) or hub.build(sms)
+        await adapter.send(target, text)
+    else:
+        record = connection.get(account)
+        await provider_for(account, record).send_sms(target, record["number"], text)
+
+
+async def text_user(account: str, bot_id: str, message, invocation_id: str) -> str:
+    """A bot texts the account's own mobile number: through the account's Twilio SMS connector when it has one,
+    else through the Phone connection."""
+    from core import reach_me
+    from core.connectors.base import ConnectorError
+    reach_me.refuse_if_paused(account, PhoneRefused)
+    text = _clean_message(message)
+    if not text_target(account)[0]:
         raise PhoneRefused("No number to text is set up for this account.")
     owner = account
     taken = _reserve(owner, bot_id, "text", invocation_id)
     try:
-        if sms:
-            adapter = hub.adapters.get(sms["id"]) or hub.build(sms)
-            await adapter.send(target, text)
-        else:
-            await provider_for(account, record).send_sms(target, record["number"], text)
+        await send_text(account, text)
     except (ProviderError, ConnectorError) as error:
         _settle(owner, taken, invocation_id, bot_outbound.RELEASED)    # the provider refused it: nothing left
         raise PhoneRefused(f"The text was not sent. {error}") from None

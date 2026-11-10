@@ -138,6 +138,14 @@ async def twilio_voice(request: Request) -> Response:
     return _response(await phone_calls.twilio_voice(dict(request.headers), request.url.query, body))
 
 
+@router.post("/twilio/sms", include_in_schema=False)
+async def twilio_sms(request: Request) -> Response:
+    body = await request.body()
+    if len(body) > 100_000:
+        return Response(status_code=413)
+    return _response(await phone_calls.twilio_sms(dict(request.headers), body))
+
+
 @router.post("/telnyx/events", include_in_schema=False)
 async def telnyx_events(request: Request) -> Response:
     body = await request.body()

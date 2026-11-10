@@ -42,18 +42,23 @@ def _row(row) -> Optional[dict]:
     return dict(row) if row is not None else None
 
 
-def enqueue(key: str, channel: str, text: str, label: str = "") -> str:
+def enqueue(key: str, channel: str, text: str, label: str = "", not_before: Optional[float] = None,
+            send: bool = True) -> str:
     """Queue one message; its id. The same key again returns the first id and
-    queues nothing. Sending starts at once when there is a running loop."""
+    queues nothing. Sending starts at once when there is a running loop, unless
+    `send` is False (the caller sends it itself with send_one). `not_before`
+    holds it until then (Reach me's quiet hours); a day of retries starts there."""
     now = time.time()
+    due = max(now, not_before or now)
     with store.transaction() as conn:
         found = conn.execute("SELECT id FROM deliveries WHERE key = ?", (key,)).fetchone()
         if found:
             return found["id"]
         delivery_id = uuid.uuid4().hex[:12]
         conn.execute("INSERT INTO deliveries (id, key, channel, text, label, status, attempts, next_try_at, created_at) "
-                     "VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?)", (delivery_id, key, channel, text, label, now, now))
-    kick()
+                     "VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?)", (delivery_id, key, channel, text, label, due, due))
+    if send:
+        kick()
     return delivery_id
 
 
@@ -122,7 +127,6 @@ def _lock() -> asyncio.Lock:
 async def send_due(now: Optional[float] = None) -> int:
     """Send every message that is due; how many went. One sender at a time,
     so a message is never in two sends at once."""
-    from core.channels import registry
     sent = 0
     async with _lock():
         now = time.time() if now is None else now
@@ -131,38 +135,56 @@ async def send_due(now: Optional[float] = None) -> int:
                 "SELECT * FROM deliveries WHERE status = 'pending' AND next_try_at <= ? ORDER BY created_at LIMIT ?",
                 (now, BATCH)).fetchall()]
         for row in due:
-            with store.transaction() as conn:
-                # Marked before the send: a crash from here on leaves it
-                # "sending", which the next start reads as unknown.
-                claimed = conn.execute("UPDATE deliveries SET status = 'sending', attempts = attempts + 1 "
-                                       "WHERE id = ? AND status = 'pending' AND next_try_at <= ?",
-                                       (row["id"], now)).rowcount
-                if claimed:
-                    row = dict(conn.execute("SELECT * FROM deliveries WHERE id = ?", (row["id"],)).fetchone())
-            if not claimed:
-                continue
-            attempts = row["attempts"]
-            try:
-                ok = await registry.send_to_channel(row["channel"], row["text"])
-                error = None if ok else "the channel did not accept it (is it connected and set up?)"
-            except Exception as e:  # a send must never take the loop down
-                ok, error = False, f"{type(e).__name__}: {e}"
-            finished = time.time()
-            if ok:
+            if await _attempt(row, now):
                 sent += 1
-                _finish(row["id"], "delivered", None, finished, clear_text=True)
-            elif finished - row["created_at"] >= GIVE_UP_SECONDS:
-                _finish(row["id"], "failed", error, finished)
-                _report_failure(row, error)
-            else:
-                with store.transaction() as conn:
-                    conn.execute("UPDATE deliveries SET status = 'pending', next_try_at = ?, last_error = ? WHERE id = ?",
-                                 (finished + _retry_delay(attempts), error, row["id"]))
-                logger.warning("outbox: a message to %s was not delivered (attempt %d); trying again later",
-                               row["channel"], attempts)
         if due:
             _prune()
     return sent
+
+
+async def _attempt(row: dict, now: float) -> bool:
+    """Claim one due row and send it once: delivered, retried later, or given up after a day."""
+    from core.channels import registry
+    with store.transaction() as conn:
+        # Marked before the send: a crash from here on leaves it
+        # "sending", which the next start reads as unknown.
+        claimed = conn.execute("UPDATE deliveries SET status = 'sending', attempts = attempts + 1 "
+                               "WHERE id = ? AND status = 'pending' AND next_try_at <= ?",
+                               (row["id"], now)).rowcount
+        if claimed:
+            row = dict(conn.execute("SELECT * FROM deliveries WHERE id = ?", (row["id"],)).fetchone())
+    if not claimed:
+        return False
+    attempts = row["attempts"]
+    try:
+        ok = await registry.send_to_channel(row["channel"], row["text"])
+        error = None if ok else "the channel did not accept it (is it connected and set up?)"
+    except Exception as e:  # a send must never take the loop down
+        ok, error = False, f"{type(e).__name__}: {e}"
+    finished = time.time()
+    if ok:
+        _finish(row["id"], "delivered", None, finished, clear_text=True)
+        return True
+    if finished - row["created_at"] >= GIVE_UP_SECONDS:
+        _finish(row["id"], "failed", error, finished)
+        _report_failure(row, error)
+    else:
+        with store.transaction() as conn:
+            conn.execute("UPDATE deliveries SET status = 'pending', next_try_at = ?, last_error = ? WHERE id = ?",
+                         (finished + _retry_delay(attempts), error, row["id"]))
+        logger.warning("outbox: a message to %s was not delivered (attempt %d); trying again later",
+                       row["channel"], attempts)
+    return False
+
+
+async def send_one(delivery_id: str) -> Optional[dict]:
+    """Send one queued message now if it is due (a bot waiting to hear how its message went); the row afterwards.
+    Shares the sender lock, so it is never in two sends at once."""
+    async with _lock():
+        row = get(delivery_id)
+        if row and row["status"] == "pending" and (row["next_try_at"] or 0) <= time.time():
+            await _attempt(row, time.time())
+    return get(delivery_id)
 
 
 def _finish(delivery_id: str, status: str, error: Optional[str], at: float, clear_text: bool = False) -> None:

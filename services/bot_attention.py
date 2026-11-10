@@ -17,7 +17,8 @@ from core.logs import scrub_credentials
 
 _RESPOND_LOCK = threading.RLock()
 NOTIFICATION_KINDS = {"approval", "question", "done", "routine-failed", "routine-deferred", "turn-failed",
-                      "incident", "sign-in", "delegation-settled", "mention", "spend", "brief", "missed-call"}
+                      "incident", "sign-in", "delegation-settled", "mention", "spend", "brief", "missed-call",
+                      "message"}
 
 
 def clean(value, limit=2000):

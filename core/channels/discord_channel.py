@@ -200,6 +200,13 @@ def _build_client(discord, bot: dict):
         # chat_service.send_message() as a blank turn.
         if not message.content.strip() and not message.attachments:
             return
+        # The one STOP (core/reach_me.py): the bot's own allowed user replying STOP or START, anywhere it is heard.
+        if allowed_user_id and str(message.author.id) == str(allowed_user_id) and not message.attachments:
+            from core import reach_me
+            answer = reach_me.handle_reply(message.content, "discord")
+            if answer is not None:
+                await _send_reply(discord, message, answer, bot)
+                return
 
         try:
             from core import tab_hooks

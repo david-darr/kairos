@@ -45,6 +45,12 @@ def on_event(event: dict) -> None:
         kinds.update(device_kind(row["kind"]) for row in bot_attention.ingest_event(event))
     except Exception:
         logger.exception("bot attention feed not updated")
+    try:
+        from core import reach_me
+        if reach_me.paused():
+            kinds = set()       # STOP (Settings > Reach me): the feed is kept, no device alert
+    except Exception:
+        logger.exception("reach me pause unreadable")
     for kind in kinds:
         try:
             mobile_activity.enqueue_bot(kind, agent_id, auth_manager.is_admin)

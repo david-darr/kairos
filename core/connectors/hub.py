@@ -135,6 +135,8 @@ class Hub:
         text = (inbound.text or "").strip()
         if not text and not inbound.attachments:
             return
+        if await self._stop_or_start(adapter, inbound, text, allowed):
+            return
         from dataclasses import asdict
         from core import tab_hooks
         tab_hooks.emit_message({"kind": "connector", "connection_id": record["id"]}, asdict(inbound))
@@ -146,6 +148,26 @@ class Hub:
             reply = "Something went wrong on my end handling that. Check the app logs."
         if reply:
             await self.send_reply(adapter, inbound.conversation, reply)
+
+    async def _stop_or_start(self, adapter: Connector, inbound: Inbound, text: str, allowed: set) -> bool:
+        """The one STOP (core/reach_me.py): STOP or START from the person themselves (an allowed sender, or the
+        place this connector delivers to) pauses or resumes every proactive message and call from this account's
+        bots. True when it was one, so it goes no further."""
+        if inbound.attachments or (inbound.sender not in allowed and inbound.sender != adapter.default_target
+                                    and inbound.conversation != adapter.default_target):
+            return False
+        from core import reach_me
+        sms = adapter.kind == "sms"
+        answer = reach_me.handle_reply(text, adapter.kind, sms=sms)
+        if answer is None:
+            return False
+        logger.info("connector %s: the person replied %s", adapter.record["name"], reach_me.command_of(text, sms=sms))
+        if not sms:      # Twilio answers STOP and START on texts itself, and blocks texts after STOP until START
+            try:
+                await self.send_reply(adapter, inbound.conversation, answer)
+            except Exception:
+                logger.exception("connector %s: could not confirm a STOP or START", adapter.record["name"])
+        return True
 
     async def _reply(self, adapter: Connector, inbound: Inbound, text: str, trusted: bool) -> Optional[str]:
         record = adapter.record
