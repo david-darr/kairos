@@ -118,7 +118,13 @@ async function renderJob(origin, job, backendUrl, token) {
   current.characterId = sheet ? match[1] : '';
   current.path = String(job.path);
   current.look = String(job.look || '');
-  if (video && (!/^[a-z0-9_-]{1,60}$/.test(current.look) || job.fps !== 30 || !Number.isInteger(job.frames) || job.frames < 1 || job.frames > 14400)) throw new Error('refused invalid video timing');
+  // A long video (core/video_longform.py) is rendered one chapter at a time: `first` and `count` name the chapter's
+  // frames inside the whole video's `frames`. One job captures at most 14,400 frames (8 minutes); a video is at most 20 minutes.
+  if (video && (!/^[a-z0-9_-]{1,60}$/.test(current.look) || job.fps !== 30 || !Number.isInteger(job.frames) || job.frames < 1 || job.frames > 36000)) throw new Error('refused invalid video timing');
+  if (video && !job.preview) {
+    const first = job.first ?? 0, count = job.count ?? job.frames;
+    if (!Number.isInteger(first) || !Number.isInteger(count) || first < 0 || count < 1 || count > 14400 || first + count > job.frames) throw new Error('refused invalid video frame range');
+  }
   const isolated = configure(origin);
   const win = new BrowserWindow({
     show: false, width: w, height: h, useContentSize: true, frame: false, paintWhenInitiallyHidden: true,
@@ -187,13 +193,18 @@ async function renderJob(origin, job, backendUrl, token) {
 
 // Backpressure comes from awaiting each acknowledged part before capturing more.
 async function captureVideo(win, job, backendUrl, token) {
-  const evaluate = code => win.webContents.executeJavaScript(code, true);
+  // A cancel destroys the window, and a script call in flight then never settles (found 2026-11-10: a stopped long
+  // render left the worker waiting, so the resume never started). Every call also ends when the window goes.
+  const gone = new Promise((_, reject) => { if (win.isDestroyed()) reject(new Error('video cancelled')); else win.once('closed', () => reject(new Error('video cancelled'))); });
+  gone.catch(() => {});
+  const evaluate = code => Promise.race([win.webContents.executeJavaScript(code, true), gone]);
   const info = await evaluate('Promise.resolve(window.kdReady).then(() => document.fonts.ready).then(() => window.kdInfo)');
   if (!info || info.width !== job.w || info.height !== job.h || info.fps !== 30 ||
       !Number.isFinite(info.duration) || info.duration <= 0 || Math.ceil(info.duration * 30 - 1e-7) !== job.frames) {
     throw new Error('The motion player dimensions or timing do not match this video job');
   }
-  const times = job.preview ? job.times : Array.from({ length: job.frames }, (_, i) => i / job.fps);
+  const first = job.first ?? 0;
+  const times = job.preview ? job.times : Array.from({ length: job.count ?? job.frames }, (_, i) => (first + i) / job.fps);
   if (!Array.isArray(times) || !times.length || (job.preview && times.length > 12) ||
       times.some(t => !Number.isFinite(t) || t < 0 || t >= info.duration)) throw new Error('invalid video sample times');
   const sampleTimes = job.layoutTimes;

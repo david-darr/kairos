@@ -25,13 +25,18 @@ const clone = value => structuredClone(value);
 // A narrated beat lasts as long as its spoken line (the server measures it into `seconds`); others last their bars.
 const beatSeconds = (b, p) => Number.isFinite(b.seconds) && b.seconds > 0 ? b.seconds : Number(b.bars) * 240 / p.bpm;
 const duration = p => p.beats.reduce((s, b) => s + beatSeconds(b, p), 0);
-const maxBeats = p => p.beats.some(b => b.say) ? 100 : 40;
+const maxBeats = p => p.beats.some(b => b.say) ? (p.chapters?.length ? 400 : 100) : 40;
 const seconds = n => `${Number(n || 0).toFixed(1)} s`;
 const beatId = () => 'b' + crypto.randomUUID().replaceAll('-', '').slice(0, 20);
 const jobLabel = status => {
   const frames = /^rendering (\d+)\/(\d+)/.exec(status || '');
   return frames ? `Rendering ${Math.round(Number(frames[1]) / Number(frames[2]) * 100)}%` : status;
 };
+// A long video (Video Styles unit 4): chapters render one by one, resumably, after the person approves the shot plan.
+const megabytes = bytes => `${(Number(bytes || 0) / 1048576).toFixed(bytes > 1048576 * 100 ? 0 : 1)} MB`;
+const minutes = secondsLeft => secondsLeft >= 90 ? `about ${Math.round(secondsLeft / 60)} min left` : `about ${Math.max(1, Math.round(secondsLeft))} s left`;
+const CHAPTER_STATE = { done: 'Done', rendering: 'Rendering', waiting: 'Waiting' };
+const STOPPED = { paused: 'Stopped', interrupted: 'Stopped when the app closed', failed: 'Failed' };
 const go = (tab, options = {}) => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab, ...options } }));
 const write = (path, body, method = 'POST') => api(path, { method, body: JSON.stringify(body), toast: false });
 let lastSection = 'videos';
@@ -223,7 +228,7 @@ export async function render(container, tabId, options = {}) {
 async function editor(host, id, looks, back, parentDisposed) {
   let disposed = false, timer, previewTimer, pollTimer, frame = 0, mountGeneration = 0;
   let selected = 0, aspect = '16:9', playing = false, looping = true, time = 0, lastFrame = 0, player;
-  let resources = { assets: [], renders: [], jobs: [] }, jobs = [], errors = {};
+  let resources = { assets: [], renders: [], jobs: [] }, jobs = [], errors = {}, plan = null;
   const state = sessions.get(id) || { p: null, undo: [], redo: [], dirty: false, revision: 0, saving: null, error: '' };
   sessions.set(id, state);
   const endpoint = `/api/videos/${id}`;
@@ -251,6 +256,7 @@ async function editor(host, id, looks, back, parentDisposed) {
     const recovered = await Promise.allSettled(loadJobs(id).map(jobId => api(`/api/video-jobs/${jobId}`)));
     jobs = [...new Map([...resources.jobs, ...recovered.filter(r => r.status === 'fulfilled').map(r => r.value)].map(j => [j.id, j])).values()];
     aspect = state.p.aspects[0];
+    await loadPlan();
   } catch (error) { host.replaceChildren(el('p', { role: 'alert', text: error.message }), button('Back to projects', back)); return () => { disposed = true; }; }
   if (parentDisposed()) return () => {};
   function renderErrors() {
@@ -310,7 +316,9 @@ async function editor(host, id, looks, back, parentDisposed) {
   }
   function drawBeats() {
     list.replaceChildren();
+    const starts = new Map((state.p.chapters || []).map((c, n) => [c.start, [c, n]]));
     state.p.beats.forEach((beat, index) => {
+      if (starts.has(beat.id)) { const [c, n] = starts.get(beat.id); list.append(el('h4', { class: 'studio-chapter', role: 'presentation', text: `Chapter ${n + 1}: ${c.title}` })); }
       const row = el('div', { class: 'studio-beat' + (index === selected ? ' selected' : ''), draggable: true, role: 'listitem', 'data-index': index });
       row.append(button(`${index + 1}. ${beat.kind}: ${beat.text || beat.number || (beat.items || []).filter(Boolean).join(', ') || 'No text'} (${seconds(beatSeconds(beat, state.p))})`, () => { selected = index; drawBeats(); drawInspector(); }, { 'aria-pressed': String(index === selected) }),
         el('div', { class: 'studio-actions' }, [button('Move up', () => move(index, index - 1), { disabled: index === 0, 'aria-label': `Move beat ${index + 1} up` }), button('Move down', () => move(index, index + 1), { disabled: index === state.p.beats.length - 1, 'aria-label': `Move beat ${index + 1} down` })]));
@@ -388,9 +396,22 @@ async function editor(host, id, looks, back, parentDisposed) {
       catch { sceneField.querySelector('.meta').textContent = 'Not valid JSON yet; nothing saved.'; }
     });
     inspector.append(only(itemField, kind === 'list'), only(sceneField, kind === 'scene'), textField('Narration (the line spoken over this beat)', 'say', 400, true));
+    // Chapters: a long narrated video (up to 20 minutes) in parts; each chapter starts at a beat and needs a title.
+    const chapter = (state.p.chapters || []).find(c => c.start === beat.id);
+    const chapterTitle = el('input', { value: chapter?.title || '', maxlength: 80, 'aria-label': 'Chapter that starts at this beat' });
+    chapterTitle.value = chapter?.title || '';
+    const chapterField = field('Chapter that starts here', chapterTitle, 'chapters', 'Leave empty for none. A long video has 2 to 30 chapters, the first at the first beat; YouTube shows 3 or more, each at least 10 seconds.');
+    chapterTitle.addEventListener('input', () => changed(p => {
+      const order = new Map(p.beats.map((b, i) => [b.id, i])), title = chapterTitle.value;
+      let list = (p.chapters || []).filter(c => c.start !== beat.id);
+      if (title.trim()) list.push({ ...(chapter ? { id: chapter.id } : { id: 'c' + crypto.randomUUID().replaceAll('-', '').slice(0, 10) }), title, start: beat.id });
+      list = list.sort((a, b) => order.get(a.start) - order.get(b.start));
+      if (list.length) p.chapters = list; else delete p.chapters;
+    }));
+    inspector.append(only(chapterField, !!beat.say || !!state.p.chapters?.length));
     const bars = el('input', { type: 'number', min: .5, max: 8, step: .5, value: beat.bars, 'aria-label': 'Beat bars', oninput: event => setBeat('bars', Number(event.target.value)) });
     inspector.append(field('Bars', bars, path + '.bars', beat.say ? 'This beat is narrated, so it lasts as long as its spoken line; bars do not change it.'
-      : '0.5 to 8, in half-bar steps. Total video: at most 120 seconds, or 480 when narrated.'),
+      : '0.5 to 8, in half-bar steps. Total video: at most 120 seconds, 480 when narrated, or 20 minutes in chapters.'),
       field('Camera', select('Camera', CAMERAS, beat.camera || 'still', v => setBeat('camera', v)), path + '.camera'),
       field('Transition to next beat', select('Transition', TRANSITIONS, beat.transition || 'cut', v => setBeat('transition', v)), path + '.transition'), only(textField('Image treatment', 'treatment', 80), pictured));
     inspector.append(only(field('Image', select('Video image', [['', 'No image'], ...resources.assets.map(a => [a, a.slice(7, 23) + '…'])], beat.image || '', v => setBeat('image', v)), path + '.image'), pictured));
@@ -427,7 +448,11 @@ async function editor(host, id, looks, back, parentDisposed) {
       changed(p => p.beats.splice(selected + 1, 0, { ...clone(p.beats[selected]), id: beatId() })); selected++; drawBeats(); drawInspector();
     }), button('Delete beat', () => {
       if (state.p.beats.length === 1) throw Error('Keep at least one beat.');
-      changed(p => p.beats.splice(selected, 1)); selected = Math.min(selected, state.p.beats.length - 1); drawBeats(); drawInspector();
+      changed(p => {
+        const [gone] = p.beats.splice(selected, 1), next = p.beats[selected];
+        // A chapter that started at the deleted beat now starts at the next one (or ends, when that one starts a chapter).
+        if (p.chapters?.length) p.chapters = p.chapters.flatMap(c => c.start !== gone.id ? [c] : next && !p.chapters.some(o => o.start === next.id) ? [{ ...c, start: next.id }] : []);
+      }); selected = Math.min(selected, state.p.beats.length - 1); drawBeats(); drawInspector();
     })]));
     const title = el('input', { value: state.p.title, maxlength: 120, 'aria-label': 'Video title' });
     const titleField = field('Title', title, 'title', `${state.p.title.length}/120 characters`);
@@ -447,11 +472,74 @@ async function editor(host, id, looks, back, parentDisposed) {
       field('Music volume', el('input', { type: 'range', min: 0, max: 1, step: .01, value: state.p.music.volume, 'aria-label': 'Music volume', oninput: e => changed(p => { p.music.volume = Number(e.target.value); }) }), 'music.volume', '0 to 1'));
     renderErrors();
   }
+  function planPanel() {
+    if (!state.p.chapters?.length) return null;
+    const status = plan?.status || 'none';
+    const text = { approved: 'Approved. The long render can start.', awaiting_approval: 'Waiting for your approval.', rejected: 'Rejected. Change it, then approve it when it is right.',
+      changed: 'Changed since it was ' + (plan?.was === 'approved' ? 'approved' : 'sent') + '. Approve the plan as it is now to render.', none: 'Not approved yet. A long video renders only after you approve its plan.' }[status] || status;
+    const box = el('section', { class: 'card studio-plan', 'aria-label': 'Shot plan approval', 'data-plan-status': status }, [el('h4', { text: 'Shot plan' }), el('p', { class: 'meta', text })]);
+    const details = el('details', { class: 'disclosure-panel' }, [el('summary', { text: 'Read the plan' }), el('pre', { class: 'studio-note', text: plan?.current || '' })]);
+    box.append(details);
+    if (status !== 'approved') box.append(el('div', { class: 'studio-actions' }, [button('Approve plan', async () => {
+      if (!await save()) throw Error('Fix the highlighted fields before approving the plan.');
+      await write(endpoint + '/plan/approve', {}); await loadPlan(); drawJobs(); toast('Plan approved. You can render it now.');
+    }, { class: 'btn primary' })]));
+    return box;
+  }
+  function chapterRows(job) {
+    const rows = el('ol', { class: 'studio-chapters', 'aria-label': 'Chapters' });
+    for (const c of job.chapters || []) {
+      const label = c.state === 'rendering' && c.frames ? `Rendering ${Math.round((c.done || 0) / c.frames * 100)}%` : CHAPTER_STATE[c.state] || c.state;
+      const row = el('li', { 'data-chapter-state': c.state }, [el('span', { text: c.title }), el('span', { class: 'meta', text: label })]);
+      if (c.state === 'rendering') row.append(el('progress', { max: c.frames, value: c.done || 0, 'aria-label': `Frames rendered in ${c.title}` }));
+      rows.append(row);
+    }
+    return rows;
+  }
+  function longJob(job) {
+    const stopped = job.status === 'paused' || job.status === 'interrupted' || job.status === 'failed' || job.status.startsWith('failed:');
+    const done = (job.chapters || []).filter(c => c.state === 'done').length, total = (job.chapters || []).length;
+    const overall = job.frames_total ? Math.round((job.frames_done ?? (job.chapters || []).reduce((n, c) => n + (c.state === 'done' ? c.frames : c.done || 0), 0)) / job.frames_total * 100) : 0;
+    const head = job.status === 'ready' ? 'Ready' : stopped ? (STOPPED[job.status] || 'Failed') : job.status === 'joining' ? 'Joining the chapters' : job.status === 'narrating' ? 'Narrating' : `Rendering ${overall}%`;
+    const facts = [`${done} of ${total} chapters done`];
+    if (job.fps) facts.push(`${Number(job.fps).toFixed(1)} frames a second`);
+    if (!stopped && job.status !== 'ready' && job.eta_seconds) facts.push(minutes(job.eta_seconds));
+    if (job.render_seconds) facts.push(`rendered in ${Math.round(job.render_seconds / 60)} min`);
+    const item = el('article', { class: 'card studio-job studio-long-job', 'data-job-id': job.id || '', 'data-long-status': job.status }, [
+      el('strong', { text: `${job.aspect} · Long video · ${head}` }), el('p', { class: 'meta', text: facts.join(' · ') })]);
+    if (!stopped && job.status !== 'ready' && job.frames_total) item.append(el('progress', { max: job.frames_total, value: job.frames_done || 0, 'aria-label': 'Frames rendered in the whole video' }));
+    item.append(chapterRows(job));
+    if (job.status.startsWith('failed:')) item.append(el('p', { class: 'studio-error', text: job.status.slice(8) }));
+    if (job.error) item.append(el('p', { class: 'studio-error', text: job.error }));
+    if (stopped) {
+      item.append(el('p', { class: 'meta', text: 'Finished chapters are kept. Resume starts at the first unfinished chapter.' }),
+        button('Resume render', () => startRender([job.aspect]), { 'aria-label': `Resume the ${job.aspect} render` }));
+    } else if (job.status !== 'ready' && job.id) {
+      item.append(button('Stop render', async () => { Object.assign(job, await write(`/api/video-jobs/${job.id}/cancel`, {})); drawJobs(); }));
+    }
+    for (const note of job.notes || []) item.append(el('p', { text: typeof note === 'string' ? note : JSON.stringify(note), class: 'studio-note' }));
+    return item;
+  }
   function drawJobs() {
     queue.replaceChildren(el('h3', { text: 'Render queue and downloads' }), el('div', { class: 'studio-actions' }, [
       ...ASPECTS.map(a => button('Render ' + a, () => startRender([a]))), button('Render chosen aspects', () => startRender(state.p.aspects)),
     ]));
+    const panel = planPanel();
+    if (panel) queue.append(panel);
+    // A long render from an earlier run (before an app restart) shows with Resume until a new job takes over its aspect.
+    const liveLong = new Set(jobs.filter(j => j.kind === 'long').map(j => j.aspect));
+    for (const stored of resources.long_renders || []) if (!liveLong.has(stored.aspect) && stored.status !== 'ready') queue.append(longJob(stored));
+    if (resources.disk && (resources.disk.parts || resources.disk.videos)) {
+      const used = el('p', { class: 'meta studio-disk', text: `Renders use ${megabytes(resources.disk.total)}` + (resources.disk.parts ? `, of which saved chapter parts ${megabytes(resources.disk.parts)}.` : '.') });
+      const row = el('div', { class: 'studio-actions' }, [used]);
+      if (resources.disk.parts) row.append(button('Remove saved chapter parts', async () => {
+        if (!await confirmDialog({ title: 'Remove saved chapter parts?', message: 'Finished videos stay. A stopped long render then starts again from its first chapter.', confirmLabel: 'Remove parts', danger: false })) return;
+        const out = await write(endpoint + '/parts/clean', {}); resources.disk = out.disk; resources.long_renders = (await api(endpoint + '/long-renders')).renders; drawJobs(); toast(`Freed ${megabytes(out.freed)}.`);
+      }));
+      queue.append(row);
+    }
     for (const job of jobs) {
+      if (job.kind === 'long') { queue.append(longJob(job)); continue; }
       const item = el('article', { class: 'card studio-job', 'data-job-id': job.id }, [el('strong', { text: `${job.aspect} · ${job.status}` })]);
       const match = /^rendering (\d+)\/(\d+)/.exec(job.status);
       if (match) item.append(el('progress', { max: match[2], value: match[1], 'aria-label': 'Frames rendered' }));
@@ -463,15 +551,23 @@ async function editor(host, id, looks, back, parentDisposed) {
     for (const file of files) {
       const url = endpoint + '/renders/' + file, slug = file.split('-v')[0];
       const links = el('div', { class: 'studio-actions' });
-      for (const [label, name] of [['Download MP4', file], ['Download contact sheet', `sheet-${slug}.png`], ['Download soundtrack (WAV)', 'soundtrack.wav']]) links.append(el('a', { class: 'btn', href: endpoint + '/renders/' + name, download: name, text: label }));
+      const extras = resources.renders.includes(file.replace(/\.mp4$/, '.chapters.txt')) ? [['Download chapter list', file.replace(/\.mp4$/, '.chapters.txt')]] : [];
+      for (const [label, name] of [['Download MP4', file], ['Download contact sheet', `sheet-${slug}.png`], ['Download soundtrack (WAV)', 'soundtrack.wav'], ...extras]) links.append(el('a', { class: 'btn', href: endpoint + '/renders/' + name, download: name, text: label }));
       queue.append(el('article', { class: 'card studio-download' }, [el('h4', { text: file }), el('video', { src: url, controls: true, preload: 'metadata', 'aria-label': `Rendered video ${file}` }), links]));
     }
   }
   async function startRender(aspects) {
     if (!await save()) throw Error('Fix the highlighted fields before rendering.');
     if (!aspects.length || aspects.some(a => !state.p.aspects.includes(a))) throw Error('Choose these aspects in the project fields first.');
-    for (const a of aspects) { const job = await write(endpoint + '/render', { aspect: a }); jobs.push(job); rememberJobs(id, jobs); drawJobs(); }
+    if (state.p.chapters?.length) { await loadPlan(); if (plan?.status !== 'approved') { drawJobs(); throw Error('Approve the shot plan first: a long video renders only after you approve it.'); } }
+    for (const a of aspects) {
+      const job = await write(endpoint + '/render', { aspect: a });
+      // Starting a long render that is already running returns that job; keep one card per job.
+      const at = jobs.findIndex(j => j.id === job.id); if (at >= 0) jobs[at] = job; else jobs.push(job);
+      rememberJobs(id, jobs); drawJobs();
+    }
   }
+  async function loadPlan() { plan = state.p.chapters?.length ? await api(endpoint + '/plan').catch(() => null) : null; }
   async function poll() {
     try {
       const results = await Promise.allSettled([api(endpoint), ...jobs.filter(j => j.status !== 'ready' && !j.status.startsWith('failed:')).map(j => api(`/api/video-jobs/${j.id}`))]);
@@ -488,7 +584,11 @@ async function editor(host, id, looks, back, parentDisposed) {
         const index = jobs.findIndex(j => j.id === result.value.id);
         if (JSON.stringify(jobs[index]) !== JSON.stringify(result.value)) { jobs[index] = result.value; jobChanged = true; }
       }
-      if (jobChanged) drawJobs();
+      if (jobChanged) {
+        // A long render that just finished or stopped: refresh the stored renders and the disk use.
+        if (jobs.some(j => j.kind === 'long')) { try { resources = await api(`${BASE}/videos/${id}/resources`); } catch { /* the next poll tries again */ } }
+        drawJobs();
+      }
     } catch (error) { if (!disposed) previewError.textContent = 'Refresh unavailable: ' + error.message; }
     finally { if (!disposed) pollTimer = setTimeout(poll, 3000); }
   }

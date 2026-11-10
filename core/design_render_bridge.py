@@ -286,7 +286,7 @@ FRAME_SECONDS = .2   # the slowest capture rate allowed before a render counts a
 
 def video_seconds(job: dict) -> float:
     """How long one video job may take: ten minutes, or longer for a long narrated video."""
-    return 600. if job.get("preview") else max(600., 60 + job["frames"] * FRAME_SECONDS)
+    return 600. if job.get("preview") else max(600., 60 + job.get("count", job["frames"]) * FRAME_SECONDS)
 
 
 async def video(job: dict, consumer) -> dict:
@@ -296,7 +296,7 @@ async def video(job: dict, consumer) -> dict:
     job_id = job["id"]
     future = asyncio.get_running_loop().create_future()
     _pending[job_id] = future
-    state = {"next": 0, "count": 0, "consumer": consumer, "expected": len(job.get("times", [])) if job.get("preview") else job["frames"],
+    state = {"next": 0, "count": 0, "consumer": consumer, "expected": len(job.get("times", [])) if job.get("preview") else job.get("count", job["frames"]),
              "layouts": 0, "lock": asyncio.Lock(), "account": accounts.effective_account()}
     _video_parts[job_id] = state
     await _q().put({**job, "kind": "video"})

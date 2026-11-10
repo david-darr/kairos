@@ -37,15 +37,29 @@ TEAM_ROLES = ("producer", "researcher", "evaluator", "script_writer", "editor", 
 ASPECTS = ("9:16", "16:9", "1:1")
 # Columns added after the first release; a store made before them gains them when it opens.
 LATER_COLUMNS = {"snapshots": {"source": "TEXT NOT NULL DEFAULT 'manual'"},
-                 "channels": {"look": "TEXT", "aspect": "TEXT", "notes": "TEXT NOT NULL DEFAULT ''", "voice": "TEXT", "style_pack": "TEXT"},
+                 "channels": {"look": "TEXT", "aspect": "TEXT", "notes": "TEXT NOT NULL DEFAULT ''", "voice": "TEXT", "style_pack": "TEXT",
+                              "long_per_week": "INTEGER"},
                  "posts": {"pick_reason": "TEXT NOT NULL DEFAULT ''", "tags": "TEXT NOT NULL DEFAULT ''",
                            "ai_label": "INTEGER NOT NULL DEFAULT 1", "format_id": "INTEGER REFERENCES formats(id)",
                            "port_id": "INTEGER REFERENCES ports(id)", "style_pack": "TEXT",
-                           "thumbnail": "TEXT NOT NULL DEFAULT ''"}}
+                           "thumbnail": "TEXT NOT NULL DEFAULT ''", "long_form": "INTEGER NOT NULL DEFAULT 0", "video_id": "TEXT"}}
 # What a post keeps as appeal evidence (Video Styles build spec section 7): the person's approval, the shot plan,
 # the sources behind its facts, and the policy checks it passed.
-EVIDENCE_KINDS = ("approval", "shot_plan", "sources", "policy_check", "port")
+EVIDENCE_KINDS = ("approval", "shot_plan", "sources", "policy_check", "port", "plan_approval")
 VOICE_ID = re.compile(r"^[a-z]{2}_[a-z0-9]{1,30}$")
+# Long-form (Video Styles section 7, V3, locked): one long video a week per YouTube channel, plus daily Shorts. The cap is
+# set per channel (0 to 7) and is soft: the person can change it on the channel; the team plans long videos within it.
+LONG_PER_WEEK = {"youtube": 1, "tiktok": 0, "instagram": 0}
+LONG_FORM_PLATFORMS = ("youtube",)
+WEEK = 7 * DAY
+
+
+def youtube_chapters(post):
+    """The chapter list a long post's render carries for its YouTube description ("0:00 Title" lines), or ""."""
+    if not post.get("long_form"):
+        return ""
+    from core import video_longform
+    return video_longform.chapters_for_render(post.get("render_ref"))
 
 
 class StudioError(Exception):
@@ -333,7 +347,21 @@ class Store:
         return self._rows(f"SELECT c.*, n.name AS niche_name FROM channels c JOIN niches n ON n.id = c.niche_id {clause} "
                           "ORDER BY c.id", tuple(args))
 
-    def edit_channel(self, channel_id, look=None, aspect=None, notes=None, voice=None, style_pack=None):
+    def long_cap(self, channel):
+        """Long videos a week this channel takes: its own setting, else one on YouTube and none elsewhere."""
+        if channel["platform"] not in LONG_FORM_PLATFORMS:
+            return 0
+        own = channel.get("long_per_week")
+        return LONG_PER_WEEK.get(channel["platform"], 0) if own is None else own
+
+    def long_this_week(self, channel_id, now=None):
+        """Long videos planned for the channel in the last seven days (rejected ones do not count)."""
+        now = time.time() if now is None else now
+        row = self._row("SELECT COUNT(*) AS n FROM posts WHERE channel_id = ? AND long_form = 1 AND state != 'rejected' "
+                        "AND created_at > ?", (channel_id, now - WEEK))
+        return row["n"] if row else 0
+
+    def edit_channel(self, channel_id, look=None, aspect=None, notes=None, voice=None, style_pack=None, long_per_week=None):
         """The channel's own look (a Studio video look id), aspect, voice notes, narrator voice (a Kokoro voice id) and
         style pack (a built-in or the account's own approved pack), so the Editor and Script Writer make each channel's
         posts in its own style and the channel keeps one voice. None leaves a field as it is; "" clears it."""
@@ -365,6 +393,12 @@ class Store:
             changes["aspect"] = aspect or None
         if notes is not None:
             changes["notes"] = _clean_text(notes, "notes", 1000, False)
+        if long_per_week is not None:
+            if isinstance(long_per_week, bool) or not isinstance(long_per_week, int) or not 0 <= long_per_week <= 7:
+                raise StudioError("long videos a week is a whole number from 0 to 7")
+            if long_per_week and self.get_channel(channel_id)["platform"] not in LONG_FORM_PLATFORMS:
+                raise StudioError("long videos are for YouTube channels; this channel makes Shorts only")
+            changes["long_per_week"] = long_per_week
         if changes:
             self._update("channels", channel_id, **changes)
         return self.get_channel(channel_id)
@@ -583,13 +617,22 @@ class Store:
 
     def create_post(self, channel_id, title, topic_id=None, script_strategy_id=None, evaluator_strategy_id=None,
                     script_ref=None, caption="", format=None, pick_reason="", format_id=None, port_id=None, style_pack=None,
-                    now=None):
+                    long_form=False, now=None):
         now = time.time() if now is None else now
         channel = self.get_channel(channel_id)
         if channel["status"] != "live":
             raise conflict("that channel is archived")
         if channel["paused"]:
             raise conflict("that channel is paused after a platform warning")
+        if long_form:
+            cap = self.long_cap(channel)
+            if channel["platform"] not in LONG_FORM_PLATFORMS:
+                raise StudioError("long videos are made for YouTube channels; make a Short for this channel")
+            used = self.long_this_week(channel_id, now)
+            if used >= cap:
+                raise conflict(f"{channel['handle']} takes {cap} long video{'' if cap == 1 else 's'} a week and {used} "
+                               f"{'is' if used == 1 else 'are'} already planned in the last 7 days; make a Short, or the person "
+                               "can change the channel's long videos a week in Studio > Content > Channels")
         if topic_id is not None and self.get_topic(topic_id)["niche_id"] != channel["niche_id"]:
             raise StudioError("that topic belongs to another niche")
         for sid, role in ((script_strategy_id, "script_writer"), (evaluator_strategy_id, "evaluator")):
@@ -617,7 +660,7 @@ class Store:
             script_strategy_id=script_strategy_id, evaluator_strategy_id=evaluator_strategy_id,
             script_ref=_clean_text(script_ref, "script", self.EDITABLE["script_ref"], False) or None,
             pick_reason=_clean_text(pick_reason, "pick reason", 500, False), format_id=format_id, port_id=port_id,
-            style_pack=style_pack, created_at=now, step_since=now)
+            style_pack=style_pack, long_form=1 if long_form else 0, created_at=now, step_since=now)
         return self.get_post(post_id)
 
     def _active_strategy(self, strategy_id, role):
@@ -711,8 +754,19 @@ class Store:
             "by": by, "at": now, "title": post["title"], "caption": post["caption"], "tags": post["tags"],
             "render_ref": post["render_ref"], "ai_label": bool(post["ai_label"]), "channel": channel["handle"],
             "platform": channel["platform"],
-            "script_sha256": hashlib.sha256((post["script_ref"] or "").encode("utf-8")).hexdigest()}, now=now)
+            "script_sha256": hashlib.sha256((post["script_ref"] or "").encode("utf-8")).hexdigest(),
+            **({"chapters": youtube_chapters(post)} if post["long_form"] else {})}, now=now)
         return approved
+
+    def link_video(self, post_id, video_id):
+        """The Studio video a long post is made as (its plan goes to the person before it renders)."""
+        post = self.get_post(post_id)
+        if post["state"] != "drafted":
+            raise conflict(f"a {post['state']} post's video cannot change")
+        if not isinstance(video_id, str) or not re.fullmatch(r"[a-f0-9]{12}", video_id):
+            raise StudioError("video_id is a Studio video's 12-character id")
+        self._update("posts", post_id, video_id=video_id)
+        return self.get_post(post_id)
 
     def reject(self, post_id, reason="", now=None):
         now = time.time() if now is None else now

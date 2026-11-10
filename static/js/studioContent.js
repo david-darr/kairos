@@ -13,6 +13,9 @@ import { libraryShareButton } from './libraryShare.js';
 // Styles lists the account's own style packs (routes/style_pack_routes.py): make one from a written brief, duplicate one,
 // add the starter pack or import a pack file; edit the brief (a new version), render its sample, export it, share it, and
 // approve or reject it. A pack waiting for you is also in Approvals. Channels pick their pack in Look.
+// Long videos (Video Styles unit 4): a long video's shot plan waits in Approvals before it renders (approved at
+// /api/videos/<id>/plan); a YouTube channel sets its long videos a week in Look (one by default); an approval card shows the
+// chapter list that goes into the YouTube description.
 
 const BASE = '/api/content-studio';
 const TABS = [['approvals', 'Approvals'], ['pipeline', 'Pipeline'], ['channels', 'Channels'], ['formats', 'Formats'], ['characters', 'Characters'], ['styles', 'Styles'], ['scoreboard', 'Scoreboard'], ['report', 'Report']];
@@ -92,6 +95,7 @@ export async function mountContent(host, { signal } = {}) {
     data = { ...(data || {}), niches: value('niches', { niches: [] }).niches, maxLive: value('niches', {}).max_live,
       channels: value('channels', { channels: [] }).channels, items: value('pipeline', { items: [] }).items,
       approvals: value('approvals', { posts: [] }).posts, sheets: value('approvals', {}).characters || [], packsWaiting: value('approvals', {}).style_packs || [],
+      plans: value('approvals', {}).plans || [],
       styles, findings: value('watch', { findings: [] }).findings,
       hasTeam: (value('settings', {}).team_bot_ids || []).length > 0, settings: value('settings', {}),
       yt: value('analytics/youtube/status', null), ytPost: value('posting/youtube/status', null),
@@ -220,16 +224,22 @@ export async function mountContent(host, { signal } = {}) {
     notes.value = channel.notes || '';
     const voice = textInput('Narrator voice', { value: channel.voice || '', maxlength: '40', placeholder: 'For example, af_heart' });
     const pack = selectOf('Style pack', M.packOptions(data.styles?.available), channel.style_pack || '');
+    const youtube = channel.platform === 'youtube';
+    const longWeek = el('input', { type: 'number', min: '0', max: '7', step: '1', 'aria-label': 'Long videos a week', value: String(channel.long_per_week ?? 1) });
+    longWeek.value = String(channel.long_per_week ?? 1);
     const status = el('p', { class: 'set-error', role: 'alert' });
     const body = el('div', { class: 'sc-dialog' }, [
       note('The Editor renders this channel\'s videos in its style pack, look and aspect, and the Script Writer follows its voice notes.'),
       group({}, [row({ title: 'Style pack', description: 'How this channel\'s videos look and sound. Only approved packs are listed (Styles).', control: pack }),
         row({ title: 'Look', description: 'A Studio video look id. Leave it empty to let the Editor choose.', control: look, stack: true }),
         row({ title: 'Aspect', control: aspect }), row({ title: 'Voice notes', control: notes, stack: true }),
-        row({ title: 'Narrator voice', description: 'The Kokoro voice that narrates every video on this channel. Left empty, the first narrated video sets it.', control: voice, stack: true })]), status]);
+        row({ title: 'Narrator voice', description: 'The Kokoro voice that narrates every video on this channel. Left empty, the first narrated video sets it.', control: voice, stack: true }),
+        youtube ? row({ title: 'Long videos a week', description: 'Longer videos in chapters, on top of the daily Shorts. The team plans within it, and each plan comes to you before it renders.', control: longWeek }) : null]), status]);
     const save = btn('Save look', async () => {
       status.textContent = '';
-      try { await send(`/channels/${channel.id}/edit`, { look: look.value.trim(), aspect: aspect.value, notes: notes.value.trim(), voice: voice.value.trim(), style_pack: pack.value }); }
+      const week = Number(longWeek.value);
+      if (youtube && (!Number.isInteger(week) || week < 0 || week > 7)) { status.textContent = 'Long videos a week is a whole number from 0 to 7.'; return; }
+      try { await send(`/channels/${channel.id}/edit`, { look: look.value.trim(), aspect: aspect.value, notes: notes.value.trim(), voice: voice.value.trim(), style_pack: pack.value, ...(youtube ? { long_per_week: week } : {}) }); }
       catch (error) { status.textContent = M.loadFailure(error); return; }
       dialog.close(); toast('Look saved.'); await reload();
     }, 'primary');
@@ -338,6 +348,8 @@ export async function mountContent(host, { signal } = {}) {
       el('div', { class: 'sc-block' }, [el('h4', { text: 'Caption' }), el('p', { class: 'sc-text', text: post.caption || 'No caption yet.' })]),
       post.tags ? el('div', { class: 'sc-block' }, [el('h4', { text: 'Tags' }), el('p', { class: 'sc-text', text: post.tags })]) : null,
       post.thumbnail ? el('div', { class: 'sc-block' }, [el('h4', { text: 'Thumbnail' }), el('p', { class: 'sc-text', text: post.thumbnail })]) : null,
+      post.long_form ? el('div', { class: 'sc-block', 'data-post-chapters': '' }, [el('h4', { text: 'Chapters (added to the YouTube description)' }),
+        el('p', { class: 'sc-text', text: post.chapters || 'The chapter list comes with the render.' })]) : null,
       el('div', { class: 'sc-block' }, [el('h4', { text: 'Script' }), el('p', { class: 'sc-text', text: post.script_ref || 'No script yet.' })]),
       el('div', { class: 'sc-block' }, [el('h4', { text: 'Video' }), renderNode]),
       el('div', { class: 'sc-block', 'data-ai-label': label.required ? 'required' : 'none' }, [el('h4', { text: 'AI label' }),
@@ -346,8 +358,30 @@ export async function mountContent(host, { signal } = {}) {
 
   // -- approvals -------------------------------------------------------------------------------
 
+  // A long video's shot plan: its chapters and shots, then Approve (the render may start) or Reject with a note.
+  function planCard(v) {
+    const node = el('article', { class: 'sc-post sc-plan', 'data-plan': v.video_id, 'aria-label': `Shot plan of ${v.title}` });
+    const header = el('header', { class: 'sc-post-head' }, [el('h3', { class: 'sc-post-title', text: `Long video plan: ${v.title}` }),
+      el('div', { class: 'sc-post-pills' }, [pill(`${Math.round((v.seconds || 0) / 6) / 10} min`, 'accent'), pill(`${(v.chapters || []).length} chapters`, 'muted')])]);
+    const chapters = el('ol', { class: 'sc-chapters' }, (v.chapters || []).map(c => el('li', { text: `${M.clock(c.start)} ${c.title}` })));
+    const plan = el('details', { class: 'sc-plan-text' }, [el('summary', { text: 'Every shot' }), el('pre', { class: 'sc-text', text: v.text || '' })]);
+    const view = () => node.replaceChildren(header, chapters, plan, note('It renders only after you approve this plan. A change to the plan comes back to you.'),
+      el('div', { class: 'sc-actions' }, [
+        btn('Approve plan', async () => { await sendTo(`/api/videos/${v.video_id}/plan/approve`); toast('Plan approved. The team can render it now.'); await reload(); }, 'primary', { 'aria-label': `Approve the plan of ${v.title}` }),
+        btn('Reject', () => asking(), 'quiet danger', { 'aria-label': `Reject the plan of ${v.title}` })]));
+    const asking = () => {
+      const reason = el('textarea', { rows: 3, 'aria-label': 'What should change?', maxlength: '500', placeholder: 'What should change? The team sees this.' });
+      node.replaceChildren(header, chapters, plan, reason, el('div', { class: 'sc-actions' }, [
+        btn('Reject plan', async () => { await sendTo(`/api/videos/${v.video_id}/plan/reject`, { reason: reason.value.trim() }); toast('Plan rejected.'); await reload(); }, 'danger'),
+        btn('Cancel', () => view(), 'quiet')]));
+      reason.focus();
+    };
+    view();
+    return node;
+  }
+
   function approvalsView() {
-    const sheets = [...data.packsWaiting.map(v => packCard(v)), ...data.sheets.map(sheetCard)];
+    const sheets = [...data.plans.map(planCard), ...data.packsWaiting.map(v => packCard(v)), ...data.sheets.map(sheetCard)];
     if (!data.approvals.length) return sheets.length ? sheets : [empty('Nothing is waiting for you. Posts appear here when the Producer brings them for approval.')];
     const out = [...sheets, note('Approving marks a post approved. Preparing it for the platform comes later, so approved posts wait in the Pipeline until then.')];
     const count = data.approvals.length;
@@ -824,9 +858,9 @@ export async function mountContent(host, { signal } = {}) {
   async function draw() {
     if (!data) return;
     if (!data.niches.length && !data.channels.length) { root.replaceChildren(emptyState()); return; }
-    tab ||= data.approvals.length || data.sheets.length || data.packsWaiting.length ? 'approvals' : 'pipeline';
+    tab ||= data.approvals.length || data.plans.length || data.sheets.length || data.packsWaiting.length ? 'approvals' : 'pipeline';
     const bar = el('div', { class: 'sc-tabs', role: 'tablist', 'aria-label': 'Content sections' }, TABS.map(([id, name]) => {
-      const waiting = data.approvals.length + data.sheets.length + data.packsWaiting.length, count = id === 'approvals' && waiting ? ` ${waiting}` : '';
+      const waiting = data.approvals.length + data.plans.length + data.sheets.length + data.packsWaiting.length, count = id === 'approvals' && waiting ? ` ${waiting}` : '';
       const node = el('button', { type: 'button', role: 'tab', class: 'sc-tab', id: `sc-tab-${id}`, 'aria-selected': String(id === tab), 'aria-controls': 'sc-body', 'data-tab': id, text: name + count });
       node.addEventListener('click', () => select(id));
       return node;

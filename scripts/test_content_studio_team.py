@@ -235,7 +235,7 @@ class StudioToolTests(unittest.TestCase):
                                  "content_studio_record_warning", "content_studio_reject_decision", "content_studio_run_review",
                                  "content_studio_save_format", "content_studio_save_script", "content_studio_save_shot_plan",
                                  "content_studio_send_report", "content_studio_style_pack_sample", "content_studio_style_packs",
-                                 "content_studio_submit_post", "content_studio_watch", "content_studio_youtube_trending"])
+                                 "content_studio_submit_plan", "content_studio_submit_post", "content_studio_watch", "content_studio_youtube_trending"])
         for name in names:
             self.assertTrue(tool_registry._REGISTRY[name].agent_only)
         self.assertFalse(any("approve" in n for n in names), "no tool approves a post")

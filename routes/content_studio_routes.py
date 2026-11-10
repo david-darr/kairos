@@ -36,6 +36,7 @@ class ChannelEditBody(Body):
     notes: Optional[str] = Field(None, max_length=1000)
     voice: Optional[str] = Field(None, max_length=40)
     style_pack: Optional[str] = Field(None, max_length=40)
+    long_per_week: Optional[int] = Field(None, ge=0, le=7)
 
 
 class BatchBody(Body):
@@ -262,7 +263,9 @@ def add_post(body: PostBody, user: str = Depends(require_user)):
 def get_post(post_id: int, user: str = Depends(require_user)):
     post = _run(studio.get_post, post_id)
     direct = youtube_publish.check(studio, post_id) if post["state"] == "approved" and post["platform"] == "youtube" else None
-    return {**post, "metrics": studio.snapshots(post_id), "direct_post_blocker": direct, "evidence": studio.evidence(post_id)}
+    from services.content_studio.store import youtube_chapters
+    return {**post, "metrics": studio.snapshots(post_id), "direct_post_blocker": direct, "evidence": studio.evidence(post_id),
+            "chapters": youtube_chapters(post)}
 
 
 @router.get("/posts/{post_id}/evidence")
@@ -286,8 +289,12 @@ def approvals(user: str = Depends(require_user)):
     """Posts waiting for the person, and character sheets and style packs waiting for their OK (approved at
     /api/characters and /api/style-packs)."""
     from core import character_store, style_pack_store
+    from core import video_plan
+    from services.content_studio.store import youtube_chapters
     packs = [{k: v for k, v in p.items() if k != "spec"} for p in style_pack_store.pending()]
-    return {"posts": pipeline.approval_queue(studio), "characters": character_store.pending(), "style_packs": packs}
+    posts = [{**p, "chapters": youtube_chapters(p)} for p in pipeline.approval_queue(studio)]
+    # Long videos whose shot plan waits for the person before it renders (approved at /api/videos/<id>/plan).
+    return {"posts": posts, "characters": character_store.pending(), "style_packs": packs, "plans": video_plan.waiting()}
 
 
 @router.post("/posts/{post_id}/approve")

@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "bedda0d4aaaf67e1a2ad54e05dbfbd8cf46910389e0c033ff83b9b39b52cff17",
+  "app.js": "5c69aacdfac36813e1ae1d769ff1a93cc7a46948337dcc8f8c4c65df09bddd35",
   "fixtures.js": "b137d6d7586b7059984b39c1c3b37447c746559f29f997ced25fc220dcc665e9",
   "index.html": "765d80b018d722a27e29860be2ae3b86e889fe704be8a9dfdc0752e78379ad19",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -75,12 +75,12 @@
   "static/css/redesign.css": "d1485aae3a4ded144849698bd90ca04d1e310231485c63d5aeca6cb0e7fc1b87",
   "static/css/ring.css": "06a1a94a65022b46c5d199d26b9eb5c3636a20ef449e1a51fadfbc9274f35c9a",
   "static/css/settings.css": "8b17458227310ea14550d45fad8624fba94feb9a312329796fb713e63f4c6738",
-  "static/css/studio-content.css": "b52e5eb7d174048da03afed694d66f8900da0f7080b3cfd8a3b3f90643389de0",
+  "static/css/studio-content.css": "f8f22d8c805e7fe2805cb774027f6167b5c20bd6192c75cb9eda5704f6fc2bce",
   "static/css/style.css": "9a2e987ec537fdd3b3350aaeab4f4d678b9d052f70e5dffcf4a29aac2a792c5d",
   "static/css/swarm.css": "c5416a3f3d94b736f53563f341e61d10cc538766e6cf6809e3004e567c7ef93f",
   "static/css/vault.css": "d65c61ab5fd0195217de837009a06bb037c0cbc27d5bab2808d5cc9937e210a3",
   "static/data/bots-ready.json": "441cf99da3a0ef69d0994ed012cd5323078287b406967f4e2e9fc18857673844",
-  "static/data/bots-teams.json": "db49e3d545f71a1cd09f16e172a034d827a165b000b8928048acb6401d8253e6",
+  "static/data/bots-teams.json": "928b5e9747673c3af4dd16ba64fda530797dd80e0de51b91af7631d2fdd29753",
   "static/fonts/CormorantGaramond-Italic-Variable.woff2": "d7caff90bca006d6cf4a46f2d7a5710a8db4b3c36220a6e1a03aa61fe1143eb7",
   "static/fonts/CormorantGaramond-OFL.txt": "6f5a41d57400577a50aae88475b11f292f3d7de78ee7d5113c69577331d8ad31",
   "static/fonts/Geist-OFL.txt": "c683bfbcc7e087f5d37a54ef628f10387c451a83ddc459b151403a164ac46c90",
@@ -336,7 +336,7 @@
   "static/motion/layout.js": "52f17751c9d1228beca774f6149822ac0ea1b61a5abec6f4a6fd070948d8eecf",
   "static/motion/player.html": "e93af7f6f221b9358ac17639d30b53c1cf659e206da6d2b25873a6e2d9e17ff9",
   "static/motion/rig.js": "a61a776327efb7c9d280213587610943387097d6b9cb4124188af5f1a956de4a",
-  "static/motion/scene.js": "ebec57545f264f0a6c8dfd18539d8315b87bc93bca22e45a06c672ba6b420cd6",
+  "static/motion/scene.js": "b4a1229a463b83c2dbf46aca09552b34b1dac0b0cca14a0ad2b71c0d01da7bfa",
   "static/motion/sheet.html": "5a7156e5898c3a17430f0d71eb61b16213199417a4b60adc3c26c9739e671684",
   "static/motion/sheet.js": "a4e2401dfc6cc95ed36d72d59349fc70f90dfd6029a0e59a27e93e3f9f250b20",
   "static/sw.js": "805f68936b6faea07d055075a38ffdd07c37d69084999d92440dfb46e4a4e4fb",
@@ -1083,7 +1083,7 @@
   "static/vendor/ascii-magic/runtime/player.js": "4843c1e44bc8b59022d46b4d2690e200a92afa4a8d1d51ce5a696bb995c9eff4",
   "static/vendor/lucide-LICENSE.txt": "b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57",
   "tabs/crm/view.css": "ee6c6680949f9ff5c107ac58aad04ed22d59b5424dce8344651374352285f2c5",
-  "tabs/studio/view.css": "63a9b5f0cdcd469c37fa0ef88080198d3fceb57e2a582e931ceb07109e451adb"
+  "tabs/studio/view.css": "8a0ccf87630e1d16eacdaa7dc9cc2d0ebcaae0aaabf9751b01a254a3de955c68"
  },
  "sources": {
   "demo/fixtures.js": "b137d6d7586b7059984b39c1c3b37447c746559f29f997ced25fc220dcc665e9",
@@ -1160,12 +1160,12 @@
   "static/css/redesign.css": "d1485aae3a4ded144849698bd90ca04d1e310231485c63d5aeca6cb0e7fc1b87",
   "static/css/ring.css": "06a1a94a65022b46c5d199d26b9eb5c3636a20ef449e1a51fadfbc9274f35c9a",
   "static/css/settings.css": "8b17458227310ea14550d45fad8624fba94feb9a312329796fb713e63f4c6738",
-  "static/css/studio-content.css": "b52e5eb7d174048da03afed694d66f8900da0f7080b3cfd8a3b3f90643389de0",
+  "static/css/studio-content.css": "f8f22d8c805e7fe2805cb774027f6167b5c20bd6192c75cb9eda5704f6fc2bce",
   "static/css/style.css": "151a5688c9c9ce88c5f4b981e195360e8297528ed38f8a58a70c5f5e66d5e321",
   "static/css/swarm.css": "c5416a3f3d94b736f53563f341e61d10cc538766e6cf6809e3004e567c7ef93f",
   "static/css/vault.css": "d65c61ab5fd0195217de837009a06bb037c0cbc27d5bab2808d5cc9937e210a3",
   "static/data/bots-ready.json": "441cf99da3a0ef69d0994ed012cd5323078287b406967f4e2e9fc18857673844",
-  "static/data/bots-teams.json": "db49e3d545f71a1cd09f16e172a034d827a165b000b8928048acb6401d8253e6",
+  "static/data/bots-teams.json": "928b5e9747673c3af4dd16ba64fda530797dd80e0de51b91af7631d2fdd29753",
   "static/fonts/CormorantGaramond-Italic-Variable.woff2": "d7caff90bca006d6cf4a46f2d7a5710a8db4b3c36220a6e1a03aa61fe1143eb7",
   "static/fonts/CormorantGaramond-OFL.txt": "6f5a41d57400577a50aae88475b11f292f3d7de78ee7d5113c69577331d8ad31",
   "static/fonts/Geist-OFL.txt": "c683bfbcc7e087f5d37a54ef628f10387c451a83ddc459b151403a164ac46c90",
@@ -1525,8 +1525,8 @@
   "static/js/slashCommands.js": "904e661c5119014068b4774ea060cd812771386654065be20a4813b5fd398263",
   "static/js/speechSegments.js": "b76625563cb913b6bba00a3f5a8c2284b0ee62c76a59615bd2e82b0d7e75032d",
   "static/js/storePublish.js": "58ddd702fef6e0bc429428ff7ee635cb19e5ba11c56f1c70aa71dcaacaeb4cf7",
-  "static/js/studioContent.js": "49b41fa92bdb5346d641f2b2e985c0cccf8910c728b6c868bc3d07886c8c6aaf",
-  "static/js/studioContentModel.js": "441236c92d0649019ae4495880bfad067be05ae8bcfb2735444c357e5c82cff1",
+  "static/js/studioContent.js": "a0742d332992e5877a00b3d6e21342cdcdc81264716831b9ee643c2a8b5f70d4",
+  "static/js/studioContentModel.js": "44193f134370ad2d519f7d3a3e76f1031a0194b56cd7874383fcdc9f995b4d7a",
   "static/js/swarmBoard.js": "699d24aaaf8f84e12fb7365b598fae373f4c0e1b4696cf3425b5406eeea9a596",
   "static/js/swarmEvents.js": "513eb95038447edc16840b73b046cf89b528202f633abec89f56aa908130b3f4",
   "static/js/swarmGraph.js": "d42cba53b2dd8516aa074d95cd4907723b253f2f26ec08faca1e6631d19bb6e6",
@@ -1794,7 +1794,7 @@
   "static/motion/layout.js": "52f17751c9d1228beca774f6149822ac0ea1b61a5abec6f4a6fd070948d8eecf",
   "static/motion/player.html": "e93af7f6f221b9358ac17639d30b53c1cf659e206da6d2b25873a6e2d9e17ff9",
   "static/motion/rig.js": "a61a776327efb7c9d280213587610943387097d6b9cb4124188af5f1a956de4a",
-  "static/motion/scene.js": "ebec57545f264f0a6c8dfd18539d8315b87bc93bca22e45a06c672ba6b420cd6",
+  "static/motion/scene.js": "b4a1229a463b83c2dbf46aca09552b34b1dac0b0cca14a0ad2b71c0d01da7bfa",
   "static/motion/sheet.html": "5a7156e5898c3a17430f0d71eb61b16213199417a4b60adc3c26c9739e671684",
   "static/motion/sheet.js": "a4e2401dfc6cc95ed36d72d59349fc70f90dfd6029a0e59a27e93e3f9f250b20",
   "static/sw.js": "805f68936b6faea07d055075a38ffdd07c37d69084999d92440dfb46e4a4e4fb",
@@ -2546,7 +2546,7 @@
   "tabs/school/tab.json": "97ca66d011d3f675e7e725bcc758cb9c8c77e0a132b175728979fb8145453ed0",
   "tabs/school/view.js": "ebdc4818f6ca446e2aae949af7ea3f08a7f46eaa6dc0320e7da1e4d1befc6399",
   "tabs/studio/tab.json": "28f1e091d41cb463851b41c3aeb27e8bf66adbcc98844f63423d09bada77b837",
-  "tabs/studio/view.css": "63a9b5f0cdcd469c37fa0ef88080198d3fceb57e2a582e931ceb07109e451adb",
-  "tabs/studio/view.js": "63070f045e0ca41c78b09b05d953b272334bc34bf52a680b2fa2c70f4da5fe2c"
+  "tabs/studio/view.css": "8a0ccf87630e1d16eacdaa7dc9cc2d0ebcaae0aaabf9751b01a254a3de955c68",
+  "tabs/studio/view.js": "1f74d5cbaa3ab00b05fff68cfe531bd6e51db2eddaf3265405992abcfb65309a"
  }
 }

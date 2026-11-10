@@ -523,3 +523,9 @@ export function packFacts(spec) {
 export function packOptions(available) {
   return [['', 'Motion type (default)'], ...(available || []).filter(p => p.id !== 'motion-type').map(p => [p.id, p.name])];
 }
+
+// A chapter's start as YouTube writes it: 00:00, 01:05, 1:02:03.
+export function clock(seconds) {
+  const t = Math.floor(Number(seconds) || 0), two = n => String(n).padStart(2, '0');
+  return t >= 3600 ? `${Math.floor(t / 3600)}:${two(Math.floor(t % 3600 / 60))}:${two(t % 60)}` : `${two(Math.floor(t / 60))}:${two(t % 60)}`;
+}

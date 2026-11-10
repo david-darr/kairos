@@ -538,14 +538,25 @@ def video_resources(video_id, user):
     from core import video_render, video_store
     video_store.require_user_access(video_id, user, is_admin(user))
     folder = video_store._folder(video_id)
-    pattern = re.compile(r"(?:(?:16-9|9-16|1-1)-v[1-9][0-9]*\.mp4|(?:sheet|thumb)-(?:16-9|9-16|1-1)\.png|soundtrack\.wav)")
+    pattern = re.compile(r"(?:(?:16-9|9-16|1-1)-v[1-9][0-9]*\.(?:mp4|chapters\.txt)|(?:sheet|thumb)-(?:16-9|9-16|1-1)\.png|soundtrack\.wav)")
     files = sorted((p for p in (folder / "renders").iterdir() if p.is_file() and pattern.fullmatch(p.name)),
                    key=lambda p: (p.stat().st_mtime_ns, p.name))
     thumbs = [p.name for p in files if p.name.startswith("thumb-")]
     return {"assets": sorted("assets/" + p.name for p in (folder / "assets").iterdir()
                              if p.is_file() and video_store.ASSET.fullmatch("assets/" + p.name)),
             "renders": [p.name for p in files], "thumbnail": thumbs[-1] if thumbs else None,
-            "jobs": [{k: v for k, v in job.items() if k != "path"} for job in video_render.jobs_for(video_id)]}
+            "jobs": [{k: v for k, v in job.items() if k != "path"} for job in video_render.jobs_for(video_id)],
+            # A long video (Video Styles unit 4): its stored renders (Resume after a restart), parts on disk, plan approval.
+            **_long_video(video_id)}
+
+
+def _long_video(video_id):
+    from core import video_longform, video_plan, video_store
+    project = video_store.get(video_id)
+    if not video_store.chaptered(project) and not video_longform.describe(video_id):
+        return {}
+    return {"long_renders": video_longform.describe(video_id), "disk": video_longform.disk(video_id),
+            "plan": {k: v for k, v in video_plan.state(project).items() if k != "text"} if video_store.chaptered(project) else None}
 
 
 def video_create_project(user, project):

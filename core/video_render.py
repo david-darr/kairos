@@ -11,7 +11,8 @@ import secrets
 from urllib.parse import quote
 import weakref
 from PIL import Image
-from core import accounts, design_render, design_render_bridge, ffmpeg_tools, video_audio, video_checks, video_narration, video_store
+from core import (accounts, design_render, design_render_bridge, ffmpeg_tools, video_audio, video_checks, video_longform, video_narration,
+                  video_plan, video_store)
 
 _jobs = {}
 _owners = {}  # job id -> the account that started it; a job is only visible to that account
@@ -54,24 +55,34 @@ def _aspect(project, aspect):
 LAYOUT_SAMPLES = 120   # the most layout samples the render worker takes (electron/designRender.js)
 
 
-def _job(project, aspect, job_id, times=None, frame_times=()):
+def _job(project, aspect, job_id, times=None, frame_times=(), frames=None):
     """The worker's job. Layout is sampled a quarter, half and three quarters into each beat, and at every frame
-    kept for the checks (`frame_times`), so a sampled frame can be compared with what the rig drew there."""
+    kept for the checks (`frame_times`), so a sampled frame can be compared with what the rig drew there.
+    `frames` = (first, count) renders only those frames of the video: one chapter of a long video
+    (core/video_longform.py); its layout samples stay inside the chapter."""
     w, h = _aspect(project, aspect)
     version = project["version"]
-    token = design_render.sign(project["id"], f"video:{aspect}:{version}", 900)
     duration = video_store.duration(project)
+    total = math.ceil(duration * 30 - 1e-7)
+    first, count = frames or (0, total)
+    # A chapter can take longer than a short video; the token outlives the capture.
+    token = design_render.sign(project["id"], f"video:{aspect}:{version}", 900 if frames is None else max(900, 600 + int(count * .5)))
+    low, high = first / 30, (first + count) / 30
     kept = sorted({round(t, 6) for t in list(frame_times) + list(times or []) if 0 <= t < duration})
     beats = sorted({round(b["start"] + (b["end"] - b["start"]) * f, 6)
                     for b in outline(project) for f in (.25, .5, .75)} - set(kept))
+    if frames is not None:
+        beats = [t for t in beats if low <= t < high]
     room = max(0, LAYOUT_SAMPLES - len(kept))
     if len(beats) > room:   # a long video: an even spread of the beat samples (100 beats would be 300)
         beats = [beats[round(i * (len(beats) - 1) / max(1, room - 1))] for i in range(room)] if room else []
     samples = sorted(set(kept[:LAYOUT_SAMPLES]) | set(beats))
-    return {"id": job_id, "kind": "video", "path": f"/api/videos/{project['id']}/player?aspect={quote(aspect, safe='')}&rt={token}&v={version}",
-            "w": w, "h": h, "look": project["look"], "fps": 30,
-            "frames": math.ceil(duration * 30 - 1e-7),
-            "preview": times is not None, "times": times or [], "layoutTimes": samples}
+    job = {"id": job_id, "kind": "video", "path": f"/api/videos/{project['id']}/player?aspect={quote(aspect, safe='')}&rt={token}&v={version}",
+           "w": w, "h": h, "look": project["look"], "fps": 30, "frames": total,
+           "preview": times is not None, "times": times or [], "layoutTimes": samples}
+    if frames is not None:
+        job.update(first=first, count=count)
+    return job
 
 
 def cast_problems(project):
@@ -163,11 +174,25 @@ def jobs_for(video_id):
 
 
 def cancel(job_id):
+    """Stop a render. A long video's render pauses: its finished chapters stay, and rendering again resumes it."""
     status(job_id)
     task = _tasks.get(job_id)
     if task and not task.done() and not task.cancelling():
         task.cancel()
-        _jobs[job_id]["status"] = "failed: cancelled"
+        _jobs[job_id]["status"] = "paused" if _jobs[job_id].get("kind") == "long" else "failed: cancelled"
+    return status(job_id)
+
+
+def _register(job_id, state, coro):
+    _owners[job_id] = accounts.effective_account()
+    _jobs[job_id] = state
+    _tasks[job_id] = asyncio.create_task(coro)
+    # Bound completed status records; live jobs are never evicted.
+    for old in list(_jobs)[:-200]:
+        if old in _tasks and _tasks[old].done():
+            _jobs.pop(old, None)
+            _owners.pop(old, None)
+            _tasks.pop(old, None)
     return status(job_id)
 
 
@@ -181,21 +206,24 @@ def start(video_id, aspect, sample_of=None):
     problems = pack_problems(project, sample_of)
     if problems:
         raise ValueError("style_pack: " + " ".join(problems))
+    if video_store.chaptered(project):
+        # A long video renders chapter by chapter, resumably, and only after the person approved its plan.
+        problems = video_plan.problems(project)
+        if problems:
+            raise ValueError("plan: " + " ".join(problems))
+        running = [j for j in jobs_for(video_id) if j.get("kind") == "long" and j["aspect"] == aspect
+                   and j["status"] not in ("ready", "paused") and not j["status"].startswith("failed:")]
+        if running:
+            return running[-1]
     if not ffmpeg_tools.find():
         raise RuntimeError(ffmpeg_tools.MISSING)
     if not design_render_bridge.available():
         raise design_render_bridge.Unavailable("Video rendering needs the Kairos desktop app. Open the desktop app and try again.")
+    if video_store.chaptered(project):
+        return video_longform.start(project, aspect, _register)
     job_id = secrets.token_hex(8)
-    _owners[job_id] = accounts.effective_account()
-    _jobs[job_id] = {"id": job_id, "video_id": video_id, "aspect": aspect, "version": project["version"], "status": "queued"}
-    _tasks[job_id] = asyncio.create_task(_render(project, aspect, job_id))
-    # Bound completed status records; live jobs are never evicted.
-    for old in list(_jobs)[:-200]:
-        if old in _tasks and _tasks[old].done():
-            _jobs.pop(old, None)
-            _owners.pop(old, None)
-            _tasks.pop(old, None)
-    return status(job_id)
+    state = {"id": job_id, "video_id": video_id, "aspect": aspect, "version": project["version"], "status": "queued"}
+    return _register(job_id, state, _render(project, aspect, job_id))
 
 
 async def render(video_id, aspect, sample_of=None):

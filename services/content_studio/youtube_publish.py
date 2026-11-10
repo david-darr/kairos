@@ -158,10 +158,21 @@ def _tags(text):
     return tags
 
 
+def description(post):
+    """The caption, and for a long video its chapter list (YouTube's chapter format: "0:00 Title" per line, the first
+    at 0:00), unless the caption already carries one. The person saw the chapters on the approval card."""
+    from .store import youtube_chapters
+    caption = post.get("caption") or ""
+    chapters = youtube_chapters(post)
+    if not chapters or re.search(r"(?m)^\s*0?0:00\b", caption):
+        return caption
+    return (caption.rstrip() + "\n\nChapters\n" + chapters).strip()
+
+
 def metadata(post, privacy):
     """Exactly what was approved, plus the AI label. YouTube refuses < and > in titles and descriptions."""
     clean = lambda s: (s or "").replace("<", "").replace(">", "")
-    return {"snippet": {"title": clean(post["title"])[:100], "description": clean(post["caption"])[:5000],
+    return {"snippet": {"title": clean(post["title"])[:100], "description": clean(description(post))[:5000],
                         "tags": _tags(post.get("tags")), "categoryId": CATEGORY_PEOPLE_BLOGS},
             "status": {"privacyStatus": privacy, "selfDeclaredMadeForKids": False, "containsSyntheticMedia": True}}
 

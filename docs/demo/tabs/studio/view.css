@@ -47,3 +47,10 @@
 @media(max-width:650px){.studio-columns{display:flex;flex-direction:column}.studio-columns>*{width:100%}.studio-centre{order:-1}.studio-stage{height:300px}.studio-actions>*{flex-grow:1}.studio-view{padding:8px}.studio-editor-top{position:static}}
 .studio-sections{margin:4px 0 12px}
 .studio-sections[hidden]{display:none}
+.studio-chapter{margin:10px 0 2px;font-size:13px;color:var(--text-dim,var(--text));overflow-wrap:anywhere}
+.studio-plan{padding:12px;margin:12px 0}
+.studio-plan pre{white-space:pre-wrap;max-height:320px;overflow:auto;font-size:12px}
+.studio-chapters{list-style:decimal;margin:8px 0;padding-left:22px;display:grid;gap:6px}
+.studio-chapters li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 8px;align-items:center}
+.studio-chapters li progress{grid-column:1/-1}
+.studio-disk{margin:0}

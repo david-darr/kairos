@@ -39,12 +39,19 @@ CAMERAS = ("still", "push", "pull", "pan", "shake")
 TRANSITIONS = ("cut", "whip", "zoom", "flip", "dither", "mosaic", "wipe")
 MOODS = ("energetic", "calm", "warm", "dark", "playful")
 ASSET = re.compile(r"assets/[a-f0-9]{64}\.(?:png|jpg|gif|webp)")
-FIELDS = {"id", "title", "look", "bpm", "fps", "aspects", "beats", "music", "narration", "cast", "palette", "style_pack"}
+FIELDS = {"id", "title", "look", "bpm", "fps", "aspects", "beats", "music", "narration", "cast", "palette", "style_pack", "chapters"}
 ACTIONS = ("idle", "wave", "point", "walk", "jump", "shrug", "think", "nod")
 MAX_CAST, MAX_ON_SCREEN, MAX_PROPS = 6, 3, 6
 MAX_SECONDS = 120               # a video with music only
-NARRATED_MAX_SECONDS = 480      # a narrated Short or mid-length video; long-form chapters are a later unit
+NARRATED_MAX_SECONDS = 480      # a narrated Short or mid-length video, rendered in one part
 MAX_BEATS, NARRATED_MAX_BEATS = 40, 100
+# Long-form (Video Styles unit 4): a narrated video in chapters, each rendered as its own part and joined without
+# re-encoding (core/video_longform.py). The 20-minute bound was set from a measured render on the machine it was built on.
+CHAPTERED_MAX_SECONDS = 1200
+CHAPTERED_MAX_BEATS = 400
+CHAPTER_MAX_SECONDS = 480       # one part is one render worker job (at most 14,400 frames)
+MIN_CHAPTERS, MAX_CHAPTERS = 2, 30
+CHAPTER_TITLE_LIMIT = 80
 LEAD, TAIL = .25, .45           # seconds of picture before a line starts and after it ends
 SAY_LIMIT, CLAUSE_LIMIT = 400, 100
 DEFAULT_VOICE = "af_heart"
@@ -101,7 +108,10 @@ def validate(project: dict) -> dict:
         _error("aspects", "choose a non-empty subset of 16:9, 9:16, 1:1 without duplicates.")
     beats = p.get("beats")
     is_narrated = isinstance(beats, list) and any(isinstance(b, dict) and "say" in b for b in beats)
-    most = NARRATED_MAX_BEATS if is_narrated else MAX_BEATS
+    has_chapters = p.get("chapters") not in (None, [])
+    if not has_chapters:
+        p.pop("chapters", None)
+    most = CHAPTERED_MAX_BEATS if has_chapters and is_narrated else NARRATED_MAX_BEATS if is_narrated else MAX_BEATS
     if not isinstance(beats, list) or not 1 <= len(beats) <= most:
         _error("beats", f"give 1 to {most} beats.")
     ids = set()
@@ -160,10 +170,20 @@ def validate(project: dict) -> dict:
         p["narration"] = _narration(p.get("narration"))
     for i, b in enumerate(beats):
         _timing(b, p.get("narration"), f"beats[{i}]")
-    limit = NARRATED_MAX_SECONDS if is_narrated else MAX_SECONDS
+    if has_chapters:
+        if not is_narrated:
+            _error("chapters", "chapters are for narrated long videos; give the beats say lines, or remove chapters.")
+        p["chapters"] = _chapters(p["chapters"], beats)
+    limit = CHAPTERED_MAX_SECONDS if has_chapters else NARRATED_MAX_SECONDS if is_narrated else MAX_SECONDS
     if duration(p) > limit:
         _error("beats", f"total duration must be at most {limit} seconds; " +
-               ("shorten or remove narration lines." if is_narrated else "reduce bars or raise bpm."))
+               ("shorten or remove narration lines." if is_narrated else "reduce bars or raise bpm.")
+               + (" A longer narrated video can be split into chapters (up to 20 minutes)." if is_narrated and not has_chapters else ""))
+    if has_chapters:
+        for span in chapter_spans(p):
+            if span["end"] - span["start"] > CHAPTER_MAX_SECONDS:
+                _error("chapters", f"chapter {span['id']} runs {span['end'] - span['start']:.0f} seconds; a chapter is at most "
+                                   f"{CHAPTER_MAX_SECONDS} seconds, so split it.")
     p.setdefault("music", {"mood": "energetic", "volume": .7})
     music = p["music"]
     if not isinstance(music, dict):
@@ -296,6 +316,66 @@ def _style_pack(p):
         style_pack_store.version_of(style_pack_store.get(value["id"]), value["version"])
     except LookupError as error:
         _error("style_pack", str(error).strip("'") + " The Styles tab in Studio > Content lists this account's packs.")
+
+
+def _chapters(value, beats):
+    """A long video's chapters: [{id, title, start}], each starting at a beat and running to the next chapter's start.
+    Kept in beat order; the first chapter starts at the first beat (YouTube's first chapter is at 0:00)."""
+    if not isinstance(value, list) or not MIN_CHAPTERS <= len(value) <= MAX_CHAPTERS:
+        _error("chapters", f"give {MIN_CHAPTERS} to {MAX_CHAPTERS} chapters, each {{id, title, start}} (start: the id of its first beat).")
+    order = {b["id"]: i for i, b in enumerate(beats)}
+    out, ids, starts = [], set(), set()
+    for i, chapter in enumerate(value):
+        path = f"chapters[{i}]"
+        if not isinstance(chapter, dict):
+            _error(path, "give {id, title, start}.")
+        for key in chapter.keys() - {"id", "title", "start"}:
+            _error(f"{path}.{key}", "unknown chapter field; use id, title or start.")
+        cid = chapter.get("id", f"c{i + 1}")
+        if not isinstance(cid, str) or not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_-]{0,47}", cid) or cid in ids:
+            _error(path + ".id", "use a unique id: a letter followed by up to 47 letters, numbers, dashes or underscores.")
+        ids.add(cid)
+        title = chapter.get("title")
+        _text(title, path + ".title", CHAPTER_TITLE_LIMIT, True)
+        if any(c in title for c in "\r\n\t<>"):
+            _error(path + ".title", "keep a chapter title on one line, without < or >.")
+        if chapter.get("start") not in order:
+            _error(path + ".start", "use the id of the beat the chapter starts at (video_outline lists them).")
+        if chapter["start"] in starts:
+            _error(path + ".start", "two chapters cannot start at the same beat.")
+        starts.add(chapter["start"])
+        out.append({"id": cid, "title": " ".join(title.split()), "start": chapter["start"]})
+    out.sort(key=lambda c: order[c["start"]])
+    if out[0]["start"] != beats[0]["id"]:
+        _error("chapters", f"the first chapter starts at the first beat ({beats[0]['id']}), so the video opens on a chapter.")
+    return out
+
+
+def chapter_spans(project):
+    """Each chapter with its place on the timeline: {id, title, first, last (beat indexes, last exclusive), start, end
+    (seconds), first_frame, frames}. Frame f shows time f / 30; a chapter's part holds every frame from the first one at
+    or after its start up to the next chapter's first frame, so the parts together are exactly the whole video's frames."""
+    beats = project["beats"]
+    index = {b["id"]: i for i, b in enumerate(beats)}
+    chapters = project.get("chapters") or []
+    starts, at = [], 0.
+    for b in beats:
+        starts.append(at)
+        at += beat_seconds(b, project.get("bpm", 120))
+    total = math.ceil(at * 30 - 1e-7)
+    out = []
+    for n, chapter in enumerate(chapters):
+        first = index[chapter["start"]]
+        last = index[chapters[n + 1]["start"]] if n + 1 < len(chapters) else len(beats)
+        out.append({"id": chapter["id"], "title": chapter["title"], "first": first, "last": last, "start": starts[first],
+                    "end": starts[last] if last < len(beats) else at, "first_frame": min(total, math.ceil(starts[first] * 30 - 1e-7))})
+    for n, span in enumerate(out):
+        span["frames"] = (out[n + 1]["first_frame"] if n + 1 < len(out) else total) - span["first_frame"]
+    return out
+
+
+def chaptered(project) -> bool:
+    return bool(project.get("chapters"))
 
 
 def clauses(text):

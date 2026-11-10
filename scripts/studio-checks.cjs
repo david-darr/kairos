@@ -26,6 +26,16 @@ const project = { id, owner: 'local', title: 'Spring season', look: 'sport', bpm
   beats: [{ id: 'title', kind: 'title', text: 'Spring season is here', bars: 1 }, { id: 'message', kind: 'statement', text: 'Every kid plays', bars: 1 }, { id: 'end', kind: 'end', text: 'Find your team', bars: 1 }],
   music: { mood: 'energetic', volume: .7 }, version: 1, updated: Date.now() / 1000, created: Date.now() / 1000 };
 const original = structuredClone(project), history = [structuredClone(project)], jobs = [], renders = [];
+// A long video in chapters (Video Styles unit 4): a stopped render from before a restart, the plan gate, Resume, progress.
+const longId = 'fedcba654321';
+const say = n => ({ say: `Line ${n} of the long video, spoken over this beat.`, seconds: 4 });
+const longProject = { id: longId, owner: 'local', title: 'The Moon', look: 'sport', bpm: 120, fps: 30, aspects: ['16:9'],
+  beats: [1, 2, 3, 4, 5, 6].map(n => ({ id: `b${n}`, kind: 'statement', text: `Point ${n}`, bars: 1, ...say(n) })),
+  chapters: [{ id: 'c1', title: 'Opening', start: 'b1' }, { id: 'c2', title: 'Phases', start: 'b3' }, { id: 'c3', title: 'Tides', start: 'b5' }],
+  narration: { voice: 'af_heart', captions: true }, music: { mood: 'calm', volume: .5 }, version: 1, updated: Date.now() / 1000, created: Date.now() / 1000 };
+const longChapters = state => longProject.chapters.map((c, i) => ({ id: c.id, title: c.title, frames: 240, done: state[i] === 'done' ? 240 : state[i] === 'rendering' ? 120 : 0, state: state[i] }));
+let longPlan = 'none', longJob = null;
+const longRenders = [];
 const tokens = { '--ds-bg': '#101418', '--ds-surface': '#1b2129', '--ds-text': '#ffffff', '--ds-text-dim': '#b4bdc8', '--ds-accent': '#c6ff3d',
   '--ds-accent-2': '#ff5a1f', '--ds-on-accent': '#101418', '--ds-font-display': 'Arial, sans-serif', '--ds-font-sans': 'Arial, sans-serif', '--ds-radius-m': '4px' };
 let enabled = true;
@@ -50,6 +60,26 @@ async function serve(req, res) {
       writes.push({ path: p, method: req.method, body });
     }
     if (p === '/api/system/custom-tabs') return json(res, enabled ? [customTab] : []);
+    if (p === `/api/videos/${longId}`) return json(res, req.method === 'PUT' ? Object.assign(longProject, body, { version: longProject.version + 1 }) : longProject);
+    if (p === `/api/videos/${longId}/plan`) return json(res, { chaptered: true, status: longPlan, current: 'Chapter 1 at 0:00: Opening\n  00:00.0-00:04.0 b1 statement' });
+    if (p === `/api/videos/${longId}/plan/approve`) { longPlan = 'approved'; return json(res, { status: 'approved' }); }
+    if (p === `/api/tab-studio/videos/${longId}/resources`) return json(res, { assets: [], renders: longRenders, jobs: longJob ? [longJob] : [], thumbnail: null,
+      long_renders: longJob ? [] : [{ aspect: '16:9', status: 'interrupted', live: false, chapters: longChapters(['done', 'waiting', 'waiting']), fps: 41.5, frames_total: 720, resumable: true }],
+      disk: { parts: 12582912, videos: 0, other: 0, total: 12582912 }, plan: { status: longPlan } });
+    if (p === `/api/videos/${longId}/render`) {
+      if (longPlan !== 'approved') return json(res, { detail: 'plan: The shot plan of this long video has not been sent to the person.' }, 422);
+      longJob = { id: 'long1', kind: 'long', video_id: longId, aspect: body.aspect, status: 'rendering 360/720', chapters: longChapters(['done', 'rendering', 'waiting']),
+        frames_done: 360, frames_total: 720, fps: 41.5, eta_seconds: 9, polls: 0, resumed: true, reused: 1 };
+      return json(res, longJob);
+    }
+    if (p === '/api/video-jobs/long1') {
+      longJob.polls++;
+      if (longJob.polls >= 2) {
+        Object.assign(longJob, { status: 'ready', chapters: longChapters(['done', 'done', 'done']), frames_done: 720, eta_seconds: 0, file: '16-9-v1.mp4', render_seconds: 61, notes: [] });
+        if (!longRenders.length) longRenders.push('16-9-v1.mp4', '16-9-v1.chapters.txt', 'sheet-16-9.png', 'soundtrack.wav');
+      }
+      return json(res, longJob);
+    }
     if (p === '/api/tab-studio/looks') return json(res, { default: 'sport', looks: [{ id: 'sport', name: 'Sport' }] });
     if (p === '/api/tab-studio/tokens/sport') return json(res, { variables: tokens, font_css: '' });
     if (p === '/api/videos/ffmpeg') return json(res, { found: false, message: 'Video needs FFmpeg. Windows: `winget install --id Gyan.FFmpeg -e`. Kairos never installs it for you.' });
@@ -210,6 +240,26 @@ app.whenReady().then(async () => {
       await capture(width === 390 ? 'phone-editor' : 'desktop-ready');
       if (width === 390) assert.deepEqual(await js("[...document.querySelectorAll('.studio-view button,.studio-view select,.studio-view input:not([type=checkbox]),.studio-view summary')].filter(n=>n.getBoundingClientRect().height>0 && n.getBoundingClientRect().height<43).map(n=>n.outerHTML)"), [], 'Phone targets are at least 44px');
     }
+    // A long video: chapter headings, a render stopped by an app restart with Resume, the plan gate, then progress per chapter.
+    await win.loadURL(base + '/#/studio/' + longId); await wait("!!document.querySelector('.studio-stage canvas')");
+    assert.equal(await js("document.querySelectorAll('.studio-chapter').length"), 3, 'Chapter headings in the beat list');
+    assert.equal(await js("document.querySelector('[aria-label=\"Chapter that starts at this beat\"]').value"), 'Opening');
+    await wait("document.querySelector('.studio-long-job')?.textContent.includes('Stopped when the app closed')");
+    assert.ok(await js("document.querySelector('.studio-plan').dataset.planStatus==='none'"));
+    assert.ok(await js("document.querySelector('.studio-disk').textContent.includes('saved chapter parts 12.0 MB')"));
+    await click('Resume render');
+    await pause(400);
+    assert.equal(writes.filter(w => w.path === `/api/videos/${longId}/render`).length, 0, 'No long render before the plan is approved');
+    await click('Approve plan');
+    await wait("document.querySelector('.studio-plan')?.dataset.planStatus==='approved'");
+    await click('Resume render');
+    await wait("document.querySelector('.studio-long-job[data-long-status^=rendering]')?.textContent.includes('1 of 3 chapters done')");
+    assert.ok(await js("document.querySelector('.studio-long-job').textContent.includes('41.5 frames a second')"));
+    assert.equal(await js("document.querySelectorAll('.studio-long-job [data-chapter-state=rendering] progress').length"), 1);
+    await capture('long-render');
+    await wait("document.querySelector('.studio-long-job')?.dataset.longStatus==='ready'");
+    await wait("[...document.querySelectorAll('.studio-download a[download]')].some(a=>a.textContent==='Download chapter list')");
+    await noOverflow(); await labels();
     // Deep-link a fresh shell load.
     await win.loadURL(base + '/#/studio/' + id); await wait("!!document.querySelector('.studio-stage canvas')");
     enabled = false;
@@ -219,7 +269,7 @@ app.whenReady().then(async () => {
     await wait("document.querySelector('.tool-store-search')?.value==='Studio'");
     assert.ok(await js("[...document.querySelectorAll('.tool-store-filters button')].some(b=>b.textContent==='Tabs'&&b.getAttribute('aria-pressed')==='true')"));
     assert.deepEqual(errors, []); assert.deepEqual(outside, []);
-    console.log(JSON.stringify({ ok: true, output, writes: writes.length, checks: ['projects', 'FFmpeg banner', 'live canvas', 'edit and PUT', 'inline validation', 'reorder', 'undo', 'aspect', 'playback', 'render progress', 'downloads', 'history confirmation', 'chat card', 'recovery', 'deep link', 'Studio enable handoff', '1440 and 390', 'labels', 'offline'] }));
+    console.log(JSON.stringify({ ok: true, output, writes: writes.length, checks: ['projects', 'FFmpeg banner', 'live canvas', 'edit and PUT', 'inline validation', 'reorder', 'undo', 'aspect', 'playback', 'render progress', 'downloads', 'history confirmation', 'chat card', 'recovery', 'long video chapters, plan gate and resume', 'deep link', 'Studio enable handoff', '1440 and 390', 'labels', 'offline'] }));
   } catch (error) {
     console.error(error.stack);
     if (win && !win.isDestroyed()) fs.writeFileSync(path.join(output, 'failure.png'), (await win.webContents.capturePage()).toPNG());

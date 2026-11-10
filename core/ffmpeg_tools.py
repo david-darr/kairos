@@ -54,8 +54,18 @@ def version():
         return None
 
 
+# The picture settings every render uses. A long video's chapter parts are encoded with exactly these, so FFmpeg's
+# concat demuxer joins them by copying the streams, with no second encode (core/video_longform.py).
+VIDEO_ARGS = ["-vf", "scale=out_range=tv:out_color_matrix=bt709",
+              "-c:v", "libx264", "-pix_fmt", "yuv420p", "-color_range", "tv", "-colorspace", "bt709",
+              "-color_primaries", "bt709", "-color_trc", "bt709", "-crf", "18", "-preset", "medium"]
+# loudnorm resamples to 192 kHz internally; bring the audio back to 48 kHz.
+AUDIO_ARGS = ["-c:a", "aac", "-b:a", "192k", "-af", LOUDNORM, "-ar", "48000"]
+
+
 class Encoder:
-    """A pipe whose stderr goes to disk so verbose FFmpeg cannot deadlock it."""
+    """A pipe whose stderr goes to disk so verbose FFmpeg cannot deadlock it. Without a soundtrack it writes a
+    picture-only part (a long video's chapter); the whole video's sound is added when the parts are joined."""
     def __init__(self, out, soundtrack, *, executable=None, timeout=180):
         self.path = Path(out)
         self.timeout = timeout
@@ -63,14 +73,11 @@ class Encoder:
         if not exe:
             raise RuntimeError(MISSING)
         self.stderr = tempfile.TemporaryFile()
-        self.argv = [exe, "-y", "-f", "image2pipe", "-framerate", "30", "-c:v", "mjpeg", "-i", "-",
-                     # JPEG frames are full range; players expect TV range BT.709, or the colours wash out.
-                     "-i", str(soundtrack), "-vf", "scale=out_range=tv:out_color_matrix=bt709",
-                     "-c:v", "libx264", "-pix_fmt", "yuv420p", "-color_range", "tv", "-colorspace", "bt709",
-                     "-color_primaries", "bt709", "-color_trc", "bt709", "-crf", "18",
-                     # loudnorm resamples to 192 kHz internally; bring the audio back to 48 kHz.
-                     "-preset", "medium", "-c:a", "aac", "-b:a", "192k", "-af", LOUDNORM, "-ar", "48000",
-                     "-shortest", "-movflags", "+faststart", str(out)]
+        # JPEG frames are full range; players expect TV range BT.709, or the colours wash out.
+        self.argv = ([exe, "-y", "-f", "image2pipe", "-framerate", "30", "-c:v", "mjpeg", "-i", "-"]
+                     + (["-i", str(soundtrack)] if soundtrack is not None else []) + VIDEO_ARGS
+                     + (AUDIO_ARGS + ["-shortest"] if soundtrack is not None else ["-an"])
+                     + ["-movflags", "+faststart", str(out)])
         try:
             self.process = subprocess.Popen(self.argv, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                                             stderr=self.stderr, shell=False,
@@ -118,6 +125,59 @@ class Encoder:
             self.process.stdin.close()
         self.stderr.close()
         self.path.unlink(missing_ok=True)
+
+
+def _run(argv, timeout, what):
+    """Run FFmpeg with its stderr in a file (a long join prints a lot); raise with the tail of it on failure."""
+    with tempfile.TemporaryFile() as err:
+        try:
+            code = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=err, timeout=timeout,
+                                  creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).returncode
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f"FFmpeg took too long to {what}.") from None
+        err.seek(0, 2)
+        err.seek(max(0, err.tell() - 8000))
+        text = err.read().decode("utf-8", "replace")
+    if code:
+        raise RuntimeError(f"FFmpeg could not {what}: " + text[-1500:])
+    return text
+
+
+def join(parts, soundtrack, out, timeout=1800):
+    """A long video from its chapter parts: the pictures are copied as they are (FFmpeg's concat demuxer; the parts share
+    one encoder setting, so nothing is encoded twice) and the whole video's soundtrack is added with one loudness pass
+    over all of it, so the music runs on across chapter joins and the level is the same everywhere."""
+    exe = find()
+    if not exe:
+        raise RuntimeError(MISSING)
+    out = Path(out)
+    listing = out.with_suffix(".parts.txt")
+    # The concat list quotes each path; a single quote inside one is written '\'' as the demuxer expects.
+    listing.write_text("ffconcat version 1.0\n" + "".join(
+        "file '" + str(Path(p).resolve()).replace("\\", "/").replace("'", "'\\''") + "'\n" for p in parts), encoding="utf-8")
+    try:
+        _run([exe, "-y", "-f", "concat", "-safe", "0", "-i", str(listing), "-i", str(soundtrack),
+              "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy",
+              # The copied stream keeps BT.709 TV range; these tag the container so players read it that way.
+              "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709"]
+             + AUDIO_ARGS + ["-shortest", "-movflags", "+faststart", str(out)],
+             timeout, "join the chapters")
+    finally:
+        listing.unlink(missing_ok=True)
+    return out
+
+
+def count_frames(path, timeout=600):
+    """The number of video frames in a file, counted by reading the stream without decoding it."""
+    exe = find()
+    if not exe:
+        raise RuntimeError(MISSING)
+    text = _run([exe, "-v", "info", "-nostats", "-i", str(path), "-map", "0:v:0", "-c", "copy", "-f", "null", "-"],
+                timeout, "read the video")
+    found = re.findall(r"frame=\s*(\d+)", text)
+    if not found:
+        raise RuntimeError("FFmpeg did not report the frame count: " + text[-500:])
+    return int(found[-1])
 
 
 def loudness(path):

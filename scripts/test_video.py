@@ -1199,8 +1199,11 @@ assert.equal(L.LIMITS.beats, 100);
         for needle in ("drawCaption(t); return;", "drawCaption(t);\n  }", "role: 'caption'", "safeArea(aspect, project.captioned)"):
             self.assertIn(needle, engine)
         worker = (ROOT / "electron/designRender.js").read_text(encoding="utf-8")
-        self.assertIn("job.frames > 14400", worker, "the worker takes a 480-second video")
+        self.assertIn("count > 14400", worker, "one worker job takes a 480-second video or chapter")
+        self.assertIn("job.frames > 36000", worker, "a chaptered video runs to 20 minutes")
         self.assertEqual(video_store.NARRATED_MAX_SECONDS * 30, 14400)
+        self.assertEqual(video_store.CHAPTER_MAX_SECONDS * 30, 14400)
+        self.assertEqual(video_store.CHAPTERED_MAX_SECONDS * 30, 36000)
 
 
 # -- Pack A: characters, sheets, scene beats, mouth timing and the sheet-match checks (Video Styles unit 3) ----------
@@ -1506,6 +1509,311 @@ class CharacterToolTests(unittest.TestCase):
         self.assertIn("scene={setting", tool_registry._REGISTRY["video_create"].description)
         with patch.object(character_sheet, "render", AsyncMock(side_effect=character_sheet.Unavailable("Needs the desktop app."))):
             self.assertIn("Not run: Needs the desktop app.", self.call("character_sheet", {"character_id": cid, "version": 2}))
+
+
+# -- Long-form: chapters, resumable renders, the plan gate, YouTube chapters (Video Styles unit 4) -------------------
+
+def chaptered(lines=9, per=3, **changes):
+    """A narrated video in chapters: `lines` statement beats, a new chapter every `per` beats."""
+    beats = [{"id": f"b{i}", "kind": "statement", "text": f"Point {i}", "say": f"This is line number {i} of the long video."}
+             for i in range(lines)]
+    chapters = [{"id": f"c{n}", "title": f"Part {n + 1}", "start": f"b{i}"} for n, i in enumerate(range(0, lines, per))]
+    return {**project(beats=beats), "narration": {"voice": "af_heart", "captions": True}, "chapters": chapters, **changes}
+
+
+def make_long(**changes):
+    p = chaptered(**changes)
+    return video_store.create(**{k: v for k, v in p.items() if k != "id"}, owner="alice", chat_key_="chat-alice")
+
+
+class ChapterValidationTests(unittest.TestCase):
+    def bad(self, p, path, words=""):
+        with self.assertRaises(ValueError) as caught:
+            video_store.validate(p)
+        self.assertIn(path + ":", str(caught.exception))
+        self.assertIn(words, str(caught.exception))
+
+    def test_chapters_partition_the_frames_in_beat_order(self):
+        p = chaptered()
+        p["chapters"].reverse()
+        out = video_store.validate(p)
+        self.assertEqual([c["start"] for c in out["chapters"]], ["b0", "b3", "b6"], "kept in beat order")
+        spans = video_store.chapter_spans(out)
+        total = math.ceil(video_store.duration(out) * 30 - 1e-7)
+        self.assertEqual(sum(s["frames"] for s in spans), total)
+        self.assertEqual(spans[0]["first_frame"], 0)
+        for a, b in zip(spans, spans[1:]):
+            self.assertEqual(a["first_frame"] + a["frames"], b["first_frame"])
+            self.assertEqual(a["last"], b["first"])
+        self.assertTrue(video_store.chaptered(out))
+        self.assertFalse(video_store.chaptered(video_store.validate(chaptered(chapters=[]))), "no chapters is a normal video")
+
+    def test_chapter_rules(self):
+        self.bad(chaptered(chapters=[{"title": "Only", "start": "b0"}]), "chapters", "2 to")
+        self.bad(chaptered(chapters=[{"title": "A", "start": "b1"}, {"title": "B", "start": "b4"}]), "chapters", "first beat")
+        self.bad(chaptered(chapters=[{"title": "A", "start": "b0"}, {"title": "B", "start": "nope"}]), "chapters[1].start")
+        self.bad(chaptered(chapters=[{"title": "A", "start": "b0"}, {"title": "B", "start": "b0"}]), "chapters[1].start", "same beat")
+        self.bad(chaptered(chapters=[{"title": "A", "start": "b0"}, {"title": "", "start": "b3"}]), "chapters[1].title")
+        self.bad(chaptered(chapters=[{"title": "A", "start": "b0"}, {"title": "B<i>", "start": "b3"}]), "chapters[1].title", "one line")
+        self.bad(chaptered(chapters=[{"title": "A", "start": "b0"}, {"title": "B", "start": "b3", "at": 1}]), "chapters[1].at")
+        music_only = project(chapters=[{"title": "A", "start": "hook"}, {"title": "B", "start": "end"}])
+        self.bad(music_only, "chapters", "narrated")
+
+    def test_the_cap_rises_to_twenty_minutes_in_chapters_only(self):
+        long_line = "This sentence has ten short words in it right here. " * 6
+        beats = [{"id": f"b{i}", "kind": "statement", "text": "Long", "say": long_line.strip()} for i in range(30)]
+        flat = {**project(beats=beats), "narration": {"voice": "af_heart", "captions": True}}
+        self.bad(flat, "beats", "chapters (up to 20 minutes)")
+        out = video_store.validate({**flat, "chapters": [{"title": f"P{n}", "start": f"b{n * 10}"} for n in range(3)]})
+        self.assertGreater(video_store.duration(out), video_store.NARRATED_MAX_SECONDS)
+        self.bad({**flat, "chapters": [{"title": "A", "start": "b0"}, {"title": "B", "start": "b29"}]}, "chapters", "split it")
+
+    def test_youtube_chapter_list(self):
+        from core import video_longform
+        out = video_store.validate(chaptered())
+        text, problems = video_longform.youtube_chapters(out)
+        lines = text.split("\n")
+        self.assertEqual(len(lines), 3)
+        self.assertTrue(lines[0].startswith("00:00 Part 1"))
+        self.assertTrue(all(re.fullmatch(r"\d\d:\d\d Part \d", line) for line in lines), lines)
+        self.assertEqual(problems, [])
+        two = video_store.validate(chaptered(lines=4, per=2))
+        self.assertIn("at least 3", video_longform.youtube_chapters(two)[1][0])
+        short = chaptered(lines=4, per=1)
+        for b in short["beats"]:
+            b["say"] = "Hi."
+        self.assertIn("at least 10 seconds", " ".join(video_longform.youtube_chapters(video_store.validate(short))[1]))
+
+
+class ChapterKeyTests(unittest.TestCase):
+    def test_an_edit_to_one_chapter_changes_only_its_part(self):
+        from core import video_longform
+        out = video_store.validate(chaptered())
+        keys = video_longform.chapter_keys(out, "16:9")
+        self.assertEqual(len(set(keys)), 3)
+        edited = copy.deepcopy(out)
+        edited["beats"][4]["text"] = "Changed in the middle of chapter two"
+        after = video_longform.chapter_keys(video_store.validate(edited), "16:9")
+        self.assertEqual([a == b for a, b in zip(keys, after)], [True, False, True])
+        self.assertNotEqual(keys, video_longform.chapter_keys(out, "9:16"), "another aspect draws other frames")
+        looked = video_longform.chapter_keys(video_store.validate({**out, "look": "nordic"}), "16:9")
+        self.assertTrue(all(a != b for a, b in zip(keys, looked)))
+
+
+class PlanGateTests(unittest.TestCase):
+    def test_a_long_video_renders_only_after_the_person_approves_its_plan(self):
+        from core import video_plan
+        p = make_long()
+        self.assertEqual(video_plan.state(p)["status"], "none")
+        with patch.object(ffmpeg_tools, "find", return_value="ffmpeg"), patch.object(bridge, "available", return_value=True):
+            with self.assertRaises(ValueError) as caught:
+                video_render.start(p["id"], "16:9")
+        self.assertIn("plan:", str(caught.exception))
+        sent = video_plan.submit(p["id"], by="model")
+        self.assertEqual(sent["status"], "awaiting_approval")
+        self.assertIn("Chapter 2 at", sent["text"])
+        self.assertIn(p["id"], [w["video_id"] for w in video_plan.waiting()])
+        self.assertEqual(video_plan.decide(p["id"], True, "alice")["status"], "approved")
+        self.assertEqual(video_plan.problems(video_store.get(p["id"])), [])
+        # A measurement does not undo it; a changed line does.
+        measured = video_store.get(p["id"])
+        self.assertEqual(video_plan.plan_hash(measured), video_plan.plan_hash({**measured, "beats": [
+            {**b, "seconds": 1.0} for b in measured["beats"]]}))
+        measured["beats"][0]["say"] = "A different first line."
+        changed = video_store.save(p["id"], measured)
+        self.assertEqual(video_plan.state(changed)["status"], "changed")
+        self.assertIn("changed after it was approved", video_plan.problems(changed)[0])
+        self.assertEqual(video_plan.problems(video_store.get(make()["id"])), [], "a Short needs no plan approval")
+        with self.assertRaises(ValueError):
+            video_plan.submit(make()["id"], by="model")
+
+    def test_plan_routes_are_the_persons(self):
+        app = FastAPI()
+        app.include_router(video_routes.router)
+        app.dependency_overrides[require_user] = lambda: "alice"
+        client = TestClient(app)
+        p = make_long()
+        self.assertEqual(client.get(f"/api/videos/{p['id']}/plan").json()["status"], "none")
+        self.assertEqual(client.post(f"/api/videos/{p['id']}/plan/reject", json={"reason": "Shorter, please"}).json()["status"], "rejected")
+        self.assertEqual(client.post(f"/api/videos/{p['id']}/plan/approve").json()["status"], "approved")
+        renders = client.get(f"/api/videos/{p['id']}/long-renders").json()
+        self.assertEqual(renders["renders"], [])
+        self.assertIn("parts", renders["disk"])
+        self.assertEqual(client.post(f"/api/videos/{p['id']}/parts/clean").json()["freed"], 0)
+        self.assertEqual(client.get(f"/api/videos/{p['id']}/renders/16-9-v1.chapters.txt").status_code, 404, "allowed name, no file yet")
+        self.assertEqual(client.get(f"/api/videos/{p['id']}/renders/..%2Fplan.json").status_code, 404)
+
+
+class LongRenderTests(unittest.IsolatedAsyncioTestCase):
+    """The chapter loop with a stand-in worker and encoder: parts, a stop, a resume that reuses them, the join."""
+    async def asyncSetUp(self):
+        bridge._queue = None
+        bridge._pending.clear()
+        bridge._video_parts.clear()
+        self.jobs = []
+
+    def fakes(self, stop_after=None):
+        test = self
+
+        class Encoder:
+            def __init__(self, path, wav):
+                self.path, self.count = Path(path), 0
+                self.path.write_bytes(b"")
+                test.assertIsNone(wav, "a chapter part is picture only")
+
+            def write(self, raw):
+                self.count += 1
+
+            def finish(self):
+                self.path.write_text(str(self.count))
+
+            def abort(self):
+                self.path.unlink(missing_ok=True)
+
+        async def capture(job, consumer):
+            test.jobs.append(job)
+            test.assertLessEqual(job["first"] + job["count"], job["frames"])
+            test.assertTrue(all(job["first"] / 30 <= t < (job["first"] + job["count"]) / 30 + 1e-9 for t in job["layoutTimes"]))
+            for offset in range(0, job["count"], 15):
+                if stop_after is not None and len(test.jobs) > stop_after and offset >= 15:
+                    await asyncio.Future()       # stuck in this chapter until cancelled
+                await consumer([image()] * min(15, job["count"] - offset), [{"time": t, "elements": []} for t in job["layoutTimes"]] if offset == 0 else [])
+            return {"frames": job["count"]}
+
+        def join(parts, wav, out):
+            Path(out).write_text(str(sum(int(Path(p).read_text()) for p in parts)))
+            return out
+
+        return [patch.object(ffmpeg_tools, "find", return_value="ffmpeg"), patch.object(ffmpeg_tools, "Encoder", Encoder),
+                patch.object(bridge, "available", return_value=True), patch.object(bridge, "video", side_effect=capture),
+                patch.object(ffmpeg_tools, "count_frames", side_effect=lambda path, *a: int(Path(path).read_text())),
+                patch.object(ffmpeg_tools, "join", side_effect=join),
+                patch.object(ffmpeg_tools, "loudness", return_value={"input_i": -16, "input_tp": -1.5}),
+                patch.object(video_narration, "_ready", return_value=type("K", (), {"synthesize": staticmethod(FakeVoice())}))]
+
+    async def test_stop_resume_reuse_and_join(self):
+        from core import video_longform, video_plan
+        p = make_long()
+        video_plan.decide(p["id"], True, "alice")
+        patches = self.fakes(stop_after=1)
+        for item in patches:
+            item.start()
+        try:
+            job = video_render.start(p["id"], "16:9")
+            self.assertEqual(job["kind"], "long")
+            for _ in range(400):
+                await asyncio.sleep(.01)
+                state = video_render.status(job["id"])
+                if state["chapters"] and state["chapters"][1]["state"] == "rendering" and state["chapters"][1]["done"] >= 15:
+                    break
+            self.assertEqual(video_render.status(job["id"])["chapters"][0]["state"], "done")
+            self.assertIsNotNone(video_render.status(job["id"])["eta_seconds"])
+            video_render.cancel(job["id"])
+            await asyncio.gather(video_render._tasks[job["id"]], return_exceptions=True)
+            stopped = video_render.status(job["id"])
+            self.assertEqual(stopped["status"], "paused")
+            self.assertEqual([c["state"] for c in stopped["chapters"]], ["done", "waiting", "waiting"])
+            stored = video_longform.describe(p["id"])
+            self.assertEqual(stored[0]["status"], "paused")
+            self.assertTrue(stored[0]["resumable"])
+            # An app restart: the live job is gone and the record says running; Studio shows it interrupted.
+            record = video_longform.record(p["id"], "16:9")
+            video_longform._save_record(p["id"], "16:9", {**record, "status": "running"})
+            video_render._jobs.pop(job["id"])
+            self.assertEqual(video_longform.describe(p["id"])[0]["status"], "interrupted")
+            patches[3].stop()
+            patches[3] = patch.object(bridge, "video", side_effect=self.fakes()[3].kwargs["side_effect"])
+            patches[3].start()
+            before = len(self.jobs)
+            again = video_render.start(p["id"], "16:9")
+            await video_render._tasks[again["id"]]
+            done = video_render.status(again["id"])
+            self.assertEqual(done["status"], "ready", done["status"])
+            self.assertEqual(done["reused"], 1)
+            self.assertTrue(done["resumed"])
+            self.assertEqual(len(self.jobs) - before, 2, "only the two unfinished chapters render again")
+            total = math.ceil(video_store.duration(video_store.get(p["id"])) * 30 - 1e-7)
+            self.assertEqual(done["frames_total"], total)
+            renders = video_store._folder(p["id"]) / "renders"
+            self.assertEqual(int((renders / done["file"]).read_text()), total)
+            self.assertTrue(done["chapters_text"].startswith("00:00 Part 1"))
+            self.assertEqual(video_longform.chapters_for_render(done["url"]), done["chapters_text"])
+            for name in ("sheet-16-9.png", "thumb-16-9.png", "soundtrack.wav", done["chapters_file"]):
+                self.assertTrue((renders / name).is_file(), name)
+            self.assertGreater(done["disk"]["parts"], 0)
+            # An edit to one chapter renders only that chapter; the old part is removed when the render finishes.
+            edited = video_store.get(p["id"])
+            edited["beats"][4]["text"] = "Only chapter two changes"
+            video_store.save(p["id"], edited)
+            video_plan.decide(p["id"], True, "alice")
+            before = len(self.jobs)
+            third = video_render.start(p["id"], "16:9")
+            await video_render._tasks[third["id"]]
+            self.assertEqual(video_render.status(third["id"])["status"], "ready")
+            self.assertEqual(len(self.jobs) - before, 1)
+            parts = video_longform._parts(p["id"], "16:9")
+            self.assertEqual(len(list(parts.glob("*.mp4"))), 3, "the replaced part is cleaned up")
+            self.assertGreater(video_longform.clean(p["id"]), 0)
+            self.assertFalse(parts.exists())
+        finally:
+            for item in patches:
+                item.stop()
+
+
+class RealJoinTests(unittest.TestCase):
+    @unittest.skipUnless(ffmpeg_tools.find(), "FFmpeg is not on this machine")
+    def test_parts_join_without_reencoding_and_keep_every_frame(self):
+        import tempfile
+        folder = Path(tempfile.mkdtemp(dir=fixture.name))
+        parts = []
+        for k, n in enumerate((37, 41, 22)):
+            encoder = ffmpeg_tools.Encoder(folder / f"p{k}.mp4", None)
+            for i in range(n):
+                encoder.write(image(size=(320, 180)))
+            encoder.finish()
+            self.assertEqual(ffmpeg_tools.count_frames(folder / f"p{k}.mp4"), n)
+            parts.append(folder / f"p{k}.mp4")
+        wav = folder / "s.wav"
+        with wave.open(str(wav), "wb") as out:
+            out.setnchannels(2)
+            out.setsampwidth(2)
+            out.setframerate(48000)
+            t = np.arange(int(100 / 30 * 48000)) / 48000
+            out.writeframes(np.repeat((np.sin(2 * np.pi * 440 * t) * 8000).astype("<i2"), 2).tobytes())
+        joined = ffmpeg_tools.join(parts, wav, folder / "out.mp4")
+        self.assertEqual(ffmpeg_tools.count_frames(joined), 100)
+        check = subprocess.run([ffmpeg_tools.find(), "-v", "error", "-i", str(joined), "-f", "null", "-"], capture_output=True, text=True)
+        self.assertEqual(check.stderr.strip(), "", "the joined file decodes without errors")
+        self.assertLess(abs(ffmpeg_tools.loudness(joined)["input_i"] + 16), 1.5)
+        picture_only = ffmpeg_tools.Encoder(folder / "x.mp4", None)
+        picture_only.abort()
+        self.assertIn("-an", picture_only.argv)
+        self.assertNotIn("-shortest", picture_only.argv)
+
+
+class LongToolTests(unittest.TestCase):
+    def setUp(self):
+        session = session_manager.create_session(owner_user="alice")
+        self.ctx = tool_registry.ToolContext(session_id=session["id"], surface=tool_registry.CODEX, turn_taint=TurnTaint())
+
+    def call(self, name, args):
+        return run(tool_registry._REGISTRY[name].handler(args, self.ctx))
+
+    def test_create_in_chapters_outline_submit_and_render_refusal(self):
+        reply = self.call("video_create", {"title": "Long", "look": "sport", "beats": [], "chapters": [
+            {"title": "Start", "beats": [{"kind": "title", "text": "Long", "say": "Long."}, {"kind": "statement", "text": "One", "say": "One idea."}]},
+            {"title": "Middle", "beats": [{"kind": "statement", "text": "Two", "say": "Two ideas."}]},
+            {"title": "End", "beats": [{"kind": "statement", "text": "Three", "say": "Three ideas here."}]}]})
+        self.assertIn("Chapter c1: Start", reply)
+        p = video_store.videos_for_chat(self.ctx.session_id)[0]
+        self.assertEqual([c["start"] for c in p["chapters"]], ["c1b1", "c2b1", "c3b1"])
+        self.assertIn("Not run", self.call("video_render", {"video_id": p["id"]}))
+        with patch.object(video_narration, "_ready", return_value=type("K", (), {"synthesize": staticmethod(FakeVoice())})):
+            sent = self.call("video_submit_plan", {"video_id": p["id"]})
+        self.assertIn("waits for the person's approval", sent)
+        self.assertIn("Chapter 3 at", sent)
+        self.assertIn("No render of this video yet", self.call("video_render_status", {"video_id": p["id"]}))
+        self.assertIn("approves its shot plan", tool_registry._REGISTRY["video_create"].description)
 
 
 if __name__ == "__main__":

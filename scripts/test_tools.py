@@ -62,6 +62,10 @@ CLAUDE_APPROVED_BEFORE = {f"mcp__hive_mind__{name}" for name in (
     # Pack A characters, reviewed 2026-11-10 (Video Styles unit 3): the account's character list and the scene vocabulary,
     # fenced as data. Designing a character and rendering its sheet are writes and still ask; approving is the person's alone.
     'character_list '
+    # Reviewed 2026-11-10: the account's style packs with their versions and briefs (user packs; a gap since that unit, the
+    # list was not updated), and a video's render progress or result (Video Styles unit 4), both fenced as data. Approving
+    # a pack or a long video's plan is the person's alone.
+    'content_studio_style_packs video_render_status '
     # Phase 4 teams, reviewed 2026-10-29: reads of the bot's own peers, assignments, rooms and team, fenced as data.
     'list_peers assignment_status list_room_targets search_team_memory list_team_setup read_incidents '
     # Phase 5 front desk (front-desk bot only, core/front_desk_tools.guard_call) and Phase 6 data, reviewed 2026-10-29:

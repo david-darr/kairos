@@ -227,6 +227,8 @@ const path = require('node:path');
   }
   const medium = S.sceneBoxes({ ...sp.beats[0], camera: 'push', scene: { ...sp.beats[0].scene, shot: 'medium' } }, sp, 1920, 1080, ground, 1, 1).find(b => b.kind === 'character');
   assert.ok(medium.y + medium.h < band.y + 8 && medium.clip === undefined, 'a medium figure stands clear of the band');
+  // A two-line caption fills the whole band: a medium figure pushing in still ends above the band's top (2026-11-10).
+  assert.ok(medium.y + medium.h <= band.y, `a medium figure ends above a full caption band (${medium.y + medium.h} > ${band.y})`);
   // A user-made style pack reaches the engine as checked colours and names only.
   const pack = L.normalizePack({ palette: { sky: ['#173d7a', '#3f7bc8'], far: '#6c8fd8', mid: '#4a6fc0', near: '#dfe6f5', ground: '#b9c6e4', prop: '#ffd166', ink: '#1b2a4a', glow: '#ffffff' },
     lighting: 'glow', caption_case: 'upper', script: 'alert(1)' });

@@ -42,7 +42,7 @@ def _envelope(active, frame):
     target = np.where(near, 10 ** (DUCK_DB / 20), 1.0)
     width = max(1, int(.08 * SR / frame))
     smooth = np.convolve(np.pad(target, (width, width), mode="edge"), np.ones(2 * width + 1) / (2 * width + 1), mode="same")[width:-width]
-    return np.repeat(smooth, frame)
+    return np.repeat(smooth.astype(np.float32), frame)
 
 
 def _mix(music, voice, stats, volume, report):
@@ -65,14 +65,20 @@ def _mix(music, voice, stats, volume, report):
         bed = speaking * 10 ** (BED_DB / 20) * (volume / .7) / m_level
     duck = _envelope(active, frame)
     duck = np.pad(duck[:n], (0, max(0, n - len(duck))), constant_values=1.0)
-    mix = music * (bed * duck)[:, None] + voice[:, None]
+    mix = music * (np.float32(bed) * duck)[:, None] + voice[:, None]
     peak = float(np.max(np.abs(mix))) if n else 0.
     if peak > MIX_PEAK:
         mix *= MIX_PEAK / peak
     if report is not None:
         under = active.any() and bed > 0
-        m_frames = (music[:frames * frame].astype(np.float64) * (bed * duck[:frames * frame])[:, None])
-        m_rms = np.sqrt((m_frames.reshape(frames, frame, 2) ** 2).mean(axis=(1, 2)) + 1e-12) if frames else np.zeros(0)
+        # The music's level per 10 ms frame under the duck (constant within a frame), in pieces so a 20-minute
+        # timeline is never copied whole as float64.
+        energy = np.zeros(frames)
+        for i in range(0, frames, 6000):
+            piece = music[i * frame:min(frames, i + 6000) * frame].astype(np.float64)
+            energy[i:i + 6000] = (piece.reshape(-1, frame, 2) ** 2).mean(axis=(1, 2))
+        gain = bed * duck[:frames * frame:frame].astype(np.float64)
+        m_rms = np.sqrt(energy * gain ** 2 + 1e-12) if frames else np.zeros(0)
         report.update({"lines": stats["lines"], "voice_clipped_samples": stats["clipped_samples"],
                        "voice_peak_dbfs": round(float(20 * np.log10(max(stats["peak"], 1e-9))), 1),
                        "mix_peak_dbfs": round(float(20 * np.log10(max(float(np.max(np.abs(mix))) if n else 0., 1e-9))), 1),
@@ -163,9 +169,12 @@ def _music(p):
     peak = float(np.max(np.abs(mix)))
     if peak:
         mix = np.tanh(mix * (1.1 / peak))
-    times = np.arange(count) / SR
-    fade = np.minimum(1, times / .03) * np.clip((seconds - times) / 1.5, 0, 1)
-    mix *= fade[:, None]
+    # The fade in and out touch only the ends; a long video's whole timeline is never held as float64 times.
+    head = min(count, int(.03 * SR) + 1)
+    mix[:head] *= (np.arange(head) / SR / .03).astype(np.float32)[:, None]
+    tail = min(count, int(1.5 * SR) + 1)
+    times = (count - tail + np.arange(tail)) / SR
+    mix[count - tail:] *= np.clip((seconds - times) / 1.5, 0, 1).astype(np.float32)[:, None]
     peak = float(np.max(np.abs(mix)))
     if peak:
         mix *= (10 ** (-1.5 / 20) / peak) * p["music"]["volume"]

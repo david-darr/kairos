@@ -943,5 +943,63 @@ class Api(unittest.TestCase):
             self.assertEqual(len(sent), before)
 
 
+class LongForm(unittest.TestCase):
+    """Video Styles unit 4: one long video a week per YouTube channel (a soft cap on the channel), chapters in the post."""
+    def setUp(self):
+        self.store = make_store()
+        niche = self.store.create_niche("Space")
+        self.yt = self.store.create_channel(niche["id"], "youtube", "@space")
+        self.tt = self.store.create_channel(niche["id"], "tiktok", "@space")
+
+    def test_one_long_video_a_week_on_youtube_by_default(self):
+        s = self.store
+        self.assertEqual((s.long_cap(self.yt), s.long_cap(self.tt)), (1, 0))
+        first = s.create_post(self.yt["id"], "The Moon, in depth", long_form=True, now=T0)
+        self.assertEqual(first["long_form"], 1)
+        with self.assertRaises(StudioError) as caught:
+            s.create_post(self.yt["id"], "A second long one", long_form=True, now=T0 + DAY)
+        self.assertIn("1 long video a week", caught.exception.detail)
+        self.assertEqual(s.create_post(self.yt["id"], "A Short is fine", now=T0 + DAY)["long_form"], 0)
+        self.assertEqual(s.create_post(self.yt["id"], "Next week's", long_form=True, now=T0 + 8 * DAY)["long_form"], 1)
+        with self.assertRaises(StudioError):
+            s.create_post(self.tt["id"], "No long videos on TikTok", long_form=True, now=T0)
+
+    def test_the_person_sets_the_cap_and_rejected_ones_free_their_slot(self):
+        s = self.store
+        self.assertEqual(s.edit_channel(self.yt["id"], long_per_week=2)["long_per_week"], 2)
+        s.create_post(self.yt["id"], "One", long_form=True, now=T0)
+        second = s.create_post(self.yt["id"], "Two", long_form=True, now=T0)
+        with self.assertRaises(StudioError):
+            s.create_post(self.yt["id"], "Three", long_form=True, now=T0)
+        s.edit_post(second["id"], render_ref="r.mp4", render_status="ok")
+        s._update("posts", second["id"], state="rejected")
+        self.assertEqual(s.long_this_week(self.yt["id"], now=T0), 1)
+        s.create_post(self.yt["id"], "Three", long_form=True, now=T0)
+        self.assertEqual(s.edit_channel(self.yt["id"], long_per_week=0)["long_per_week"], 0)
+        with self.assertRaises(StudioError):
+            s.create_post(self.yt["id"], "None allowed now", long_form=True, now=T0 + 30 * DAY)
+        for bad in (8, -1, True, 1.5):
+            with self.assertRaises(StudioError):
+                s.edit_channel(self.yt["id"], long_per_week=bad)
+        with self.assertRaises(StudioError):
+            s.edit_channel(self.tt["id"], long_per_week=1)
+
+    def test_youtube_description_carries_the_renders_chapters(self):
+        from core import video_longform
+        from services.content_studio import youtube_publish
+        from services.content_studio.store import youtube_chapters
+        post = self.store.create_post(self.yt["id"], "Long", caption="All about the Moon.", long_form=True)
+        ref = "/api/videos/0123456789ab/renders/16-9-v1.mp4"
+        post = self.store.edit_post(post["id"], render_ref=ref)
+        listing = "00:00 Start\n01:10 Phases\n02:30 Tides"
+        with patch.object(video_longform, "chapters_for_render", return_value=listing):
+            self.assertEqual(youtube_chapters(post), listing)
+            meta = youtube_publish.metadata(post, "private")
+            self.assertEqual(meta["snippet"]["description"], "All about the Moon.\n\nChapters\n" + listing)
+            already = {**post, "caption": "Mine.\n00:00 Intro\n00:30 Rest\n01:00 End"}
+            self.assertEqual(youtube_publish.description(already), already["caption"], "a caption with its own list is kept")
+            self.assertEqual(youtube_publish.description({**post, "long_form": 0}), "All about the Moon.", "a Short has no chapters")
+
+
 if __name__ == "__main__":
     unittest.main()

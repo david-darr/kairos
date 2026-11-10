@@ -1,5 +1,6 @@
 // A real narrated video render through the app's own render path. Run via run-electron-test.cjs:
-//   node scripts/run-electron-test.cjs video-render-smoke [--sample | --pack-a | --style-pack] [--models <kokoro folder>] [--keep <folder>] [--name <stem>]
+//   node scripts/run-electron-test.cjs video-render-smoke [--sample | --pack-a | --style-pack | --long-form] [--models <kokoro folder>] [--keep <folder>] [--name <stem>]
+// --long-form renders a 3 to 5 minute chaptered video in the starter pack, stops it in its second chapter and resumes it (up to an hour).
 // Electron runs only the app's render worker (electron/designRender.js); scripts/video_render_smoke.py serves the
 // player and renders with core/video_render.render on a free loopback port, with temporary data. Without --models a
 // tone stands in for Kokoro, so the suite needs no download. FFmpeg must be on the machine (Kairos never installs it).
@@ -34,7 +35,7 @@ function finish(code, message) {
   exitAfterFlush(code);
 }
 process.on('unhandledRejection', error => finish(1, error.stack));
-setTimeout(() => finish(1, 'Video render smoke timed out'), 400000);
+setTimeout(() => finish(1, 'Video render smoke timed out'), args.includes('--long-form') ? 3540000 : 400000);
 // The worker's offscreen windows are the only windows; the suite ends itself, not the last window closing.
 app.on('window-all-closed', () => {});
 app.on('browser-window-created', (_event, win) => {
@@ -51,6 +52,7 @@ app.whenReady().then(async () => {
   if (args.includes('--sample')) py.push('--sample');
   if (args.includes('--pack-a')) py.push('--pack-a');
   if (args.includes('--style-pack')) py.push('--style-pack');
+  if (args.includes('--long-form')) py.push('--long-form');
   for (const name of ['--models', '--keep', '--name']) if (flag(name)) py.push(name, flag(name));
   backend = spawn(python, py, { cwd: ROOT, env: { ...process.env, KAIROS_RENDER_TOKEN: token }, stdio: 'inherit', windowsHide: true });
   const exited = new Promise(resolve => backend.on('exit', code => resolve(code)));
@@ -65,7 +67,7 @@ app.whenReady().then(async () => {
   if (code !== 0 || !result.ok) return finish(1, 'Video render smoke failed: ' + (result.error || `backend exited ${code}`));
   const job = result.job;
   const summary = { seconds: job.seconds, render_seconds: result.render_seconds, real_voice: result.real_voice, loudness: job.loudness,
-    narration: job.narration, notes: job.notes, sheets: result.sheets, sheet_match: result.sheet_match, pack: result.pack || null, kept: result.kept || null };
+    narration: job.narration, notes: job.notes, sheets: result.sheets, sheet_match: result.sheet_match, pack: result.pack || null, kept: result.kept || null, long: result.long || null };
   console.log(JSON.stringify(summary, null, 2));
   if (!job.narration || !job.narration.lines) return finish(1, 'The render has no narration track.');
   // Pack A: each character's sheet rendered and passed its own checks, and no frame drifted from its sheet.
@@ -87,6 +89,19 @@ app.whenReady().then(async () => {
     const strays = (job.notes || []).filter(n => /pack (does not use|keeps shots)|outside the .* pack|opening beat runs past/.test(n));
     if (strays.length) return finish(1, 'The sample strays from its own pack: ' + strays.join(' '));
     if (!(job.seconds >= 20 && job.seconds <= 30)) return finish(1, `The sample runs ${job.seconds} s, outside 20 to 30 s.`);
+  }
+  // A long video: refused before its plan was approved, stopped in its second chapter and resumed from there, joined into one
+  // 3 to 5 minute video with YouTube chapters, inside its pack's rules.
+  if (args.includes('--long-form')) {
+    const long = result.long || {};
+    if (!/plan/.test(long.refused_before_approval || '')) return finish(1, 'The long video was not refused before its plan was approved.');
+    if (long.stopped_status !== 'paused' || long.stopped_chapters?.[0] !== 'done') return finish(1, 'The stop did not keep the first chapter: ' + JSON.stringify(long.stopped_chapters));
+    if (!(long.reused_on_resume >= 1)) return finish(1, 'The resume rendered the first chapter again.');
+    if (!(job.seconds >= 180 && job.seconds <= 300)) return finish(1, `The long sample runs ${job.seconds} s, outside 3 to 5 minutes.`);
+    const lines = (long.chapters_text || '').split('\n');
+    if (lines.length < 3 || !lines[0].startsWith('00:00 ')) return finish(1, 'The YouTube chapter list is wrong: ' + long.chapters_text);
+    const strays = (job.notes || []).filter(n => /pack (does not use|keeps shots)|outside the .* pack|opening beat runs past|YouTube/.test(n));
+    if (strays.length) return finish(1, 'The long sample strays from its pack or YouTube rules: ' + strays.join(' '));
   }
   finish(0, 'Video render smoke passed.');
 });

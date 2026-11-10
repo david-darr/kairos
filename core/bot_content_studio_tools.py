@@ -28,6 +28,12 @@ from a written brief turned into pack data, or by duplicating a pack with change
 Studio > Content > Styles; no tool approves. A channel uses its own pack by default, and a post in a user pack is recorded
 only when its video is made in that pack's approved version.
 
+Long videos (Video Styles unit 4; the locked cadence: one long video a week per YouTube channel plus daily Shorts): the
+Evaluator picks a long video with long_form true, only within the channel's long videos a week (a soft cap the person sets
+on the channel; one on YouTube by default). The Script Writer writes it in chapters, the Editor builds it as a chaptered
+video and sends its shot plan to the person (content_studio_submit_plan); it renders only after they approve the plan, and
+its render carries the chapter timestamps the YouTube description uses. Shorts keep the daily flow.
+
 Policy checks (services/content_studio/policy.py) run at the pick, when a script is saved and when a post is queued:
 sameness against the channel's last 30 posts, no narrator presented as a health, legal, money or political expert, no
 distress or rescue hooks, no cross-posting between the team's own channels, and the AI label on every post. The
@@ -104,7 +110,8 @@ def _pipeline(args, ctx, bot, role):
     active strategies (the default first) and any open request for a replacement niche."""
     channels = [{"id": c["id"], "niche_id": c["niche_id"], "niche": c["niche_name"], "platform": c["platform"], "handle": c["handle"],
                  "paused": bool(c["paused"]), "look": c["look"], "aspect": c["aspect"] or "9:16",
-                 "notes": c["notes"], "voice": c["voice"], "style_pack": c.get("style_pack") or "motion-type"}
+                 "notes": c["notes"], "voice": c["voice"], "style_pack": c.get("style_pack") or "motion-type",
+                 "long_videos_a_week": studio.long_cap(c), "long_videos_last_7_days": studio.long_this_week(c["id"])}
                 for c in studio.list_channels(status="live")]
     strategies = {r: [{"id": s["id"], "name": s["name"], "default": bool(s["is_default"])}
                       for s in sorted(studio.list_strategies(r, "active"), key=lambda s: not s["is_default"])]
@@ -173,7 +180,7 @@ def _pick(args, ctx, bot, role):
     post = studio.create_post(args["channel_id"], title, topic_id=topic["id"],
                               evaluator_strategy_id=strategy["id"] if strategy else None, format=fmt,
                               pick_reason=args["reason"], format_id=format_id, port_id=port["id"] if port else None,
-                              style_pack=args.get("style_pack"))
+                              style_pack=args.get("style_pack"), long_form=bool(args.get("long_form")))
     if card:
         studio.add_evidence(post["id"], "port", {
             "by": bot["name"], "format": {k: card[k] for k in ("id", "name", "premise", "beats", "source_niche", "evidence")},
@@ -181,6 +188,9 @@ def _pick(args, ctx, bot, role):
                                           "mascot", "style_pack", "thumbnail", "checks")} if port else None),
             "pick_checks": early})
     tail = " The Script Writer writes it next."
+    if post["long_form"]:
+        tail += (" It is this week's long video for the channel: the Script Writer writes it in chapters, and the Editor sends its "
+                 "shot plan to the person with content_studio_submit_plan before rendering.")
     if post["style_pack"] not in formats.STYLE_PACKS:
         tail += (f" It is made in the user-made style pack {formats.all_packs()[post['style_pack']]['name']}: the Editor passes "
                  f"style_pack={post['style_pack']} to video_create, which applies the pack's approved look, voice and characters.")
@@ -301,6 +311,60 @@ def _pack_matches(post, render_ref):
         raise StudioError(" ".join(problems))
 
 
+def _long_matches(post, render_ref):
+    """A long post's render is its chaptered video, made after the person approved the plan; a Short's is not chaptered."""
+    match = _STUDIO_RENDER.match((render_ref or "").strip())
+    if not match:
+        if post["long_form"]:
+            raise StudioError("a long video's render_ref is its Studio render link, so its chapters and plan approval can be checked")
+        return
+    from core import video_plan, video_store
+    try:
+        project = video_store.get(match.group(1))
+    except LookupError:
+        raise StudioError("that Studio render's video is not in this account")
+    if not post["long_form"]:
+        if video_store.chaptered(project):
+            raise StudioError("this post is a Short, but the video is a long one in chapters; make the Short as its own video")
+        return
+    if not video_store.chaptered(project):
+        raise StudioError("this post is the channel's long video; make it in chapters (video_create chapters)")
+    if post["video_id"] and post["video_id"] != project["id"]:
+        raise StudioError("the render is of another video than the one whose plan the person was sent")
+    problems = video_plan.problems(project)
+    if problems:
+        raise StudioError(" ".join(problems))
+
+
+def _submit_plan(args, ctx, bot, role):
+    from core import video_narration, video_plan, video_store
+    post = _drafted(args["post_id"])
+    if not post["long_form"]:
+        raise StudioError("only a long video's plan goes to the person before rendering; a Short follows the daily flow")
+    try:
+        project = video_store.get(args["video_id"])
+    except LookupError:
+        raise StudioError("no such video in this account")
+    if not video_store.chaptered(project):
+        raise StudioError("the video has no chapters; a long video is made in chapters (video_create chapters)")
+    try:
+        project = video_narration.prepare(project["id"])
+        measured = True
+    except video_narration.NarrationUnavailable:
+        measured = False
+    studio.link_video(post["id"], project["id"])
+    data = video_plan.submit(project["id"], by=bot["name"], post_id=post["id"])
+    text = video_plan.plan_text(project)
+    studio.add_evidence(post["id"], "shot_plan", {"plan": text[:20000], "by": bot["name"], "video_id": project["id"], "long_form": True})
+    if data["status"] == "approved":
+        return "The person already approved this plan as it is. Render it with video_render, then record the render."
+    video_plan.notify(project, data)
+    minutes = round(video_store.duration(project) / 60, 1)
+    return (f"The shot plan of '{project['title']}' ({minutes:g} minutes, {len(project['chapters'])} chapters) is with the person in "
+            "Studio > Content > Approvals and their Inbox. Render it only after they approve it; video_render refuses until then."
+            + ("" if measured else " The lengths are estimates: Kokoro is not ready, so the lines are not spoken yet."))
+
+
 def _render(args, ctx, bot, role):
     post = _drafted(args["post_id"])
     if not post["script_ref"]:
@@ -315,6 +379,7 @@ def _render(args, ctx, bot, role):
         if not studio.evidence(args["post_id"], "shot_plan"):
             raise StudioError("record the shot plan first (content_studio_save_shot_plan with the plan video_narrate returned)")
         _pack_matches(post, args.get("render_ref"))
+        _long_matches(post, args.get("render_ref"))
         note = _channel_voice(post, args.get("render_ref"))
     for key in ("tags", "caption", "thumbnail"):
         if args.get(key) is not None:
@@ -542,7 +607,9 @@ _add("content_studio_pick_topic", "Evaluator: pick a topic candidate for one cha
            "format": _str(80, "The format, for example 'list' or 'explainer', when there is no format card"),
            "port_id": _int("An accepted port this episode is made from"), "format_id": _int("A format card, when not from a port"),
            "style_pack": _str(40, "The style pack: motion-type, flat-2d, or the id of an approved user-made pack (content_studio_style_packs); "
-                                  "the channel's own pack when left out")},
+                                  "the channel's own pack when left out"),
+           "long_form": {"type": "boolean", "description": "This week's long video for a YouTube channel (chapters, several minutes), "
+                                                           "within the channel's long videos a week; a Short when left out"}},
           ("channel_id", "topic_id", "reason")),
      WRITE, ("evaluator",), _pick)
 _add("content_studio_save_script", "Script Writer: save the script with its beat outline and narration lines for a drafted post, and optionally its "
@@ -555,6 +622,12 @@ _add("content_studio_save_script", "Script Writer: save the script with its beat
                                                                        "date": _str(40, "When it was read")}, ("url",))}},
           ("post_id", "script")),
      WRITE, ("script_writer",), _script)
+_add("content_studio_submit_plan", "Script Writer, Editor or Producer: send a long post's shot plan to the person before it renders. Give the "
+     "post and its chaptered Studio video (video_create with chapters, then video_narrate). The lines are spoken and measured, the plan "
+     "with its chapters is kept as the post's shot plan, and the person approves or rejects it in Studio > Content > Approvals. "
+     "video_render refuses a long video until they approve; any later change to the plan needs them again.",
+     _obj({"post_id": _int(), "video_id": _str(12, "The chaptered Studio video's id")}, ("post_id", "video_id")),
+     WRITE, ("script_writer", "editor", "producer"), _submit_plan)
 _add("content_studio_save_shot_plan", "Script Writer or Editor: record the timestamped shot plan of a drafted post (video_narrate returns it with "
      "measured times). It goes to the person with the post, and a render cannot be recorded without one.",
      _obj({"post_id": _int(), "plan": _str(20000)}, ("post_id", "plan")), WRITE, ("script_writer", "editor"), _shot_plan)

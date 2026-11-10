@@ -20,7 +20,9 @@ export const LIGHTING = { flat: 0, soft: 1, glow: 1.8 };
 const TAU = Math.PI * 2;
 
 // A captioned scene stands its figures far enough above the caption band that feet (and a push-in camera) stay clear.
-export function groundLine(h, band, captioned) { return captioned && band ? band.y - h * .03 : h * .88; }
+// A captioned scene stands its figures 5% of the height above the caption band: a two-line caption fills the band, and a
+// medium shot pushing in brings the feet down about 1% (3% let a long video's two-line captions touch the feet, 2026-11-10).
+export function groundLine(h, band, captioned) { return captioned && band ? band.y - h * .05 : h * .88; }
 
 // The camera per depth: a far layer moves less than the cast. `p` is the beat's progress 0..1.
 export function layerTransform(camera, p, seed, depth, w, h, anchorY) {

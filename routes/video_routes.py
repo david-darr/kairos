@@ -7,7 +7,8 @@ from typing import Any, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
-from core import accounts, design_render, design_render_bridge, design_systems, ffmpeg_tools, video_render, video_store
+from core import (accounts, design_render, design_render_bridge, design_systems, ffmpeg_tools, video_longform, video_plan, video_render,
+                  video_store)
 from core.auth import auth_manager
 from core.middleware import get_current_user, require_user
 from core.constants import STATIC_DIR
@@ -21,7 +22,7 @@ class VideoBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str = Field(min_length=1, max_length=120)
     look: str = Field(min_length=1, max_length=60)
-    beats: list[dict[str, Any]] = Field(min_length=1, max_length=video_store.NARRATED_MAX_BEATS)
+    beats: list[dict[str, Any]] = Field(min_length=1, max_length=video_store.CHAPTERED_MAX_BEATS)
     bpm: float = 120
     fps: int = 30
     aspects: list[str] = Field(default=["16:9"], min_length=1, max_length=3)
@@ -30,6 +31,7 @@ class VideoBody(BaseModel):
     cast: Optional[list[dict[str, Any]]] = None      # Pack A: characters pinned to versions
     palette: Optional[str] = Field(None, max_length=24)
     style_pack: Optional[dict[str, Any]] = None       # a user-made style pack, {id, version}
+    chapters: Optional[list[dict[str, Any]]] = Field(None, max_length=video_store.MAX_CHAPTERS)   # a long video's chapters
     id: Optional[str] = None
     owner: Optional[str] = None
     chat_ids: list[str] = []
@@ -40,7 +42,7 @@ class VideoBody(BaseModel):
 
     def project(self):
         return {k: v for k, v in self.model_dump().items()
-                if k in video_store.FIELDS and (k not in ("id", "narration", "cast", "palette", "style_pack") or v is not None)}
+                if k in video_store.FIELDS and (k not in ("id", "narration", "cast", "palette", "style_pack", "chapters") or v is not None)}
 
 
 class RenderBody(BaseModel):
@@ -278,7 +280,7 @@ async def cancel_job(job_id: str, user: str = Depends(require_user)):
 @router.get("/api/videos/{video_id}/renders/{file}")
 async def download(video_id: str, file: str, user: str = Depends(require_user)):
     _video(video_id, user)
-    if not re.fullmatch(r"(?:(?:16-9|9-16|1-1)-v[1-9][0-9]*\.mp4|(?:sheet|thumb)-(?:16-9|9-16|1-1)\.png|soundtrack\.wav)", file):
+    if not re.fullmatch(r"(?:(?:16-9|9-16|1-1)-v[1-9][0-9]*\.(?:mp4|chapters\.txt)|(?:sheet|thumb)-(?:16-9|9-16|1-1)\.png|soundtrack\.wav)", file):
         raise HTTPException(404, "Render not found")
     path = video_store._folder(video_id) / "renders" / file
     if not path.is_file():
@@ -296,3 +298,57 @@ async def history(video_id: str, user: str = Depends(require_user)):
 async def restore(video_id: str, version: int, user: str = Depends(require_user)):
     _video(video_id, user)
     return _call(video_store.restore, video_id, version)
+
+
+# -- long videos (Video Styles unit 4): the person's plan approval, stored renders, parts on disk ------------------------
+
+class PlanDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reason: str = Field("", max_length=500)
+
+
+@router.get("/api/videos/{video_id}/plan")
+async def get_plan(video_id: str, user: str = Depends(require_user)):
+    project = _video(video_id, user)
+    return {"chaptered": video_store.chaptered(project), **video_plan.state(project),
+            "current": video_plan.plan_text(project) if video_store.chaptered(project) else ""}
+
+
+@router.post("/api/videos/{video_id}/plan/approve")
+async def approve_plan(video_id: str, user: str = Depends(require_user)):
+    """The person approves the long video's shot plan as it is now. No model tool reaches this."""
+    _video(video_id, user)
+    return _plan_evidence(_call(video_plan.decide, video_id, True, user))
+
+
+@router.post("/api/videos/{video_id}/plan/reject")
+async def reject_plan(video_id: str, body: PlanDecision = PlanDecision(), user: str = Depends(require_user)):
+    _video(video_id, user)
+    return _plan_evidence(_call(video_plan.decide, video_id, False, user, body.reason))
+
+
+def _plan_evidence(data):
+    """A team post's plan decision is kept with the post's appeal evidence."""
+    if data.get("post_id"):
+        try:
+            from services.content_studio import studio
+            studio.add_evidence(data["post_id"], "plan_approval", {k: data.get(k) for k in (
+                "status", "decided_by", "decided_at", "reason", "hash", "seconds", "chapters", "text")})
+        except Exception:
+            pass
+    return data
+
+
+@router.get("/api/videos/{video_id}/long-renders")
+async def long_renders(video_id: str, user: str = Depends(require_user)):
+    """Each aspect's long render as stored (a stopped one shows Resume after a restart) and the disk the renders take."""
+    _video(video_id, user)
+    return {"renders": video_longform.describe(video_id), "disk": video_longform.disk(video_id)}
+
+
+@router.post("/api/videos/{video_id}/parts/clean")
+async def clean_parts(video_id: str, user: str = Depends(require_user)):
+    """Remove the saved chapter parts; a stopped long render then starts again from its first chapter."""
+    _video(video_id, user)
+    freed = _call(video_longform.clean, video_id)
+    return {"freed": freed, "disk": video_longform.disk(video_id)}

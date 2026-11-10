@@ -25,7 +25,7 @@ const now = Date.now() / 1000;
 const customTab = { id: 'studio', label: 'Studio', user_tab: false, format: 'folder', view_url: '/tab-files/studio/view.js', style_url: '/tab-files/studio/view.css', icon_svg: '<svg viewBox="0 0 24 24"><path d="M3 6h18v15H3z"/></svg>' };
 
 // -- the mock Content Studio store ------------------------------------------------------------------------------
-const store = { forbidden: false, niches: [], channels: [], items: [], approvals: [], findings: [], decisions: [], posted: [], team: [],
+const store = { forbidden: false, niches: [], channels: [], items: [], approvals: [], plans: [], findings: [], decisions: [], posted: [], team: [],
   settings: { weights: { views: 0.4, watch: 0.4, engagement: 0.2 }, batch_approval: false },
   yt: { configured: true, connected: false, pending: false, google_account: null, needs_reconnect: false, last_sync: null, notice: 'Read only.' },
   ytPost: { configured: true, connected: true, pending: false, google_account: { id: 'g1', email: 'me@example.com' }, needs_reconnect: false, privacy: 'private',
@@ -83,7 +83,7 @@ function content(method, p, body) {
   if (/^\/channels\/\d+\/restore$/.test(p)) { Object.assign(channel, { status: 'live', archive_reason: null }); return [200, channel]; }
   if (/^\/channels\/\d+\/resume$/.test(p)) { channel.paused = 0; store.findings = store.findings.filter(f => f.channel_id !== id); return [200, channel]; }
   if (p === '/pipeline') return [200, { items: store.items }];
-  if (p === '/approvals') return [200, { posts: store.approvals, characters: pending(), style_packs: pendingPacks() }];
+  if (p === '/approvals') return [200, { posts: store.approvals, characters: pending(), style_packs: pendingPacks(), plans: store.plans }];
   if (p === '/watch') return [200, { findings: store.findings }];
   if (p === '/settings') { if (method === 'PUT') Object.assign(store.settings, body); return [200, { ...store.settings, team_bot_ids: store.team }]; }
   if (p === '/posts' && method === 'GET') return [200, { posts: store.posted }];
@@ -198,6 +198,8 @@ async function serve(req, res) {
     if (p.startsWith('/api/characters')) { const [status, value] = characters(req.method, p, body); return json(res, value, status); }
     if (/^\/api\/style-packs\/[a-f0-9]{12}\/versions\/\d+\/sample(\.mp4|-sheet\.png)$/.test(p)) { res.writeHead(200, { 'Content-Type': 'image/png' }); res.end(PIXEL); return; }
     if (p.startsWith('/api/style-packs')) { const [status, value] = stylePacks(req.method, p, body); return json(res, value, status); }
+    // A long video's plan decision is the person's own route on the video (routes/video_routes.py).
+    if (/^\/api\/videos\/[a-f0-9]{12}\/plan\/(approve|reject)$/.test(p)) { store.plans = store.plans.filter(v => !p.includes(v.video_id)); return json(res, { status: p.endsWith('approve') ? 'approved' : 'rejected' }); }
     if (p.startsWith('/api/content-studio/')) { const [status, value] = content(req.method, p.slice('/api/content-studio'.length), body); return json(res, value, status); }
     if (p === '/api/system/custom-tabs') return json(res, [customTab]);
     if (p === '/api/tab-studio/looks') return json(res, { default: 'sport', looks: [{ id: 'sport', name: 'Sport' }] });
@@ -339,9 +341,11 @@ app.whenReady().then(async () => {
       ['Motion type (default)', 'Flat 2D explainer', 'Flat science explainer'], 'Only approved packs are offered');
     await fill('Look id', 'sport'); await fill('Aspect', '16:9'); await fill('Voice notes', 'Calm, curious.'); await fill('Narrator voice', 'af_heart');
     await fill('Style pack', 'aaaaaaaaaaaa');
+    assert.equal(await js("document.querySelector('[aria-label=\"Long videos a week\"]').value"), '1', 'One long video a week on YouTube by default');
+    await fill('Long videos a week', '2');
     await click('.sc-dialog-panel button', 'Save look');
     await wait("!document.querySelector('[aria-label=\"Look id\"]')");
-    assert.deepEqual(last('/channels/1/edit').body, { look: 'sport', aspect: '16:9', notes: 'Calm, curious.', voice: 'af_heart', style_pack: 'aaaaaaaaaaaa' });
+    assert.deepEqual(last('/channels/1/edit').body, { look: 'sport', aspect: '16:9', notes: 'Calm, curious.', voice: 'af_heart', style_pack: 'aaaaaaaaaaaa', long_per_week: 2 });
     await wait("document.querySelector('[data-channel-id=\"1\"]').textContent.includes('style Flat science explainer, look sport, 16:9, voice notes set')");
     await noOverflow(); await labels();
 
@@ -420,6 +424,19 @@ app.whenReady().then(async () => {
     await click('.confirm-panel button', 'Approve all');
     await wait("document.querySelectorAll('.sc-post').length===0");
     assert.deepEqual(last('/approvals/approve-batch').body, { post_ids: [14, 15] });
+    // A long video's shot plan waits in Approvals before it renders: chapters, every shot, Approve or Reject with a note.
+    store.plans = [{ video_id: 'abcabcabcabc', title: 'The Moon, in depth', seconds: 213, version: 3, submitted_by: 'Editor', post_id: 30,
+      chapters: [{ title: 'Our nearest neighbour', start: 0 }, { title: 'Why the Moon changes shape', start: 61.2 }, { title: 'The pull behind the tides', start: 125 }],
+      text: 'Chapter 1 at 0:00: Our nearest neighbour (61 s)\n  00:00.0-00:05.1 hook scene: says "Look up tonight."' }];
+    await pause(1100); await tab('pipeline'); await openContent(); await tab('approvals');
+    await wait("!!document.querySelector('.sc-plan')");
+    const ptext = await js("document.querySelector('.sc-plan').textContent");
+    for (const part of ['Long video plan: The Moon, in depth', '3.6 min', '3 chapters', '00:00 Our nearest neighbour', '01:01 Why the Moon changes shape', 'renders only after you approve']) assert.ok(ptext.includes(part), part);
+    assert.equal(await js("document.querySelector('.sc-tab[data-tab=approvals]').textContent"), 'Approvals 1');
+    await capture('desktop-plan'); await noOverflow(); await labels();
+    await js("document.querySelector('button[aria-label=\"Approve the plan of The Moon, in depth\"]').click()");
+    await wait("!document.querySelector('.sc-plan')");
+    assert.ok(last('/api/videos/abcabcabcabc/plan/approve'));
 
     // 5b. Formats: cards with every number and its date, ports with what changes and the checks. It only reads.
     await tab('formats');

@@ -68,7 +68,8 @@ function runSuite(name, args) {
     // 2026-10-21: the phone checks now walk every tab, popup and two device classes; ui-smoke runs them too.
     // 2026-11-03: the full suite now takes about 20 minutes (1,216 s measured on
     // Electron 43.8.3, and it outgrew 15 on stock 43.7.0 as well). David: raise it to 30.
-    { stdio: 'inherit', windowsHide: true, timeout: name === 'ui-smoke' ? 1800000 : 420000 });
+    // 2026-11-10: video-render-smoke --long-form renders a 3 to 5 minute video twice over (a stop and a resume): up to an hour.
+    { stdio: 'inherit', windowsHide: true, timeout: name === 'ui-smoke' ? 1800000 : name === 'video-render-smoke' && args.includes('--long-form') ? 3600000 : 420000 });
   if (result.error) console.error(result.error.message);
   return result.status ?? 1;
 }
