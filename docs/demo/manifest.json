@@ -1,7 +1,7 @@
 {
  "built": {
   "app.js": "046577e12097b4855bfcfc103f9c51b26c97e43e54365ba32e46ba17ddf677f2",
-  "fixtures.js": "6b42b4f4ad288e39f69bb7c9ea152774574ad6d69439dd40d526b34d24aa9816",
+  "fixtures.js": "e43a2a6208cb5d8f266340f7bf757fd10b00d52fc7eefd1c3f58f2f81fbebdfe",
   "index.html": "765d80b018d722a27e29860be2ae3b86e889fe704be8a9dfdc0752e78379ad19",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
   "static/css/agent-ecosystem.css": "b40994f8cd2083cc7dbbce7b6ef625dfaef1013079488f5ca9caafb6d80ebad4",
@@ -43,7 +43,7 @@
   "static/css/bots-workbench.css": "d80bd4be07f54a5b80cb071272612e5ffe819a11ea082330ce8260bad3d384c1",
   "static/css/bots.css": "31647b592a21a0c7a31951829655a3b4c46b04b4ab37436aea164348fd429cb0",
   "static/css/browse.css": "ed6f53d03188ace261cacc57a57c2fbf5fce54535ec3aa0dc65815ff37f83d46",
-  "static/css/chat.css": "8e60851c4f0a8c890b8bcb6243e859975e34a40c0458a763eb66509419207bf3",
+  "static/css/chat.css": "38f397b7e1edb4991165c7c4e3fe2f0783a10ee674604712088e5c381d4b64e7",
   "static/css/design-canvas.css": "986b6f0f07935f32b23d56c22893615016d6fc3e9524d83168f3b47036db70d2",
   "static/css/interface.css": "c3f7c554e4182f2957e1c9d730c43b5495d1024e52f19f4d173c66e3d4300622",
   "static/css/kairos-theme.css": "1bdb893d3116152688ee36c5c15a0f8ef4b87ec4994a4f72c5fbad480158af93",
@@ -73,7 +73,7 @@
   "static/css/redesign-welcome.css": "44f7627d473df2c47b7a10600cc19873bd465ee7cd40c730552fdb10a8e24cf9",
   "static/css/redesign-workspaces.css": "1e9e6974b591d16b2800715ff55af5a6d7abb10d09f3b1767907408d871ed87e",
   "static/css/redesign.css": "d1485aae3a4ded144849698bd90ca04d1e310231485c63d5aeca6cb0e7fc1b87",
-  "static/css/ring.css": "9acd6b2706e6e2d050485dfe6ab56db53f395914c2967c9af1272120dcd853b6",
+  "static/css/ring.css": "06a1a94a65022b46c5d199d26b9eb5c3636a20ef449e1a51fadfbc9274f35c9a",
   "static/css/settings.css": "8b17458227310ea14550d45fad8624fba94feb9a312329796fb713e63f4c6738",
   "static/css/studio-content.css": "ed65404f48705654de9516c1688c17fdceee401665509e1c9e0820a0c0337fcf",
   "static/css/style.css": "9a2e987ec537fdd3b3350aaeab4f4d678b9d052f70e5dffcf4a29aac2a792c5d",
@@ -1082,7 +1082,7 @@
   "tabs/studio/view.css": "63a9b5f0cdcd469c37fa0ef88080198d3fceb57e2a582e931ceb07109e451adb"
  },
  "sources": {
-  "demo/fixtures.js": "6b42b4f4ad288e39f69bb7c9ea152774574ad6d69439dd40d526b34d24aa9816",
+  "demo/fixtures.js": "e43a2a6208cb5d8f266340f7bf757fd10b00d52fc7eefd1c3f58f2f81fbebdfe",
   "demo/shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
   "scripts/build_site_demo.py": "62293abd875c0ee4ec573ea4a9c2c6539e6950af04230804345d6d5576183e0e",
   "static/css/agent-ecosystem.css": "b40994f8cd2083cc7dbbce7b6ef625dfaef1013079488f5ca9caafb6d80ebad4",
@@ -1124,7 +1124,7 @@
   "static/css/bots-workbench.css": "d80bd4be07f54a5b80cb071272612e5ffe819a11ea082330ce8260bad3d384c1",
   "static/css/bots.css": "d8c26ca9f829310713c61251dc68cf245c7c63288754d5f0b9bec93d1114bbb9",
   "static/css/browse.css": "ed6f53d03188ace261cacc57a57c2fbf5fce54535ec3aa0dc65815ff37f83d46",
-  "static/css/chat.css": "8e60851c4f0a8c890b8bcb6243e859975e34a40c0458a763eb66509419207bf3",
+  "static/css/chat.css": "38f397b7e1edb4991165c7c4e3fe2f0783a10ee674604712088e5c381d4b64e7",
   "static/css/design-canvas.css": "986b6f0f07935f32b23d56c22893615016d6fc3e9524d83168f3b47036db70d2",
   "static/css/interface.css": "c3f7c554e4182f2957e1c9d730c43b5495d1024e52f19f4d173c66e3d4300622",
   "static/css/kairos-theme.css": "47403c4ddce3e17cee1ade683be1a260d786d2a5ac63bd843d4aa1a03f6b6ac0",
@@ -1154,7 +1154,7 @@
   "static/css/redesign-welcome.css": "7dc36132446983d18d874b0d75b47de1b7cf35b76a52040de046cdead7ec6c3e",
   "static/css/redesign-workspaces.css": "1e9e6974b591d16b2800715ff55af5a6d7abb10d09f3b1767907408d871ed87e",
   "static/css/redesign.css": "d1485aae3a4ded144849698bd90ca04d1e310231485c63d5aeca6cb0e7fc1b87",
-  "static/css/ring.css": "9acd6b2706e6e2d050485dfe6ab56db53f395914c2967c9af1272120dcd853b6",
+  "static/css/ring.css": "06a1a94a65022b46c5d199d26b9eb5c3636a20ef449e1a51fadfbc9274f35c9a",
   "static/css/settings.css": "8b17458227310ea14550d45fad8624fba94feb9a312329796fb713e63f4c6738",
   "static/css/studio-content.css": "ed65404f48705654de9516c1688c17fdceee401665509e1c9e0820a0c0337fcf",
   "static/css/style.css": "151a5688c9c9ce88c5f4b981e195360e8297528ed38f8a58a70c5f5e66d5e321",

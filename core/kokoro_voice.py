@@ -1,7 +1,7 @@
 """Kokoro-82M as an optional neural voice engine that Kairos runs itself (build spec step 7).
 
-It plugs into the existing neural-voice architecture (core/call_voices.py): protocol "kokoro" sits beside "voicestudio"
-and "compatible", and answers the same two questions (which voices exist, give me PCM for this sentence), so the
+It plugs into the existing neural-voice architecture (core/call_voices.py): protocol "kokoro" sits beside "voicebox",
+"elevenlabs" and "compatible", and answers the same two questions (which voices exist, give me PCM for this sentence), so the
 prefetching speaker in static/js/callVoice.js and the bots read-aloud queue use it unchanged.
 
 Gated on two things, each reported honestly: the model + voices files (a user-started download,

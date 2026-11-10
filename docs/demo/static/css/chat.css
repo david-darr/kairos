@@ -272,7 +272,7 @@
    Figures are read-only; n/a is dimmed, never shown as zero. */
 .usage-meter-popover { width: 340px; padding: 0; z-index: 70; overflow-y: auto; color: var(--rd-ink, var(--text));
   background: var(--rd-surface-solid, var(--bg)); border: 1px solid var(--rd-line-strong, var(--border-strong));
-  box-shadow: var(--rd-shadow, 0 8px 24px rgba(0,0,0,.18)); border-radius: var(--rd-radius-card, 12px); }
+  box-shadow: var(--rd-shadow, var(--shadow-elevated)); border-radius: var(--rd-radius-card, 12px); }
 .usage-meter-header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 10px 14px; background: inherit; border-bottom: 1px solid var(--rd-line, var(--border)); }
 .usage-meter-header h2 { margin: 0; font: 600 14px/1.2 var(--rd-font-title, inherit); }
@@ -304,11 +304,11 @@
 .usage-context-label { flex: 1; }
 .usage-context-tokens { color: var(--rd-ink-dim, var(--text-dim)); font-variant-numeric: tabular-nums; }
 /* One colour per part, the same in the bar and the list. */
-:is(.usage-context-segment, .usage-context-dot)[data-index='0'] { background: var(--rd-ink-faint, #8a8a8a); }
-:is(.usage-context-segment, .usage-context-dot)[data-index='1'] { background: #d98a3d; }
-:is(.usage-context-segment, .usage-context-dot)[data-index='2'] { background: #3fa7a0; }
-:is(.usage-context-segment, .usage-context-dot)[data-index='3'] { background: #6aa84f; }
-:is(.usage-context-segment, .usage-context-dot)[data-index='4'] { background: #4a7fd4; }
+:is(.usage-context-segment, .usage-context-dot)[data-index='0'] { background: var(--rd-ink-faint, var(--text-faint)); }
+:is(.usage-context-segment, .usage-context-dot)[data-index='1'] { background: var(--chart-5); }
+:is(.usage-context-segment, .usage-context-dot)[data-index='2'] { background: var(--chart-8); }
+:is(.usage-context-segment, .usage-context-dot)[data-index='3'] { background: var(--chart-4); }
+:is(.usage-context-segment, .usage-context-dot)[data-index='4'] { background: var(--chart-3); }
 :is(.usage-context-segment, .usage-context-dot)[data-part='whole'] { background: var(--rd-ink-dim, var(--text-dim)); }
 .usage-meter-empty, .usage-meter-note, .usage-meter-source { margin: 0; font-size: 12px; line-height: 1.4; color: var(--rd-ink-dim, var(--text-dim)); }
 .usage-meter-source { color: var(--rd-ink-faint, var(--text-faint)); font-size: 11px; }

@@ -1395,6 +1395,8 @@
     // Realtime speech-to-speech (Track A): no realtime connection in the demo, so calls and bots offer Local only.
     if (route === "/api/agent-calls/realtime-choices") return [];
     if (route === "/api/agent-calls/realtime-settings") return { endpoint_id: null, voice: null, bots: {} };
+    // Read-aloud asks which engine Kairos Voice speaks with (botsSpeak.js); the demo has no Kokoro download.
+    if (route === "/api/agent-calls/voices") return { url: "", protocol: "kokoro", models: [], voices: [], error: "Kokoro is not downloaded. The device voice is used instead." };
     if (route === "/api/bot-voice/voices") return { voices: [], models: [] };
     if (route === "/api/agents/inbox") return state.empty || state.homeClear ? { items: [], reviews: [], count: 0 } :
       { items: agentInbox, reviews: state.agentReview ? agentDetail('a1').cards : [], count: agentInbox.length + (state.agentReview ? 1 : 0) };
