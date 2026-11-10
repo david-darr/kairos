@@ -13,6 +13,8 @@ import { createVoiceTrace } from './voiceTrace.js';
 import { takePendingRing } from './ringHost.js';
 import { createFillerGate, fetchFillerClip } from './voiceFiller.js';
 import { isBackchannel, endsInQuestion } from './backchannel.js';
+import { callIcon } from './callIcons.js';
+import { outputSupported, listOutputs, chooseOutput, chosenOutput, routeContext } from './callOutput.js';
 import { pickConversation, pickSpeechModel, pickCallMode, pickVoice, consentKey, conversationLabel, isCliKind } from './callDefaults.js';
 
 // In a call the bot's Kip replaces the orb (Kairos Mascot build spec,
@@ -20,6 +22,7 @@ import { pickConversation, pickSpeechModel, pickCallMode, pickVoice, consentKey,
 // by inheritance: eyes widen while listening, squash and the point pulses
 // while speaking, and a halo swells with the level. The orb core stays as
 // the fallback when Show Kip is off.
+const UNREAD_POLL_MS = 6000;
 const CALL_MASCOT = { setup: 'idle', preparing: 'thinking', listening: 'listening', transcribing: 'thinking', thinking: 'thinking', speaking: 'speaking', paused: 'sleeping' };
 let ongoingCall = null;
 
@@ -54,22 +57,54 @@ export function agentCall(agent, controller) {
   let readingTyped = false;
   const emitState = () => {
     document.documentElement.dataset.botsCallActive = String(active);
+    dialog.toggleAttribute('data-live', active); paintKeys();
     document.dispatchEvent(new CustomEvent('kairos:bots-call-state', { detail: { agentId: agent.id, sessionId: controller.sessionId(), callId: transport.record?.id || null, active, minimized, muted: microphoneMuted, startedAt } }));
     callBar?.refresh();
   };
-  const restore = () => { minimized = false; if (!dialog.open) dialog.showModal(); emitState(); };
+  const restore = () => { minimized = false; unread = false; clearInterval(unreadTimer); unreadTimer = null; if (!dialog.open) { dialog.showModal(); dialog.focus({ preventScroll: true }); } emitState(); };
+  // Minimized (2026-11-10, David: "minimize the call so you can still utilize other kairos features"): the call keeps
+  // running in its pill (botsCallBar.js) on every screen, and the pill shows a dot when the bot posts in its chat.
   const minimize = async () => {
     if (!active) return;
-    minimized = true; cancelHold(); dialog.close();
+    minimized = true; cancelHold(); openSheet(false); dialog.close();
     try {
       const { mountCallBar } = await import('./botsCallBar.js');
       if (!active || disposed) return;
-      callBar ||= mountCallBar({ agent, members: room ? room.memberIds().map(id => room.memberName(id)) : null, snapshot: () => ({ active, minimized, muted: microphoneMuted, startedAt }),
-        mute: () => setMicrophoneMuted(!microphoneMuted), hangup, restore,
-        onSettings: () => { document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'settings', section: 'bot-voice' } })); minimize(); } });
+      callBar ||= mountCallBar({ agent, members: room ? room.memberIds().map(id => room.memberName(id)) : null,
+        snapshot: () => ({ active, minimized, muted: microphoneMuted, startedAt, state: CALL_MASCOT[state] || 'idle', unread, kind: kindText() }),
+        mute: () => setMicrophoneMuted(!microphoneMuted), hangup, restore, openChat: () => { unread = false; callBar?.refresh(); goChat(); } });
+      unreadBase = undefined; checkUnread();
+      clearInterval(unreadTimer); unreadTimer = setInterval(checkUnread, UNREAD_POLL_MS);
       emitState();
-    } catch { minimized = false; if (!dialog.open) dialog.showModal(); error.textContent = 'Call bar could not load. The call is still open.'; }
+    } catch { minimized = false; if (!dialog.open) { dialog.showModal(); dialog.focus({ preventScroll: true }); } error.textContent = 'Call bar could not load. The call is still open.'; }
   };
+  // The bot's (or the room's) conversation: on screen now, and where the pill's dot and Back to chat lead.
+  const chatVisible = () => !document.hidden && !!document.querySelector(room
+    ? `.bots-room[data-room-id="${CSS.escape(String(controller.roomId()))}"] .bots-composer`
+    : `[data-agent-id="${CSS.escape(String(agent.id))}"] .bots-composer`);
+  const goChat = () => document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: room
+    ? { tab: 'botsRoom', roomId: controller.roomId() } : { tab: 'botsShell', agentId: agent.id, sessionId: controller.sessionId() } }));
+  let unread = false, unreadBase, unreadTimer = null;
+  async function latestPost() {
+    const url = room ? `/api/bot-rooms/${encodeURIComponent(controller.roomId())}/messages?limit=1` : `/api/bot-chat/${encodeURIComponent(controller.sessionId())}/messages?limit=1`;
+    const last = (await api(url, { toast: false }))?.messages?.at?.(-1);
+    return last ? { id: String(last.id ?? last.seq ?? ''), bot: ['assistant', 'bot'].includes(last.role) } : { id: '', bot: false };
+  }
+  // One light read every few seconds while minimized. With the conversation on screen, what is there counts as read;
+  // otherwise a newer post by the bot lights the pill's dot. A reply the open chat announces (kairos:bots-typed-reply)
+  // marks it at once.
+  async function checkUnread() {
+    if (!active || !minimized || !controller.sessionId?.()) return;
+    try {
+      const last = await latestPost();
+      if (!active || !minimized) return;
+      if (chatVisible()) { unreadBase = last.id; if (unread) { unread = false; callBar?.refresh(); } return; }
+      if (unreadBase === undefined || !last.bot) unreadBase = last.id;
+      else if (last.id !== unreadBase) { unread = true; callBar?.refresh(); }
+    } catch { /* the next read tries again */ }
+  }
+  const replied = event => { if (active && minimized && event.detail?.agentId === agent.id && !chatVisible()) { unread = true; callBar?.refresh(); } };
+  document.addEventListener('kairos:bots-typed-reply', replied);
   let microphoneMuted = false, assistantMuted = false, state = 'setup';
   let pending = null, startedAt = 0, timer = null, downloadTimer = null;
   const turnEndpoint = createTurnEndpoint({ post: postTurn, encode: pcm => encodeWav(pcm, 16000) });
@@ -121,9 +156,9 @@ export function agentCall(agent, controller) {
   // No realtime connection yet: offer the free Gemini key setup right here (freeVoiceSetup.js).
   const freeVoice=el('button',{type:'button',class:'btn agent-call-free-voice',text:'Set up free Gemini voice',hidden:true});
   freeVoice.onclick=async()=>{const {openFreeVoiceSetup}=await import('./freeVoiceSetup.js');openFreeVoiceSetup({onConnected:async()=>{try{const found=await api('/api/agent-calls/realtime-choices',{toast:false});liveChoicesByMode.realtime=Array.isArray(found)?found:[];}catch{}fillLiveChoices();syncModel();}});};
-  const liveCallbacks=[next=>{if(!active)return;if(next==='ended'){hangup();return;}setState(next,next==='speaking'?`${agent.name} is speaking. You can interrupt naturally.`:'Listening...');},(role,delta)=>{heard.textContent=(heard.dataset.speaker===role?heard.textContent:`${role}: `)+delta;heard.dataset.speaker=role;},level=>orb.style.setProperty('--word',String(level)),message=>{error.textContent=message;}];
+  const liveCallbacks=[next=>{if(!active)return;if(next==='ended'){hangup();return;}setState(next,next==='speaking'?`${agent.name} is speaking. You can interrupt naturally.`:'Listening...');},(role,delta)=>{heard.textContent=(heard.dataset.speaker===role?heard.textContent:`${role}: `)+delta;heard.dataset.speaker=role;},level=>voiceLevel('--word',String(level)),message=>{error.textContent=message;}];
   let realtimeInfo=null;
-  const realtimeLive=realtimeVoice(...liveCallbacks,info=>{if(info.work){announceRealtimeWork(info.work);return;}realtimeInfo=info;});
+  const realtimeLive=realtimeVoice(...liveCallbacks,info=>{if(info.work){announceRealtimeWork(info.work);return;}realtimeInfo=info;},{makeContext:options=>{const context=new AudioContext(options);if(!options?.sampleRate)routeContext(context);return context;}});
   const live={start(...args){realtimeInfo=null;return realtimeLive.start(...args);},muteMicrophone:value=>realtimeLive.muteMicrophone(value),muteAssistant:value=>realtimeLive.muteAssistant(value),stop(){realtimeLive.stop();}};
   const isCloud=()=>callMode.value==='realtime';
   let liveChoicesByMode={realtime:[]};
@@ -139,6 +174,8 @@ export function agentCall(agent, controller) {
   const voiceKey = `kairos:agent-voice:${agent.id}`;
   const dialog = el('dialog', { class: 'agent-call', 'aria-label': room ? `Group call in ${agent.name}` : `Voice call with ${agent.name}` });
   dialog.dataset.state = 'setup';
+  // The dialog itself takes focus when it opens, so no key looks selected before the person touches one.
+  dialog.setAttribute('autofocus', ''); dialog.tabIndex = -1;
   const clock = el('time', { class: 'agent-call-clock', text: '00:00' });
   const status = el('div', { class: 'agent-call-status', role: 'status', text: 'Ready when you are' });
   const callMascot = createMascot({ agent, state: 'idle' });
@@ -194,16 +231,30 @@ export function agentCall(agent, controller) {
   conversationModel.onchange = saveConversation;
   function saveConversation(){try{localStorage.setItem(conversationKey,JSON.stringify({endpoint:conversation.value,model:conversationModel.value}));}catch{}syncModel();}
   const action = (title, click, cls = '') => el('button', { type: 'button', class: `btn quiet agent-call-action ${cls}`, text: title, onclick: click });
-  const assistant = action('Mute assistant', () => {
-    assistantMuted = !assistantMuted; assistant.setAttribute('aria-pressed', String(assistantMuted));
-    assistant.textContent = assistantMuted ? 'Unmute assistant' : 'Mute assistant';
+  // The three round keys (call screen redesign, 2026-11-10): Speaker (the bot's voice on or off), Mute (your
+  // microphone) and Hang up. Everything else lives in the More sheet.
+  const key = (name, label, click, cls = '') => {
+    const node = el('button', { type: 'button', class: `agent-call-key ${cls}`, 'data-call': name, 'aria-label': label, onclick: click });
+    node.append(el('span', { class: 'agent-call-key-disc' }), el('span', { class: 'agent-call-key-label', text: label }));
+    return node;
+  };
+  const keyFace = (node, icon, caption) => { node.firstChild.replaceChildren(callIcon(icon, 28)); node.lastChild.textContent = caption; };
+  const assistant = key('speaker', 'Speaker', () => {
+    assistantMuted = !assistantMuted; paintKeys();
     if(isCloud())live.muteAssistant(assistantMuted);
     if (assistantMuted && state === 'speaking') { stopPlayback(); listen(); }
   });
-  const microphone = action('Mute microphone', () => setMicrophoneMuted(!microphoneMuted));
-  assistant.setAttribute('aria-pressed', 'false'); microphone.setAttribute('aria-pressed', 'false');
-  const controls = el('div', { class: 'agent-call-controls', hidden: true }, [assistant, microphone,
-    action('End call', () => hangup(), 'is-end'), action('Interrupt', interrupt)]);
+  const microphone = key('mute', 'Mute', () => setMicrophoneMuted(!microphoneMuted));
+  const hangupKey = key('hangup', 'End call', () => hangup(), 'is-end');
+  function paintKeys() {
+    assistant.setAttribute('aria-pressed', String(!assistantMuted)); keyFace(assistant, assistantMuted ? 'speakerOff' : 'speaker', assistantMuted ? 'Speaker off' : 'Speaker');
+    microphone.setAttribute('aria-pressed', String(microphoneMuted)); keyFace(microphone, microphoneMuted ? 'micOff' : 'mic', microphoneMuted ? 'Muted' : 'Mute');
+    keyFace(hangupKey, 'hangup', active ? 'End call' : 'Close');
+    hangupKey.setAttribute('aria-label', active ? 'End call' : 'Close');
+    assistant.disabled = microphone.disabled = !active;
+  }
+  const controls = el('div', { class: 'agent-call-controls' }, [assistant, microphone, hangupKey]);
+  const interruptButton = action('Interrupt', interrupt);
   function interrupt() {
       if(isCloud()){toast('Speak to interrupt the live conversation. Delegated work keeps running.');return;}
       transport.interrupt(false, state === 'speaking' || voiceBusy ? speaker.heard() : null); voiceBusy=false; partials.cancel();
@@ -211,7 +262,6 @@ export function agentCall(agent, controller) {
       cancelHold(); recorder?.setEnabled(false); stopPlayback(); listen(); scheduleFlush();
   }
   const hold = action('Hold to talk', () => {}, 'agent-call-hold');
-  controls.append(hold);
   hold.hidden = true; hold.setAttribute('aria-pressed', 'false');
   const holdHint = el('p', { class: 'agent-call-hold-hint', text: 'Hold the button or F9. Release to send. You can pause within a sentence.', hidden: true });
   function cancelHold() { holding = false; holdPointer = null; hold.setAttribute('aria-pressed', 'false'); hold.textContent = 'Hold to talk'; recorder?.cancelHold(); }
@@ -232,35 +282,75 @@ export function agentCall(agent, controller) {
   dialog.addEventListener('keydown', keyDown); dialog.addEventListener('keyup', keyUp); window.addEventListener('blur', loseFocus);
   document.addEventListener('visibilitychange', visibilityChanged);
   function visibilityChanged() { if (document.hidden) loseFocus(); }
-  const chat = action('Chat', () => { if (!active) { hangup(); return; } minimize(); });
-  const close = action('Close', () => hangup());
+  // Back to chat (More): the call shrinks to its pill and the bot's conversation opens.
+  const chat = action('Back to chat', () => { if (!active) { hangup(); goChat(); return; } minimize().then(() => { if (!chatVisible()) goChat(); }); });
+  const minimizer = el('button', { type: 'button', class: 'agent-call-minimize', 'aria-label': 'Minimize call', title: 'Minimize call', onclick: () => { if (!active) { hangup(); return; } minimize(); } }, [callIcon('minimize', 26)]);
   // One plain line: a fallback the call made for you (notice), or the one thing that stops it, with its fix (blocker).
   const notice = el('p', { class: 'agent-call-notice', role: 'status', hidden: true });
   const blockerText = el('p', { role: 'alert' });
   const blockerAction = el('button', { type: 'button', class: 'btn primary agent-call-blocker-action' });
   const blocker = el('div', { class: 'agent-call-blocker', hidden: true }, [blockerText, blockerAction]);
-  const settingsToggle = el('button', { type: 'button', class: 'btn quiet agent-call-settings-toggle', text: 'Call settings', 'aria-expanded': 'false', onclick: () => {
+  const settingsToggle = el('button', { type: 'button', class: 'agent-call-action agent-call-settings-toggle', text: 'Call settings', 'aria-expanded': 'false', onclick: () => {
     // In a live call the settings in use cannot change underneath it: this ends the call and opens them here.
     if (active) { hangup({ keepOpen: true }); say1('Call ended. Change what you need, then press Start call.'); showSettings(true); return; }
     showSettings(setup.hidden);
   } });
-  const more = el('div', { class: 'agent-call-more' }, [settingsToggle]);
-  dialog.append(el('header', { class: 'agent-call-header' }, [clock,
-    el('div', { class: 'agent-call-tabs' }, [chat, el('span', { text: 'Voice', 'aria-current': 'page' })]), close]),
-    el('div', { class: 'agent-call-scene' }, [orb, el('h1', { text: agent.name }), status]), notice, blocker, engineStatus, heard, timing, setup, error, more, controls, holdHint, workList, summaryStatus,
-    el('p', { class: 'agent-call-privacy', text: `Recognition stays on this device. Dialogue goes to your selected conversation model. Only a summary is saved in ${savedIn} after the call.` }));
+  // -- The call screen (2026-11-10, David: "more like" a phone's audio call, with the bot's animated mascot) -------------
+  // One centred column on a dark ground: the call kind, the mascot in a round avatar, the name, the timer, level bars
+  // for whoever is speaking, and three round keys. Minimize (top left) shrinks the call to its pill (botsCallBar.js);
+  // every other action lives in the More sheet (top right, or a swipe up), never on the main view.
+  const kind = el('p', { class: 'agent-call-kind' });
+  const sheetId = `agent-call-sheet-${String(agent.id).replace(/[^a-z0-9_-]/gi, '')}`;
+  const moreToggle = el('button', { type: 'button', class: 'agent-call-more-toggle', 'aria-label': 'More call options', title: 'More', 'aria-expanded': 'false', 'aria-controls': sheetId, onclick: () => openSheet(sheet.hidden) }, [callIcon('more', 26)]);
+  const meter = el('div', { class: 'agent-call-meter', 'aria-hidden': 'true' }, Array.from({ length: 5 }, () => el('i')));
   const membersLine = el('p', { class: 'agent-call-members' });
   const drawMembers = () => { membersLine.textContent = `With ${room.memberIds().map(id => room.memberName(id)).join(', ')}. Say a name to choose who answers.`; };
-  if (room) { drawMembers(); dialog.querySelector('.agent-call-scene').append(membersLine); }
-  document.body.append(dialog);
   const ringNote = el('p', { class: 'agent-call-ring', role: 'status', hidden: true });
-  dialog.querySelector('.agent-call-scene').append(ringNote);
+  const outputs = el('select', { 'aria-label': 'Audio output' });
+  const outputBox = el('label', { class: 'agent-call-output', hidden: true }, [el('span', { text: 'Audio output' }), outputs]);
+  outputs.onchange = () => chooseOutput(outputs.value);
+  async function drawOutputs() {
+    if (!outputSupported()) { outputBox.hidden = true; return; }
+    const found = await listOutputs();
+    outputBox.hidden = found.length < 2;
+    outputs.replaceChildren(el('option', { value: '', text: 'System default' }), ...found.map(d => el('option', { value: d.id, text: d.label })));
+    outputs.value = found.some(d => d.id === chosenOutput()) ? chosenOutput() : '';
+  }
+  const transcript = el('section', { class: 'agent-call-transcript', 'aria-label': 'Live transcript' }, [el('h2', { text: 'Live transcript' }), heard, timing, engineStatus]);
+  const privacy = el('p', { class: 'agent-call-privacy', text: `Recognition stays on this device. Dialogue goes to your selected conversation model. Only a summary is saved in ${savedIn} after the call.` });
+  const sheet = el('section', { class: 'agent-call-sheet', id: sheetId, hidden: true, 'aria-label': 'More call options' }, [
+    el('div', { class: 'agent-call-sheet-grab', 'aria-hidden': 'true' }),
+    el('div', { class: 'agent-call-sheet-actions' }, [chat, interruptButton, hold, settingsToggle]), holdHint, outputBox,
+    transcript, membersLine, workList, summaryStatus, setup, privacy]);
+  for (const [name, node] of [['chat', chat], ['interrupt', interruptButton], ['hold', hold], ['settings', settingsToggle]]) node.dataset.call = name;
+  const scene = el('div', { class: 'agent-call-scene' }, [el('div', { class: 'agent-call-avatar' }, [orb]), el('h1', { text: agent.name }), clock, meter, status, ringNote, notice, blocker, error]);
+  dialog.append(el('header', { class: 'agent-call-top' }, [minimizer, kind, moreToggle]), scene, sheet, controls);
+  if (room) drawMembers();
+  document.body.append(dialog);
+  function openSheet(open) {
+    sheet.hidden = !open; moreToggle.setAttribute('aria-expanded', String(open));
+    if (open) { dialog.dataset.sheet = 'open'; drawOutputs(); } else delete dialog.dataset.sheet;
+  }
+  // Swipe up on the scene opens More; swipe down on the sheet's grab closes it. A press on a button is never a swipe.
+  let swipe = null;
+  dialog.addEventListener('pointerdown', event => { if (event.target.closest('select,input,textarea') || event.button !== 0) return; if (event.target.closest('.agent-call-scene,.agent-call-sheet-grab') && !event.target.closest('button')) swipe = { y: event.clientY, id: event.pointerId }; });
+  dialog.addEventListener('pointerup', event => {
+    if (!swipe || swipe.id !== event.pointerId) return;
+    const dy = event.clientY - swipe.y; swipe = null;
+    if (dy < -48 && sheet.hidden) openSheet(true); else if (dy > 48 && !sheet.hidden) openSheet(false);
+  });
+  dialog.addEventListener('pointercancel', () => { swipe = null; });
+  // Levels: the mascot reads --level (you) and --word (the bot) by inheritance, the bars and the pill read the same.
+  function voiceLevel(name, value) { orb.style.setProperty(name, value); scene.style.setProperty(name, value); callBar?.level(name, value); }
+  const kindText = () => room ? 'Group call' : isCloud() ? (realtimeChoice()?.provider === 'openai_live' ? 'GPT-Live call' : 'Realtime voice') : 'Kairos call';
+  paintKeys(); kind.textContent = kindText();
   const button = el('button', { type: 'button', class: 'agent-call-open btn quiet', 'aria-label': `Call ${agent.name}`, title: `Call ${agent.name}`, text: 'Call', onclick: async () => {
     if (disposed) return;
     if (room) drawMembers();
-    if (!dialog.open) dialog.showModal();
-    if (active || starting || preparingVoice) return;
-    error.textContent = ''; showSettings(false); clearLines();
+    if (active) { restore(); return; }
+    if (!dialog.open) { dialog.showModal(); dialog.focus({ preventScroll: true }); }
+    if (starting || preparingVoice) return;
+    error.textContent = ''; showSettings(false); openSheet(false); clearLines();
     setState('preparing', `Calling ${agent.name}...`);
     if (await loadSetup()) autoStart();
   } });
@@ -275,7 +365,7 @@ export function agentCall(agent, controller) {
   function showSettings(open) {
     setup.hidden = !open; settingsToggle.setAttribute('aria-expanded', String(open));
     settingsToggle.textContent = open ? 'Hide call settings' : 'Call settings';
-    if (open) { dialog.dataset.settings = 'open'; autoRun++; blocker.hidden = true; if (!starting && !active) setState('setup', 'Ready when you are'); syncModel(); }
+    if (open) { openSheet(true); dialog.dataset.settings = 'open'; autoRun++; blocker.hidden = true; if (!starting && !active) setState('setup', 'Ready when you are'); syncModel(); }
     else delete dialog.dataset.settings;
   }
   const goSettings = section => { hangup(); document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'settings', section } })); };
@@ -342,13 +432,14 @@ export function agentCall(agent, controller) {
   document.addEventListener('kairos:ring-answered', adoptRing);
   setTimeout(adoptRing, 0);
   // Phone (Kairos Mobile v2): the call button is a round phone icon; the word stays for a desktop.
-  const callIcon = el('span', { class: 'agent-call-open-icon', 'aria-hidden': 'true' });
-  callIcon.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z"/></svg>';
-  button.replaceChildren(callIcon, el('span', { class: 'agent-call-open-label', text: 'Call' }));
+  const openIcon = el('span', { class: 'agent-call-open-icon', 'aria-hidden': 'true' });
+  openIcon.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z"/></svg>';
+  button.replaceChildren(openIcon, el('span', { class: 'agent-call-open-label', text: 'Call' }));
   const speakerOptions = {
+    onContext: routeContext,   // the Kairos Voice plays on the chosen audio output (callOutput.js)
     onSentenceReady: () => { fillerGate.sentenceReady(); voiceTrace.mark(currentTrace, 'first_sentence'); },
     onSentenceStart: index => { fillerOn = false; voiceTrace.sentenceStart(currentTrace); if (index > 0) drawTiming(); },
-    onLevel:level=>{if(active&&state==='speaking')orb.style.setProperty('--word',String(level));},
+    onLevel:level=>{if(active&&state==='speaking')voiceLevel('--word',String(level));},
     getVoice: () => {
       const chosen = voices.find(item => item.name === voice.value) || resolveVoice(voices);
       if (!room || !speaking || !voices.length) return chosen;
@@ -361,8 +452,8 @@ export function agentCall(agent, controller) {
       // OS speech exposes word timing, not its PCM amplitude. This pulse
       // follows real word events; microphone energy is measured separately.
       if (!active || state !== 'speaking') return;
-      orb.style.setProperty('--word', '1'); clearTimeout(wordTimer);
-      wordTimer = setTimeout(() => orb.style.setProperty('--word', '0'), 180);
+      voiceLevel('--word', '1'); clearTimeout(wordTimer);
+      wordTimer = setTimeout(() => voiceLevel('--word', '0'), 180);
     },
     onError: () => { if (active) { error.textContent = 'Voice playback failed. Check the selected device voice or mute the assistant to continue.'; if (readingTyped) { stopPlayback(); listen(); } } },
   };
@@ -379,12 +470,13 @@ export function agentCall(agent, controller) {
   setup.insertBefore(preview,modelBox);
   voice.onchange = () => { try { localStorage.setItem(voiceKey, voice.value); } catch {} };
   function setState(next, text) {
-    state = next; dialog.dataset.state = next; status.textContent = text;
+    state = next; dialog.dataset.state = next; status.textContent = text; kind.textContent = kindText();
+    meter.dataset.who = next === 'speaking' ? 'bot' : next === 'listening' && !microphoneMuted ? 'you' : '';
     if (['speaking', 'thinking', 'transcribing'].includes(next)) lastActivity = Date.now();
     emitState();
     callMascot.setAttribute('state', CALL_MASCOT[next] || 'idle');
-    if (next !== 'listening') orb.style.setProperty('--level', '0');
-    if (next !== 'speaking') orb.style.setProperty('--word', '0');
+    if (next !== 'listening') voiceLevel('--level', '0');
+    if (next !== 'speaking') voiceLevel('--word', '0');
     applyMicrophone(next);
   }
   // The microphone is on in every state but speaking/paused/preparing/setup. While Kairos SPEAKS (local, automatic input) it
@@ -503,7 +595,7 @@ export function agentCall(agent, controller) {
     } catch (problem) { if (!disposed && token === epoch) { error.textContent = problem.message; download.disabled = false; model.disabled = false; } }
   }
   function stopPlayback() {
-    clearTimeout(wordTimer); wordTimer = null; orb.style.setProperty('--word', '0'); fillerGate.cancel(); fillerOn = false;
+    clearTimeout(wordTimer); wordTimer = null; voiceLevel('--word', '0'); fillerGate.cancel(); fillerOn = false;
     // Change state first so the speaker's cancel callback cannot resume capture.
     if (state === 'speaking') state = 'paused';
     speaker.cancel();
@@ -512,12 +604,12 @@ export function agentCall(agent, controller) {
   async function setMicrophoneMuted(value) {
     microphoneMuted = value;
     emitState();
-    if(isCloud()){live.muteMicrophone(value);microphone.setAttribute('aria-pressed',String(value));microphone.textContent=value?'Unmute microphone':'Mute microphone';return;}
-    microphone.setAttribute('aria-pressed', String(value)); microphone.textContent = value ? 'Unmute microphone' : 'Mute microphone';
-    if (value) { cancelHold(); partials.cancel(); recorder?.close(); recorder = null; speechActive = false; orb.style.setProperty('--level', '0'); if (state === 'listening') status.textContent = 'Microphone muted'; scheduleFlush(); }
+    if(isCloud()){live.muteMicrophone(value);paintKeys();return;}
+    paintKeys();
+    if (value) { cancelHold(); partials.cancel(); recorder?.close(); recorder = null; speechActive = false; voiceLevel('--level', '0'); if (state === 'listening') status.textContent = 'Microphone muted'; scheduleFlush(); }
     else if (active) {
       try { await openMicrophone(); if (state === 'listening') status.textContent = 'Listening...'; }
-      catch (problem) { microphoneMuted = true; microphone.setAttribute('aria-pressed', 'true'); microphone.textContent = 'Unmute microphone'; error.textContent = problem.message; }
+      catch (problem) { microphoneMuted = true; paintKeys(); error.textContent = problem.message; }
     }
   }
   async function openMicrophone() {
@@ -525,7 +617,7 @@ export function agentCall(agent, controller) {
     const token = epoch;
     const next = createCallRecorder({
       mode: inputMode.value,
-      onLevel: level => { if (active && !microphoneMuted && state !== 'speaking') orb.style.setProperty('--level', String(level)); },
+      onLevel: level => { if (active && !microphoneMuted && state !== 'speaking') voiceLevel('--level', String(level)); },
       onChunk: pcm => { if (active && !microphoneMuted && epoch === token) partials.push(pcm); },
       // Smart Turn: at a short pause, ask whether the sentence is finished. No answer (not set up, slow) = today's silence wait.
       onPause: (id, pcm) => { turnEndpoint.ask(pcm).then(verdict => { if (verdict && active && epoch === token && recorder === next) next.verdict(id, verdict.complete); else if (turnEndpoint.off && recorder === next) next.setSmartTurn(false); }); },
@@ -550,7 +642,7 @@ export function agentCall(agent, controller) {
         }
         scheduleFlush();
       },
-      onError: problem => { cancelHold(); speechActive = false; microphoneMuted = true; microphone.setAttribute('aria-pressed','true'); microphone.textContent = 'Unmute microphone'; recorder = null; error.textContent = problem.message; if (state === 'listening') status.textContent = 'Microphone stopped'; scheduleFlush(); },
+      onError: problem => { cancelHold(); speechActive = false; microphoneMuted = true; paintKeys(); recorder = null; error.textContent = problem.message; if (state === 'listening') status.textContent = 'Microphone stopped'; scheduleFlush(); },
     });
     recorder = next;
     try { await next.start(); } catch (problem) { next.close(); if (recorder === next) recorder = null; throw problem; }
@@ -590,7 +682,7 @@ export function agentCall(agent, controller) {
     dialog.dataset.callTimings = JSON.stringify({ ...recognitionTiming, ...(response || {}), trace: response?.trace ? voiceTrace.offsets(response.trace) : undefined });
   }
   function showEngine(info) {
-    engineStatus.textContent = `${model.value === 'small.en' ? 'Small' : model.value} / ${info.engine === 'cuda' ? 'GPU accelerated' : 'CPU recognition'}${info.fallback ? ` — ${info.fallback}` : ''}`;
+    engineStatus.textContent = `${model.value === 'small.en' ? 'Small' : model.value} / ${info.engine === 'cuda' ? 'GPU accelerated' : 'CPU recognition'}${info.fallback ? `. ${info.fallback}` : ''}`;
   }
   // Called from every event that can make a flush possible (an utterance ending, a transcript arriving, speech or a
   // reply finishing, finished work). It runs at the end of the current event instead of on a 180 ms poll; flushText
@@ -697,6 +789,7 @@ export function agentCall(agent, controller) {
   // Start call in Call settings: exactly what the form shows (it asks for a download or a voice instead of choosing one).
   setup.addEventListener('submit', async event => {
     event.preventDefault(); if (active || starting) return;
+    if (notice.textContent.startsWith('Call ended.')) say1('');
     if (callMode.value==='local' && (!speech?.models?.some(item => item.name === model.value && item.downloaded) || !neural.ready() || (neural.selection().provider==='device'&&!voices.length))) { start.textContent = 'Start call'; await loadSetup(); return; }
     await beginCall();
   });
@@ -730,11 +823,11 @@ export function agentCall(agent, controller) {
       if (ready.engine !== 'cuda') partials.disable('cpu'); dialog.dataset.partials = partials.state.disabled || 'on';
       active = true; microphoneMuted = false; assistantMuted = false;
       dialog.dataset.inputMode = inputMode.value;
-      microphone.setAttribute('aria-pressed', 'false'); microphone.textContent = 'Mute microphone'; assistant.setAttribute('aria-pressed', 'false'); assistant.textContent = 'Mute assistant';
+      paintKeys();
       await openMicrophone();
       if (!active || epoch !== token) return;
       }
-      showSettings(false); settingsToggle.textContent = 'End call and change settings'; controls.hidden = false; hold.hidden = holdHint.hidden = isCloud()||inputMode.value !== 'hold'; button.classList.add('is-call-active'); startedAt = lastActivity = Date.now(); ongoingCall = { isActive: () => active, restore }; listen();
+      showSettings(false); openSheet(false); settingsToggle.textContent = 'End call and change settings'; hold.hidden = holdHint.hidden = isCloud()||inputMode.value !== 'hold'; button.classList.add('is-call-active'); startedAt = lastActivity = Date.now(); ongoingCall = { isActive: () => active, restore }; listen();
       if (ringOpening && callMode.value === 'local') { ringOpening = null; workUpdates.push('ring-opening'); scheduleFlush(); }
       timer = setInterval(() => { const seconds = Math.floor((Date.now() - startedAt) / 1000); clock.textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`; drawRealtimeCost(seconds); if (Date.now() - lastActivity > livePrefs.idle_minutes * 60000 && !voiceBusy && !speechActive) hangup(); }, 1000);
     } catch (problem) {
@@ -754,14 +847,14 @@ export function agentCall(agent, controller) {
     active = false; epoch++; revision++; audioQueue = []; texts = []; workUpdates=[];deferredReply = null; flushQueued = false; clearInterval(timer); timer = null; clearTimeout(downloadTimer); downloadTimer = null;
     cancelHold(); partials.cancel(); recorder?.close(); recorder = null; speechActive = false; pending?.abort(); pending = null; stopPlayback();
     live.stop();transport.end();voiceBusy=false;paid.checked=false;
-    showSettings(false); clearLines(); controls.hidden = true; clock.textContent = '00:00'; model.disabled = false;
+    showSettings(false); openSheet(false); clearLines(); clock.textContent = '00:00'; model.disabled = false; unread = false; unreadBase = undefined; clearInterval(unreadTimer); unreadTimer = null;
     response = null; recognitionTiming = {}; timing.textContent = ''; heard.textContent = '';
     engineStatus.textContent = ''; hold.hidden = holdHint.hidden = true;
     setState('setup', 'Ready when you are'); if (!keepOpen) dialog.close(); button.classList.remove('is-call-active');
     minimized = false; ongoingCall = null; speaking = null; delete dialog.dataset.speaker; callBar?.destroy(); callBar = null; emitState();
     if (detached) cleanup();
   }
-  dialog.addEventListener('cancel', event => { event.preventDefault(); hangup(); });
+  dialog.addEventListener('cancel', event => { event.preventDefault(); if (!sheet.hidden) { openSheet(false); moreToggle.focus(); return; } hangup(); });
   async function loadPendingSummaries() {
     const parent=controller.sessionId();if(!parent)return;
     const records=await api(`/api/agent-calls/pending/${parent}`);
@@ -788,17 +881,11 @@ export function agentCall(agent, controller) {
   document.addEventListener('kairos:bots-live-settings', settingsChanged);
   document.addEventListener('kairos:bots-typed-reply', typedReply);
   document.addEventListener('kairos:bots-saved', botSaved);
-  function cleanup() { if (disposed) return; disposed = true; transport.dispose(); localSpeaker.dispose(); deviceSpeaker.cancel(); callBar?.destroy(); document.removeEventListener('kairos:bots-live-settings', settingsChanged); document.removeEventListener('kairos:bots-typed-reply', typedReply); document.removeEventListener('kairos:bots-saved', botSaved); document.removeEventListener('kairos:ring-answered', adoptRing); window.removeEventListener('blur', loseFocus); document.removeEventListener('visibilitychange', visibilityChanged); dialog.remove(); button.remove(); }
-  // Moving between Bots conversations keeps a call going in its bar; leaving Bots mode ends it, so a live
-  // microphone never runs behind a page that has no call bar.
-  let modeWatch = null;
-  const inBots = () => document.documentElement.dataset.appMode === 'bots';
-  const endDetached = () => { modeWatch?.disconnect(); modeWatch = null; if (active) hangup(); cleanup(); };
+  function cleanup() { if (disposed) return; disposed = true; transport.dispose(); localSpeaker.dispose(); deviceSpeaker.cancel(); callBar?.destroy(); document.removeEventListener('kairos:bots-live-settings', settingsChanged); document.removeEventListener('kairos:bots-typed-reply', typedReply); document.removeEventListener('kairos:bots-saved', botSaved); document.removeEventListener('kairos:ring-answered', adoptRing); document.removeEventListener('kairos:bots-typed-reply', replied); clearInterval(unreadTimer); window.removeEventListener('blur', loseFocus); document.removeEventListener('visibilitychange', visibilityChanged); dialog.remove(); button.remove(); }
+  // Leaving the conversation (another bot, another tab, another mode) keeps a live call going in its pill, which is on
+  // every screen, so a microphone never runs without a visible way to mute or hang up. Hanging up there cleans up.
   return { button, minimize, restore, update() {}, dispose() {
-    if (active && inBots()) {
-      detached = true; minimize(); button.remove();
-      modeWatch = new MutationObserver(() => { if (!inBots()) endDetached(); });
-      modeWatch.observe(document.documentElement, { attributes: true, attributeFilter: ['data-app-mode'] });
-    } else { hangup(); cleanup(); }
+    if (active) { detached = true; button.remove(); if (!minimized) minimize(); }
+    else { hangup(); cleanup(); }
   } };
 }

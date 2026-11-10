@@ -56,6 +56,26 @@
   --m-body-cdbfd9: #CDBFD9;  /* lilac */
 }
 
+/* The call screen (2026-11-10): a night ground in every theme, like a phone's
+   call screen, warm like the brand (bistre to near black). Fixed like the
+   mascot pastels: Appearance changes the app around a call, not the call.
+   css/agents-messages.css (the screen) and css/bots-voice.css (its pill). */
+:root {
+  --call-ground-top:    #2B2119;
+  --call-ground-bottom: #0D0A08;
+  --call-sheet:         #1D1712;
+  --call-ink:           #F6EEE1;  /* text on the night ground */
+  --call-ink-dim:       #CBBBA6;
+  --call-error:         #F2A595;
+  --call-line:          rgba(246, 238, 225, .16);
+  --call-key:           #F3EADB;  /* a pressed key: speaker on, microphone muted */
+  --call-key-ink:       #2B2119;
+  --call-key-quiet:     #3E322A;  /* a key at rest */
+  --call-key-quiet-ink: #F6EEE1;
+  --call-hangup:        #C2412C;
+  --call-hangup-ink:    #FFFFFF;
+}
+
 /* The Agent village's illustration palette (the pixel-art buildings, trees,
    lakes, roads and its signs and status lights). Like the avatar faces, the
    village paints its own scene, so these stay fixed across Appearance

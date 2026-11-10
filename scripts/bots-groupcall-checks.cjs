@@ -4,7 +4,7 @@
 const assert = require('node:assert/strict');
 const { isolateBotsCheck } = require('./bots-check-support.cjs');
 
-module.exports = async ({ js, waitFor, delay, win, demoState, base }) => {
+module.exports = async ({ js, waitFor, delay, win, demoState, base, capture }) => {
   const q = JSON.stringify, originalSize = win.getContentSize();
   const restore = await isolateBotsCheck({ js, demoState }, { botsChat: undefined, botsRooms: {}, botsVoice: {
     callsEnabled: true, catalog: { voices: [], models: [] }, notes: {}, counter: 0, log: [],
@@ -51,13 +51,24 @@ module.exports = async ({ js, waitFor, delay, win, demoState, base }) => {
     assert.equal(made.agent_id, bo, "it opens with the room's chosen responder");
     assert.equal(made.parent_id, roomId);
 
-    // Back to the room: the bar sits above the room's composer and lists the members; the shortcut hangs up.
-    await js("[...document.querySelectorAll('.agent-call-tabs button')].find(n=>n.textContent==='Chat').click()");
-    await waitFor("!!document.querySelector('.bots-room .bots-call-bar:not([hidden])') && !document.querySelector('.agent-call').open");
-    assert.match(await js("document.querySelector('.bots-call-bar [data-call-clock]').textContent"), new RegExp(`^Group call in Launch ${unique} · `));
-    assert.equal(await js("document.querySelector('.bots-call-bar .bots-call-members').textContent"), `With ${names.join(', ')}`);
+    // The group call screen: "Group call" on top, the room's name, the members in More.
+    assert.equal(await js("document.querySelector('.agent-call-kind').textContent"), 'Group call');
+    assert.equal(await js("document.querySelector('.agent-call-scene h1').textContent"), `Launch ${unique}`);
+    assert.ok(await js("!!document.querySelector('.agent-call-sheet .agent-call-members')"), 'the members are listed in More');
+    assert.deepEqual(await js("[...document.querySelectorAll('.agent-call-controls > button')].map(n=>n.dataset.call)"), ['speaker', 'mute', 'hangup']);
+    await capture?.('group-call-screen');
+    await js("document.querySelector('.agent-call-more-toggle').click()");
+    await waitFor("!document.querySelector('.agent-call-sheet').hidden");
+    await capture?.('group-call-more');
+    await js("document.querySelector('.agent-call-more-toggle').click()");
+    // Minimized, the pill names the room and keeps clear of the room's composer; the shortcut hangs up.
+    await js("document.querySelector('.agent-call-minimize').click()");
+    await waitFor("!!document.querySelector('.call-pill:not([hidden])') && !document.querySelector('.agent-call').open");
+    assert.equal(await js("document.querySelector('.call-pill').getAttribute('aria-label')"), `Group call in Launch ${unique}`);
+    assert.equal(await js("document.querySelector('.call-pill').title"), `With ${names.join(', ')}`);
+    assert.ok(await js("(()=>{const a=document.querySelector('.call-pill').getBoundingClientRect(),c=document.querySelector('.bots-room .bots-composer').getBoundingClientRect();return a.bottom<=c.top||a.top>=c.bottom||a.right<=c.left||a.left>=c.right})()"), 'the pill never covers the room composer');
     await js("document.dispatchEvent(new KeyboardEvent('keydown',{key:'h',ctrlKey:true,shiftKey:true,bubbles:true,cancelable:true}))");
-    await waitFor("!document.querySelector('.bots-call-bar')");
+    await waitFor("!document.querySelector('.call-pill')");
     // The end request goes out in the background, so give it a moment to land.
     for (let i = 0; i < 40 && !Object.values(demoState.botsVoice.calls).every(c => c.ended); i++) await delay(50);
     assert.ok(Object.values(demoState.botsVoice.calls).every(c => c.ended), 'hanging up ends the call');

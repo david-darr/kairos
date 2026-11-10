@@ -1,7 +1,7 @@
 // Written for the orchestrator. Uses synthetic device audio, never a microphone or voice server.
 const assert = require('node:assert/strict');
 const { isolateBotsCheck } = require('./bots-check-support.cjs');
-module.exports = async ({ js, waitFor, navigate, win, demoState, base, capture }) => {
+module.exports = async ({ js, waitFor, delay, navigate, win, demoState, base, capture }) => {
   const q = JSON.stringify, originalSize = win.getContentSize();
   const restore = await isolateBotsCheck({ js, demoState }, { botsChat: undefined, botsVoice: {
     callsEnabled: true, catalog: { voices: [{ id: 'fixture', name: 'Fixture voice' }], models: ['fixture'] }, notes: {}, counter: 0, log: [],
@@ -34,19 +34,73 @@ module.exports = async ({ js, waitFor, navigate, win, demoState, base, capture }
     await waitFor("document.querySelector('.agent-call')?.dataset.state==='listening'");
     assert.equal(await js("document.querySelector('[aria-label=\"Conversation model connection\"]').value"), 'voice-check-model');
     assert.equal(await js("document.querySelector('.agent-call-setup').hidden"), true);
-    await js("[...document.querySelectorAll('.agent-call-tabs button')].find(n=>n.textContent==='Chat').click()");
-    await waitFor("!!document.querySelector('.bots-call-bar:not([hidden])') && !document.querySelector('.agent-call').open");
+    // Minimize (2026-11-10, David: "minimize the call so you can still utilize other kairos features"): the chevron at
+    // the top shrinks the call to a pill with the bot's mascot, name, timer, mute and hang up.
+    const pill = "document.querySelector('.call-pill')";
+    await click('.agent-call-minimize');
+    await waitFor(`!!${pill} && !${pill}.hidden && !document.querySelector('.agent-call').open`);
+    const shape = await js(`(()=>{const p=${pill};return {name:p.querySelector('.call-pill-name').textContent,clock:/^\\d+:\\d\\d$/.test(p.querySelector('[data-call-clock]').textContent),mascot:p.querySelector('kairos-mascot')?.getAttribute('state'),keys:[...p.querySelectorAll('[data-call]')].map(n=>n.dataset.call),dot:p.querySelector('.call-pill-unread').hidden,small:[...p.querySelectorAll('button')].filter(n=>n.getClientRects().length).filter(n=>n.getBoundingClientRect().height<44).length}})()`);
+    assert.equal(shape.name, await js(`fetch('/api/agents/${botId}').then(r=>r.json()).then(d=>d.agent.name)`), 'the pill names the bot');
+    assert.ok(shape.clock, 'and runs the timer');
+    assert.equal(shape.mascot, 'listening', "and shows the bot's mascot in the call's state");
+    assert.deepEqual(shape.keys, ['mute', 'hangup'], 'with mute and hang up');
+    assert.equal(shape.dot, true, 'and no unread dot yet');
+    assert.equal(shape.small, 0, 'every pill control is 44 px');
+    const clear = sel => `(()=>{const a=${pill}.getBoundingClientRect(),c=document.querySelector(${q(sel)})?.getBoundingClientRect();return !c||a.bottom<=c.top||a.top>=c.bottom||a.right<=c.left||a.left>=c.right})()`;
+    assert.ok(await js(clear('.bots-shell .bots-composer')), 'the pill never covers the composer');
+    await capture?.('call-pill-desktop');
+    // Mute from the pill (and its shortcut), with the call screen agreeing.
     await js("document.dispatchEvent(new KeyboardEvent('keydown',{key:'m',ctrlKey:true,shiftKey:true,bubbles:true,cancelable:true}))");
-    await waitFor("[...document.querySelectorAll('.bots-call-bar button')].some(n=>n.textContent==='Unmute')");
+    await waitFor(`${pill}.querySelector('[data-call=mute]').getAttribute('aria-pressed')==='true' && document.querySelector('.agent-call [data-call=mute]').getAttribute('aria-pressed')==='true'`);
+    await js(`${pill}.querySelector('[data-call=mute]').click()`);
+    await waitFor(`${pill}.querySelector('[data-call=mute]').getAttribute('aria-pressed')==='false'`);
+    // The call stays up while the person goes anywhere in Kairos.
+    for (const tab of ['home', 'chat', 'library', 'botsHome']) {
+      await navigate(tab); await delay(200);
+      assert.ok(await js(`!!${pill} && !${pill}.hidden && document.documentElement.dataset.botsCallActive==='true'`), `the call survives a move to ${tab}`);
+      assert.ok(await js(`(()=>{const r=${pill}.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight})()`), `and its pill is on screen in ${tab}`);
+      assert.ok(await js(clear('.chat-input-bar')) && await js(clear('.bots-composer')), `and keeps clear of the composer in ${tab}`);
+      if (tab === 'chat') await capture?.('call-pill-chat-tab');
+    }
+    assert.ok(Object.values(demoState.botsVoice.calls).some(c => !c.ended), 'the call record is still open');
+    await capture?.('call-pill-other-tab');
+    // The bot posts in its chat while the call is minimized and the chat is not on screen: a dot, which opens the chat.
+    require('./fixtures/bots-chat-backend.cjs').latest.seed(sid, [{ role: 'assistant', content: 'Your report is ready.' }]);
+    await waitFor(`!${pill}.querySelector('.call-pill-unread').hidden`, 15000);
+    await capture?.('call-pill-unread');
+    await js(`${pill}.querySelector('.call-pill-unread').click()`);
+    await waitFor(`document.querySelector('.bots-shell')?.dataset.agentId===${q(botId)} && ${pill}.querySelector('.call-pill-unread').hidden && !${pill}.hidden`);
+    // A desktop pill drags to a corner and stays there.
+    const corner = await js("localStorage.getItem('kairos:call-pill-corner')");
+    await js(`(()=>{const b=${pill}.querySelector('.call-pill-back'),r=b.getBoundingClientRect(),o={bubbles:true,pointerId:7,button:0,isPrimary:true};b.dispatchEvent(new PointerEvent('pointerdown',{...o,clientX:r.left+20,clientY:r.top+20}));b.dispatchEvent(new PointerEvent('pointermove',{...o,clientX:120,clientY:140}));b.dispatchEvent(new PointerEvent('pointerup',{...o,clientX:120,clientY:140}));return true})()`);
+    await delay(50);
+    assert.equal(await js(`${pill}.dataset.corner`), 'top-left', 'a drag drops the pill in the nearest corner');
+    assert.ok(await js(`(()=>{const r=${pill}.getBoundingClientRect();return r.left<=20&&r.top<innerHeight/2})()`), 'and it moves there');
+    assert.equal(await js('document.querySelector(\'.agent-call\').open'), false, 'a drag is not a tap');
+    await js(`(${q(corner)}===null?localStorage.removeItem('kairos:call-pill-corner'):localStorage.setItem('kairos:call-pill-corner',${q(corner)}),${pill}.refresh?.(),true)`);
+    // Tap returns to the full call.
+    await js(`${pill}.querySelector('.call-pill-back').click()`);
+    await waitFor(`document.querySelector('.agent-call').open && ${pill}.hidden`);
+    // Back to chat (More) is the same minimize; another bot's page offers Return to call.
+    await js("document.querySelector('.agent-call [data-call=chat]').click()");
+    await waitFor(`!${pill}.hidden && !document.querySelector('.agent-call').open`);
     await navigate('botsShell', { agentId: otherBot, sessionId: otherSid });
-    await waitFor("document.querySelector('.bots-call-bar')?.hasAttribute('data-floating') && document.querySelector('.agent-call-open')?.textContent==='Return to call'");
-    await js("[...document.querySelectorAll('.bots-call-bar button')].find(n=>n.textContent==='Return to call').click()");
+    await waitFor(`!${pill}.hidden && document.querySelector('.agent-call-open')?.textContent==='Return to call'`);
+    // A phone: the pill docks at the bottom, full width, above the composer.
+    await win.setContentSize(390, 844); await delay(250);
+    const phonePill = await js(`(()=>{const r=${pill}.getBoundingClientRect(),c=document.querySelector('.bots-shell .bots-composer')?.getBoundingClientRect();return {left:Math.round(r.left),width:Math.round(r.width),bottom:r.bottom,inner:innerHeight,clear:!c||r.bottom<=c.top+1,corner:${pill}.dataset.corner}})()`);
+    assert.equal(phonePill.corner, 'bottom', 'on a phone the pill docks at the bottom');
+    assert.ok(phonePill.left === 12 && phonePill.width === 390 - 24, `edge to edge inside a 12 px gutter (${JSON.stringify(phonePill)})`);
+    assert.ok(phonePill.clear && phonePill.bottom <= phonePill.inner - 12, 'above the composer and the bottom edge');
+    await capture?.('phone-call-pill');
+    await win.setContentSize(...originalSize); await delay(150);
+    await js("document.querySelector('.call-pill .call-pill-back').click()");
     await waitFor("document.querySelector('.agent-call').open");
-    await js("[...document.querySelectorAll('.agent-call-tabs button')].find(n=>n.textContent==='Chat').click()");
-    await waitFor("!!document.querySelector('.bots-call-bar:not([hidden])')");
+    await js("document.querySelector('.agent-call [data-call=chat]').click()");
+    await waitFor(`!${pill}.hidden`);
+    // Hang up from the pill (its shortcut).
     await js("document.dispatchEvent(new KeyboardEvent('keydown',{key:'h',ctrlKey:true,shiftKey:true,bubbles:true,cancelable:true}))");
-    await waitFor("!document.querySelector('.bots-call-bar')");
-    assert.ok(Object.values(demoState.botsVoice.calls).every(c => c.ended));
+    await waitFor(`!${pill}`);
     await waitFor("document.querySelector('.agent-call-open')?.textContent==='Call'");
     await navigate('botsShell', { agentId: botId, sessionId: sid });
     await waitFor("!!document.querySelector('.bots-chat-host .bots-composer')");

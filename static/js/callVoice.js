@@ -87,7 +87,7 @@ export function neuralSpeaker(options, getSelection) {
     pause(){if(context&&speaking&&!paused&&!cancelled){paused=true;poke('suspend');}},
     resume(){if(paused){paused=false;poke('resume');}},
     filler:playClip,
-    async prepare(){if(!context){context=new AudioContext();analyser=context.createAnalyser();analyser.fftSize=256;analyser.connect(context.destination);}await context.resume();},
+    async prepare(){if(!context){context=new AudioContext();options.onContext?.(context);analyser=context.createAnalyser();analyser.fftSize=256;analyser.connect(context.destination);}await context.resume();},
     feed(text){if(!cancelled)chunker.feed(text);},
     flushSentence(){if(!cancelled)chunker.flushSentence();},
     finish(){chunker.finish();finished=true;pump();},
