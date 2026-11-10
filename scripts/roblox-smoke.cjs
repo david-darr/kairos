@@ -242,6 +242,10 @@ app.whenReady().then(async () => {
     await js("document.body.click()");
     await js('window.cleanup()');
     admin = true;
+    // The administrator gets a page of their own. On the same page api() answers an identical GET made within 1 s
+    // from one shared read (static/js/api.js), so the tool store was handed the non-admin status read just before
+    // and drew every add-on button disabled (2026-11-10).
+    await win.loadURL(base); await wait('window.ready'); await js('window.cleanup()');
     win.setContentSize(1440,1080);
     await js("import('/static/js/views/tool-store.js').then(m=>m.render(document.getElementById('fixture')))");
     await wait("!![...document.querySelectorAll('.tool-store-card .ts-desktop-name')].find(n=>n.textContent==='Blender')");

@@ -264,9 +264,11 @@ module.exports = async function browseChecks({ js, base, output, fs }) {
 
     // Phone width: Browse still lays out without spilling sideways.
     win.setContentSize(390, 844);
-    await new Promise(r => setTimeout(r, 300));
+    // The resize lands asynchronously: wait for the page to have it, or the check measures the desktop layout.
+    await until("innerWidth === 390");
     assert.equal(await run("return document.documentElement.scrollWidth <= innerWidth + 1;"), true, 'no sideways scroll at phone width');
     win.setContentSize(1440, 900);
+    await until("innerWidth === 1440");
 
     // Icons, not text characters, on the sidebar's buttons (2026-11-04).
     assert.ok(await run("return ['Collapse sidebar', 'Home', 'Back', 'Forward'].every(l => document.querySelector(`.browse-top [aria-label=\"${l}\"] svg`));"), 'line icons on the top buttons');

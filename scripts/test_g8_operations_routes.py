@@ -47,6 +47,9 @@ BY_DESIGN = {
     "/api/design-fonts/{system_id}/{file}": "font files for sandboxed board frames",
     "/api/design-looks/{system_id}/preview": "a bundled look's script-free preview for a sandboxed Tool Store frame",
     "/api/videos/{video_id}/assets/{name}": "content-addressed and immutable, like design assets; the render window sends no session",
+    # Added 2026-11-10 (92fad4e2) with the same capability as the asset route above: the player page's render token
+    # names the account, and without one or a sign-in it answers 404 (test_a_video_frame_needs_a_token_or_a_sign_in).
+    "/api/videos/{video_id}/assets/media/{sha}/{frame}": "one decoded frame of an uploaded clip, same capability as video assets",
     "/api/design-render/jobs": "Electron render worker; _worker() checks its own credential",
     "/api/design-render/result/{job_id}": "same",
     "/api/content-studio/page-reads/jobs": "Electron page-read worker (Content Studio); _worker() checks the same render token",
@@ -124,6 +127,18 @@ class RouteSweepTests(Base):
                 open_routes.append((method, path, box.get("code")))
         self.assertEqual(hung, [], "routes that never answered an anonymous caller")
         self.assertEqual(open_routes, [], "non-public routes an anonymous caller was not refused on")
+
+    def test_a_video_frame_needs_a_token_or_a_sign_in(self):
+        # The frame route is open to sessionless render windows, so it must refuse on the account, not on a missing
+        # file: with a real frame on disk, an anonymous caller without a render token still gets nothing.
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as frame:
+            frame.write(bytes.fromhex("ffd8ffd9"))
+        self.addCleanup(os.unlink, frame.name)
+        with patch("core.video_media.frame_path", return_value=Path(frame.name)):
+            path = "/api/videos/probe/assets/media/probe/000001.jpg"
+            self.assertEqual(self.anon.get(path).status_code, 404)
+            self.assertEqual(self.anon.get(path + "?rt=forged").status_code, 404)
+            self.assertEqual(self.admin.get(path).status_code, 200, "a signed-in caller is served the same frame")
 
     def test_members_are_refused_on_every_a21_admin_route(self):
         for method, path in A21_ADMIN:

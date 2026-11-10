@@ -157,7 +157,9 @@ export async function render(container, _id, options = {}) {
       if (!status.admin || !valid() || healthChecking || working) return;
       healthChecking = true;
       try {
-        const health = await request(`/projects/${pid}/connection`);
+        // A live check, never api()'s shared read: within its 1 s share window (static/js/api.js, 2026-10-27)
+        // Check connection right after Connect was answered with the check Connect had just made (2026-11-10).
+        const health = await api(`${BASE}/projects/${pid}/connection`, { cache: 'no-store' });
         if (!valid()) return; lastHealth = health;
         state.dataset.state = health.state;
         state.textContent = ({ connected: 'Studio verified', disconnected: 'Studio disconnected', busy: 'Studio busy', needs_attention: 'Connection needs attention' })[health.state] || 'Studio unavailable';

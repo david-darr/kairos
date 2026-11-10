@@ -268,18 +268,10 @@ def node_tests(changed):
 
 # -- UI ---------------------------------------------------------------------------------------------------------
 # Area checks that only run through their own flag (the full ui-smoke run never calls them) and fail on unchanged
-# `dev` (65c0d4fd, 2026-11-05): they test screens or behaviour that has since changed. Never picked until fixed;
-# --list names them when a change touches their area.
-STALE = {
-    "g3": "expects the old Agents messenger (and passed no demoState to the phone and appearance checks)",
-    "interface": "the menu button no longer regains focus after the drawer closes",
-    "mobile": "the More sheet no longer takes focus",
-    "mobile-chrome": "the small-phone Forge New composer overlaps the home indicator",
-    "g8": "Logs filters: never sees the follow reload",
-    "g10": "Forge's REA header button never appears",
-    "a14-settings": "the default sidebar order is now home, chat, notes",
-    "g6": "reports two Tasks findings: a refused Schedule says nothing, and an unsent Schedule draft is lost on leaving",
-}
+# `dev`: never picked until fixed; --list names them when a change touches their area. Empty since 2026-11-10
+# (fix/test-bar): g3 and interface were brought up to date; mobile, mobile-chrome, g8, g10, a14-settings, g6 and
+# g7 pass on dev again (fixed by later work).
+STALE = {}
 
 
 def ui_units():
@@ -353,11 +345,9 @@ def ui_selection(changed, units, coverage):
     return chosen, False
 
 
-# Electron suites that fail on unchanged `dev` (65c0d4fd, 2026-11-05); skipped and named until fixed.
-STALE_SUITES = {
-    "bg-tasks-smoke": "the background-tasks caption never says 'running in background' (with its scripted backend)",
-    "roblox-smoke": "after 'Check connection' the state never reads 'Connection needs attention'",
-}
+# Electron suites that fail on unchanged `dev`; skipped and named until fixed. Empty since 2026-11-10: roblox-smoke
+# (a stale shared read in the Roblox tab) and bg-tasks-smoke (its harness hashed the whole checkout) are fixed.
+STALE_SUITES = {}
 
 
 def electron_selection(changed):

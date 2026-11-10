@@ -28,18 +28,21 @@ import io
 import json
 import os
 import re
-import shutil
 import sys
 import time
 import unittest
-import uuid
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-environment = Path(__file__).resolve().parents[1] / (".design-test-" + uuid.uuid4().hex[:12])
-environment.mkdir()
+# 2026-11-10: an owned system-temp folder, not `.design-test-*` in the checkout. A bare rmtree there failed
+# whenever something still held a file (a watcher or scanner on the checkout, a store left open), and the
+# folder it left behind was committed once (2a86b415). TestDataDirectory closes the stores and log files it
+# owns and retries the delete.
+from scripts.test_data_support import TestDataDirectory  # noqa: E402
+_fixture = TestDataDirectory(prefix="jarvis-design-test-")
+environment = Path(_fixture.name)
 os.environ["JARVIS_DATA_DIR"] = str(environment)
 
 from fastapi import FastAPI  # noqa: E402
@@ -1067,10 +1070,11 @@ class ElectronWorkerTests(unittest.TestCase):
 
 
 def tearDownModule():
-    # Windows will not delete a database that is still open.
-    from core import session_manager_store
-    session_manager_store.close()
-    shutil.rmtree(environment)
+    # Windows will not delete a file that is still open: the fixture closes the session store, chat-task
+    # timers and log files under the folder before it deletes it.
+    _fixture.cleanup()
+    if environment.exists():
+        raise AssertionError(f"the design test data folder was left behind: {environment}")
 
 
 if __name__ == "__main__":

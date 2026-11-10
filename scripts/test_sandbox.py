@@ -201,6 +201,7 @@ class EscapeTests(unittest.TestCase):
 
     def test_no_network_not_even_to_jarvis_on_this_machine(self):
         server, port = _host_http_server()
+        self.addCleanup(server.server_close)  # runs after shutdown (cleanups run last-in, first-out)
         self.addCleanup(server.shutdown)
         probe = ("import socket\n"
                  "for host in ('host.docker.internal', '192.168.65.254', '10.0.2.2', '1.1.1.1', '172.17.0.1'):\n"
@@ -220,6 +221,7 @@ class EscapeTests(unittest.TestCase):
         networked run goes through core/sandbox_egress.py's filter instead, and
         why the test above means something."""
         server, port = _host_http_server()
+        self.addCleanup(server.server_close)  # runs after shutdown (cleanups run last-in, first-out)
         self.addCleanup(server.shutdown)
         out = subprocess.run(["docker", "run", "--rm", sandbox.IMAGE, "python", "-c",
                               f"import urllib.request;print(urllib.request.urlopen('http://host.docker.internal:{port}/',timeout=5).status)"],
@@ -368,6 +370,11 @@ class EgressTests(unittest.TestCase):
                 self.assertIn("Tunnel connection failed: 403", out[url])
             elif "nip.io" in url and "cannot resolve" in out[url]:
                 pass  # many home routers drop public answers that point at private addresses; refused either way
+            elif url.split("/")[2].strip("[]") in ("127.0.0.1", "localhost", "::1"):
+                # Since 2026-10-16 a loopback name is a local app on this computer, reachable only on a port a
+                # person approved for a computer preview (core/sandbox_egress.py LOCAL_HOSTS); none is approved here.
+                host = url.split("/")[2].strip("[]")
+                self.assertTrue(out[url].startswith("HTTP 403") and f"local app at {host}:80 is not approved" in out[url], out[url])
             else:
                 self.assertTrue(out[url].startswith("HTTP 403") and "private or local" in out[url], out[url])
         from core import sandbox_egress
@@ -377,6 +384,7 @@ class EgressTests(unittest.TestCase):
 
     def test_other_ports_are_refused_even_for_this_computer(self):
         server, port = _host_http_server()
+        self.addCleanup(server.server_close)  # runs after shutdown (cleanups run last-in, first-out)
         self.addCleanup(server.shutdown)
         out = self.fetch([f"http://host.docker.internal:{port}/", "http://example.com:8080/"])
         for line in out.values():
@@ -405,7 +413,8 @@ class EgressTests(unittest.TestCase):
         r = run("python probe.py", files={"probe.py": script}, network=True, timeout=60)
         self.assertEqual(r.exit_code, 0, r.stderr)
         line = next(l for l in r.stdout.splitlines() if l.startswith(("OK", "HTTP", "ERR")))
-        self.assertTrue(line.startswith("HTTP 403") and "private or local" in line, line)
+        # The redirect's target is this computer's loopback: refused as an unapproved local app (see above).
+        self.assertTrue(line.startswith("HTTP 403") and "local app at 127.0.0.1:80 is not approved" in line, line)
 
     def test_no_way_out_but_the_filter(self):
         r = run("getent hosts example.com || echo NO-DNS; "
@@ -422,6 +431,7 @@ class EgressTests(unittest.TestCase):
         """The filter's own container can open a connection to this computer;
         what stops a sandboxed run getting there through it is the address rule."""
         server, port = _host_http_server()
+        self.addCleanup(server.server_close)  # runs after shutdown (cleanups run last-in, first-out)
         self.addCleanup(server.shutdown)
         from core import sandbox_egress
         run("true", network=True)  # the filter is up

@@ -23,6 +23,11 @@ from services import background_tasks as bg, chat_service
 from services.agent_service import agent_service
 from services.task_service import task_service
 from scripts.bg_model_server import ScriptedModelServer, demo_calls
+from core import file_checkpoints
+# 2026-11-10: every chat turn checkpoints the source checkout (core/file_checkpoints.py), about 4,500 files and
+# 10 s on a cold hash cache: under load that alone outran the 8 s waits below and the harness's 45 s. These
+# scripted turns change no files; watch only the test vault, as bg_tasks_scripted.py does.
+file_checkpoints.BASE_DIR = fixture.name
 
 
 class AnyModelTests(unittest.IsolatedAsyncioTestCase):

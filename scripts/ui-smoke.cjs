@@ -437,11 +437,11 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['google workspace'], errors }, null, 2));
       console.log('PASS: Google Workspace desktop and mobile.'); console.log('Screenshots: ' + output); return;
     }
-    if (process.argv.includes('--g3-only')) {  // Part 2 A07: phone/appearance modules plus the village benchmark (g3-checks.cjs).
-      const bench = await require('./g3-checks.cjs')({ js, waitFor, delay, navigate, win, capture, reads, demoState, inbox: calendarFixtures.agentInbox });
+    if (process.argv.includes('--g3-only')) {  // Part 2 A07: phone and appearance modules, notification click, idle reads (g3-checks.cjs).
+      const bench = await require('./g3-checks.cjs')({ js, waitFor, delay, navigate, win, capture, reads, demoState, base, inbox: calendarFixtures.agentInbox });
       assert.deepEqual(errors, [], 'g3 renderer errors');
-      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['agents phone', 'agents appearance', 'village benchmark'], bench, errors }, null, 2));
-      console.log('PASS: g3 Agents phone audit, appearance, village benchmark.'); console.log('Screenshots: ' + output); return;
+      fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks: ['agents phone', 'agents appearance', 'bot notification opens the bot', 'idle reads'], bench, errors }, null, 2));
+      console.log('PASS: g3 Agents phone audit, appearance, notification click, idle reads.'); console.log('Screenshots: ' + output); return;
     }
     if (process.argv.includes('--agents-call-only')) {
       await require('./agents-call-checks.cjs')({ js, waitFor, delay, navigate, win, capture, writes, demoState, liveChange, base });

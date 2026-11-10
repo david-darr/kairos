@@ -95,6 +95,18 @@ def main():
     os.environ.update(JARVIS_DATA_DIR=str(data_dir), APP_PORT=str(args.port), AUTH_ENABLED='0', TEMP=str(temp_dir), TMP=str(temp_dir))
     tempfile.tempdir = str(temp_dir)
     install_network_guard()
+    # 2026-11-10: lay the data folder out the way app.py does before anything opens it. The seeding below
+    # opens sessions.db; when `from app import app` ran the account-folder migration only afterwards, the
+    # open database refused the move, the migration retried for 10 s, gave up and left this harness on the
+    # old layout. Those 10 s pushed test_background_any_model's harness past its 45 s limit under load.
+    from core import account_migration
+    account_migration.run()
+    # A chat turn checkpoints the vault and, in a source checkout, the checkout itself (core/file_checkpoints.py).
+    # The scripted turns change no files, and hashing this checkout's ~4,500 files held each first turn about
+    # 10 s (more under load): bg-tasks-smoke's background jobs started after its 10 s wait, which is why it
+    # failed on dev since 2026-11-05. Watch only the scripted vault.
+    from core import file_checkpoints
+    file_checkpoints.BASE_DIR = str(data_dir)
 
     from core import quota_usage, model_discovery, mcp_oauth
     async def quotas(*args, **kwargs):

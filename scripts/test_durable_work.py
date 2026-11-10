@@ -31,6 +31,12 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from core import events, outbox, runs, session_manager_store as store, task_scheduler  # noqa: E402
+from core import file_checkpoints  # noqa: E402
+# 2026-11-10: a task or card run checkpoints the vault and, in a source checkout, the checkout itself. Hashing the
+# checkout's ~4,500 files was 10.7 of this suite's 12 s, up to 4.8 s for one run with a warm disk cache, and more
+# under load or cold: past `started()`'s wait, so a run "never reached the model". These runs change no files;
+# checkpoints still run, over the test vault only.
+file_checkpoints.BASE_DIR = _DATA.name
 from core.middleware import require_user  # noqa: E402
 from routes import task_routes  # noqa: E402
 from services import task_service as task_module  # noqa: E402
@@ -208,7 +214,10 @@ class AtMostOnceTests(Base):
         task_service.record_run(task["id"], "done")
         self.assertLessEqual(len(task_service.list_runs(task["id"])), task_module.MAX_RUNS_PER_TASK)
         self.assertEqual(sum(r["id"] == live_id for r in task_service.list_runs(task["id"])), 1)
-        self.assertEqual(task_service.list_runs(task["id"])[0]["outcome"], "succeeded")
+        # The live record itself, not whichever record sorts first: list_runs orders by ran_at, and on Windows
+        # Python 3.12's time.time() ticks every 1 to 15.6 ms, so a receipt written in the same tick as the finish
+        # ties with it and could sort ahead (2/5 runs once the suite stopped hashing the checkout, 2026-11-10).
+        self.assertEqual(next(r for r in task_service.list_runs(task["id"]) if r["id"] == live_id)["outcome"], "succeeded")
 
     def test_a_run_cut_off_by_a_crash_is_recorded_lost_and_not_run_again(self):
         task = self.task("brief", deliver_to_channel="discord")

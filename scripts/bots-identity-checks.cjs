@@ -25,6 +25,12 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
   const yes = () => click('.confirm-panel .modal-footer .btn:last-child');
   const closeDialogs = () => js(`(() => { for (let i = 0; i < 6; i++) { const b = document.querySelector('.modal-backdrop .modal-close-btn'); if (!b) break; b.click(); }
     document.querySelectorAll('.modal-backdrop').forEach(n => n.remove()); return true; })()`);
+  // A condition on the fake backend's own state (Node side), with ui-smoke's usual 10 s limit. The fixed 2 to 4 s
+  // loops this replaced (2026-11-10) ran out under a full run's load: bots-identity failed there and passed alone.
+  const until = async (test, what, timeout = 10000) => {
+    for (const end = Date.now() + timeout; Date.now() < end; await delay(50)) if (await test()) return;
+    if (!(await test())) throw new Error('Timed out: ' + what);
+  };
   const mountPanel = async (id, mode) => { await mountRaw(id, mode); await waitFor("!!document.querySelector('#bots-id-host .bots-panel-top') && !!document.querySelector('#bots-id-host .bots-panel-scroll')"); };
   const mountRaw = (id, mode) => js(`(async () => {
     const P = await import('/static/js/botsPanel.js');
@@ -46,7 +52,8 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
   const card = id => `#bots-id-host [data-panel-card=${id}]`;
   const botRecord = id => call(`/api/agents/${id}`).then(r => r.body);
   const waitSaved = async (id, test, what) => {
-    for (let i = 0; i < 80; i++) { if (test(await botRecord(id))) return; await delay(50); }
+    for (const end = Date.now() + 10000; Date.now() < end; await delay(50)) if (test(await botRecord(id))) return;
+    if (test(await botRecord(id))) return;
     const last = (await botRecord(id)).agent;
     throw new Error(`Timed out waiting for the saved record: ${what}. Now: ${JSON.stringify({ name: last.name, role: last.role, reply_style: last.reply_style, notifications: last.notifications, soul: last.soul })}; writes: ${JSON.stringify(writes.slice(-4).map(w => [w.method, w.path, w.status, w.body.slice(0, 80)]))}`);
   };
@@ -231,7 +238,7 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
     assert.equal(await js(`document.querySelector('${card('memory')} textarea').value`), 'A draft the person has not saved', 'a Memory draft survives leaving the section and a poll');
     const memoryMark = writes.length;   // earlier checks in a full run wrote to bots with the same IDs
     await click(`${card('memory')} .bots-actions .bots-btn`);
-    for (let i = 0; i < 60 && !writes.slice(memoryMark).some(w => w.path === `/api/agents/${botId}/memory` && w.method === 'PUT' && w.status === 200); i++) await delay(50);
+    await until(() => writes.slice(memoryMark).some(w => w.path === `/api/agents/${botId}/memory` && w.method === 'PUT' && w.status === 200), 'the Memory save');
     assert.equal(demoState.botsCore.memoryText[botId], 'A draft the person has not saved');
 
     await openSection('routines');
@@ -245,7 +252,7 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
     assert.match(await text(`${card('routines')} .bots-routine`), /Morning sweep/);
     assert.match(await text(`${card('routines')} .bots-routine`), /At 08:00 every day/);
     await js(`[...document.querySelectorAll('${card('routines')} .bots-routine .bots-btn')].find(b => /Check now/.test(b.textContent)).click()`);
-    for (let i = 0; i < 40 && !(demoState.botsIdentity.ran || []).length; i++) await delay(50);
+    await until(() => (demoState.botsIdentity.ran || []).length > 0, 'Check now running the routine');
     assert.equal((demoState.botsIdentity.ran || []).length, 1, 'Check now ran the routine');
     await js(`[...document.querySelectorAll('${card('routines')} .bots-routine .bots-btn')].find(b => /Pause/.test(b.textContent)).click()`);
     await waitFor(`/paused/.test(document.querySelector('${card('routines')} .bots-routine')?.textContent || '')`);
@@ -307,7 +314,9 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
     await click(`${card('identity')} [data-action=image-settings]`);
     assert.deepEqual(await js(`window.__nav.slice(${navBefore})`),[{ tab: 'settings', section: 'images' }], 'the button opens the image Settings section');
     await call('/api/image-provider', 'PUT', { kind: 'openai', key: 'sk-test-key-123456', model: 'gpt-image-1', daily_limit: 50 });
-    await delay(1100); // expire shared GETs before remounting
+    // The remount must read the new connection, not api()'s shared read from before the PUT (its 1 s window starts
+    // when a read settles, so a fixed 1.1 s pause was short whenever a read was still in flight).
+    await js("import('/static/js/api.js').then(m => { m.clearSharedReads(); return true; })");
     await mountPanel(botId, 'advanced');
     await openSection('identity');
     await waitFor(`!!document.querySelector('${card('identity')} .bots-avatar-editor')`);
@@ -376,13 +385,13 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
     assert.equal(verdict.ok, true, 'flushBotEdits reports success');
     // ================= Phone: the panel is a sheet and keeps focus inside ======================================================
     phone = true;
-    win.setContentSize(390, 800); await delay(500);
+    win.setContentSize(390, 800); await waitFor('innerWidth === 390 && innerHeight === 800');
     await mountPanel(botId, 'simple');
     await waitFor("!!document.querySelector('#bots-id-host .bots-hero-name')");
     assert.equal(await js('document.documentElement.scrollWidth <= innerWidth'), true, 'no sideways scroll at phone width');
     assert.ok(await js("[...document.querySelectorAll('#bots-id-host .bots-tab')].every(n => n.getBoundingClientRect().height >= 32)"), 'tabs are easy to hit');
     await capture('phone-bots-identity-simple');
-    win.setContentSize(1440, 900); await delay(400); phone = false;
+    win.setContentSize(1440, 900); await waitFor('innerWidth === 1440 && innerHeight === 900'); phone = false;
 
     assert.deepEqual((await errorToasts()).filter(t => !expected.includes(t)), [], 'no unexpected error toast');
     assert.deepEqual(await js('window.__errs'), [], 'no script errors in the page');

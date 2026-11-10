@@ -136,7 +136,28 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, overflow }
     // Phones keep Mode in More; the desktop prompt shows it as the permission pill (desktop redesign).
     if (width <= 768) assert.equal(await js("document.getElementById('chat-permission-mode').getClientRects().length > 0"), true, 'Permission mode stays visible in More');
     else assert.equal(await js("document.getElementById('chat-permission-pill').getClientRects().length > 0 && document.getElementById('overflow-menu').contains(document.getElementById('chat-openmic'))"), true, 'Desktop shows the permission pill, with Open Mic in the + menu');
-    assert.equal(await js("(() => {const m=document.getElementById('overflow-menu').getBoundingClientRect(), b=document.getElementById('chat-openmic'), r=b.getBoundingClientRect();return m.width<=230 && m.height<=320 && (b.hidden || r.height<=44.1);})()"), true, 'More is compact and Open Mic stays one row');
+    // 2026-11-10: was `height <= 320`, set when the phone menu had six rows. Version 2.2.1 (d05ad085, 5a0741d9)
+    // made Mode and Dictate rows of their own, so the phone menu has seven rows (341 px). Compact now means what
+    // the cap stood for: narrow, at most two thirds of the screen, every visible row one line of text, all on screen.
+    assert.deepEqual(await js(`(() => {
+      const menu = document.getElementById('overflow-menu'), m = menu.getBoundingClientRect(), b = document.getElementById('chat-openmic'), r = b.getBoundingClientRect();
+      const rows = [...menu.querySelectorAll('.overflow-menu-item, .chat-permission-control, .chat-openmic-btn, .composer-extra-tools > summary')]
+        .filter(n => n.getClientRects().length && !n.closest('details:not([open]) > :not(summary)'));
+      // A label that wraps lays out as more than one line box (one client rect per line of a text node).
+      const tall = n => { const w = document.createTreeWalker(n, NodeFilter.SHOW_TEXT); const t = document.createRange();
+        for (let x = w.nextNode(); x; x = w.nextNode()) { if (!x.textContent.trim() || x.parentElement.closest('select')) continue;
+          t.selectNodeContents(x); if (t.getClientRects().length > 1) return true; }
+        return n.getBoundingClientRect().height > 56; };
+      const problems = [];
+      if (m.width > 230) problems.push('menu is ' + Math.round(m.width) + 'px wide');
+      if (m.top < 0 || m.bottom > innerHeight) problems.push('menu runs off screen: ' + Math.round(m.top) + '..' + Math.round(m.bottom) + ' of ' + innerHeight);
+      // Its CSS lets a long menu scroll (desktop min(520px, 64dvh), phone min(55dvh, 420px)); it stays a menu, not a sheet.
+      if (m.height > Math.min(420, innerHeight * 0.64)) problems.push('menu is ' + Math.round(m.height) + 'px tall');
+      if (rows.length < 5) problems.push('only ' + rows.length + ' rows');
+      for (const n of rows.filter(tall)) problems.push('row wraps: ' + n.textContent.trim().slice(0, 30) + ' ' + Math.round(n.getBoundingClientRect().height) + 'px');
+      if (!b.hidden && r.height > 44.1) problems.push('Open Mic is ' + Math.round(r.height) + 'px tall');
+      return problems;
+    })()`), [], `${label}: More is compact (narrow, one-line rows, fully on screen) and Open Mic stays one row`);
     await click(width <= 768 ? '.chat-permission-control' : '#overflow-menu .overflow-menu-heading');
     assert.equal(await js("!document.getElementById('overflow-menu').classList.contains('hidden')"), true, 'Clicks inside More do not dismiss it');
     if (width <= 768) {

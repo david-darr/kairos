@@ -1,22 +1,28 @@
 // A07 (Part 2, group g3): run with `ui-smoke.cjs --g3-only`.
 // 1. Runs the two Agents modules that otherwise live only in the default run
 //    (phone 44px/overflow audit, appearance contrast on every bot surface).
-// 2. Benchmarks the village: mount time, frame time while agents walk, and
-//    idle request count on the Agents tab. Numbers go to result.json and stdout.
+// 2. A bot notification click opens that bot, and the idle request count on the
+//    Agents entry (the Bots home). Numbers go to result.json and stdout.
 const assert = require('node:assert/strict');
+const { isolateBotsCheck } = require('./bots-check-support.cjs');
 
-module.exports = async ({ js, waitFor, delay, navigate, win, capture, reads, demoState, inbox }) => {
+module.exports = async ({ js, waitFor, delay, navigate, win, capture, reads, demoState, base, inbox }) => {
   const bench = {};
   let t = Date.now();
-  await require('./agents-phone-checks.cjs')({ js, waitFor, delay, navigate, win });
+  // 2026-11-10: both modules isolate the Bots fixture store and reload the page, so they need demoState and base.
+  await require('./agents-phone-checks.cjs')({ js, waitFor, delay, navigate, win, demoState, base });
   bench.phoneAuditMs = Date.now() - t;
   t = Date.now();
-  await require('./agents-appearance-checks.cjs')({ js, waitFor, navigate, capture, win });
+  await require('./agents-appearance-checks.cjs')({ js, waitFor, navigate, capture, win, demoState, base, delay });
   bench.appearanceMs = Date.now() - t;
   win.setContentSize(1440, 900);
   await delay(200);
 
-  // A notification click opens the right agent's thread (app.js botInboxWatcher -> jarvis:navigate).
+  // A notification click opens the right bot (app.js botInboxWatcher -> jarvis:navigate). The Bots shell it opens
+  // reads the live Bots fixtures, so this part runs isolated like every Bots check (bots-check-support.cjs).
+  const restoreBots = await isolateBotsCheck({ js, demoState });
+  await win.loadURL(base);
+  await waitFor("!!document.querySelector('.dashboard-core')");
   await navigate('home');
   await js(`window.g3Notes = []; window.g3RealNotification = window.Notification;
     window.Notification = class { constructor(title, o) { this.title = title; this.o = o; this.closed = false; window.g3Notes.push(this); } close() { this.closed = true; } };
@@ -28,9 +34,10 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, reads, dem
     await waitFor("window.g3Notes.length === 1");
     assert.equal(await js("window.g3Notes[0].title"), 'Archivist needs you');
     assert.equal(await js("window.g3Notes[0].o.tag"), 'kairos-bot-a2');
-    assert.equal(await js("document.querySelector('.agents-messenger')?.dataset.agentId || null"), null, 'the thread is not open before the click');
+    // Since the Bots migration a click opens the bot in the Bots shell (app.js: jarvis:navigate to botsShell).
+    assert.equal(await js("document.querySelector('.bots-shell')?.dataset.agentId || null"), null, 'the bot is not open before the click');
     await js("window.g3Notes[0].onclick()");
-    await waitFor("document.querySelector('.agents-messenger')?.dataset.agentId === 'a2'");
+    await waitFor("document.documentElement.dataset.view === 'botsShell' && document.querySelector('.bots-shell')?.dataset.agentId === 'a2'");
     assert.equal(await js("window.g3Notes[0].closed"), true, 'the notification closes on click');
     // The same item polled again does not notify twice.
     await js("document.dispatchEvent(new CustomEvent('jarvis:agents-changed'))"); await delay(400);
@@ -38,48 +45,17 @@ module.exports = async ({ js, waitFor, delay, navigate, win, capture, reads, dem
   } finally {
     inbox.splice(inbox.indexOf(item), 1);
     await js("window.Notification = window.g3RealNotification; void 0");
+    await restoreBots();
   }
 
-  // Village frame time: N agents all on a task (so every one commutes), measured with requestAnimationFrame.
-  await navigate('agents');
-  await waitFor("!!document.querySelector('#agents-ecosystem-tab')");
-  for (const count of [24, 100]) {
-    const result = await js(`import('/static/js/agentEcosystem.js').then(async ({mountAgentEcosystem}) => {
-      const host = document.createElement('section'); host.className = 'agent-ecosystem';
-      host.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#fff';
-      document.body.append(host);
-      const map = mountAgentEcosystem(host, () => {}, () => {}); map.reveal();
-      const places = ['CS homework quiz', 'Debug Python code', 'Deploy database server', 'Read research papers', 'Design a video', 'Review email inbox'];
-      const agents = Array.from({length: ${count}}, (_, i) => ({id: 'bench-' + i, name: 'Agent ' + i, role: 'Software developer',
-        status: 'working', enabled: true, status_detail: places[i % places.length]}));
-      const frames = async ms => { const d = []; let l = performance.now(); const e = l + ms;
-        await new Promise(resolve => { const tick = now => { d.push(now - l); l = now; now < e ? requestAnimationFrame(tick) : resolve(); }; requestAnimationFrame(tick); }); d.shift(); return d; };
-      const baseline = await frames(1000);  // the window's own rAF rate with nothing mounted work-wise
-      const teams = Array.from({length: Math.ceil(${count} / 8)}, (_, i) => ({id: 'bt-' + i, name: 'Team ' + i, state: 'active'}));
-      map.update({agents: agents.map(a => ({...a, status: 'idle'})), teams});
-      await new Promise(r => setTimeout(r, 300));
-      const started = performance.now();
-      map.update({agents, teams});
-      const mount = performance.now() - started;
-      await new Promise(r => setTimeout(r, 500));
-      const deltas = await frames(3000);
-      const sorted = [...deltas].sort((a, b) => a - b);
-      const walking = host.querySelectorAll('[data-motion=walking]').length;
-      const characters = host.querySelectorAll('.ecosystem-character').length;
-      map.destroy(); host.remove();
-      return {baselineMeanMs: baseline.reduce((a, b) => a + b, 0) / baseline.length, mountMs: mount, frames: deltas.length, meanMs: deltas.reduce((a, b) => a + b, 0) / deltas.length,
-        p95Ms: sorted[Math.floor(sorted.length * .95)], maxMs: sorted[sorted.length - 1],
-        over50: deltas.filter(d => d > 50).length, walking, characters};
-    })`);
-    assert.equal(result.characters, count, `${count} characters render`);
-    assert.ok(result.walking > 0, `${count} agents: some are actually walking (${result.walking})`);
-    assert.ok(result.frames > 20, `${count} agents: animation frames are produced (${result.frames})`);
-    bench['village' + count] = Object.fromEntries(Object.entries(result).map(([k, v]) => [k, Math.round(v * 10) / 10]));
-  }
+  // The village frame-time benchmark is retired (2026-11-10): Bots Phase 1 (unit U4) removed the village screen.
+  // agentEcosystem.js is loaded only by agentsMessenger.js, which nothing imports, and agents-ecosystem-checks.cjs
+  // proves no village appears. Benchmarking it measured code no user can reach.
 
-  // Idle: nothing working, village open, 6 seconds. Count API reads (a poll that spins burns CPU and tokens downstream).
+  // Idle: nothing working, the Agents entry open (now the Bots home), 6 seconds. Count API reads (a poll that
+  // spins burns CPU and tokens downstream).
   await navigate('agents');
-  await js("document.querySelector('#agents-ecosystem-tab')?.click()");
+  await waitFor("document.getElementById('view-content').dataset.view === 'botsHome'");
   await delay(1000);
   const before = reads.length;
   await delay(6000);
