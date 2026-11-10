@@ -9,8 +9,18 @@ Publisher's direct YouTube upload only ever sends a post the person approved, th
 
 The daily cycle, one tool per step: Researcher add_topic (and propose_niche, youtube_trending), Evaluator
 pick_topic, Script Writer save_script (with the shot plan and sources), Editor record_render then submit_post, the
-person approves, Publisher publish_youtube or mark_posted, Executor record_metrics and run_review, Producer watch,
-confirm and send_report.
+person approves, Publisher prepare_post (then publish_youtube, or the person posts from the upload page Kairos filled)
+and mark_posted, Executor record_metrics and run_review, Producer watch, confirm and send_report.
+
+Prepare post (services/content_studio/prepare.py): the Publisher or Producer assembles an approved post for its platform
+(the file in the platform's aspect from the editor's exports, title, description with chapters, hashtags, the AI label,
+the cover, the schedule and a checklist). No tool opens the upload page or presses Post: the person presses Open upload
+page in Studio > Content > Publishing, Kairos fills the page in the person's own Browse tab and stops before the final
+button, which only the person presses. Bots never work in the person's own tabs (Kairos Browser D1).
+
+Page-read analytics (services/content_studio/page_reads.py): content_studio_read_analytics asks Kairos to read the due
+TikTok or Instagram posts' numbers from the person's own signed-in creator pages, only when the person turned that on,
+within its rate limits. The bot gets the numbers stored, never the page.
 
 Formats (Video Styles build spec section 2): the Researcher writes format cards (save_format) and port proposals
 (propose_port: a proven format from another niche into ours, with what changes); the Evaluator checks a port (audience
@@ -46,7 +56,8 @@ from urllib.parse import urlsplit
 
 from core.tool_registry import READ, WRITE, register
 from core.untrusted import wrap_untrusted
-from services.content_studio import StudioError, delivery, formats, pipeline, policy, review, studio, team, youtube, youtube_publish
+from services.content_studio import (StudioError, delivery, formats, page_reads, pipeline, policy, prepare, publishing, review,
+                                     studio, team, youtube, youtube_publish)
 
 
 def _obj(properties, required=()):
@@ -428,6 +439,47 @@ async def _publish(args, ctx, bot, role):
     return _data(ctx, "content studio upload", {k: result[k] for k in ("video_id", "url", "privacy", "asked_privacy")}) + note
 
 
+def _prepare(args, ctx, bot, role):
+    prep = prepare.prepare(studio, args["post_id"], bot["name"], args.get("schedule_at"))
+    package = prep["package"]
+    shown = {"post_id": prep["post_id"], "platform": package["platform_name"], "state": prep["state"], "routes": package["routes"],
+             "file": package["file"], "text": package["text"], "hashtags": package["hashtags"], "ai_label": package["ai_label"]["name"],
+             "cover": package["cover"].get("file"), "scheduled_at": prep["scheduled_at"], "problems": package["problems"],
+             "checklist": [f"[{c['by']}] {c['text']}" for c in package["checklist"]]}
+    if package["problems"]:
+        tail = " It cannot go out as it is: tell the Producer the problem; the fix is the team's (a new render or a redraft)."
+    elif "api" in package["routes"]:
+        tail = (" Ready. You may post it with content_studio_publish_youtube, or the person presses Open upload page in Studio > Content > "
+                "Publishing. Tell the Producer it is ready.")
+    else:
+        tail = (" Ready, and the person has been told. Only the person opens the upload page (Studio > Content > Publishing): Kairos fills it "
+                f"and stops before {package['post_button']}, which the person presses. Record the live link with content_studio_mark_posted "
+                "when they give it to you.")
+    return _data(ctx, "content studio prepared post", shown) + tail
+
+
+def _publishing(args, ctx, bot, role):
+    board = publishing.dashboard(studio)
+    wanted = args.get("state")
+    rows = [{k: item[k] for k in ("post_id", "title", "platform", "handle", "state", "scheduled_at", "posted_url", "next", "problems", "error")}
+            for item in board["items"] if not wanted or item["state"] == wanted][:100]
+    return _data(ctx, "content studio publishing", {"counts": board["counts"], "items": rows})
+
+
+async def _read_analytics(args, ctx, bot, role):
+    platform = args["platform"]
+    if not studio.settings()["page_reads"].get(platform):
+        return (f"Not run: the person has not turned on page reads for {platform}. Ask them to turn it on in Studio > Content > "
+                "Channels, or import the numbers (CSV) instead.")
+    summary = await page_reads.read_due(studio, platform, limit=3)
+    reasons = {"off": "page reads are off", "signed_out": "the person is signed out of it in the Kairos Browser; ask them to sign in",
+               "page_changed": "several reads in a row found no numbers, so the page may have changed; the person presses Try again after checking",
+               "daily_limit": "today's page reads are used up", "unavailable": "the Kairos desktop app is not open"}
+    note = f" Stopped: {reasons.get(summary['stopped'], summary['stopped'])}." if summary["stopped"] else ""
+    return (_data(ctx, "content studio page reads", {**summary, "note": page_reads.NOTE}) + note +
+            " Stored numbers are marked page-read in the scoring record.")
+
+
 def _propose_niche(args, ctx, bot, role):
     decision = review.propose_niche(studio, args["name"], args["source"], args.get("signal", ""), args.get("reason", ""),
                                     proposed_by=bot["name"])
@@ -663,12 +715,30 @@ _add("content_studio_record_render", "Editor: record the render of a scripted po
      _obj({"post_id": _int(), "status": {"type": "string", "enum": ["ok", "failed"]}, "render_ref": _str(500), "tags": _str(500),
            "caption": _str(5000), "thumbnail": _str(300, "What the thumbnail shows, in a sentence")}, ("post_id", "status")),
      WRITE, ("editor",), _render)
-_add("content_studio_mark_posted", "Publisher: record the live link of an approved post the person posted (Prepare post), so its numbers can be tracked. "
+_add("content_studio_mark_posted", "Publisher: record the live link of an approved post the person posted from the page Kairos prepared, so its numbers can be tracked. "
      "The link must be the https link on the post's own platform.",
      _obj({"post_id": _int(), "url": _str(500)}, ("post_id", "url")), WRITE, ("publisher",), _posted)
 _add("content_studio_publish_youtube", "Publisher: upload an approved YouTube post exactly as approved, with the AI label, through the person's own "
-     "connected Google project, and record its link. Only works when the person connected YouTube posting. YouTube may keep it private.",
+     "connected Google project, and record its link. Only works when the person connected YouTube posting. YouTube may keep it private. "
+     "A schedule set on the prepared post becomes YouTube's scheduled publish.",
      _obj({"post_id": _int()}, ("post_id",)), WRITE, ("publisher",), _publish)
+_add("content_studio_prepare_post", "Publisher or Producer: prepare an approved post for its platform: the file in the platform's aspect and length "
+     "(the editor's export of the approved version, 9:16 for Shorts, Reels and TikTok), the title, the description with YouTube chapters, "
+     "hashtags within the platform's count, the platform's AI-content label (always on), the thumbnail or cover, the schedule and a "
+     "checklist of what Kairos fills and what the person does. It never posts: the person opens the upload page from Studio > Content > "
+     "Publishing and presses Post themselves (or you post a YouTube post with content_studio_publish_youtube when posting is connected).",
+     _obj({"post_id": _int(), "schedule_at": {"type": "number", "description": "Unix time the post should go out; leave out for as soon as the person posts it"}},
+          ("post_id",)), WRITE, ("publisher", "producer"), _prepare)
+_add("content_studio_publishing", "Read the publishing dashboard: every post with its state (drafted, awaiting_approval, approved, prepared, "
+     "waiting_for_you, posted, failed, rejected), its schedule, its live link and the next action.",
+     _obj({"state": {"type": "string", "enum": ["drafted", "awaiting_approval", "approved", "prepared", "waiting_for_you", "posted", "failed", "rejected"]}}),
+     READ, ANY, _publishing)
+_add("content_studio_read_analytics", "Producer, Publisher or Executor: read the due TikTok or Instagram posts' numbers (views, watch time, likes, "
+     "comments, shares, follows) from the person's own signed-in creator pages in the Kairos Browser, read-only, into the scoring record as "
+     "page-read snapshots. Only when the person turned page reads on for that platform; at most 3 pages a call, 20 seconds apart, 40 a day, each "
+     "post once in 20 hours. It may break when a platform changes its page. YouTube's numbers come from its own analytics instead.",
+     _obj({"platform": {"type": "string", "enum": ["tiktok", "instagram"]}}, ("platform",)),
+     WRITE, ("producer", "publisher", "executor"), _read_analytics)
 _add("content_studio_propose_niche", "Researcher: propose a candidate new niche (for example to replace a retired one), with its source and signal. "
      "The Producer confirms it and the person decides; nothing is created until they do.",
      _obj({"name": _str(80), "source": _str(300, "Where the evidence is"), "signal": _str(300, "What is rising and by how much"),

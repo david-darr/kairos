@@ -78,8 +78,8 @@ export function groupChannels(niches, channels) {
 
 export function aiLabel(platform) {
   return platform === 'youtube' || platform === 'tiktok'
-    ? { required: true, text: `${platformName(platform)} needs the AI-content label. The Editor sets it when it prepares the post.` }
-    : { required: false, text: `${platformName(platform)} does not need an AI-content label here.` };
+    ? { required: true, text: `${platformName(platform)} needs the AI-content label. Prepare post turns it on.` }
+    : { required: false, text: `${platformName(platform)} does not require one here; Prepare post turns on its AI label anyway.` };
 }
 
 // A render reference is a link, a Studio video id, or free text from the Editor.
@@ -206,7 +206,7 @@ export function syncText(result) {
 export const PRIVACY = [['private', 'Private'], ['unlisted', 'Unlisted'], ['public', 'Public']];
 
 export function postingText(status) {
-  if (!status?.connected) return 'Post approved YouTube posts through your own Google project. Optional: Prepare post stays the default.';
+  if (!status?.connected) return 'Post approved YouTube posts through your own Google project. Optional: Prepare post stays the default (Publishing).';
   return status.google_account?.email ? `As ${status.google_account.email}.` : 'Connected.';
 }
 
@@ -547,4 +547,103 @@ export function packOptions(available) {
 export function clock(seconds) {
   const t = Math.floor(Number(seconds) || 0), two = n => String(n).padStart(2, '0');
   return t >= 3600 ? `${Math.floor(t / 3600)}:${two(Math.floor(t % 3600 / 60))}:${two(t % 60)}` : `${two(Math.floor(t / 60))}:${two(t % 60)}`;
+}
+
+// -- the publishing dashboard (Studio > Content > Publishing; services/content_studio/publishing.py) ----------------
+export const PUBLISH_STATES = [['drafted', 'Drafted'], ['awaiting_approval', 'Waiting for your approval'], ['approved', 'Approved'],
+  ['prepared', 'Prepared'], ['waiting_for_you', 'Waiting for you to press Post'], ['posted', 'Posted'], ['failed', 'Failed'], ['rejected', 'Rejected']];
+const STATE_TONES = { drafted: 'muted', awaiting_approval: 'warn', approved: 'accent', prepared: 'accent', waiting_for_you: 'warn',
+  posted: 'ok', failed: 'error', rejected: 'muted' };
+export const stateLabel = state => (PUBLISH_STATES.find(s => s[0] === state) || [state, state])[1];
+export const stateTone = state => STATE_TONES[state] || 'muted';
+export const POST_BUTTONS = { youtube: 'Publish', tiktok: 'Post', instagram: 'Share' };
+export const FILL_NAMES = { file: 'Video', title: 'Title', description: 'Description', caption: 'Caption', tags: 'Tags', ai_label: 'AI label',
+  made_for_kids: 'Audience', thumbnail: 'Thumbnail' };
+
+// The states that have posts, in order, for the filter row.
+export function stateCounts(counts = {}) {
+  return PUBLISH_STATES.filter(([id]) => counts[id]).map(([id, label]) => ({ id, label, count: counts[id] }));
+}
+
+export function filterItems(items, state) {
+  return state && state !== 'all' ? items.filter(i => i.state === state) : items;
+}
+
+const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const two = n => String(n).padStart(2, '0');
+
+// Seconds of local midnight `days` after the day `at` falls on (calendar days, so a clock change never shifts a column).
+export function addDays(at, days) {
+  const d = new Date(at * 1000);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + days).getTime() / 1000;
+}
+export function weekOf(at) {
+  const d = new Date(at * 1000);
+  return addDays(at, -((d.getDay() + 6) % 7));
+}
+export function weekDays(weekStart) {
+  return DAY_NAMES.map((name, i) => { const at = addDays(weekStart, i); const d = new Date(at * 1000); return { at, name, label: `${name} ${d.getDate()} ${MONTHS[d.getMonth()]}` }; });
+}
+export function weekLabel(weekStart, thisWeek) {
+  const d = new Date(weekStart * 1000), end = new Date(addDays(weekStart, 6) * 1000);
+  const span = `${d.getDate()} ${MONTHS[d.getMonth()]} to ${end.getDate()} ${MONTHS[end.getMonth()]}`;
+  return weekStart === thisWeek ? `This week, ${span}` : `Week of ${span}`;
+}
+// The week's items, one list per day, earliest first.
+export function itemsByDay(items, weekStart) {
+  const days = weekDays(weekStart).map(d => d.at), end = addDays(weekStart, 7);
+  return days.map((start, i) => items.filter(item => item.when >= start && item.when < (i < 6 ? days[i + 1] : end)).sort((a, b) => a.when - b.when));
+}
+export function timeText(at) {
+  const d = new Date(at * 1000);
+  return `${DAY_NAMES[(d.getDay() + 6) % 7]} ${d.getDate()} ${MONTHS[d.getMonth()]}, ${two(d.getHours())}:${two(d.getMinutes())}`;
+}
+export function whenText(item) {
+  if (item.posted_at) return `Posted ${timeText(item.posted_at)}`;
+  if (item.scheduled_at) return `Scheduled for ${timeText(item.scheduled_at)}`;
+  if (item.approved_at) return `Approved ${timeText(item.approved_at)}, not scheduled`;
+  return `Made ${timeText(item.created_at)}`;
+}
+export function nextText(next) {
+  if (!next) return '';
+  return `${next.who === 'you' ? 'You' : 'Team'}: ${next.what}`;
+}
+// What the fill did on the page, in words.
+export function fillText(fill) {
+  if (!fill || !fill.stage) return '';
+  const names = keys => (keys || []).map(k => FILL_NAMES[k] || k).join(', ');
+  const parts = [];
+  if (fill.filled?.length) parts.push(`Kairos filled: ${names(fill.filled)}.`);
+  if (fill.missing?.length) parts.push(`Not found on the page, do these yourself: ${names(fill.missing)}.`);
+  if (fill.stage === 'stopped' && fill.note) parts.push(`Stopped: ${fill.note}.`);
+  return parts.join(' ');
+}
+// <input type=datetime-local> value for a time, and back.
+export function scheduleValue(at) {
+  if (!at) return '';
+  const d = new Date(at * 1000);
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}T${two(d.getHours())}:${two(d.getMinutes())}`;
+}
+export function parseSchedule(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value || '');
+  if (!match) return null;
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5])).getTime() / 1000;
+}
+export function prepareText(prep) {
+  const pkg = prep?.package || {};
+  if (pkg.problems?.length) return `Prepared with a problem: ${pkg.problems[0]}`;
+  return `Prepared for ${pkg.platform_name || 'its platform'}. ${pkg.routes?.includes('api') ? 'Post to YouTube, or open the upload page.' : 'Open the upload page when you are ready.'}`;
+}
+
+// -- page-read analytics (TikTok and Instagram) ----------------------------------------------------------------
+const READ_STATUS = { ok: 'read', signed_out: 'signed out', not_yours: 'not this channel\'s page', parse_failed: 'no numbers found',
+  failed: 'could not read', unavailable: 'desktop app closed' };
+export function pageReadText(p) {
+  if (!p) return '';
+  if (!p.on) return `Off. Turn it on to read ${p.name} numbers from your own signed-in pages in the Kairos Browser.`;
+  if (p.paused === 'signed_out') return `Paused: you are signed out of ${p.name} in the Kairos Browser. Sign in there; reading resumes within six hours.`;
+  if (p.paused === 'page_changed') return `Paused: several reads in a row found no numbers, so ${p.name} may have changed its page. Check a post's analytics page, then press Try again.`;
+  const last = p.last ? ` Last read ${timeText(p.last.at)} (${READ_STATUS[p.last.status] || p.last.status}).` : ' Nothing read yet.';
+  return `On. ${p.reads_today} of ${p.max_per_day} page reads today.${last}`;
 }

@@ -43,6 +43,35 @@ async function browsePasswordBackend(route, body) {
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return response.json();
 }
+// Content Studio's Prepare post (studio-prepare.js): the person pressed Open upload page for an approved post.
+// The fill plan (with the video's local path) comes from a desktop-only route; the page opens in a Browse tab on
+// the person's own sign-in, and the fill runs there, stopping before the platform's final button.
+const studioPrepare = require("./studio-prepare");
+const studioPages = require("./studio-pages");
+async function studioDesktop(path, body) {
+  const response = await session.defaultSession.fetch(`${BACKEND_URL}/api/content-studio/desktop/${path}`, {
+    method: "POST", headers: { "Content-Type": "application/json", "X-Kairos-Desktop": DESKTOP_SECRET },
+    body: JSON.stringify(body || {}), redirect: "error", signal: AbortSignal.timeout(15000),
+  });
+  const answer = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(typeof answer.detail === "string" ? answer.detail : `HTTP ${response.status}`);
+  return answer;
+}
+async function preparePost(browse, prepId) {
+  if (!DESKTOP_SECRET) return { ok: false, reason: "Open upload page needs the Kairos desktop app." };
+  let plan;
+  try { plan = await studioDesktop(`prepared/${prepId}`); } catch (err) { return { ok: false, reason: err.message }; }
+  if (!studioPrepare.hostAllowed(plan.platform, plan.upload_url)) return { ok: false, reason: "That upload page is not on the platform's own site." };
+  const opened = browse.tabs.open(plan.upload_url);
+  if (!opened || !opened.ok) return { ok: false, reason: (opened && opened.reason) || "Browse could not open the upload page." };
+  const wc = browse.tabs.webContentsOf(opened.id);
+  if (!wc) return { ok: false, reason: "Browse could not open the upload page." };
+  studioPrepare.run({ wc, plan,
+    report: (body) => studioDesktop(`prepared/${prepId}/report`, body),
+    notify: (payload) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("browse:prepare-progress", payload); },
+  }).catch((err) => console.error(`[prepare] ${err.message}`));
+  return { ok: true, tabId: opened.id, platform: plan.platform };
+}
 let browseReservedPorts = null;
 const browseProfiles = createBrowseProfiles({
   // The window's own sign-in cookie names the account; the page can't choose.
@@ -585,6 +614,8 @@ async function createWindow() {
     })
     .catch(() => {});
   if (RENDER_TOKEN) designRender.start({ backendUrl: BACKEND_URL, token: RENDER_TOKEN });
+  // Content Studio's page-read analytics: the backend's jobs, read-only, in hidden windows on the account's Browse profile.
+  if (RENDER_TOKEN) studioPages.start({ backendUrl: BACKEND_URL, token: RENDER_TOKEN });
   await win.loadURL(BACKEND_URL);
   if (process.platform === "win32" && !screenGrab) {
     screenGrab = installScreenGrab({
@@ -718,7 +749,7 @@ ipcMain.handle("google:open-sign-in", async (event, url) => {
 });
 
 // Browse's channels (browser-ipc.js): app window only, arguments checked there.
-installBrowseIpc({ ipcMain, fromAppWindow, getBrowse: () => browseProfiles.get(), resolveBrowse: () => browseProfiles.resolve(),
+installBrowseIpc({ ipcMain, fromAppWindow, getBrowse: () => browseProfiles.get(), resolveBrowse: () => browseProfiles.resolve(), preparePost,
   // Import a password CSV into the signed-in account (cookie-only route).
   importPasswords: () => importBrowsePasswords({ dialog, fs, shell, parent: mainWindow,
     post: async (csv) => {
@@ -901,6 +932,7 @@ app.on("before-quit", (event) => {
   sideBrowser.close();
   forgePreview.close();
   designRender.stop();
+  studioPages.stop();
   if (usageOverlay && !usageOverlay.isDestroyed()) usageOverlay.destroy();
   stopBackend();
 });

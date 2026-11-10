@@ -506,6 +506,7 @@ async def _tick() -> None:
             except Exception:
                 logger.exception("scheduler: the pass for account %s failed", account_id)
     _youtube_daily(loop)
+    _page_reads_due(loop)
     _check_mcp_servers(loop)
     try:
         from services.bot_keep_warm import tick
@@ -528,6 +529,23 @@ def _youtube_daily(loop) -> None:
     _youtube["last"] = clock.time()
     from services.content_studio import youtube
     _youtube["task"] = loop.create_task(youtube.sync_all_due())
+
+
+_page_reads = {"task": None, "last": 0.0}
+
+
+def _page_reads_due(loop) -> None:
+    """Content Studio's page-read analytics (TikTok and Instagram, read-only from the person's own signed-in pages):
+    every half hour look at each account that turned it on; each post is still read at most once in 20 hours, and only
+    while the desktop app is open (services/content_studio/page_reads.py has the limits)."""
+    import time as clock
+    from services.content_studio import page_reads
+    running = _page_reads["task"]
+    if (running is not None and not running.done()) or clock.time() - _page_reads["last"] < page_reads.LOOK_EVERY_S:
+        return
+    _page_reads["last"] = clock.time()
+    if page_reads.available():
+        _page_reads["task"] = loop.create_task(page_reads.read_all_due())
 
 
 async def _tick_account(loop, account_id: str) -> None:

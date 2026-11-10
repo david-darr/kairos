@@ -49,6 +49,8 @@ BY_DESIGN = {
     "/api/videos/{video_id}/assets/{name}": "content-addressed and immutable, like design assets; the render window sends no session",
     "/api/design-render/jobs": "Electron render worker; _worker() checks its own credential",
     "/api/design-render/result/{job_id}": "same",
+    "/api/content-studio/page-reads/jobs": "Electron page-read worker (Content Studio); _worker() checks the same render token",
+    "/api/content-studio/page-reads/result/{job_id}": "same",
     "/api/cli/local-path": "paired Kairos CLI on loopback; checks inside the handler (422 here is body validation first)",
 }
 # Add-on gate runs as a router dependency BEFORE the auth dependency, so an

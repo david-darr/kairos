@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Instagram (mock)</title>
+<style>body{font:14px sans-serif;margin:20px} [hidden]{display:none!important} [contenteditable]{border:1px solid #888;min-height:40px;padding:4px;white-space:pre-wrap}</style>
+<script src="/recorder.js"></script></head>
+<body>
+<nav>Instagram (local mock page) <a href="#create" id="create" role="link" aria-label="New post">Create</a> <span>space.kairos</span></nav>
+<div id="modal" role="dialog" hidden></div>
+<script>
+  // The Create dialog is built when the person presses Create, as on the real site.
+  document.getElementById('create').addEventListener('click', (event) => {
+    event.preventDefault();
+    const modal = document.getElementById('modal');
+    modal.hidden = false;
+    modal.innerHTML = `
+      <section id="step-select"><h2>Create new post</h2><form enctype="multipart/form-data" method="post" role="presentation">
+        <input type="file" accept="image/jpeg,image/png,video/mp4,video/quicktime" multiple hidden></form><button type="button">Select from computer</button></section>
+      <section id="step-crop" hidden><h2>Crop</h2><button type="button" class="next" data-final>Next</button></section>
+      <section id="step-edit" hidden><h2>Edit</h2><button type="button" class="next" data-final>Next</button></section>
+      <section id="step-caption" hidden><h2>New reel</h2>
+        <div aria-label="Write a caption..." contenteditable="true" role="textbox"></div>
+        <div class="advanced"><h3>Advanced settings</h3><label><input type="checkbox" id="ai-label"> Add AI label</label>
+          <p>We require you to label certain realistic content that's made with AI.</p></div>
+        <button type="button" id="share" data-final>Share</button></section>`;
+    const input = modal.querySelector('input[type=file]');
+    input.addEventListener('change', () => { modal.querySelector('#step-select').hidden = true; modal.querySelector('#step-crop').hidden = false; });
+    const [crop, edit] = modal.querySelectorAll('.next');
+    crop.addEventListener('click', () => { modal.querySelector('#step-crop').hidden = true; modal.querySelector('#step-edit').hidden = false; });
+    edit.addEventListener('click', () => { modal.querySelector('#step-edit').hidden = true; modal.querySelector('#step-caption').hidden = false; });
+  });
+</script>
+</body></html>

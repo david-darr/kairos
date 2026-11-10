@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Channel content - YouTube Studio (mock)</title>
+<style>body{font:14px sans-serif;margin:20px} [hidden]{display:none!important} [contenteditable]{border:1px solid #888;min-height:24px;padding:4px;white-space:pre-wrap} [role=radio]{display:inline-block;border:1px solid #888;padding:2px 8px;margin:2px;cursor:pointer} [aria-checked=true]{background:#cde} .chip{display:inline-block;background:#eee;margin:2px;padding:1px 6px}</style>
+<script src="/recorder.js"></script></head>
+<body>
+<header>YouTube Studio (local mock page) <span class="account">@space.kairos</span></header>
+<ytcp-uploads-dialog>
+  <section id="select"><h1>Upload videos</h1>
+    <ytcp-uploads-file-picker><input type="file" name="Filedata" accept="video/*" hidden><button type="button" id="select-files">Select files</button></ytcp-uploads-file-picker>
+  </section>
+  <form id="details" hidden>
+    <h2>Details</h2>
+    <div id="title-textarea"><label id="t-label">Title (required)</label><div id="textbox" contenteditable="true" aria-labelledby="t-label"></div></div>
+    <div id="description-textarea"><label id="d-label">Description</label><div id="textbox" contenteditable="true" aria-labelledby="d-label"></div></div>
+    <div>Thumbnail <input id="file-loader" type="file" accept="image/jpeg,image/png" hidden><button type="button">Upload thumbnail</button></div>
+    <div id="audience"><h3>Audience</h3><div role="radiogroup">
+      <tp-yt-paper-radio-button name="VIDEO_MADE_FOR_KIDS_MFK" role="radio" aria-checked="false">Yes, it's made for kids</tp-yt-paper-radio-button>
+      <tp-yt-paper-radio-button name="VIDEO_MADE_FOR_KIDS_NOT_MFK" role="radio" aria-checked="false">No, it's not made for kids</tp-yt-paper-radio-button>
+    </div></div>
+    <div id="altered"><h3>Altered content</h3><p>Do any of the following describe your content? Makes a real person appear to say or do something; realistic synthetic scenes.</p>
+      <div role="radiogroup"><span role="radio" aria-checked="false" tabindex="0">Yes</span><span role="radio" aria-checked="false" tabindex="0">No</span></div></div>
+    <button type="button" id="show-more">Show more</button>
+    <section id="more" hidden>
+      <div id="tags-container"><label for="text-input">Tags</label><span id="chips"></span><input id="text-input" type="text" aria-label="Tags"></div>
+    </section>
+    <button type="button" class="next" data-final>Next</button>
+    <button type="submit" id="publish" data-final>Publish</button>
+  </form>
+</ytcp-uploads-dialog>
+<script>
+  const picker = document.querySelector('input[name=Filedata]');
+  picker.addEventListener('change', () => {
+    document.getElementById('select').hidden = true;
+    document.getElementById('details').hidden = false;
+    // YouTube puts the file's name in the title shortly after the upload starts.
+    setTimeout(() => { document.querySelector('#title-textarea #textbox').textContent = picker.files[0].name.replace(/\.[^.]+$/, ''); }, 300);
+  });
+  document.getElementById('show-more').addEventListener('click', () => { document.getElementById('more').hidden = false; });
+  const tagInput = document.getElementById('text-input');
+  tagInput.addEventListener('input', () => {
+    const parts = tagInput.value.split(',');
+    if (parts.length < 2) return;
+    for (const tag of parts.slice(0, -1)) if (tag.trim()) { const chip = document.createElement('span'); chip.className = 'chip'; chip.textContent = tag.trim(); document.getElementById('chips').append(chip); }
+    tagInput.value = parts.at(-1);
+  });
+  tagInput.addEventListener('change', () => { if (tagInput.value.trim()) { const chip = document.createElement('span'); chip.className = 'chip'; chip.textContent = tagInput.value.trim(); document.getElementById('chips').append(chip); tagInput.value = ''; } });
+</script>
+</body></html>

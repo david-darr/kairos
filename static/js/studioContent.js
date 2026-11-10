@@ -5,8 +5,11 @@ import { libraryShareButton } from './libraryShare.js';
 
 // The Content section of the Studio tab: channels, the pipeline board, approvals, the scoreboard, the weekly report
 // and the numbers import for the Content Studio team (routes/content_studio_routes.py). Drawn with the Settings kit
-// rows and pills. Approving only marks a post approved; preparing it for the platform comes with the Kairos Browser.
-// A YouTube post can also go out through the person's own Google project when they connect posting (Channels tab).
+// rows and pills. Approving marks a post approved; Publishing is the dashboard from draft to live link: Prepare post
+// assembles an approved post for its platform (services/content_studio/prepare.py), Open upload page has the desktop app
+// fill the platform's page in the Kairos Browser and stop before the final button, which the person presses. A YouTube
+// post can also go out through the person's own Google project when they connect posting (Channels tab). Channels also
+// holds the TikTok and Instagram page-read switches (read-only numbers from the person's own signed-in pages).
 // Formats shows the Researcher's format cards and the ports the Evaluator checked; the bots write them, this only reads.
 // Characters (Pack A) lists each character's versions with their reference sheets: a sheet waiting for you is also in
 // Approvals, and only you approve it (routes/character_routes.py). A video may only use an approved version.
@@ -18,7 +21,7 @@ import { libraryShareButton } from './libraryShare.js';
 // chapter list that goes into the YouTube description.
 
 const BASE = '/api/content-studio';
-const TABS = [['approvals', 'Approvals'], ['pipeline', 'Pipeline'], ['channels', 'Channels'], ['formats', 'Formats'], ['characters', 'Characters'], ['styles', 'Styles'], ['scoreboard', 'Scoreboard'], ['report', 'Report']];
+const TABS = [['approvals', 'Approvals'], ['publishing', 'Publishing'], ['pipeline', 'Pipeline'], ['channels', 'Channels'], ['formats', 'Formats'], ['characters', 'Characters'], ['styles', 'Styles'], ['scoreboard', 'Scoreboard'], ['report', 'Report']];
 const CHARACTERS = '/api/characters';
 const STYLES = '/api/style-packs';
 const sendTo = (path, body = {}) => api(path, { method: 'POST', body: JSON.stringify(body), toast: false });
@@ -84,7 +87,7 @@ export async function mountContent(host, { signal } = {}) {
   const alive = () => !disposed && root.isConnected;
 
   async function loadCore() {
-    const names = ['niches', 'channels', 'pipeline', 'approvals', 'watch', 'settings', 'analytics/youtube/status', 'posting/youtube/status'];
+    const names = ['niches', 'channels', 'pipeline', 'approvals', 'watch', 'settings', 'analytics/youtube/status', 'posting/youtube/status', 'publishing'];
     const [results, styles] = await Promise.all([Promise.allSettled(names.map(n => get('/' + n))), api(STYLES).catch(() => null)]);
     if (!alive()) return;
     if (results.every(r => r.status === 'rejected')) {
@@ -98,7 +101,7 @@ export async function mountContent(host, { signal } = {}) {
       plans: value('approvals', {}).plans || [],
       styles, findings: value('watch', { findings: [] }).findings,
       hasTeam: (value('settings', {}).team_bot_ids || []).length > 0, settings: value('settings', {}),
-      yt: value('analytics/youtube/status', null), ytPost: value('posting/youtube/status', null),
+      yt: value('analytics/youtube/status', null), ytPost: value('posting/youtube/status', null), pub: value('publishing', null),
       failed: names.filter((n, i) => results[i].status === 'rejected' && !n.includes('youtube')) };
     await draw();
   }
@@ -174,6 +177,8 @@ export async function mountContent(host, { signal } = {}) {
     const cap = data.maxLive ? ` At most ${data.maxLive} niches can be live at once.` : '';
     out.push(el('div', { class: 'sc-bar' }, [note('Channels you created. Kairos never creates accounts.' + cap), btn('Add a channel', () => addChannelDialog())]));
     out.push(youtubeGroup());
+    const reads = pageReadsGroup();
+    if (reads) out.push(reads);
     for (const { niche, channels } of M.groupChannels(data.niches, data.channels)) {
       const rows = channels.map(channelRow);
       if (!rows.length) rows.push(empty('No channels in this niche yet.'));
@@ -319,7 +324,9 @@ export async function mountContent(host, { signal } = {}) {
     if (post.state === 'awaiting_approval') actions.push(btn('Go to Approvals', () => { dialog.close(); select('approvals'); }, 'primary'));
     if (post.state === 'approved') {
       const link = textInput('Link to the live post', { placeholder: 'https://' });
-      actions.push(btn('Prepare post', () => {}, '', { disabled: true, title: 'Coming later' }));
+      const listed = data.pub?.items.find(i => i.post_id === post.id);
+      if (listed?.prep_id) actions.push(btn('Open in Publishing', () => { dialog.close(); select('publishing'); preparedDialog(listed); }, 'primary'));
+      else actions.push(btn('Prepare post', async () => { dialog.close(); await prepareItem({ post_id: post.id }); select('publishing'); }, 'primary'));
       if (post.platform === 'youtube' && !post.direct_post_blocker) {
         actions.push(btn('Post to YouTube', async () => {
           const privacy = data.ytPost?.privacy || 'private';
@@ -331,7 +338,7 @@ export async function mountContent(host, { signal } = {}) {
       } else if (post.platform === 'youtube' && post.direct_post_blocker) {
         parts.push(note(`Posting straight to YouTube: ${post.direct_post_blocker}`));
       }
-      parts.push(note('Prepare post is not built yet. For now, post it yourself, then paste the link here to mark it posted.'),
+      parts.push(note('Prepare post assembles it for its platform; Publishing opens the upload page and fills it for you. After you posted it, paste the link here to mark it posted.'),
         group({}, [row({ title: 'Mark as posted', description: 'Needed before you can import its numbers.', control: [link, btn('Mark posted', async () => {
           if (!link.value.trim()) { toast('Paste the link to the post.', 'error'); return; }
           await send(`/posts/${post.id}/posted`, { url: link.value.trim() }); dialog.close(); toast('Marked as posted.'); await reload();
@@ -365,6 +372,185 @@ export async function mountContent(host, { signal } = {}) {
         el('p', { class: 'sc-text' }, [pill(label.required ? 'Required' : 'Not needed', label.required ? 'accent' : 'muted'), ' ', label.text])])]);
   }
 
+  // -- publishing (Prepare post and the dashboard) -------------------------------------------------
+
+  // Open upload page: the desktop app opens the platform's page in a Browse tab on the person's own sign-in and fills
+  // it, stopping before the final button. Without the desktop app the checklist is the way.
+  async function openUpload(item) {
+    const browse = window.jarvis?.browse;
+    if (!browse?.preparePost) { toast('Open upload page needs the Kairos desktop app. The checklist has everything to post it by hand.', 'error'); return; }
+    const out = await browse.preparePost(item.prep_id);
+    if (!out?.ok) { toast(out?.reason || 'Kairos could not open the upload page.', 'error'); return; }
+    toast(`Kairos is filling the ${M.platformName(item.platform)} page. Check it, then press ${M.POST_BUTTONS[item.platform]} yourself.`);
+    try { const { switchMode } = await import('./app.js'); await switchMode('browse'); } catch { /* stays here; the tab is open in Browse */ }
+  }
+
+  async function prepareItem(item, schedule) {
+    const prep = await send(`/posts/${item.post_id}/prepare`, schedule ? { schedule_at: schedule } : {});
+    toast(M.prepareText(prep));
+    await reload();
+    return prep;
+  }
+
+  async function postToYouTube(item) {
+    const privacy = data.ytPost?.privacy || 'private';
+    const ok = await confirmDialog({ title: 'Post to YouTube?', message: `"${item.title}" is uploaded exactly as approved, as ${privacy}, with YouTube's AI-content label${item.scheduled_at ? `, scheduled for ${M.timeText(item.scheduled_at)}` : ''}. YouTube may keep it private until your Google project passes its API audit.`, confirmLabel: 'Post to YouTube', danger: false });
+    if (!ok) return;
+    toast(M.publishText(await send(`/posts/${item.post_id}/publish-youtube`))); await reload();
+  }
+
+  function markPostedDialog(item) {
+    const link = textInput('Link to the live post', { placeholder: 'https://', maxlength: '500' });
+    const status = el('p', { class: 'set-error', role: 'alert' });
+    const save = btn('Mark posted', async () => {
+      status.textContent = '';
+      if (!link.value.trim()) { status.textContent = 'Paste the link to the post.'; return; }
+      try { await send(`/posts/${item.post_id}/posted`, { url: link.value.trim() }); } catch (error) { status.textContent = M.loadFailure(error); return; }
+      dialog.close(); toast('Marked as posted. Its numbers can be tracked now.'); await reload();
+    }, 'primary');
+    const dialog = openPanelDialog({ title: `Mark posted: ${item.title}`, className: 'sc-dialog-panel', footer: el('div', {}, [save]),
+      body: el('div', { class: 'sc-dialog' }, [note(`After you pressed ${M.POST_BUTTONS[item.platform]} on ${M.platformName(item.platform)}, paste the post's link.`),
+        group({}, [row({ title: 'Live link', control: link, stack: true })]), status]) });
+    link.focus();
+  }
+
+  function scheduleDialog(item) {
+    const when = el('input', { type: 'datetime-local', 'aria-label': 'When to post', value: M.scheduleValue(item.scheduled_at) });
+    const status = el('p', { class: 'set-error', role: 'alert' });
+    const save = btn('Save schedule', async () => {
+      status.textContent = '';
+      const at = M.parseSchedule(when.value);
+      if (!at) { status.textContent = 'Choose a date and time.'; return; }
+      try { await send(`/posts/${item.post_id}/schedule`, { at }); } catch (error) { status.textContent = M.loadFailure(error); return; }
+      dialog.close(); toast(`Scheduled for ${M.timeText(at)}.`); await reload();
+    }, 'primary');
+    const clear = item.scheduled_at ? btn('Clear schedule', async () => { await send(`/posts/${item.post_id}/schedule`, { at: null }); dialog.close(); toast('Schedule cleared.'); await reload(); }, 'quiet') : null;
+    const how = item.platform === 'youtube' ? 'With YouTube posting connected, YouTube publishes it at this time. On the upload page you set it under Visibility.'
+      : item.platform === 'tiktok' ? 'You set it on TikTok\'s page under Schedule; the checklist reminds you.' : 'Instagram on the web posts at once: press Share at this time, or schedule it in Meta Business Suite.';
+    const dialog = openPanelDialog({ title: `Schedule: ${item.title}`, className: 'sc-dialog-panel', footer: el('div', { class: 'sc-actions' }, [save, clear]),
+      body: el('div', { class: 'sc-dialog' }, [note(how), group({}, [row({ title: 'When', control: when })]), status]) });
+  }
+
+  function itemActions(item, { inDialog = false, close = () => {} } = {}) {
+    const out = [], label = `${item.title} on ${M.platformName(item.platform)}`;
+    const after = fn => async () => { close(); await fn(); };
+    if (item.state === 'awaiting_approval') out.push(btn('Go to Approvals', after(() => select('approvals')), 'primary', { 'aria-label': `Go to Approvals for ${label}` }));
+    if (item.state === 'approved') out.push(btn('Prepare post', after(() => prepareItem(item)), 'primary', { 'aria-label': `Prepare ${label}` }));
+    if (['prepared', 'waiting_for_you', 'failed'].includes(item.state)) {
+      const blocked = item.problems?.length;
+      if (item.routes?.includes('api') && !blocked) out.push(btn('Post to YouTube', after(() => postToYouTube(item)), 'primary', { 'aria-label': `Post ${label} to YouTube` }));
+      if (!blocked) out.push(btn(item.state === 'waiting_for_you' ? 'Open upload page again' : 'Open upload page', after(() => openUpload(item)), item.routes?.includes('api') ? '' : 'primary', { 'aria-label': `Open the upload page for ${label}` }));
+      if (!inDialog) out.push(btn('Checklist', () => preparedDialog(item), '', { 'aria-label': `Checklist for ${label}` }));
+      out.push(btn('Schedule', after(() => scheduleDialog(item)), 'quiet', { 'aria-label': `Schedule ${label}` }));
+      out.push(btn('Mark posted', after(() => markPostedDialog(item)), 'quiet', { 'aria-label': `Mark ${label} posted` }));
+      if (item.state === 'failed' || blocked) out.push(btn('Prepare again', after(() => prepareItem(item)), 'quiet', { 'aria-label': `Prepare ${label} again` }));
+    }
+    if (item.state === 'posted' && item.posted_url) out.push(el('a', { class: 'btn quiet', href: item.posted_url, target: '_blank', rel: 'noopener noreferrer', text: 'Open post', 'aria-label': `Open the live post of ${label}` }));
+    return out;
+  }
+
+  // The prepared post: the file, the text as it goes on the page, the AI label, cover, schedule and the checklist.
+  async function preparedDialog(item) {
+    const body = el('div', { class: 'sc-dialog sc-prepared' }, [el('p', { role: 'status', text: 'Loading...' })]);
+    const dialog = openPanelDialog({ title: `${M.platformName(item.platform)}: ${item.title}`, body, className: 'sc-dialog-panel' });
+    let prep;
+    try { prep = await get(`/preparations/${item.prep_id}`); } catch (error) { body.replaceChildren(el('p', { role: 'alert', text: M.loadFailure(error) })); return; }
+    const pkg = prep.package || {}, file = pkg.file || {}, fill = prep.fill || {};
+    const copyable = (title, text) => el('div', { class: 'sc-block' }, [el('h4', { text: title }), el('p', { class: 'sc-text', text }),
+      btn('Copy', async () => { await navigator.clipboard.writeText(text); toast(`${title} copied.`); }, 'quiet sc-copy', { 'aria-label': `Copy the ${title.toLowerCase()}` })]);
+    const filled = new Set(fill.filled || []), missing = new Set(fill.missing || []);
+    const stateOf = c => c.by !== 'kairos' ? ['You', 'muted'] : filled.has(c.key) ? ['Filled', 'ok'] : missing.has(c.key) ? ['Not found, do it yourself', 'warn'] : ['Kairos', 'accent'];
+    body.replaceChildren(...[
+      pkg.problems?.length ? el('div', { class: 'sc-warning', role: 'alert' }, [el('strong', { text: 'Fix before posting: ' }), pkg.problems.join(' ')]) : null,
+      prep.error ? el('div', { class: 'sc-warning', role: 'alert' }, [el('strong', { text: 'Failed: ' }), prep.error]) : null,
+      el('div', { class: 'sc-post-pills' }, [pill(M.stateLabel(item.state), M.stateTone(item.state)), pill(item.handle, 'muted'),
+        pkg.ai_label ? pill(`${pkg.ai_label.name}: on`, 'accent') : null]),
+      el('div', { class: 'sc-preview' }, [
+        el('div', { class: 'sc-block' }, [el('h4', { text: 'Video' }), el('p', { class: 'sc-text', text: `${file.name || ''}, ${file.aspect || 'aspect unknown'}${file.seconds ? `, ${M.clock(file.seconds)}` : ''}${file.approved_file === false ? ' (the editor\'s export of the version you approved)' : ''}` })]),
+        ...Object.entries(pkg.text || {}).map(([key, text]) => copyable(M.FILL_NAMES[key] || key, text)),
+        pkg.hashtags_left_out?.length ? el('p', { class: 'sc-dim', text: `Left out (over ${M.platformName(item.platform)}'s hashtag count): ${pkg.hashtags_left_out.join(' ')}` }) : null,
+        el('div', { class: 'sc-block' }, [el('h4', { text: pkg.cover?.name || 'Cover' }), el('p', { class: 'sc-text', text: pkg.cover?.file ? `${pkg.cover.file}${pkg.cover.what ? `: ${pkg.cover.what}` : ''}` : 'Pick a frame on the page.' })]),
+        el('div', { class: 'sc-block' }, [el('h4', { text: 'Schedule' }), el('p', { class: 'sc-text', text: prep.scheduled_at ? M.timeText(prep.scheduled_at) : 'Not scheduled: it goes out when you post it.' })])]),
+      el('h4', { class: 'sc-check-title', text: 'Checklist' }),
+      el('ol', { class: 'sc-checklist', 'aria-label': 'Checklist' }, (pkg.checklist || []).map(c => {
+        const [text, tone] = stateOf(c);
+        return el('li', { class: `sc-check by-${c.by}`, 'data-check': c.key }, [pill(text, tone), el('span', { text: c.text })]);
+      })),
+      M.fillText(fill) ? note(M.fillText(fill)) : null,
+      el('p', { class: 'sc-dim', text: pkg.rules_note || '' }),
+      el('div', { class: 'sc-actions' }, itemActions(item, { inDialog: true, close: () => dialog.close() }))].filter(Boolean));
+  }
+
+  function publishRow(item) {
+    const label = `${item.title} on ${M.platformName(item.platform)}`;
+    const node = el('article', { class: `sc-pub sc-pub-${item.state}`, 'data-pub': item.post_id, 'aria-label': label }, [
+      el('header', { class: 'sc-post-head' }, [
+        el('h3', { class: 'sc-post-title', text: item.title }),
+        el('div', { class: 'sc-post-pills' }, [pill(M.stateLabel(item.state), M.stateTone(item.state)), badge(M.platformName(item.platform), hueFor(item.platform)),
+          el('span', { class: 'sc-dim', text: item.handle }), item.long_form ? pill('Long video', 'muted') : null])]),
+      el('p', { class: 'sc-pub-when', text: M.whenText(item) }),
+      el('p', { class: `sc-pub-next by-${item.next.who}`, text: M.nextText(item.next) }),
+      item.state === 'waiting_for_you' && M.fillText(item.fill) ? el('p', { class: 'sc-dim', text: M.fillText(item.fill) }) : null,
+      item.posted_url ? el('p', { class: 'sc-dim sc-pub-link' }, [el('a', { href: item.posted_url, target: '_blank', rel: 'noopener noreferrer', text: item.posted_url })]) : null,
+      el('div', { class: 'sc-actions' }, itemActions(item))]);
+    return node;
+  }
+
+  let pubView = 'list', pubFilter = 'all', pubWeek = null;
+  function publishingView() {
+    const pub = data.pub;
+    if (!pub) return [el('p', { role: 'alert', class: 'sc-error', text: 'The publishing dashboard did not load. Try again in a moment.' }), btn('Try again', reload)];
+    pubWeek ??= pub.this_week;
+    const views = el('div', { class: 'sc-seg', role: 'group', 'aria-label': 'View' }, [['list', 'List'], ['week', 'Week']].map(([id, text]) =>
+      btn(text, () => { pubView = id; draw(); }, pubView === id ? 'is-on' : 'quiet', { 'aria-pressed': String(pubView === id), 'data-view': id })));
+    const filters = el('div', { class: 'sc-filters', role: 'group', 'aria-label': 'Show posts' }, [{ id: 'all', label: 'All', count: pub.items.length }, ...M.stateCounts(pub.counts)].map(f =>
+      btn(`${f.label} ${f.count}`, () => { pubFilter = f.id; draw(); }, pubFilter === f.id ? 'is-on' : 'quiet', { 'aria-pressed': String(pubFilter === f.id), 'data-filter': f.id })));
+    const intro = note('Every post, its state and what happens next. Prepare post assembles it for its platform; Open upload page fills the page in the Kairos Browser and stops before Post, which you press yourself.');
+    const items = M.filterItems(pub.items, pubFilter);
+    const out = [intro, el('div', { class: 'sc-bar sc-pub-bar' }, [filters, views])];
+    if (!pub.items.length) return [...out, empty('No posts yet. They appear here from the first draft to the live link.')];
+    if (pubView === 'week') {
+      const days = M.weekDays(pubWeek), byDay = M.itemsByDay(items, pubWeek);
+      out.push(el('div', { class: 'sc-week-nav' }, [
+        btn('Previous week', () => { pubWeek = M.addDays(pubWeek, -7); draw(); }, 'quiet', { 'aria-label': 'Previous week' }),
+        el('h3', { class: 'sc-week-title', text: M.weekLabel(pubWeek, pub.this_week) }),
+        pubWeek !== pub.this_week ? btn('This week', () => { pubWeek = pub.this_week; draw(); }, 'quiet') : null,
+        btn('Next week', () => { pubWeek = M.addDays(pubWeek, 7); draw(); }, 'quiet', { 'aria-label': 'Next week' })]));
+      out.push(el('div', { class: 'sc-week', role: 'list', 'aria-label': 'Posts by day' }, days.map((day, i) => el('section', { class: `sc-day${day.at === M.addDays(Date.now() / 1000, 0) ? ' is-today' : ''}`, role: 'listitem', 'aria-label': `${day.label}, ${byDay[i].length} posts` }, [
+        el('h4', { class: 'sc-day-title', text: day.label }),
+        ...(byDay[i].length ? byDay[i].map(item => {
+          const chip = el('button', { type: 'button', class: `sc-cal sc-pub-${item.state}`, 'data-pub': item.post_id, 'aria-label': `${item.title}, ${M.platformName(item.platform)}, ${M.stateLabel(item.state)}` }, [
+            el('span', { class: 'sc-cal-time', text: M.timeText(item.when).split(', ')[1] }), el('span', { class: 'sc-cal-title', text: item.title }),
+            el('span', { class: 'sc-cal-meta' }, [badge(M.platformName(item.platform), hueFor(item.platform)), pill(M.stateLabel(item.state), M.stateTone(item.state))])]);
+          chip.addEventListener('click', () => item.prep_id ? preparedDialog(item) : openDetails({ kind: 'post', id: item.post_id, title: item.title, step: item.state, owner: item.next.who === 'you' ? 'user' : 'publisher', age_h: 0, niche_name: item.niche, platform: item.platform }, chip));
+          return chip;
+        }) : [el('p', { class: 'sc-none', text: 'Nothing.' })])]))));
+      return out;
+    }
+    if (!items.length) out.push(empty('No posts in this state.'));
+    out.push(...items.map(publishRow));
+    return out;
+  }
+
+  // Page-read analytics switches on the Channels tab: TikTok and Instagram, each off until the person turns it on.
+  function pageReadsGroup() {
+    const reads = data.pub?.page_reads;
+    if (!reads) return null;
+    const rows = Object.entries(reads.platforms).map(([platform, p]) => {
+      const toggle = el('input', { type: 'checkbox', role: 'switch', 'aria-label': `Read ${p.name} numbers from your signed-in pages`, ...(p.on ? { checked: '' } : {}) });
+      toggle.checked = !!p.on;
+      toggle.addEventListener('change', async () => {
+        try { await put('/analytics/pages', { [platform]: toggle.checked }); toast(toggle.checked ? `${p.name} page reads on.` : `${p.name} page reads off.`); await reload(); }
+        catch (error) { say(error); toggle.checked = !toggle.checked; }
+      });
+      const controls = [toggle];
+      if (p.on && p.paused === 'page_changed') controls.push(btn('Try again', async () => { await send('/analytics/pages/try-again', { platform }); toast('Reading again from now.'); await reload(); }, '', { 'aria-label': `Try ${p.name} page reads again` }));
+      else if (p.on) controls.push(btn('Read now', async () => { await send('/analytics/pages/read', { platform }); toast(`Reading ${p.name} pages, 20 seconds apart.`); }, 'quiet', { 'aria-label': `Read ${p.name} numbers now` }));
+      return row({ title: p.name, description: M.pageReadText(p), control: controls, attrs: { 'data-page-reads': platform } });
+    });
+    return group({ title: 'TikTok and Instagram numbers', description: reads.note }, [...rows, el('p', { class: 'sc-dim sc-notice', text: `Read-only, at most ${Object.values(reads.platforms)[0]?.max_per_day || 40} pages a day per platform, each post once a day, only your own posts. ${reads.desktop ? '' : 'Needs the Kairos desktop app open. '}${reads.rules_note}` })]);
+  }
+
   // -- approvals -------------------------------------------------------------------------------
 
   // A long video's shot plan: its chapters and shots, then Approve (the render may start) or Reject with a note.
@@ -392,7 +578,7 @@ export async function mountContent(host, { signal } = {}) {
   function approvalsView() {
     const sheets = [...data.plans.map(planCard), ...data.packsWaiting.map(v => packCard(v)), ...data.sheets.map(sheetCard)];
     if (!data.approvals.length) return sheets.length ? sheets : [empty('Nothing is waiting for you. Posts appear here when the Producer brings them for approval.')];
-    const out = [...sheets, note('Approving marks a post approved. Preparing it for the platform comes later, so approved posts wait in the Pipeline until then.')];
+    const out = [...sheets, note('Approving marks a post approved. Nothing is posted by approving: the Publisher prepares it, and you post it from Publishing.')];
     const count = data.approvals.length;
     if (data.settings?.batch_approval && count > 1) {
       out.push(el('div', { class: 'sc-actions sc-batch' }, [btn(`Approve all ${count}`, async () => {
@@ -411,11 +597,11 @@ export async function mountContent(host, { signal } = {}) {
     const done = async text => { toast(text); await reload(); };
     const view = () => {
       const actions = el('div', { class: 'sc-actions' }, [
-        btn('Approve', async () => { await send(`/posts/${post.id}/approve`); await done('Approved. Preparing the post comes later.'); }, 'primary', { 'aria-label': `Approve ${post.title}` }),
+        btn('Approve', async () => { await send(`/posts/${post.id}/approve`); await done('Approved. It is in Publishing, ready to prepare.'); }, 'primary', { 'aria-label': `Approve ${post.title}` }),
         btn('Edit', () => node.replaceChildren(header(), editor()), '', { 'aria-label': `Edit ${post.title}` }),
         btn('Reject', () => asking('reject'), 'quiet danger', { 'aria-label': `Reject ${post.title}` }),
         btn('Redraft', () => asking('redraft'), 'quiet', { 'aria-label': `Redraft ${post.title}` })]);
-      node.replaceChildren(header(), postBody(post), actions, el('p', { class: 'sc-dim sc-post-note', text: 'The Post action comes later with Prepare post.' }));
+      node.replaceChildren(header(), postBody(post), actions, el('p', { class: 'sc-dim sc-post-note', text: 'After you approve, Publishing prepares it and opens the upload page; you press Post yourself.' }));
     };
     const asking = mode => {
       const reason = el('textarea', { rows: 3, 'aria-label': mode === 'reject' ? 'Why are you rejecting this?' : 'What should change?', maxlength: '500',
@@ -887,13 +1073,21 @@ export async function mountContent(host, { signal } = {}) {
     const panel = el('div', { class: 'sc-body', id: 'sc-body', role: 'tabpanel', 'aria-labelledby': `sc-tab-${tab}` }, [el('p', { role: 'status', text: 'Loading...' })]);
     root.replaceChildren(...[alerts(), data.failed.length ? el('p', { class: 'set-error', role: 'alert', text: 'Some parts did not load. Try again in a moment.' }) : null, bar, panel].filter(Boolean));
     const shown = tab;
-    const build = { approvals: approvalsView, pipeline: pipelineView, channels: channelsView, formats: formatsView, characters: charactersView, styles: stylesView, scoreboard: scoreboardView, report: reportView }[shown];
+    const build = { approvals: approvalsView, publishing: publishingView, pipeline: pipelineView, channels: channelsView, formats: formatsView, characters: charactersView, styles: stylesView, scoreboard: scoreboardView, report: reportView }[shown];
     try {
       const content = await build();
       if (alive() && tab === shown && panel.isConnected) panel.replaceChildren(...content);
     } catch (error) { if (alive() && panel.isConnected) panel.replaceChildren(el('p', { role: 'alert', class: 'sc-error', text: M.loadFailure(error) }), btn('Try again', () => draw())); }
   }
 
+  // The desktop app's fill reports back (electron/studio-prepare.js): refresh the dashboard when a page is filled.
+  const stopProgress = window.jarvis?.browse?.onPrepareProgress?.(progress => {
+    if (!alive() || !progress || progress.stage === 'filling') return;
+    if (progress.stage === 'done') toast('The upload page is filled. Check it and press Post yourself.');
+    else if (progress.stage === 'stopped' && progress.missing?.length) toast(`Some fields were not on the page: ${progress.missing.map(k => M.FILL_NAMES[k] || k).join(', ')}. Do those yourself.`);
+    reload();
+  });
+  signal?.addEventListener('abort', () => stopProgress?.(), { once: true });
   await reload();
-  return () => { disposed = true; };
+  return () => { disposed = true; stopProgress?.(); };
 }

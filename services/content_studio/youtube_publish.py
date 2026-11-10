@@ -169,12 +169,16 @@ def description(post):
     return (caption.rstrip() + "\n\nChapters\n" + chapters).strip()
 
 
-def metadata(post, privacy):
-    """Exactly what was approved, plus the AI label. YouTube refuses < and > in titles and descriptions."""
+def metadata(post, privacy, publish_at=None):
+    """Exactly what was approved, plus the AI label. YouTube refuses < and > in titles and descriptions.
+    `publish_at` (a schedule set on the prepared post) becomes YouTube's scheduled publish: the video uploads private
+    and YouTube makes it public at that time (an unaudited project may keep it private regardless)."""
     clean = lambda s: (s or "").replace("<", "").replace(">", "")
+    status = {"privacyStatus": privacy, "selfDeclaredMadeForKids": False, "containsSyntheticMedia": True}
+    if publish_at:
+        status.update(privacyStatus="private", publishAt=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(publish_at)))
     return {"snippet": {"title": clean(post["title"])[:100], "description": clean(description(post))[:5000],
-                        "tags": _tags(post.get("tags")), "categoryId": CATEGORY_PEOPLE_BLOGS},
-            "status": {"privacyStatus": privacy, "selfDeclaredMadeForKids": False, "containsSyntheticMedia": True}}
+                        "tags": _tags(post.get("tags")), "categoryId": CATEGORY_PEOPLE_BLOGS}, "status": status}
 
 
 def _body(meta, video):
@@ -227,8 +231,12 @@ async def publish(store, post_id, by, now=None):
                 raise PostingError(f"The connected Google account does not own {channel['handle']}. Connect posting "
                                    "with the Google account that owns this channel.", 409)
             privacy = state.get("privacy") or "private"
+            prep = store.preparation_for(post_id)
+            publish_at = prep["scheduled_at"] if prep and prep.get("scheduled_at") and prep["scheduled_at"] > time.time() + 60 else None
+            if publish_at:
+                privacy = "private"   # a scheduled upload is private until YouTube publishes it at publish_at
             with open(path, "rb") as handle:
-                content, kind = _body(metadata(post, privacy), handle.read())
+                content, kind = _body(metadata(post, privacy, publish_at), handle.read())
             try:
                 answer = await google.request("youtube_upload", "POST", "/videos",
                                               params={"part": "snippet,status", "uploadType": "multipart"},
@@ -249,11 +257,23 @@ async def publish(store, post_id, by, now=None):
             posted = store.mark_posted(post_id, url, now=now)
             stricter = PRIVACY.index(actual) < PRIVACY.index(privacy) if actual in PRIVACY else False
             result = {"post": posted, "video_id": video, "url": url, "privacy": actual, "asked_privacy": privacy,
-                      "kept_private": stricter, "by": by,
+                      "kept_private": stricter, "by": by, "publish_at": publish_at,
                       "note": ("YouTube kept it " + actual + ". Uploads from a project that has not passed YouTube's API "
-                               "audit stay private; make it public in YouTube Studio or use Prepare post.") if stricter else ""}
+                               "audit stay private; make it public in YouTube Studio or use Prepare post.") if stricter else
+                              (f"Scheduled: YouTube makes it public at {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(publish_at))}."
+                               if publish_at else "")}
             state["last_upload"] = {"post_id": post_id, "video_id": video, "privacy": actual, "at": time.time() if now is None else now}
             _save(state)
             return result
+    except PostingError as exc:
+        if exc.status >= 500 or exc.status in (413, 429) or exc.detail.startswith(("YouTube", "The connected Google account")):
+            # The dashboard shows the failed state with YouTube's reason (only for a post that was prepared).
+            from . import prepare
+            try:
+                if store.get_post(post_id)["state"] == "approved":
+                    prepare.record_failure(store, post_id, exc.detail, now=now)
+            except StudioError:
+                pass
+        raise
     finally:
         _sending.discard(key)

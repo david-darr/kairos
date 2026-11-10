@@ -69,9 +69,10 @@ process.on('unhandledRejection', (error) => {
   finish(1, 'FAIL (unhandled rejection): ' + ((error && error.stack) || error));
 });
 // Live page loads are slower and depend on someone else's server, so the
-// watchdog is given real room when --live is on. (150 s: the bot checks start
-// a Python process, slow when other work shares the machine.)
-setTimeout(() => finish(1, 'FAIL: timed out before finishing.'), process.argv.includes('--live') ? 240000 : 150000).unref();
+// watchdog is given real room when --live is on. (240 s: the bot checks start
+// a Python process, slow when other work shares the machine; the Content Studio
+// checks wait on mock pages and start Python too.)
+setTimeout(() => finish(1, 'FAIL: timed out before finishing.'), process.argv.includes('--live') ? 300000 : 240000).unref();
 
 // Pages for the Browse checks, on their own port.
 const BROWSE_PORT = 8478;
@@ -681,6 +682,9 @@ app.whenReady().then(async () => {
   await browseChecks(win);
   await browseIpcChecks(win);
 
+  // -- Content Studio's Prepare post fill and page-read analytics, on local mock pages (scripts/studio-prepare-checks.cjs).
+  await require('./studio-prepare-checks.cjs')({ check, assert, root, BrowserWindow, session });
+
   // -- live check against the real web. OFF by default (--live), because the
   // rest of this file is deliberately hermetic and must stay deterministic
   // in CI. Everything above proves the pane REFUSES the right things; this
@@ -741,5 +745,5 @@ app.whenReady().then(async () => {
   }
 
   if (failures.length) finish(1, 'FAIL\n' + failures.map(f => ' - ' + f).join('\n'));
-  else finish(0, (process.argv.includes('--live') ? 'PASS (with live web check): ' : 'PASS: ') + `${checksRun} checks. ` + 'side-browser isolation — scheme and loopback blocking, backend origin refused, separate session partition with unshared cookies, no bridge/node/IPC in the page, permissions denied, view destroyed on close. Browse — gate policies, tabs and history, pop-ups only after a click, sign-in pop-ups and tabs keeping their opener, Chrome user agent, password offers and exact-origin fill, bots filling saved passwords (switch, exact site, no value to the model, per account, use list), audio output routing, remembered permissions, ad blocking with off switch, marked downloads, zoom per site, reopen and pin, session restore, cookie re-save.');
+  else finish(0, (process.argv.includes('--live') ? 'PASS (with live web check): ' : 'PASS: ') + `${checksRun} checks. ` + 'side-browser isolation — scheme and loopback blocking, backend origin refused, separate session partition with unshared cookies, no bridge/node/IPC in the page, permissions denied, view destroyed on close. Browse — gate policies, tabs and history, pop-ups only after a click, sign-in pop-ups and tabs keeping their opener, Chrome user agent, password offers and exact-origin fill, bots filling saved passwords (switch, exact site, no value to the model, per account, use list), audio output routing, remembered permissions, ad blocking with off switch, marked downloads, zoom per site, reopen and pin, session restore, cookie re-save. Content Studio — Prepare post fills the YouTube, TikTok and Instagram mock pages and never presses a final button, page reads with the profile sign-in.');
 });

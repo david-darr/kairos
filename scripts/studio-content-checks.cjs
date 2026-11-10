@@ -25,11 +25,46 @@ const now = Date.now() / 1000;
 const customTab = { id: 'studio', label: 'Studio', user_tab: false, format: 'folder', view_url: '/tab-files/studio/view.js', style_url: '/tab-files/studio/view.css', icon_svg: '<svg viewBox="0 0 24 24"><path d="M3 6h18v15H3z"/></svg>' };
 
 // -- the mock Content Studio store ------------------------------------------------------------------------------
-const store = { forbidden: false, niches: [], channels: [], items: [], approvals: [], plans: [], findings: [], decisions: [], posted: [], team: [],
+const store = { forbidden: false, niches: [], channels: [], items: [], approvals: [], plans: [], findings: [], decisions: [], posted: [], team: [], pubItems: [], reads: { tiktok: false, instagram: false },
   settings: { weights: { views: 0.4, watch: 0.4, engagement: 0.2 }, batch_approval: false },
   yt: { configured: true, connected: false, pending: false, google_account: null, needs_reconnect: false, last_sync: null, notice: 'Read only.' },
   ytPost: { configured: true, connected: true, pending: false, google_account: { id: 'g1', email: 'me@example.com' }, needs_reconnect: false, privacy: 'private',
     notice: 'YouTube may keep uploads from a project that has not passed its API audit private.' } };
+// Publishing (Prepare post and the dashboard): a week of posts in every state. Times are this week's, local.
+const monday = (() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate() - (d.getDay() + 6) % 7).getTime() / 1000; })();
+const at = (day, hour, minute = 0) => { const d = new Date(monday * 1000); return new Date(d.getFullYear(), d.getMonth(), d.getDate() + day, hour, minute).getTime() / 1000; };
+const pageReadsData = () => ({ note: 'Read from your signed-in pages in the Kairos Browser, read-only. It may stop working when TikTok or Instagram change their pages; the numbers are only as good as what the page showed.',
+  rules_note: 'Platform limits and page layouts are from general knowledge (2026-11), not checked against the platforms\' own pages. If a platform says otherwise, the platform wins.',
+  desktop: true, platforms: {
+    tiktok: { on: store.reads.tiktok, name: 'TikTok', reads_today: 3, max_per_day: 40, last: { at: at(1, 20, 5), status: 'ok' }, paused: '', paused_until: null, posts: 3 },
+    instagram: { on: store.reads.instagram, name: 'Instagram', reads_today: 2, max_per_day: 40, last: { at: at(1, 20, 6), status: 'parse_failed' }, paused: store.reads.instagram ? 'page_changed' : '', paused_until: null, posts: 2 } } });
+const pubItem = (post_id, title, platform, state, extra = {}) => ({ post_id, title, platform, platform_name: { youtube: 'YouTube', tiktok: 'TikTok', instagram: 'Instagram' }[platform],
+  handle: platform === 'instagram' ? 'sky.kairos' : '@sky.kairos', channel_id: 1, niche: 'Sky science', long_form: false, state, scheduled_at: null, posted_at: null, posted_url: null,
+  approved_at: at(0, 9), created_at: at(0, 8), prep_id: null, route: null, routes: [], problems: [], error: '', fill: {}, checklist: [], rejection_count: 0, ...extra,
+  when: extra.when || extra.posted_at || extra.scheduled_at || extra.approved_at || at(0, 9) });
+const NEXT = { drafted: ['team', 'The Script Writer writes the script.'], awaiting_approval: ['you', 'Approve, edit or reject it in Approvals.'],
+  approved: ['team', 'The Publisher prepares it for YouTube, or press Prepare post.'], prepared: ['you', 'Press Post to YouTube, or Open upload page to post it yourself.'],
+  waiting_for_you: ['you', 'Check the TikTok page and press Post yourself, then paste the live link (Mark posted).'], posted: ['team', 'Its numbers are tracked.'],
+  failed: ['you', 'Fix it and try again: The upload page could not be filled.'], rejected: ['you', 'Redraft it or leave it.'] };
+function pubData() {
+  const items = store.pubItems.map(i => ({ ...i, next: { who: NEXT[i.state][0], what: NEXT[i.state][1] }, week: monday }));
+  const counts = {}; for (const i of items) counts[i.state] = (counts[i.state] || 0) + 1;
+  return { items, counts, labels: {}, now, this_week: monday, page_reads: pageReadsData() };
+}
+const checklist = [{ key: 'file', text: 'Attach 9-16-v2.mp4 (9:16, 0:31), the editor\'s export of the version you approved', by: 'kairos', status: 'todo' },
+  { key: 'title', text: 'Title', by: 'kairos', status: 'todo' }, { key: 'description', text: 'Description and 2 hashtags', by: 'kairos', status: 'todo' },
+  { key: 'tags', text: 'Tags (3), under Show more', by: 'kairos', status: 'todo' }, { key: 'made_for_kids', text: 'Audience: No, it\'s not made for kids', by: 'kairos', status: 'todo' },
+  { key: 'ai_label', text: 'Altered or synthetic content: on. In Details, under Altered content, answer Yes.', by: 'kairos', status: 'todo' },
+  { key: 'cover', text: 'Thumbnail: Upload the thumbnail in Details. Shorts take a frame you pick in the YouTube app. Kairos made post-32.jpg from the video.', by: 'you', status: 'todo' },
+  { key: 'schedule', text: 'Schedule for Tue 11 Nov 2026, 09:00. In Visibility, choose Schedule and set the date and time.', by: 'you', status: 'todo' },
+  { key: 'check', text: 'Read the page once: every field as approved, nothing added by the platform you do not want.', by: 'you', status: 'todo' },
+  { key: 'post', text: 'Press Publish yourself. Kairos never presses it.', by: 'you', status: 'todo' },
+  { key: 'link', text: 'Paste the live link in Kairos (Mark posted), or the Publisher records it, so the numbers can be tracked.', by: 'you', status: 'todo' }];
+const prepFor = (id) => { const i = store.pubItems.find(x => x.prep_id === id); return { id, post_id: i.post_id, platform: i.platform, state: i.state === 'failed' ? 'failed' : i.state === 'waiting_for_you' ? 'waiting_for_you' : 'prepared',
+  route: i.route, scheduled_at: i.scheduled_at, error: i.error, fill: i.fill, package: { platform: i.platform, platform_name: i.platform_name, routes: i.routes, problems: i.problems,
+    file: { name: '9-16-v2.mp4', aspect: '9:16', seconds: 31, approved_file: false }, text: i.platform === 'youtube' ? { title: i.title, description: 'Sunlight scatters off the air.\n\n#sky #science', tags: 'sky, science, light' } : { caption: 'Sunlight scatters off the air.\n\n#sky #science' },
+    hashtags: ['#sky', '#science'], hashtags_left_out: [], ai_label: { on: true, name: 'Altered or synthetic content' }, cover: { name: 'Thumbnail', file: 'post-32.jpg', what: 'A blue sky over a sun' },
+    checklist, rules_note: 'Platform limits and page layouts are from general knowledge (2026-11), not checked against the platforms\' own pages.' } }; };
 const post = (id, extra = {}) => ({ id, channel_id: 1, title: `Post ${id}`, caption: 'A caption', script_ref: 'Hook, three steps, ask', render_ref: 'https://example.com/render.mp4',
   render_status: 'ok', state: 'awaiting_approval', rejection_count: 0, platform: 'youtube', handle: '@cooks', niche_id: 1, niche_name: 'Cooking', ...extra });
 const board = () => ({ at: now, weights: { views: 0.4, watch: 0.4, engagement: 0.2 }, minimum: { weeks: 3, posts: 10 },
@@ -83,6 +118,12 @@ function content(method, p, body) {
   if (/^\/channels\/\d+\/restore$/.test(p)) { Object.assign(channel, { status: 'live', archive_reason: null }); return [200, channel]; }
   if (/^\/channels\/\d+\/resume$/.test(p)) { channel.paused = 0; store.findings = store.findings.filter(f => f.channel_id !== id); return [200, channel]; }
   if (p === '/pipeline') return [200, { items: store.items }];
+  if (p === '/publishing') return [200, pubData()];
+  if (p === '/analytics/pages') { if (method === 'PUT') Object.assign(store.reads, body); return [200, pageReadsData()]; }
+  if (p === '/analytics/pages/read' || p === '/analytics/pages/try-again') return [200, { started: true, ...pageReadsData() }];
+  if (/^\/preparations\/\d+$/.test(p)) return [200, prepFor(id)];
+  if (/^\/posts\/\d+\/prepare$/.test(p)) { const i = store.pubItems.find(x => x.post_id === id); Object.assign(i, { state: 'prepared', prep_id: 40 + id, route: 'api', routes: ['api', 'browser'], checklist }); return [200, prepFor(40 + id)]; }
+  if (/^\/posts\/\d+\/schedule$/.test(p)) { const i = store.pubItems.find(x => x.post_id === id); i.scheduled_at = body.at; i.when = body.at || i.approved_at; return [200, prepFor(i.prep_id)]; }
   if (p === '/approvals') return [200, { posts: store.approvals, characters: pending(), style_packs: pendingPacks(), plans: store.plans }];
   if (p === '/watch') return [200, { findings: store.findings }];
   if (p === '/settings') { if (method === 'PUT') Object.assign(store.settings, body); return [200, { ...store.settings, team_bot_ids: store.team }]; }
@@ -103,7 +144,17 @@ function content(method, p, body) {
   return [404, { detail: 'Missing content mock: ' + p }];
 }
 const populate = () => {
-  Object.assign(store, { niches: [{ id: 1, name: 'Cooking', status: 'live', slots: 1 }, { id: 2, name: 'Travel', status: 'live', slots: 1 }],
+  Object.assign(store, {
+    pubItems: [
+      pubItem(31, 'Why the sky is blue', 'tiktok', 'waiting_for_you', { prep_id: 7, route: 'browser', routes: ['browser'], scheduled_at: at(0, 18), fill: { stage: 'done', filled: ['file', 'caption', 'ai_label'], missing: [] } }),
+      pubItem(32, 'Why the sky is blue', 'youtube', 'prepared', { prep_id: 8, route: 'api', routes: ['api', 'browser'], scheduled_at: at(1, 9) }),
+      pubItem(33, 'Why the sky is blue', 'instagram', 'failed', { prep_id: 9, route: 'browser', routes: ['browser'], error: 'The upload page could not be filled.', approved_at: at(2, 10) }),
+      pubItem(34, 'Clouds weigh tons', 'tiktok', 'posted', { posted_at: at(3, 17, 30), posted_url: 'https://www.tiktok.com/@sky.kairos/video/7350000000000000001' }),
+      pubItem(35, 'Clouds weigh tons', 'youtube', 'posted', { posted_at: at(3, 18), posted_url: 'https://www.youtube.com/watch?v=abcdefghijk' }),
+      pubItem(26, 'YouTube ready', 'youtube', 'approved', { approved_at: at(4, 11) }),
+      pubItem(11, 'Five minute soup', 'youtube', 'awaiting_approval', { approved_at: null, created_at: at(4, 8), when: at(4, 8) }),
+      pubItem(21, 'Scripting now', 'youtube', 'drafted', { approved_at: null, created_at: at(5, 8), when: at(5, 8) }),
+      pubItem(36, 'Rainbow myths', 'instagram', 'rejected', { approved_at: null, created_at: at(6, 12), when: at(6, 12) })], niches: [{ id: 1, name: 'Cooking', status: 'live', slots: 1 }, { id: 2, name: 'Travel', status: 'live', slots: 1 }],
     channels: [{ id: 1, niche_id: 1, platform: 'youtube', handle: '@cooks', status: 'live', paused: 1, niche_name: 'Cooking' },
       { id: 2, niche_id: 1, platform: 'tiktok', handle: '@cooks.tt', status: 'live', paused: 0, niche_name: 'Cooking' },
       { id: 3, niche_id: 2, platform: 'instagram', handle: '@trips', status: 'archived', paused: 0, niche_name: 'Travel', archive_reason: 'archived by you' }],
@@ -365,8 +416,8 @@ app.whenReady().then(async () => {
     await capture('desktop-pipeline'); await noOverflow(); await labels();
     await js("document.querySelector('[data-item=post-23]').click()");
     await wait("!!document.querySelector('.sc-dialog .sc-preview')");
-    assert.ok(await js("document.querySelector('.sc-dialog').textContent.includes('Prepare post is not built yet')"));
-    assert.equal(await js("[...document.querySelectorAll('.sc-dialog button')].find(b=>b.textContent==='Prepare post').disabled"), true);
+    assert.ok(await js("document.querySelector('.sc-dialog').textContent.includes('Prepare post assembles it for its platform')"));
+    assert.equal(await js("[...document.querySelectorAll('.sc-dialog button')].find(b=>b.textContent==='Prepare post').disabled"), false, 'Prepare post is built');
     await fill('Link to the live post', 'https://www.instagram.com/p/abc');
     await click('.sc-dialog button', 'Mark posted');
     await wait("!document.querySelector('.sc-dialog')");
@@ -387,11 +438,11 @@ app.whenReady().then(async () => {
     await wait("document.querySelectorAll('.sc-post').length===4");
     const card = id => `.sc-post[data-post-id="${id}"]`;
     const text = await js(`document.querySelector(${T(card(11))}).textContent`);
-    for (const part of ['Five minute soup', 'A caption', 'Hook, three steps, ask', 'Open render', 'AI label', 'Required', 'The Post action comes later',
+    for (const part of ['Five minute soup', 'A caption', 'Hook, three steps, ask', 'Open render', 'AI label', 'Required', 'you press Post yourself',
       'Format: One person at a time (ported). Style pack: Motion type.', 'A pot with a glowing number']) assert.ok(text.includes(part), part);
     assert.equal(await js(`!!document.querySelector('.sc-post[data-post-id="12"] [data-post-format]')`), false, 'No format block without a format');
     assert.ok((await js(`document.querySelector(${T(card(13))}).textContent`)).includes('Not needed'), 'Instagram needs no AI label');
-    assert.ok((await js("document.querySelector('.sc-body').textContent")).includes('Preparing it for the platform comes later'));
+    assert.ok((await js("document.querySelector('.sc-body').textContent")).includes('Nothing is posted by approving'));
     await capture('desktop-approvals');
     await js("document.querySelector('button[aria-label=\"Approve Five minute soup\"]').click()");
     await wait("document.querySelectorAll('.sc-post').length===3");
@@ -442,6 +493,110 @@ app.whenReady().then(async () => {
     await js("document.querySelector('button[aria-label=\"Approve the plan of The Moon, in depth\"]').click()");
     await wait("!document.querySelector('.sc-plan')");
     assert.ok(last('/api/videos/abcabcabcabc/plan/approve'));
+
+    // 5a. Publishing: every post with its state, schedule, link and next action; a week calendar; the prepared post's
+    // checklist; Prepare post, Schedule, Open upload page (the desktop bridge stand-in) and Mark posted.
+    const shots = process.env.STUDIO_PUBLISHING_SHOTS;   // also keep the dashboard's screenshots there (for David)
+    const keep = async name => { await capture(name); if (shots) { fs.mkdirSync(shots, { recursive: true }); fs.copyFileSync(path.join(output, name + '.png'), path.join(shots, name + '.png')); } };
+    await win.loadURL(base + '/?load=' + (++loads) + '#/studio'); await wait("!!document.querySelector('.studio-sections')");
+    await js("document.getElementById('onboarding-overlay')?.classList.add('hidden')");
+    await js("window.__prepared = []; window.jarvis = { ...(window.jarvis || {}), browse: { preparePost: async id => { window.__prepared.push(id); return { ok: true, tabId: 4 }; }, onPrepareProgress: h => { window.__progress = h; return () => {}; } } }; true");
+    await click('.studio-sections button', 'Content');
+    await tab('publishing');
+    await wait("document.querySelectorAll('.sc-pub').length===9");
+    assert.deepEqual(await js("[...document.querySelectorAll('.sc-pub')].map(n=>[n.dataset.pub, n.querySelector('.set-pill').textContent])"), [
+      ['31', 'Waiting for you to press Post'], ['32', 'Prepared'], ['33', 'Failed'], ['34', 'Posted'], ['35', 'Posted'], ['26', 'Approved'],
+      ['11', 'Waiting for your approval'], ['21', 'Drafted'], ['36', 'Rejected']], 'every state, labelled');
+    const pubText = await js("document.querySelector('.sc-body').textContent");
+    for (const part of ['stops before Post, which you press yourself', 'You: Check the TikTok page and press Post yourself', 'Kairos filled: Video, Caption, AI label.',
+      'Scheduled for', 'Posted ', 'https://www.tiktok.com/@sky.kairos/video/7350000000000000001', 'Team: The Publisher prepares it', 'You: Fix it and try again']) assert.ok(pubText.includes(part), part);
+    assert.ok(!pubText.includes('\u2014'), 'No em-dashes in the copy');
+    assert.equal(await js("document.querySelector('[data-pub=\"34\"] a').getAttribute('rel')"), 'noopener noreferrer');
+    assert.deepEqual(await js("[...document.querySelectorAll('[data-pub=\"32\"] .sc-actions button')].map(b=>b.textContent)"), ['Post to YouTube', 'Open upload page', 'Checklist', 'Schedule', 'Mark posted']);
+    assert.deepEqual(await js("[...document.querySelectorAll('[data-pub=\"33\"] .sc-actions button')].map(b=>b.textContent)"), ['Open upload page', 'Checklist', 'Schedule', 'Mark posted', 'Prepare again']);
+    assert.equal(await js("[...document.querySelectorAll('.sc-filters button')].map(b=>b.textContent).join('|')"),
+      'All 9|Drafted 1|Waiting for your approval 1|Approved 1|Prepared 1|Waiting for you to press Post 1|Posted 2|Failed 1|Rejected 1');
+    await keep('publishing-list'); await noOverflow(); await labels();
+    // Filter to one state.
+    await click('.sc-filters button', 'Posted 2');
+    await wait("document.querySelectorAll('.sc-pub').length===2");
+    await click('.sc-filters button', 'All 9');
+    await wait("document.querySelectorAll('.sc-pub').length===9");
+    // The checklist of a prepared post: what Kairos fills and what you do, the text with Copy, the rules note.
+    await js("document.querySelector('button[aria-label=\"Checklist for Why the sky is blue on YouTube\"]').click()");
+    await wait("!!document.querySelector('.sc-checklist')");
+    const ctext0 = await js("document.querySelector('.sc-prepared').textContent");
+    for (const part of ['9-16-v2.mp4, 9:16, 00:31', "the editor's export", 'Sunlight scatters off the air.', 'Altered or synthetic content: on', 'post-32.jpg: A blue sky over a sun',
+      'Press Publish yourself. Kairos never presses it.', 'not checked against the platforms']) assert.ok(ctext0.includes(part), part);
+    assert.deepEqual(await js("[...document.querySelectorAll('.sc-check')].map(li=>li.dataset.check+':'+li.querySelector('.set-pill').textContent)").then(r => r.slice(0, 3)), ['file:Kairos', 'title:Kairos', 'description:Kairos']);
+    assert.equal(await js("document.querySelectorAll('.sc-prepared button.sc-copy').length"), 3, 'Copy for title, description and tags');
+    await keep('publishing-checklist'); await noOverflow(); await labels();
+    // Open upload page from the checklist: the desktop bridge gets the prepared post's id only.
+    await click('.sc-dialog-panel .sc-actions button', 'Open upload page');
+    await wait("window.__prepared.length===1");
+    assert.deepEqual(await js('window.__prepared'), [8]);
+    await wait("!document.querySelector('.sc-checklist')");
+    // The fill's report reloads the dashboard.
+    const loadsBefore = writes.length;
+    await js("window.__progress({ prepId: 8, stage: 'done', filled: ['file', 'title'], missing: [] }); true");
+    await pause(300);
+    assert.equal(writes.length, loadsBefore, 'a progress report writes nothing');
+    // Prepare post on an approved post.
+    await click('.sc-pub button', 'Prepare post');
+    await wait("document.querySelector('[data-pub=\"26\"] .set-pill').textContent==='Prepared'");
+    assert.deepEqual(last('/posts/26/prepare').body, {});
+    // Schedule it.
+    await js("document.querySelector('button[aria-label=\"Schedule YouTube ready on YouTube\"]').click()");
+    await wait("!!document.querySelector('[aria-label=\"When to post\"]')");
+    const when = new Date((at(4, 11) + 7 * 86400) * 1000); const two = n => String(n).padStart(2, '0');
+    await fill('When to post', `${when.getFullYear()}-${two(when.getMonth() + 1)}-${two(when.getDate())}T15:30`);
+    await click('.sc-dialog-panel button', 'Save schedule');
+    await wait("!document.querySelector('[aria-label=\"When to post\"]')");
+    assert.equal(new Date(last('/posts/26/schedule').body.at * 1000).getHours(), 15);
+    // Mark posted: the live link.
+    await js("document.querySelector('button[aria-label=\"Mark Why the sky is blue on TikTok posted\"]').click()");
+    await wait("!!document.querySelector('[aria-label=\"Link to the live post\"]')");
+    await fill('Link to the live post', 'https://www.tiktok.com/@sky.kairos/video/7350000000000000002');
+    await click('.sc-dialog-panel button', 'Mark posted');
+    await wait("!document.querySelector('[aria-label=\"Link to the live post\"]')");
+    assert.deepEqual(last('/posts/31/posted').body, { url: 'https://www.tiktok.com/@sky.kairos/video/7350000000000000002' });
+    assert.equal(writes.filter(w => /\/(publish-youtube)$/.test(w.path) && w.path.includes('/32/')).length, 0, 'Nothing posts without the person');
+    // The week calendar.
+    await click('.sc-seg button', 'Week');
+    await wait("document.querySelectorAll('.sc-day').length===7");
+    assert.deepEqual(await js("[...document.querySelectorAll('.sc-day')].map(d=>d.querySelectorAll('.sc-cal').length)"), [1, 1, 1, 2, 1, 1, 1], 'posts on their days (the scheduled one moved to next week)');
+    assert.match(await js("document.querySelector('.sc-week-title').textContent"), /^This week, /);
+    await keep('publishing-week'); await noOverflow(); await labels();
+    await click('.sc-week-nav button', 'Next week');
+    await wait("document.querySelector('.sc-week-title').textContent.startsWith('Week of')");
+    assert.equal(await js("document.querySelectorAll('.sc-cal').length"), 1, 'the scheduled post moved to next week');
+    await click('.sc-week-nav button', 'This week');
+    await wait("document.querySelector('.sc-week-title').textContent.startsWith('This week')");
+    await js("document.querySelector('.sc-cal[data-pub=\"32\"]').click()");
+    await wait("!!document.querySelector('.sc-checklist')");
+    await js("document.querySelector('.sc-dialog-panel .modal-close-btn, .sc-dialog-panel [aria-label=Close]')?.click()");
+    await pause(200);
+    if (await js("!!document.querySelector('.sc-checklist')")) await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+    await wait("!document.querySelector('.sc-checklist')");
+    win.setContentSize(390, 1000); await pause(350); await noOverflow(); await labels(); await keep('publishing-week-phone');
+    await click('.sc-seg button', 'List'); await pause(200); await noOverflow(); await keep('publishing-list-phone');
+    win.setContentSize(1440, 1000); await pause(350);
+    // Channels: the TikTok and Instagram page-read switches, off until the person turns them on.
+    await tab('channels');
+    await wait("!!document.querySelector('[data-page-reads=tiktok]')");
+    assert.ok(await js("document.querySelector('[data-page-reads=tiktok]').textContent.includes('Off. Turn it on')"));
+    assert.ok(await js("document.querySelector('.sc-body').textContent.includes('may stop working when TikTok or Instagram change their pages')"), 'labelled as page-read');
+    await js("document.querySelector('[aria-label=\"Read TikTok numbers from your signed-in pages\"]').click()");
+    for (let n = 0; n < 100 && !last('/analytics/pages', 'PUT'); n++) await pause(50);
+    assert.deepEqual(last('/analytics/pages', 'PUT').body, { tiktok: true });
+    await wait("document.querySelector('[data-page-reads=tiktok]').textContent.includes('3 of 40 page reads today')");
+    await click('.sc button', 'Read TikTok numbers now');
+    for (let n = 0; n < 100 && !last('/analytics/pages/read'); n++) await pause(50);
+    assert.deepEqual(last('/analytics/pages/read').body, { platform: 'tiktok' });
+    await js("document.querySelector('[aria-label=\"Read Instagram numbers from your signed-in pages\"]').click()");
+    await wait("!!document.querySelector('button[aria-label=\"Try Instagram page reads again\"]')");
+    assert.ok(await js("document.querySelector('[data-page-reads=instagram]').textContent.includes('may have changed its page')"));
+    await keep('publishing-page-reads'); await noOverflow(); await labels();
 
     // 5b. Formats: cards with every number and its date, ports with what changes and the checks. It only reads.
     await tab('formats');
@@ -629,7 +784,7 @@ app.whenReady().then(async () => {
     await js("new Promise(r => { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = '/static/css/studio-editor.css'; l.onload = l.onerror = r; document.head.append(l); })");
     assert.ok(await js("[...document.styleSheets].some(s => (s.href || '').endsWith('/studio-editor.css') && s.cssRules.length > 20)"), 'Editor stylesheet loaded');
     win.setContentSize(390, 1000); await pause(350);
-    for (const name of ['approvals', 'pipeline', 'channels', 'formats', 'characters', 'styles', 'scoreboard', 'report']) {
+    for (const name of ['approvals', 'publishing', 'pipeline', 'channels', 'formats', 'characters', 'styles', 'scoreboard', 'report']) {
       await tab(name); await pause(250); await noOverflow(); await labels();
       assert.deepEqual(await js("[...document.querySelectorAll('.sc button,.sc select,.sc input:not([type=checkbox]),.sc textarea')].filter(n=>n.getBoundingClientRect().height>0 && n.getBoundingClientRect().height<43).map(n=>n.outerHTML.slice(0,90))"), [], `Phone targets in ${name}`);
       await capture('phone-' + name);
@@ -644,7 +799,7 @@ app.whenReady().then(async () => {
     store.forbidden = false;
 
     assert.deepEqual(errors, []); assert.deepEqual(outside, []);
-    console.log(JSON.stringify({ ok: true, output, writes: writes.length, checks: ['empty state and template deep link', 'add channel', 'warning shown and resolved', 'archive and restore', 'youtube connections and privacy', 'channel look', 'pipeline board', 'details', 'post to youtube', 'approve', 'edit', 'reject with note', 'redraft', 'batch approval', 'scoreboard needs more data', 'niche proposal', 'team settings', 'decisions confirm and reject', 'format cards and ports', 'characters and sheet approval', 'style packs: brief, duplicate, edit, import, sample, approval', 'channel style pack', 'report', 'csv mapping and import', '390 phone', '403', 'offline'] }));
+    console.log(JSON.stringify({ ok: true, output, writes: writes.length, checks: ['empty state and template deep link', 'add channel', 'warning shown and resolved', 'archive and restore', 'youtube connections and privacy', 'channel look', 'pipeline board', 'details', 'post to youtube', 'approve', 'edit', 'reject with note', 'redraft', 'batch approval', 'scoreboard needs more data', 'niche proposal', 'team settings', 'decisions confirm and reject', 'publishing dashboard, checklist, prepare, schedule, open upload page, mark posted, week calendar, page-read switches', 'format cards and ports', 'characters and sheet approval', 'style packs: brief, duplicate, edit, import, sample, approval', 'channel style pack', 'report', 'csv mapping and import', '390 phone', '403', 'offline'] }));
   } catch (error) {
     console.error(error.stack);
     if (win && !win.isDestroyed()) fs.writeFileSync(path.join(output, 'failure.png'), (await win.webContents.capturePage()).toPNG());

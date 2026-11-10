@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Video analytics | TikTok Studio (mock)</title>
+<style>body{font:14px sans-serif;margin:20px} .metric{display:inline-block;margin:8px;padding:8px;border:1px solid #ccc}</style></head>
+<body>
+<header>TikTok Studio (local mock page)</header>
+<div class="account">space.kairos</div>
+<h1>Video analytics</h1>
+<p class="caption">Why the sky is blue. My friends gave 3 likes and 2 comments.</p>
+<div id="overview">Loading...</div>
+<script>
+  // The numbers arrive after the page, as on the real site.
+  setTimeout(() => {
+    const rows = [['Video views', '1.2K'], ['Total play time', '2h 3m 4s'], ['Average watch time', '7.3s'], ['Watched full video', '18.5%'],
+      ['New followers', '12'], ['Likes', '210'], ['Comments', '14'], ['Shares', '9']];
+    document.getElementById('overview').innerHTML = rows.map(([k, v]) => `<div class="metric"><div>${k}</div><div>${v}</div></div>`).join('');
+  }, 600);
+</script>
+</body></html>

@@ -22,7 +22,7 @@ function rect(v) {
   return Object.values(r).every((n) => n !== null && n > -100000 && n < 100000) ? r : null;
 }
 
-function installBrowseIpc({ ipcMain, fromAppWindow, getBrowse, resolveBrowse = async () => getBrowse(), importPasswords = null }) {
+function installBrowseIpc({ ipcMain, fromAppWindow, getBrowse, resolveBrowse = async () => getBrowse(), importPasswords = null, preparePost = null }) {
   // handle(): request/answer. on(): fire and forget. Both no-op answers when
   // the sender is wrong, Browse isn't up, or an argument is malformed.
   // `opening` channels first settle which account's Browse is open
@@ -104,6 +104,10 @@ function installBrowseIpc({ ipcMain, fromAppWindow, getBrowse, resolveBrowse = a
   // Audio output for every Browse page (browser-audio.js): a device's name, or "" for the system default.
   handle("browse:audio", (b) => ({ label: b.audio.get() }));
   handle("browse:audio-set", (b, label) => (typeof label === "string" && label.length <= 300 ? b.audio.set(label) : undefined));
+
+  // Content Studio's Open upload page (main.js preparePost, studio-prepare.js): only the id of a prepared post comes
+  // from the page; main fetches the plan from the backend and fills the new tab itself.
+  if (preparePost) handle("browse:prepare-post", (b, prepId) => (isId(prepId) ? preparePost(b, prepId) : undefined), { ok: false }, true);
 
   // Downloads.
   handle("browse:downloads", (b) => b.downloads.list(), []);

@@ -802,12 +802,15 @@ class Api(unittest.TestCase):
 
     def test_every_route_needs_a_user(self):
         routes = [(m.upper(), path) for path, ops in kairos.app.openapi()["paths"].items()
-                  if path.startswith("/api/content-studio") for m in ops]
+                  if path.startswith("/api/content-studio") and "/page-reads/" not in path for m in ops]
         self.assertGreater(len(routes), 25)
         for method, path in routes:
             url = path.replace("{post_id}", "1").replace("{channel_id}", "1").replace("{decision_id}", "1").replace("{format_id}", "1")
             r = self.anon.request(method, url, json={} if method != "GET" else None)
             self.assertEqual(r.status_code, 401, f"{method} {path}")
+        # The desktop app's page-read worker has no sign-in: only its per-launch token, from this computer, else 404.
+        self.assertEqual(self.anon.get("/api/content-studio/page-reads/jobs").status_code, 404)
+        self.assertEqual(self.anon.post("/api/content-studio/page-reads/result/x", content=b"{}").status_code, 404)
 
     def test_pipeline_flow_and_two_accounts_stay_apart(self):
         d, b = self.clients["david"], self.clients["bea"]

@@ -230,8 +230,9 @@ class StudioToolTests(unittest.TestCase):
         self.assertEqual(names, ["content_studio_add_topic", "content_studio_check_port", "content_studio_check_post",
                                  "content_studio_confirm_decision", "content_studio_decide_port", "content_studio_formats",
                                  "content_studio_mark_posted", "content_studio_pick_topic", "content_studio_pipeline",
-                                 "content_studio_post_evidence", "content_studio_propose_niche", "content_studio_propose_port",
-                                 "content_studio_propose_style_pack", "content_studio_publish_youtube", "content_studio_record_metrics", "content_studio_record_render",
+                                 "content_studio_post_evidence", "content_studio_prepare_post", "content_studio_propose_niche", "content_studio_propose_port",
+                                 "content_studio_propose_style_pack", "content_studio_publish_youtube", "content_studio_publishing",
+                                 "content_studio_read_analytics", "content_studio_record_metrics", "content_studio_record_render",
                                  "content_studio_record_warning", "content_studio_reject_decision", "content_studio_run_review",
                                  "content_studio_save_format", "content_studio_save_script", "content_studio_save_shot_plan",
                                  "content_studio_send_report", "content_studio_style_pack_sample", "content_studio_style_packs",
@@ -313,6 +314,41 @@ class StudioToolTests(unittest.TestCase):
         self.assertIn("kept it private", out)
         self.assertIn("Only the Researcher", call("content_studio_youtube_trending", bots["Publisher"]))
         self.assertIn("Connect YouTube analytics first", call("content_studio_youtube_trending", bots["Researcher"]))
+
+    def test_publisher_prepares_never_posts_and_reads_analytics_only_when_the_person_allowed_it(self):
+        bots = self.bots
+        post = self.rendered_post()
+        studio.submit_for_approval(post["id"])
+        self.assertIn("Only the Publisher or Producer", call("content_studio_prepare_post", bots["Editor"], post_id=post["id"]))
+        self.assertIn("Only a post you approved", call("content_studio_prepare_post", bots["Publisher"], post_id=post["id"]))
+        studio.approve(post["id"], "david")
+        self.assertIn("no rendered video to post", call("content_studio_prepare_post", bots["Producer"], post_id=post["id"]))
+        from services.content_studio import prepare as prepare_mod
+
+        def fake_prepare(store, post_id, by, scheduled_at=None):
+            package = {"platform_name": "YouTube", "routes": ["browser"], "file": {"name": "9-16-v1.mp4"}, "text": {"title": "Black holes"},
+                       "hashtags": [], "ai_label": {"name": "Altered or synthetic content"}, "cover": {"file": None}, "problems": [],
+                       "post_button": "Publish", "checklist": [{"by": "you", "text": "Press Publish yourself. Kairos never presses it."}]}
+            return {"post_id": post_id, "state": "prepared", "scheduled_at": scheduled_at, "package": package, "by": by}
+        with patch.object(prepare_mod, "prepare", fake_prepare):
+            out = call("content_studio_prepare_post", bots["Publisher"], post_id=post["id"], schedule_at=2_000_000_000)
+        self.assertIn("Only the person opens the upload page", out)
+        self.assertIn("Kairos never presses it", out)
+        self.assertIn("2000000000", out)
+        board = call("content_studio_publishing", bots["Executor"])
+        self.assertIn('"approved": 1', board)
+        self.assertIn("Only the Producer or Publisher or Executor", call("content_studio_read_analytics", bots["Editor"], platform="tiktok"))
+        self.assertIn("has not turned on page reads", call("content_studio_read_analytics", bots["Publisher"], platform="tiktok"))
+        studio.update_settings(page_reads={"tiktok": True})
+        from services.content_studio import page_reads
+
+        async def fake_read(store, platform, limit=None, **kw):
+            return {"platform": platform, "read": 1, "stored": 1, "statuses": {"ok": 1}, "stopped": "", "limit": limit}
+        with patch.object(page_reads, "read_due", fake_read):
+            out = call("content_studio_read_analytics", bots["Executor"], platform="tiktok")
+        self.assertIn('"stored": 1', out)
+        self.assertIn('"limit": 3', out, "at most three pages a call")
+        studio.update_settings(page_reads={"tiktok": False})
 
     def test_a_new_niche_is_proposed_confirmed_then_the_persons_call(self):
         bots = self.bots

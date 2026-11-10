@@ -161,7 +161,10 @@ BOTS = [
          "the pipeline state with content_studio_pipeline, and every bot's output.",
          "decisions and the approval queue. Approvals and the weekly report go to the person's Inbox. You never approve or post anything; only the person approves a post.",
          "Daily cycle, per live channel: the Researcher gathers candidates, the Evaluator picks, the Script Writer writes, the Editor renders and drafts the post, then you queue the post with content_studio_submit_post for the person to approve, edit or reject. "
-         "After an approval, the Publisher posts it and records the link. Never skip the approval.\n"
+         "After an approval, the Publisher prepares it for its platform (content_studio_prepare_post; you can too, with a schedule time) and records the link once it is live. Never skip the approval. "
+         "Preparing never posts: the person opens the upload page from Studio > Content > Publishing and presses Post themselves; YouTube can also go out through its API when the person connected posting. "
+         "Check content_studio_publishing each cycle: a post prepared but not posted for a day, or one that failed, is yours to raise with the person once, plainly.\n"
+         "Numbers: YouTube's come from its analytics; TikTok's and Instagram's from the person's own signed-in pages when they turned page reads on (content_studio_read_analytics, read-only and rate-limited), else from a CSV import.\n"
          "Bring each post's shot plan with it for approval (content_studio_post_evidence lists the plan, the sources and the policy checks the post passed; it is also the record if a channel ever has to appeal). "
          "Run content_studio_watch each cycle; it sends urgent findings to the person's Inbox once. Watch for and act on: a step that has not finished in its time window (retry it or hand it to another bot), a render failure, a post rejected twice (stop and ask the person what they want), spend near the cap, and any platform warning on a channel (content_studio_record_warning pauses the channel and tells the person at once, do not wait for the weekly report).\n"
          "Spend: the team has a monthly cap of $" + str(MONTHLY_CAP_USD) + ". Check spend each cycle with content_studio_watch. When it reaches " + str(WARN_PERCENT) + " percent, the watch tells the person in the Inbox before the cap stops the team's work; add what has been spent and what is planned.\n"
@@ -222,9 +225,13 @@ BOTS = [
          "You are the Publisher. You hand each approved post to the platform and record the posted link. Making and posting are separate steps with separate permissions.",
          "approved posts only.",
          "the posted link, the time and the platform.",
-         "Never post anything the person has not approved, and never post it changed. By default you prepare the post: fill the upload page with the approved title, caption, tags and file, then stop and let the person click Post. "
-         "When the person posted it, record the live link with content_studio_mark_posted so its numbers can be tracked. "
+         "Never post anything the person has not approved, and never post it changed. "
+         "For each approved post, prepare it with content_studio_prepare_post: Kairos picks the file in the platform's aspect and length (the editor's 9:16 export for Shorts, Reels and TikTok), writes the title, the description with YouTube chapters, the hashtags, turns on the platform's AI label, makes the cover and lists what the person does. Pass schedule_at when the Producer gave a time. "
+         "If it comes back with a problem (wrong aspect, too long, text over the limit), do not work around it: tell the Producer, who sends it back to the Editor or the Script Writer. "
+         "You never open the upload page and you never press Post, Publish or Share. The person opens the page from Studio > Content > Publishing; Kairos fills it in their own browser and stops before the final button, which they press. "
+         "When the person posted it, record the live link with content_studio_mark_posted so its numbers can be tracked. content_studio_publishing shows every post's state and what waits on whom. "
          "Post directly only on a platform the person has connected their own registered app for: today that is YouTube, with content_studio_publish_youtube, which uploads the approved post exactly as approved with the AI label and records the link. YouTube may keep it private; say so to the Producer. "
+         "When the person turned on page reads for TikTok or Instagram, content_studio_read_analytics reads the due posts' numbers from their own signed-in creator pages, read-only and rate-limited; if it says they are signed out or the page may have changed, tell the Producer instead of retrying. "
          "If anything looks wrong (a warning, a missing label, a changed file), stop and tell the Producer. Your approval level is Ask and must stay there.")},
     {"key": "bot-7", "name": "Executor", "color": "#d99a92",
      "role": "Reviews results weekly and proposes which niche, format or channel to retire",
@@ -266,8 +273,10 @@ ROUTINES = {
     "bot-7": [
         {"name": "Daily metrics snapshot",
          "prompt": ("Take today's metrics snapshot for every posted item: views, watch time or average view duration, likes, comments, shares and follows gained. "
-                    "Read them from the platform analytics available, or the signed-in pages in the Kairos Browser (read-only), and record them as new rows in the time series "
-                    "with content_studio_record_metrics (all posts in one call; one bad row stores none). Never edit an earlier snapshot. Tell the Producer if a number is missing or a platform shows a warning."),
+                    "YouTube's arrive from its analytics. For TikTok and Instagram, when the person turned page reads on, run content_studio_read_analytics for each "
+                    "(it reads the person's own signed-in pages, read-only, and stores the numbers itself). Record anything else as new rows in the time series "
+                    "with content_studio_record_metrics (all posts in one call; one bad row stores none). Never edit an earlier snapshot. Tell the Producer if a number is missing, "
+                    "a page read says signed out or page changed, or a platform shows a warning."),
          "schedule_kind": "daily", "run_time": "20:00", "report_when": "notable"},
     ],
 }

@@ -32,6 +32,10 @@ DEFAULT_SETTINGS = {
     "team_roles": {},            # bot id -> role (producer, researcher, ...), filled in when the team template is imported
     "notified": {},              # delivery keys already sent to the Inbox, so a watch does not repeat itself
     "batch_approval": False,     # spec section 2: a per-post OK first; the person turns on one-tap batch approval later
+    # Page-read analytics (page_reads.py): reading TikTok and Instagram numbers from the person's own signed-in pages in
+    # the Kairos Browser. Off until the person turns each platform on.
+    "page_reads": {"tiktok": False, "instagram": False},
+    "page_reads_reset": {},      # platform -> when the person pressed Try again after the reads paused
 }
 TEAM_ROLES = ("producer", "researcher", "evaluator", "script_writer", "editor", "publisher", "executor")
 ASPECTS = ("9:16", "16:9", "1:1")
@@ -127,6 +131,15 @@ CREATE TABLE IF NOT EXISTS ports (
   example_title TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'proposed', checks TEXT NOT NULL DEFAULT '{}',
   verdict_by TEXT, verdict_reason TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL DEFAULT '', created_at REAL NOT NULL,
   decided_at REAL);
+CREATE TABLE IF NOT EXISTS preparations (
+  id INTEGER PRIMARY KEY, post_id INTEGER NOT NULL UNIQUE REFERENCES posts(id), platform TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'prepared', route TEXT NOT NULL DEFAULT 'browser', package TEXT NOT NULL DEFAULT '{}',
+  scheduled_at REAL, prepared_by TEXT NOT NULL DEFAULT '', prepared_at REAL NOT NULL, opened_at REAL,
+  fill TEXT NOT NULL DEFAULT '{}', error TEXT NOT NULL DEFAULT '', updated_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS page_reads (
+  id INTEGER PRIMARY KEY, platform TEXT NOT NULL, post_id INTEGER REFERENCES posts(id), url TEXT NOT NULL DEFAULT '',
+  at REAL NOT NULL, status TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '', snapshot_id INTEGER);
+CREATE INDEX IF NOT EXISTS page_reads_at ON page_reads(platform, at);
 CREATE TABLE IF NOT EXISTS review_marks (
   review_id INTEGER NOT NULL REFERENCES reviews(id), subject_type TEXT NOT NULL, subject_id INTEGER NOT NULL,
   score REAL NOT NULL, median REAL, behind INTEGER NOT NULL);
@@ -136,7 +149,7 @@ CREATE TABLE IF NOT EXISTS decisions (
   payload TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL, proposed_by TEXT NOT NULL,
   confirmed_by TEXT, user_ok_by TEXT, at REAL NOT NULL, resolved_at REAL);
 """
-JSON_COLS = {"numbers", "payload", "body", "beats", "audience", "do_not_use", "evidence", "audience_evidence", "checks"}
+JSON_COLS = {"numbers", "payload", "body", "beats", "audience", "do_not_use", "evidence", "audience_evidence", "checks", "package", "fill"}
 JSON_LISTS = {"beats", "do_not_use", "evidence", "audience_evidence"}
 
 
@@ -253,6 +266,15 @@ class Store:
             elif key == "batch_approval":
                 if not isinstance(value, bool):
                     raise StudioError("batch_approval is true or false")
+            elif key == "page_reads":
+                if not isinstance(value, dict) or not set(value) <= {"tiktok", "instagram"} or \
+                        any(not isinstance(v, bool) for v in value.values()):
+                    raise StudioError("page_reads maps tiktok and instagram to true or false")
+                value = {**current[key], **value}
+            elif key == "page_reads_reset":
+                if not isinstance(value, dict) or not set(value) <= {"tiktok", "instagram"}:
+                    raise StudioError("page_reads_reset maps tiktok and instagram to a time")
+                value = {**current[key], **{k: _num(v, "reset time") for k, v in value.items()}}
             elif key in ("min_weeks", "min_posts", "behind_reviews", "start_niches", "score_after_days", "review_gap_days"):
                 value = _num(value, key, True, 0 if key == "review_gap_days" else 1)
             else:
@@ -787,8 +809,97 @@ class Store:
     def reject(self, post_id, reason="", now=None):
         now = time.time() if now is None else now
         post = self.get_post(post_id)
-        return self._move(post_id, ("awaiting_approval", "approved"), "rejected", now,
-                          rejection_count=post["rejection_count"] + 1, reject_reason=_clean_text(reason, "reason", 500, False))
+        rejected = self._move(post_id, ("awaiting_approval", "approved"), "rejected", now,
+                              rejection_count=post["rejection_count"] + 1, reject_reason=_clean_text(reason, "reason", 500, False))
+        # A prepared package was made from what was approved; a rejected post is prepared again after its next approval.
+        self._write("DELETE FROM preparations WHERE post_id = ?", (post_id,))
+        return rejected
+
+    # -- Prepare post (prepare.py assembles; publishing.py draws the dashboard) -------------------------
+
+    PREP_STATES = ("prepared", "waiting_for_you", "posted", "failed")
+
+    def save_preparation(self, post_id, platform, package, route, by="", scheduled_at=None, now=None):
+        """The assembled post for its platform. Preparing again replaces the package and starts the state over;
+        the schedule is kept unless a new one is given."""
+        now = time.time() if now is None else now
+        with self.lock:
+            old = self.preparation_for(post_id)
+            if old and old["state"] == "posted":
+                raise conflict("that post is already posted")
+            fields = dict(platform=platform, state="prepared", route=route, package=package,
+                          prepared_by=_clean_text(by, "by", 80, False), prepared_at=now, opened_at=None, fill={}, error="",
+                          updated_at=now, scheduled_at=scheduled_at if scheduled_at is not None else (old or {}).get("scheduled_at"))
+            if old:
+                self._update("preparations", old["id"], **fields)
+                return self.get_preparation(old["id"])
+            return self.get_preparation(self._insert("preparations", post_id=post_id, **fields))
+
+    def get_preparation(self, prep_id):
+        row = self._row("SELECT * FROM preparations WHERE id = ?", (prep_id,))
+        if not row:
+            raise not_found("prepared post")
+        return row
+
+    def preparation_for(self, post_id):
+        return self._row("SELECT * FROM preparations WHERE post_id = ?", (post_id,))
+
+    def list_preparations(self):
+        return self._rows("SELECT * FROM preparations ORDER BY id")
+
+    def update_preparation(self, prep_id, now=None, **fields):
+        now = time.time() if now is None else now
+        prep = self.get_preparation(prep_id)
+        if "state" in fields and fields["state"] not in self.PREP_STATES:
+            raise StudioError(f"a prepared post's state is one of {', '.join(self.PREP_STATES)}")
+        if prep["state"] == "posted" and fields.get("state", "posted") != "posted":
+            raise conflict("that post is already posted")
+        if "error" in fields:
+            fields["error"] = _clean_text(fields["error"], "error", 500, False)
+        self._update("preparations", prep_id, updated_at=now, **fields)
+        return self.get_preparation(prep_id)
+
+    def set_schedule(self, post_id, at, now=None):
+        """When the post should go out (None clears it). Only an approved post that is not posted yet; the time is
+        part of the prepared post's checklist and, on YouTube's own route, YouTube's scheduled publish."""
+        now = time.time() if now is None else now
+        post = self.get_post(post_id)
+        if post["state"] != "approved":
+            raise conflict("only an approved post that is not posted yet can be scheduled")
+        if at is not None:
+            at = _num(at, "schedule time")
+            if at < now - 60:
+                raise StudioError("the schedule time is in the past")
+            if at > now + 180 * DAY:
+                raise StudioError("schedule at most 180 days ahead")
+        prep = self.preparation_for(post_id)
+        if prep is None:
+            raise conflict("prepare the post first; the schedule is part of the prepared post")
+        self._update("preparations", prep["id"], scheduled_at=at, updated_at=now)
+        return self.get_preparation(prep["id"])
+
+    # -- page-read analytics log (page_reads.py): what was read, when, and how it went -----------------
+
+    PAGE_READ_STATUSES = ("ok", "signed_out", "not_yours", "parse_failed", "failed", "unavailable")
+
+    def record_page_read(self, platform, status, post_id=None, url="", detail="", snapshot_id=None, now=None):
+        now = time.time() if now is None else now
+        if status not in self.PAGE_READ_STATUSES:
+            raise StudioError(f"a page read is one of {', '.join(self.PAGE_READ_STATUSES)}")
+        rid = self._insert("page_reads", platform=platform, post_id=post_id, url=_clean_text(url, "url", 500, False), at=now,
+                           status=status, detail=_clean_text(detail, "detail", 500, False), snapshot_id=snapshot_id)
+        self._write("DELETE FROM page_reads WHERE id IN (SELECT id FROM page_reads WHERE platform = ? "
+                    "ORDER BY id DESC LIMIT -1 OFFSET 2000)", (platform,))
+        return self._row("SELECT * FROM page_reads WHERE id = ?", (rid,))
+
+    def page_reads(self, platform=None, since=None, post_id=None, limit=200):
+        where, args = [], []
+        for col, op, value in (("platform", "=", platform), ("at", ">=", since), ("post_id", "=", post_id)):
+            if value is not None:
+                where.append(f"{col} {op} ?")
+                args.append(value)
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        return self._rows(f"SELECT * FROM page_reads {clause} ORDER BY id DESC LIMIT ?", (*args, int(limit)))
 
     def redraft(self, post_id, now=None):
         """A rejected post goes back to the drafting steps (the rejection count stays, for the Producer's watch)."""
@@ -819,8 +930,12 @@ class Store:
         if any(other["posted_url"] == url and other["channel_id"] != post["channel_id"] for other in self.list_posts()):
             raise conflict("that link is already recorded on another of the team's channels; one video is never "
                            "posted on two of its own channels")
-        return self._move(post_id, ("approved",), "posted", now, posted_url=url,
-                          posted_at=now if posted_at is None else _num(posted_at, "posted_at"))
+        posted = self._move(post_id, ("approved",), "posted", now, posted_url=url,
+                            posted_at=now if posted_at is None else _num(posted_at, "posted_at"))
+        prep = self.preparation_for(post_id)
+        if prep:
+            self._update("preparations", prep["id"], state="posted", error="", updated_at=now)
+        return posted
 
     # -- appeal evidence ------------------------------------------------------------------------
 

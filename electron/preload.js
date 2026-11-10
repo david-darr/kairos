@@ -139,6 +139,8 @@ contextBridge.exposeInMainWorld("jarvis", {
       useStrongPassword: invoke("browse:password-generate"), importPasswords: invoke("browse:passwords-import"),
       onPasswordOffer: subscribe("browse:password-offer"), onPasswordSuggest: subscribe("browse:password-suggest"),
       audioOutput: invoke("browse:audio"), setAudioOutput: invoke("browse:audio-set"),
+      // Content Studio: open a prepared post's upload page and fill it (stops before the final button).
+      preparePost: invoke("browse:prepare-post"), onPrepareProgress: subscribe("browse:prepare-progress"),
       onState: subscribe("browse:state"), onEvent: subscribe("browse:event"), onDownload: subscribe("browse:download"),
       onPermission: subscribe("browse:permission"), onShortcut: subscribe("browse:shortcut"),
     };

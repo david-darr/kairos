@@ -128,3 +128,60 @@
 
 .sc-chapters{margin:8px 0;padding-left:22px;display:grid;gap:4px}
 .sc-plan-text pre{white-space:pre-wrap;max-height:360px;overflow:auto;font-size:12px}
+
+/* Publishing: every post from draft to live link (a list, or a week calendar), the prepared post's checklist. */
+.sc-pub-bar { align-items: flex-start; }
+.sc-filters, .sc-seg { display: flex; gap: 6px; flex-wrap: wrap; }
+.sc-seg { padding: 3px; border: 1px solid var(--border); border-radius: 999px; flex: 0 0 auto; }
+.sc .sc-filters .btn, .sc .sc-seg .btn { min-height: 32px; padding: 0 12px; font-size: 12.5px; border-radius: 999px; }
+.sc .sc-filters .btn.is-on, .sc .sc-seg .btn.is-on { background: var(--bg-panel-solid); color: var(--text); box-shadow: 0 0 0 1px var(--border-strong); }
+.sc-pub { border: 1px solid var(--border); border-left: 3px solid var(--border-strong); border-radius: 12px; padding: 12px 14px; margin: 0 0 10px; background: var(--bg-panel-solid); }
+.sc-pub-waiting_for_you, .sc-pub-awaiting_approval { border-left-color: rgba(var(--warn-rgb), .8); }
+.sc-pub-prepared, .sc-pub-approved { border-left-color: var(--accent); }
+.sc-pub-posted { border-left-color: var(--success); }
+.sc-pub-failed { border-left-color: var(--danger); }
+.sc-pub .sc-actions { margin: 8px 0 0; }
+.sc-pub-when, .sc-pub-next { margin: 6px 0 0; font-size: 12.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.sc-pub-when { color: var(--text-faint); }
+.sc-pub-next.by-you { color: var(--text); font-weight: 550; }
+.sc-pub-next.by-team { color: var(--text-dim); }
+.sc-pub-link { margin: 4px 0 0; }
+.sc-pub-link a { color: var(--accent); overflow-wrap: anywhere; }
+.sc-week-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
+.sc-week-title { margin: 0 auto 0 0; font-size: 14px; order: -1; flex: 1 1 200px; }
+.sc-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; align-items: start; }
+.sc-day { border: 1px solid var(--border); border-radius: 12px; padding: 8px; min-height: 140px; display: grid; gap: 6px; align-content: start; background: rgba(var(--ink-rgb), .015); }
+.sc-day.is-today { border-color: var(--accent); }
+.sc-day-title { margin: 0 0 2px; font-size: 12px; color: var(--text-dim); }
+.sc-cal { display: grid; gap: 3px; width: 100%; text-align: left; padding: 7px 8px; border: 1px solid var(--border); border-left: 3px solid var(--border-strong); border-radius: 8px; background: var(--bg-panel-solid); color: var(--text); font: inherit; cursor: pointer; }
+.sc-cal:hover { border-color: var(--border-strong); }
+.sc-cal:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sc-cal-time { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.sc-cal-title { font-size: 12.5px; overflow-wrap: anywhere; }
+.sc-cal-meta { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.sc-cal-meta .set-pill { font-size: 10.5px; }
+.sc-prepared .sc-post-pills { margin: 4px 0 2px; }
+.sc-prepared .sc-block { position: relative; }
+.sc .sc-copy { min-height: 28px; padding: 0 10px; font-size: 12px; margin-top: 4px; }
+.sc-check-title { margin: 14px 0 6px; font-size: 12px; color: var(--text-dim); }
+.sc-checklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.sc-check { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 10px; align-items: start; font-size: 12.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.sc-check .set-pill { justify-self: start; }
+[data-page-reads] .set-row-control input[type=checkbox] { width: 36px; height: 20px; }
+@media (max-width: 1100px) { .sc-week { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); } }
+@media (max-width: 768px) {
+  .sc-week { grid-template-columns: 1fr; }
+  .sc-day { min-height: 0; }
+  .sc-check { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .sc .sc-filters .btn, .sc .sc-seg .btn, .sc .sc-week-nav .btn { min-height: 44px; }
+}
+/* The shipped-tab restyle makes every button a pill; a calendar entry and a Copy button keep their own shape. */
+.kairos-redesign [data-view][data-custom-tab] .sc .sc-cal { display: grid; gap: 3px; min-height: 0; padding: 7px 8px; border-radius: 8px !important; background-color: var(--rd-surface-solid) !important; border-color: var(--rd-line) !important; text-align: left; white-space: normal; }
+.kairos-redesign [data-view][data-custom-tab] .sc .sc-cal:hover { border-color: var(--rd-line-strong) !important; }
+.kairos-redesign [data-view][data-custom-tab] .sc .sc-cal .set-pill { white-space: normal; text-align: left; }
+.kairos-redesign [data-view][data-custom-tab] .sc .sc-copy { min-height: 28px; padding: 0 10px; font-size: 12px; }
+.kairos-redesign [data-view][data-custom-tab] .sc .sc-cal { border-left-width: 3px; }
+.kairos-redesign [data-view][data-custom-tab] .sc .sc-cal:is(.sc-pub-waiting_for_you, .sc-pub-awaiting_approval) { border-left-color: rgba(var(--warn-rgb), .8) !important; }
+.kairos-redesign [data-view][data-custom-tab] .sc .sc-cal:is(.sc-pub-prepared, .sc-pub-approved) { border-left-color: var(--accent) !important; }
+.kairos-redesign [data-view][data-custom-tab] .sc .sc-cal.sc-pub-posted { border-left-color: var(--success) !important; }
+.kairos-redesign [data-view][data-custom-tab] .sc .sc-cal.sc-pub-failed { border-left-color: var(--danger) !important; }

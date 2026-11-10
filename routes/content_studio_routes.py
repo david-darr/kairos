@@ -3,17 +3,28 @@
 store only (services/content_studio). Numbers come in by manual entry or import, or from YouTube's read-only analytics.
 These routes are the person's: a confirm here is the person's OK. The Producer's own confirm step is its role-gated
 tool (core/bot_content_studio_tools.py), never this API.
+
+Prepare post and the publishing dashboard (services/content_studio/prepare.py, publishing.py): the person prepares an
+approved post, schedules it, and opens its upload page in the Kairos Browser. The desktop app's main process fetches the
+fill plan and reports how the fill went through the /desktop routes, which also need the desktop app's own secret
+(X-Kairos-Desktop), so a script in the app page cannot read a local file path or mark a fill. Page-read analytics
+(page_reads.py): the person turns TikTok and Instagram reads on, reads now or tries again; the desktop app's hidden
+reader takes its jobs from `worker_router` with the per-launch render token, like the design render worker.
 """
+import asyncio
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.middleware import require_user
 from core.middleware import local_api_base
-from services.content_studio import StudioError, delivery, formats, pipeline, report, review, studio, youtube, youtube_publish
+from services.content_studio import (StudioError, delivery, formats, page_reads, pipeline, prepare, publishing, report, review,
+                                     studio, youtube, youtube_publish)
 
 router = APIRouter(prefix="/api/content-studio", tags=["content-studio"])
+worker_router = APIRouter(tags=["content-studio"])
 
 
 class Body(BaseModel):
@@ -301,7 +312,7 @@ def approvals(user: str = Depends(require_user)):
 
 @router.post("/posts/{post_id}/approve")
 def approve_post(post_id: int, user: str = Depends(require_user)):
-    """Marks the post approved. Preparing or sending it to the platform is the Publisher step, built later."""
+    """Marks the post approved. Preparing it for the platform (Prepare post) and posting are the next steps."""
     return _run(studio.approve, post_id, user)
 
 
@@ -477,3 +488,135 @@ async def publish_youtube(post_id: int, user: str = Depends(require_user)):
         return await youtube_publish.publish(studio, post_id, user)
     except StudioError as exc:
         raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+
+
+# -- Prepare post and the publishing dashboard ---------------------------------------------------------------------
+
+class PrepareBody(Body):
+    schedule_at: Optional[float] = None
+
+
+class ScheduleBody(Body):
+    at: Optional[float] = None
+
+
+class FillReportBody(Body):
+    stage: str = Field(max_length=10)
+    filled: list[str] = Field(default_factory=list, max_length=20)
+    missing: list[str] = Field(default_factory=list, max_length=20)
+    note: str = Field("", max_length=300)
+
+
+@router.get("/publishing")
+def publishing_view(user: str = Depends(require_user)):
+    """Every post with its state, schedule, live link and next action, for the dashboard and its week calendar."""
+    return {**publishing.dashboard(studio), "page_reads": page_reads.status(studio)}
+
+
+@router.post("/posts/{post_id}/prepare")
+def prepare_post(post_id: int, body: PrepareBody = PrepareBody(), user: str = Depends(require_user)):
+    """Assembles an approved post for its platform: file, text, hashtags, AI label, cover, schedule and checklist."""
+    return _run(prepare.prepare, studio, post_id, user, body.schedule_at)
+
+
+@router.get("/preparations/{prep_id}")
+def preparation(prep_id: int, user: str = Depends(require_user)):
+    return _run(studio.get_preparation, prep_id)
+
+
+@router.post("/posts/{post_id}/schedule")
+def schedule_post(post_id: int, body: ScheduleBody, user: str = Depends(require_user)):
+    """Sets (or clears, with null) when a prepared post should go out."""
+    return _run(prepare.schedule, studio, post_id, body.at)
+
+
+def _desktop(request: Request, user: str = Depends(require_user)) -> str:
+    from routes.browse_routes import _desktop as desktop_only
+    return desktop_only(request, user)
+
+
+@router.post("/desktop/prepared/{prep_id}")
+def desktop_fill_plan(prep_id: int, user: str = Depends(_desktop)):
+    """The desktop app's main process, when the person pressed Open upload page: what to fill, with the file's path."""
+    return _run(prepare.fill_plan, studio, prep_id)
+
+
+@router.post("/desktop/prepared/{prep_id}/report")
+def desktop_fill_report(prep_id: int, body: FillReportBody, user: str = Depends(_desktop)):
+    return _run(prepare.report_fill, studio, prep_id, body.stage, body.filled, body.missing, body.note)
+
+
+# -- page-read analytics (TikTok and Instagram, the person's own signed-in pages) -------------------------------------
+
+class PageReadsBody(Body):
+    tiktok: Optional[bool] = None
+    instagram: Optional[bool] = None
+
+
+class PlatformBody(Body):
+    platform: str = Field(max_length=10)
+
+
+@router.get("/analytics/pages")
+def page_reads_status(user: str = Depends(require_user)):
+    return page_reads.status(studio)
+
+
+@router.put("/analytics/pages")
+def page_reads_switch(body: PageReadsBody, user: str = Depends(require_user)):
+    """The person turns page reads on or off per platform."""
+    _run(studio.update_settings, page_reads={k: v for k, v in _given(body).items() if v is not None})
+    return page_reads.status(studio)
+
+
+_reading: dict = {}
+
+
+@router.post("/analytics/pages/read")
+async def page_reads_now(body: PlatformBody, user: str = Depends(require_user)):
+    """Read now: the due posts of one platform, within the same limits as the schedule. Runs in the background
+    (pages are read at least 20 seconds apart); the status shows each read as it lands."""
+    if body.platform not in ("tiktok", "instagram"):
+        raise HTTPException(422, "Page reads are for TikTok and Instagram.")
+    if not studio.settings()["page_reads"].get(body.platform):
+        raise HTTPException(409, "Turn page reads on for this platform first.")
+    if not page_reads.available():
+        raise HTTPException(409, "Page reads need the Kairos desktop app open.")
+    from core import accounts
+    key = (accounts.effective_account(), body.platform)
+    running = _reading.get(key)
+    if running is None or running.done():
+        _reading[key] = asyncio.ensure_future(page_reads.read_due(studio, body.platform))
+    return {"started": True, **page_reads.status(studio)}
+
+
+@router.post("/analytics/pages/try-again")
+def page_reads_try_again(body: PlatformBody, user: str = Depends(require_user)):
+    try:
+        return page_reads.try_again(studio, body.platform)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+def _worker(request: Request) -> None:
+    if not page_reads.token_ok(request.headers.get("X-Kairos-Render-Token")):
+        raise HTTPException(404, "Not found")
+    host = request.client.host if request.client else ""
+    if host not in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(404, "Not found")
+
+
+@worker_router.get("/api/content-studio/page-reads/jobs")
+async def page_read_jobs(request: Request) -> StreamingResponse:
+    _worker(request)
+    return StreamingResponse(page_reads.worker_stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
+@worker_router.post("/api/content-studio/page-reads/result/{job_id}")
+async def page_read_result(job_id: str, request: Request) -> dict:
+    _worker(request)
+    body = await request.body()
+    if len(body) > 2 * 1024 * 1024:
+        raise HTTPException(413, "Too large")
+    return {"ok": page_reads.complete(job_id, body, request.headers.get("X-Kairos-Render-Error"))}

@@ -196,5 +196,37 @@ const { pathToFileURL } = require('node:url');
     [['', 'Motion type (default)'], ['flat-2d', 'Flat 2D explainer'], ['abcdefabcdef', 'Mine']]);
   assert.equal(M.channelLookText({ style_pack: 'abcdefabcdef', look: 'sport' }, [{ id: 'abcdefabcdef', name: 'Mine' }]), 'style Mine, look sport');
 
+  // Publishing: states, the week calendar, the fill's words, the schedule field, the page-read lines.
+  assert.equal(M.stateLabel('waiting_for_you'), 'Waiting for you to press Post');
+  assert.deepEqual(M.stateCounts({ posted: 2, drafted: 1, failed: 0 }), [{ id: 'drafted', label: 'Drafted', count: 1 }, { id: 'posted', label: 'Posted', count: 2 }]);
+  assert.deepEqual(M.filterItems([{ state: 'posted' }, { state: 'failed' }], 'failed'), [{ state: 'failed' }]);
+  const wed = new Date(2026, 10, 11, 15, 30).getTime() / 1000;              // Wednesday 11 Nov 2026
+  const mon = M.weekOf(wed);
+  assert.equal(new Date(mon * 1000).getDay(), 1); assert.equal(new Date(mon * 1000).getHours(), 0);
+  assert.equal(new Date(mon * 1000).getDate(), 9);
+  assert.equal(M.weekOf(mon), mon, 'a Monday is its own week');
+  assert.deepEqual(M.weekDays(mon).map(d => d.label), ['Mon 9 Nov', 'Tue 10 Nov', 'Wed 11 Nov', 'Thu 12 Nov', 'Fri 13 Nov', 'Sat 14 Nov', 'Sun 15 Nov']);
+  assert.equal(M.weekLabel(mon, mon), 'This week, 9 Nov to 15 Nov');
+  assert.equal(M.weekLabel(M.addDays(mon, 7), mon), 'Week of 16 Nov to 22 Nov');
+  const days = M.itemsByDay([{ when: wed }, { when: mon }, { when: M.addDays(mon, 7) }, { when: wed - 3600 }], mon);
+  assert.deepEqual(days.map(d => d.length), [1, 0, 2, 0, 0, 0, 0]);
+  assert.ok(days[2][0].when < days[2][1].when, 'earliest first');
+  assert.equal(M.timeText(wed), 'Wed 11 Nov, 15:30');
+  assert.equal(M.whenText({ posted_at: wed }), 'Posted Wed 11 Nov, 15:30');
+  assert.equal(M.whenText({ scheduled_at: wed }), 'Scheduled for Wed 11 Nov, 15:30');
+  assert.equal(M.nextText({ who: 'you', what: 'Press Post.' }), 'You: Press Post.');
+  assert.equal(M.fillText({ stage: 'stopped', filled: ['file', 'caption'], missing: ['ai_label'], note: 'time ran out' }),
+    'Kairos filled: Video, Caption. Not found on the page, do these yourself: AI label. Stopped: time ran out.');
+  assert.equal(M.fillText({}), '');
+  assert.equal(M.scheduleValue(wed), '2026-11-11T15:30');
+  assert.equal(M.parseSchedule('2026-11-11T15:30'), wed);
+  assert.equal(M.parseSchedule('soon'), null);
+  assert.match(M.pageReadText({ on: false, name: 'TikTok' }), /^Off\. Turn it on/);
+  assert.match(M.pageReadText({ on: true, name: 'TikTok', paused: 'signed_out' }), /signed out of TikTok/);
+  assert.match(M.pageReadText({ on: true, name: 'Instagram', paused: 'page_changed' }), /Try again/);
+  assert.equal(M.pageReadText({ on: true, name: 'TikTok', reads_today: 3, max_per_day: 40, last: { at: wed, status: 'ok' } }), 'On. 3 of 40 page reads today. Last read Wed 11 Nov, 15:30 (read).');
+  assert.equal(M.prepareText({ package: { platform_name: 'TikTok', routes: ['browser'], problems: [] } }), 'Prepared for TikTok. Open the upload page when you are ready.');
+  for (const text of [M.pageReadText({ on: false, name: 'TikTok' }), M.fillText({ stage: 'done', filled: ['file'] }), M.aiLabel('instagram').text]) assert.ok(!text.includes('—'), 'no em-dashes');
+
   console.log('studio content model ok');
 })().catch(error => { console.error(error); process.exit(1); });

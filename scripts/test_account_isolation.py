@@ -136,6 +136,18 @@ def fill(account):
                                                  "checked": date.today().isoformat()}]})
     account.ids.setdefault("format", []).append(str(card["id"]))
     account.seeded["format cards"] = "file"
+    # Prepare post and page reads (2026-11-10): an approved post's prepared package and a page-read log row, written to the
+    # account's own store (preparing needs a rendered file); the publishing, preparation and page-read routes are then
+    # tried across accounts like the rest.
+    with accounts.as_account(auth_manager.account_id(account.name)):
+        niche = studio.create_niche(f"{m} niche")
+        channel = studio.create_channel(niche["id"], "tiktok", f"@{account.name}.leak")
+        post = studio.create_post(channel["id"], f"{m} post", script_ref=m)
+        studio._update("posts", post["id"], state="approved", render_ref="/generated-files/x.mp4", render_status="ok")
+        prep = studio.save_preparation(post["id"], "tiktok", {"text": {"caption": f"{m} caption"}, "checklist": [], "problems": []}, "browser")
+        studio.record_page_read("tiktok", "not_yours", post["id"], "https://www.tiktok.com/tiktokstudio/analytics/1", f"{m} read")
+    account.ids.setdefault("preparation", []).append(str(prep["id"]))
+    account.seeded["prepared posts"] = "file"
     # Pack A characters (Video Styles unit 3) are made through their route; the marker is the character's name.
     account.seed("characters", "POST", "/api/characters", {"family": "round", "name": m}, "character")
     # User-made style packs: the starter pack through its route, then a copy named with the marker (a brief needs a model).
@@ -148,7 +160,7 @@ def fill(account):
 ID_PARAMS = {"session": "session", "note": "note", "event": "event", "document": "document", "doc": "document",
              "project": "project", "endpoint": "endpoint", "task": "task", "routine": "task", "agent": "agent",
              "bot": "agent", "design": "design", "skill": "skill", "slug": "skill", "hook": "hook", "trigger": "trigger",
-             "format_id": "format", "character_id": "character", "pack_id": "style_pack"}
+             "format_id": "format", "character_id": "character", "pack_id": "style_pack", "prep_id": "preparation"}
 
 
 # Fields the edit routes accept; extra ones are ignored. A route that refuses the body (422) proves nothing
