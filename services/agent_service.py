@@ -968,12 +968,15 @@ class AgentService:
             work = [t for t in task_service.list_tasks() if t.get("agent_id") == agent_id]
             owned = {t["id"] for t in work}
             midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
-            history = task_service.list_runs()
+            # The stored records, not list_runs(): that sorts, copies and looks up the delivery of every run in
+            # the install, and the bot list asks this twice a bot (100-bot scale test, 2026-11-10). A record with
+            # no outcome reads as succeeded or failed there, so it is never queued or running here either.
+            history = task_service.run_records()
             completed = sum(1 for r in history if r["task_id"] in owned
                             # Missed receipts did no work and must not spend
                             # tomorrow's cap on startup (phase 2-i, 2026-10-13).
                             and not r.get("missed_reason")
-                            and not (r["task_id"] == claimed_work_id and r["outcome"] in ("queued", "running"))
+                            and not (r["task_id"] == claimed_work_id and r.get("outcome") in ("queued", "running"))
                             and (r.get("admitted_at") or r.get("started_at") or r["ran_at"]) >= midnight)
             # Durable starts bridge a restart until lost-work recovery runs.
             # This matters for cards still waiting for their lease to expire:

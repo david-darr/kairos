@@ -116,8 +116,11 @@ class DepartmentsTests(TeamsCase):
         self.assertEqual(bot_audience.audience("team", team["id"], owner="local"), [a["id"]])
         foreign = self.bot("Foreign")
         foreign["owner_user"] = "other"
-        mapped = web.get("/api/bot-team/map").json()
+        # The map reads the team list once, not once a bot (it grew with the square of the bots; 2026-11-10).
+        with patch.object(teams, "team_of", side_effect=AssertionError("one registry sync a bot")):
+            mapped = web.get("/api/bot-team/map").json()
         self.assertEqual([b["id"] for b in mapped["members"]], [a["id"]])
+        self.assertEqual(mapped["members"][0]["department_id"], team["id"])
 
 
 if __name__ == "__main__":

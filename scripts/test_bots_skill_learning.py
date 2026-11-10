@@ -231,6 +231,18 @@ class Reviewer(Case):
         self.assertEqual(review.due_threads(self.bot), [])
         self.assertFalse(review.observe_tool_step(self.bot, "t2", 50)["due"])
 
+    def test_due_check_rereads_only_after_a_change(self):
+        # The memory tick asks every bot every 15 s; unchanged files are not read again (100-bot scale test).
+        review.set_settings(self.bot, steps=3)
+        review.observe_tool_step(self.bot, "t1", 3)
+        self.assertEqual(review.due_threads(self.bot), ["t1"])
+        with patch.object(review, "read_json", side_effect=AssertionError("read again")):
+            self.assertEqual(review.due_threads(self.bot), ["t1"])
+        review.observe_tool_step(self.bot, "t2", 3)
+        self.assertEqual(sorted(review.due_threads(self.bot)), ["t1", "t2"], "a write is seen at once")
+        review.set_settings(self.bot, enabled=False)
+        self.assertEqual(review.due_threads(self.bot), [])
+
     def test_counters_keep_at_most_500_threads(self):
         for i in range(505):
             review.observe_tool_step(self.bot, f"th{i}", 1, now=1000 + i)

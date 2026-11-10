@@ -7,6 +7,7 @@ checks as a person's apply. A failed run retries after fifteen minutes and stops
 Counters keep at most 500 threads per bot.
 """
 import json
+import os
 import re
 import time
 
@@ -68,13 +69,37 @@ def observe_tool_step(scope, thread_id, steps=1, *, now=None):
                 and now >= row["next_at"]}
 
 
+# The memory tick asks every bot this every 15 seconds. Reading the two files through the link checks costs
+# about 35 file-system calls a bot (300 ms a pass at 100 bots, on the event loop; 100-bot scale test, 2026-11-10),
+# so the answer's inputs are kept until either file changes: two plain stats a bot instead.
+_due_inputs: dict = {}
+
+
+def _stamp(folder):
+    out = []
+    for filename in ("review.json", "review-state.json"):
+        try:
+            info = os.stat(os.path.join(folder, filename))
+            out.append((info.st_mtime_ns, info.st_size, info.st_ino))
+        except OSError:
+            out.append(None)
+    return tuple(out)
+
+
 def due_threads(scope, *, now=None):
     bot_id = bot_skills._bot_id(scope)
     now = time.time() if now is None else now
-    config = settings(bot_id)
+    from core import accounts
+    folder = os.path.join(accounts.path("bot-skill-state"), bot_id)  # the folder state_path() checks and reads
+    stamp = _stamp(folder)
+    saved = _due_inputs.get(bot_id)
+    if saved is None or saved[0] != folder or saved[1] != stamp:
+        config = settings(bot_id)
+        saved = _due_inputs[bot_id] = (folder, stamp, config, _state(bot_id)["threads"] if config["enabled"] else {})
+    config, threads = saved[2], saved[3]
     if not config["enabled"]:
         return []
-    return [tid for tid, row in _state(bot_id)["threads"].items()
+    return [tid for tid, row in threads.items()
             if not row["gave_up"] and row["count"] >= config["steps"] and now >= row["next_at"]]
 
 

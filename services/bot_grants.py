@@ -388,8 +388,14 @@ def native_hidden(scope, names, surface: Optional[str] = None) -> set:
         scope = scope_from(scope)
     except ScopeError:
         return set(names)
-    return {n for n in names if not verdict(scope, n, {}).allowed
-            and verdict(scope, n, {}).code in ("denied", "not_selected", "unavailable", "unknown")}
+    # One verdict a name, not two: each re-reads the bot, its grants state and the settings, and every bot
+    # turn's tool list asks this for some 200 tools (100-bot scale test, 2026-11-10).
+    hidden = set()
+    for n in names:
+        judged = verdict(scope, n, {})
+        if not judged.allowed and judged.code in ("denied", "not_selected", "unavailable", "unknown"):
+            hidden.add(n)
+    return hidden
 
 
 def claude_disallowed(scope) -> list:

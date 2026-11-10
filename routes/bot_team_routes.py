@@ -27,7 +27,10 @@ def team_map(user: str = Depends(require_user)):
     for bot in teams.service().list_agents():
         if bot.get("hidden") or (teams.owner(bot) != user):
             continue
-        team = teams.team_of(bot["id"])
+        # The team from the list read above, the same one team_of() reads: it re-syncs the whole registry
+        # (every bot's owner) once a bot, which made this map grow with the square of the bots (2026-11-10).
+        section = (bot.get("section") or "").strip()
+        team = next((d for d in departments if teams._same(d["name"], section)), None) if section else None
         bots.append({k: bot.get(k) for k in ("id", "name", "role", "section", "avatar", "endpoint_id",
                                             "model_override", "model_effort") } | {
             "department_id": team["id"] if team else None,

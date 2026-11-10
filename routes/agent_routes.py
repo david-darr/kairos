@@ -208,13 +208,18 @@ def _owned(agent_id: str) -> list[dict]:
     return [t for t in task_service.list_tasks() if t.get("agent_id") == agent_id]
 
 
-def _summary(agent: dict, user: str | None = None) -> dict:
+def _done_keys(user: str | None) -> set:
+    from core import bot_attention_store
+    return {key for key, pref in bot_attention_store.inbox_preferences(user).items() if pref.get("done")} if user else set()
+
+
+def _summary(agent: dict, user: str | None = None, done: set | None = None) -> dict:
     """The agent plus what its card on the Agents list shows. With `user`, items that person marked done in the
-    inbox no longer count as needing them (2026-11-02: "Needs you" stayed after Mark done)."""
+    inbox no longer count as needing them (2026-11-02: "Needs you" stayed after Mark done). `done`: those keys,
+    read once by a caller summarising many agents."""
     from services.agent_handoff import person_inbox
     from services.chat_live import agent_activity
-    from core import bot_attention_store
-    done = {key for key, pref in bot_attention_store.inbox_preferences(user).items() if pref.get("done")} if user else set()
+    done = _done_keys(user) if done is None else done
     owned = _owned(agent["id"])
     running = next((t for t in owned if t["schedule_kind"] == "card" and t.get("status") == "running"), None) \
         or next((t for t in owned if t["schedule_kind"] != "card" and t.get("run_started_at")), None)
@@ -282,7 +287,9 @@ def _refused(error: ValueError) -> HTTPException:
 
 @router.get("")
 async def list_agents(user: str = Depends(require_user)) -> list[dict]:
-    return [_summary(a, user) for a in agent_service.list_agents()]
+    # The done list once, not once a bot: each read opens the attention database (100-bot scale test, 2026-11-10).
+    done = _done_keys(user)
+    return [_summary(a, user, done) for a in agent_service.list_agents()]
 
 
 @router.post("")

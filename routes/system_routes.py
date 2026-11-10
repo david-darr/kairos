@@ -68,7 +68,10 @@ async def recent_events(limit: int = Query(50, ge=1, le=300), user: str = Depend
 
 @router.get("/diagnostics")
 async def diagnostics(user: str = Depends(require_admin)) -> dict:
-    return system_admin.diagnostics()
+    # It walks the whole data folder (28,000 files, 1.5 s at 100 bots): off the event loop, so every other
+    # request and the scheduler keep going meanwhile (100-bot scale test, 2026-11-10).
+    import asyncio
+    return await asyncio.to_thread(system_admin.diagnostics)
 
 
 def _log_dir() -> str:

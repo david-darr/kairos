@@ -85,7 +85,9 @@ def effective_account() -> str:
 def account_dir(account_id: Optional[str] = None, create: bool = True) -> str:
     """The folder of an account: the given one, else effective_account()'s."""
     path = os.path.join(ACCOUNTS_DIR, _checked(effective_account() if account_id is None else account_id))
-    if create:
+    # One stat when the folder is there (it nearly always is) instead of makedirs' three calls: every store's
+    # path goes through here, thousands of times a request at 100 bots (100-bot scale test, 2026-11-10).
+    if create and not os.path.isdir(path):
         os.makedirs(path, exist_ok=True)
     return path
 

@@ -507,6 +507,10 @@ class RunTests(AgentTestCase):
                              "stopped" if outcome == "cancelled" else outcome)
             await task_scheduler.start_run(goal)
             self.assertEqual(agent_service.runs_today(self.agent["id"]), 2)
+            # Counted from the stored records: list_runs() decorates every run in the install, and the bot
+            # list asks this twice a bot (100-bot scale test, 2026-11-10).
+            with patch.object(task_service, "list_runs", side_effect=AssertionError("counted through list_runs")):
+                self.assertEqual(agent_service.runs_today(self.agent["id"]), 2)
             self.assertEqual(agent_service._reservations, {})
             self.assertFalse(agent_service.can_run(self.agent["id"])[0], "the cap keeps its meaning")
 

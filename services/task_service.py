@@ -923,6 +923,11 @@ class TaskService:
                                 "task_id": task_id, "agent_id": task.get("agent_id"), "output": output, "error": error})
         self._save_tasks()
 
+    def run_records(self) -> list[dict]:
+        """Every stored run record as written, in storage order: no sorting, defaults or delivery
+        lookups. For counting; list_runs() is the shown form (100-bot scale test, 2026-11-10)."""
+        return list(self._runs)
+
     def list_runs(self, task_id: Optional[str] = None) -> list[dict]:
         """Newest first. Records from before 2026-10-02 have no start time or
         outcome: the outcome is read from the error and the duration stays
