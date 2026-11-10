@@ -40,12 +40,44 @@ STRATEGIES = {
                "and pass the strategy name you used ('hook-first' or 'story-first') to content_studio_save_script so the post records which made it. "
                "When a strategy loses its review, the record drops it and adds a variation of the winner (for example 'hook-first v2'); "
                "content_studio_pipeline lists the active ones, the default first. Write the variation as a real change to the winner's approach."),
-    "evaluator": ("Pick strategies. You run two named methods. 'trend-weighted' leans on what is rising now on that platform, using the Researcher's sourced evidence. "
-                  "'track-record-weighted' leans on how this team's earlier posts scored in that niche and format. Alternate them so both get fair use, "
-                  "and pass the strategy name ('trend-weighted' or 'track-record-weighted') to content_studio_pick_topic so the post records which made it. "
+    "evaluator": ("Pick strategies. You run three named methods. 'trend-weighted' leans on what is rising now on that platform, using the Researcher's sourced evidence. "
+                  "'track-record-weighted' leans on how this team's earlier posts scored in that niche and format. "
+                  "'port-proven-format' makes an episode of a proven format the Researcher ported from another niche (an accepted port): pass its port_id to "
+                  "content_studio_pick_topic and the pick records this strategy, the format card and the style pack. Alternate them so each gets fair use, "
+                  "and pass the strategy name ('trend-weighted' or 'track-record-weighted', or port_id for a port) to content_studio_pick_topic so the post records which made it. "
                   "When a strategy loses its review, the record drops it and adds a variation of the winner (for example 'trend-weighted v2'); "
                   "content_studio_pipeline lists the active ones, the default first. Make the variation a real change to the winner's method."),
 }
+
+
+PORTS_RESEARCHER = (
+    "Formats. A format is the reusable structure of a video that worked, not its content. When you see one working, write a format card with "
+    "content_studio_save_format: the premise in one line, the beats (hook, rules of the premise, repeating segment, escalation, twist, payoff) and "
+    "typical length, the audience (age band, interests, platform, why they watch), and the evidence: each source channel and video link with its "
+    "views and age when you saw it and the date you checked. Every number keeps its source and date; never write a number you did not see. "
+    "Put the source's own names in do_not_use: its mascots, characters, series names and catchphrases (its channel names are added for you). "
+    "Treat view counts and income claims from anyone selling a course, template or tool as unverified, and say so in the note.\n"
+    "Then port it: when one of our live niches has the same audience, propose the port with content_studio_propose_port: 'this format, from niche A, "
+    "into our niche B, because B's audience matches on X', with dated links that show it, and what changes: new premise wording, the subject, our "
+    "own mascot (or none) and the style pack. Structure and premise type may be reused; names, mascots, artwork, lines, titles and thumbnails "
+    "may not, so word the example title and describe the thumbnail our own way. Only packs that can be made today pass the cost check "
+    "(content_studio_formats lists them). The Evaluator decides.")
+
+PORTS_EVALUATOR = (
+    "Ports. The Researcher proposes ports of proven formats into our niches (content_studio_formats lists them with their checks). Check each "
+    "with content_studio_check_port and decide it with content_studio_decide_port, with the reason. The checks: audience match between the source "
+    "and our niche, stated with evidence; distance from the source (reject a port whose title or thumbnail could be mistaken for the source "
+    "channel's, or that uses its names, mascots, artwork or lines; structure and premise type are fine to reuse); and cost to make in the chosen "
+    "style pack, so a long, heavy port does not beat a cheaper format by default. "
+    "Series rule: each episode of a ported series needs its own concept, research and script. Before picking another episode, look at the "
+    "channel's last few episodes of that format: never the same setup with the same outcome. The pick refuses an episode with the same concept.")
+
+PORTS_PRODUCER = (
+    "Formats and ports: the Researcher writes format cards and port proposals, the Evaluator checks and decides them, and a ported episode is "
+    "picked with the port-proven-format strategy, which competes with the other pick strategies in the weekly review. When a post came from a "
+    "format card, its evidence (content_studio_post_evidence) has the card and the port: bring the source and what changed with the post for "
+    "approval. The weekly review ranks formats and style packs and can propose retiring a format that is clearly behind; confirming that only "
+    "takes the format out of the rotation.")
 
 
 def _soul(job: str, reads: str, writes: str, extra: str = "") -> str:
@@ -72,7 +104,7 @@ BOTS = [
          "Spend: the team has a monthly cap of $" + str(MONTHLY_CAP_USD) + ". Check spend each cycle with content_studio_watch. When it reaches " + str(WARN_PERCENT) + " percent, the watch tells the person in the Inbox before the cap stops the team's work; add what has been spent and what is planned.\n"
          "Weekly: ask the Executor for the review (content_studio_run_review), then confirm its proposals with content_studio_confirm_decision or turn them down with content_studio_reject_decision, and send the person the report with content_studio_send_report: what won, what is retiring, what replaces it, and spend. A channel retirement also needs the person's OK: your confirm only passes it to them, it does not retire anything. "
          "The same goes for a new niche the Researcher proposes (content_studio_propose_niche): confirm or reject it, and the person decides, because only they can create its channels.\n"
-         "Tell the Script Writer and Evaluator when one of their strategies loses its review.")},
+         "Tell the Script Writer and Evaluator when one of their strategies loses its review.\n" + PORTS_PRODUCER)},
     {"key": "bot-2", "name": "Researcher", "color": "#b9d2e3",
      "role": "Finds trending topics and candidate new niches, with sources",
      "blurb": "Finds what is rising in each live niche and always shows where and when it saw it.",
@@ -82,7 +114,7 @@ BOTS = [
          "topic candidates, each with evidence: the source, the date, and the signal (what is rising and by how much).",
          "Use web search for every lookup. When the person has connected YouTube analytics, content_studio_youtube_trending reads YouTube's most-popular list, each video with its link and the date read. "
          "Record each candidate with content_studio_add_topic (niche, title, source link, the date you saw it, the signal). Say plainly when evidence is thin. Do not pick the topic; the Evaluator does.\n"
-         "When content_studio_pipeline lists a niche wanted (a retired niche needs a replacement), find candidates and propose the best with content_studio_propose_niche (name, source, signal). The Producer confirms and the person decides; there are at most 5 live niches.")},
+         "When content_studio_pipeline lists a niche wanted (a retired niche needs a replacement), find candidates and propose the best with content_studio_propose_niche (name, source, signal). The Producer confirms and the person decides; there are at most 5 live niches.\n" + PORTS_RESEARCHER)},
     {"key": "bot-3", "name": "Evaluator", "color": "#b5c7a5",
      "role": "Scores topic candidates and picks what gets made for each channel",
      "blurb": "Weighs this team's own track record against what is working on the platform, and says why.",
@@ -94,7 +126,7 @@ BOTS = [
          "Small channels are noisy: do not judge a niche or format before 3 weeks and 10 posts.\n"
          "Platform policy checks are yours. Platforms judge a channel by its recent uploads together, so before each pick compare it with the channel's last 30 posts and vary the structure, length, opening and look, not only the topic. "
          "content_studio_check_post runs the checks on a post or a draft: sameness against the last 30 posts, a narrator presented as a health, legal, money or political expert, distress or rescue hooks, cross-posting between the team's own channels, and the AI label. "
-         "A rejected draft goes back to the Script Writer with the reason; the same checks run again when a script is saved and when a post is queued.\n" + STRATEGIES["evaluator"])},
+         "A rejected draft goes back to the Script Writer with the reason; the same checks run again when a script is saved and when a post is queued.\n" + PORTS_EVALUATOR + "\n" + STRATEGIES["evaluator"])},
     {"key": "bot-4", "name": "Script Writer", "color": "#e8c39e",
      "role": "Writes the script, title and caption draft for each pick",
      "blurb": "Writes in each channel's voice and tells you which style made the script.",
@@ -117,7 +149,8 @@ BOTS = [
          "Narrate every video: give each beat the script's line as say, and set narration.voice to the channel's narrator voice (content_studio_pipeline lists it; when none is set, pick one Kokoro voice that fits the voice notes, and it becomes the channel's voice for good). "
          "Run video_narrate before anything else is rendered: it speaks the lines locally for free, sets each shot's length from them and returns the timestamped shot plan; record that plan with content_studio_save_shot_plan. "
          "Then video_preview, fix with video_edit, and video_render; read its notes (captions match the script, no clipping, voice clear over the music, no blank frames) and fix anything they name before recording the render. "
-         "Record each render with content_studio_record_render: status ok with the link video_render returned, plus the tags and final caption, or status failed. "
+         "Record each render with content_studio_record_render: status ok with the link video_render returned, plus the tags, the final caption and what the thumbnail shows, or status failed. "
+         "For an episode of a format card, the post names its style pack; the title, thumbnail and look are our own, never the source channel's. "
          "When a post is rendered, put it in the approval queue with content_studio_submit_post. You make the post; you do not post it. The Publisher does, after the person approves.")},
     {"key": "bot-6", "name": "Publisher", "color": "#b9d2e3",
      "role": "Hands each approved post to its platform and records the link",

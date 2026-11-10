@@ -127,5 +127,28 @@ const { pathToFileURL } = require('node:url');
   assert.match(M.weightsFromPercents({ views: 'x', watch: '1', engagement: '1' }).error, /between 0 and 100/);
   for (const text of [M.analyticsText({}), M.postingText({}), M.batchText({ approved: [], skipped: [{}] })]) assert.ok(!text.includes('—'), 'no em-dashes');
 
+
+  // Format cards and ports (build unit 2): every number with its date, checks in plain words, no em-dashes.
+  assert.equal(M.formatLength(60, 300), '1 to 5 minutes');
+  assert.equal(M.formatLength(45, 120), '45 seconds to 2 minutes');
+  assert.equal(M.formatLength(180, 180), 'about 3 minutes');
+  assert.equal(M.evidenceText({ views: 1200000, age_days: 12, checked: '2026-11-10' }), '1,200,000 views, 12 days old when seen. Checked 2026-11-10.');
+  assert.equal(M.evidenceText({ checked: '2026-11-10', note: 'Reported by a course seller; unverified.' }), 'Checked 2026-11-10. Reported by a course seller; unverified.');
+  assert.match(M.audienceText({ age_band: '16-30', interests: 'science', platform: 'youtube', why: 'Curiosity' }), /16-30, science, on YouTube\. Why they watch: Curiosity\./);
+  assert.deepEqual(M.portChecks({}), []);
+  assert.deepEqual(M.portChecks({ ok: false, findings: [{ check: 'distance', result: 'reject', reason: 'a' }, { check: 'cost', result: 'warn', reason: 'b' }] }),
+    [['Audience match', 'Passed', 'ok'], ['Distance from the source', 'Refused', 'error'], ['Cost to make', 'Warning', 'warn'], ['Series rule', 'Passed', 'ok']]);
+  assert.deepEqual(M.portReasons({ findings: [{ reason: 'a' }, { reason: 'b' }] }), ['a', 'b']);
+  assert.deepEqual(M.portStatus({ status: 'proposed' }), ['With the Evaluator', 'accent']);
+  assert.equal(M.packName('glossy-3d'), 'Glossy 3D mascot');
+  assert.equal(M.packName('motion-type', [{ id: 'motion-type', name: 'Motion' }]), 'Motion');
+  assert.equal(M.costText({ units: 20, ratio: 10 }), 'About 20 planning units, 10 times the cheapest pack that could make it.');
+  assert.equal(M.costText({ units: 2, ratio: 1 }), 'About 2 planning units, the cheapest way to make it.');
+  assert.equal(M.postFormatText({ format_id: 3, format_name: 'One person at a time', port_id: 2, style_pack: 'motion-type' }),
+    'Format: One person at a time (ported). Style pack: Motion type.');
+  assert.equal(M.postFormatText({}), '');
+  assert.equal(M.decisionTitle({ kind: 'retire', subject_type: 'format', subject_name: 'Weak format' }), 'Retire format Weak format');
+  for (const text of [M.formatLength(10, 600), M.evidenceText({ checked: 'x' }), M.costText({ units: 1, ratio: null })]) assert.ok(!text.includes('—'), 'no em-dashes');
+
   console.log('studio content model ok');
 })().catch(error => { console.error(error); process.exit(1); });

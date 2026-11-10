@@ -124,11 +124,24 @@ def fill(account):
     account.seed("skills", "POST", "/api/skills", {"name": f"leak-{account.name}-{m[-6:].lower()}", "description": m, "body": m}, "skill", ("slug", "name", "id"))
     account.seed("hooks", "POST", "/api/hooks", {"name": f"{m} hook", "enabled": False, "event": "chat.reply", "action": "vault_note", "config": {"path": f"Logs/{m}.md"}}, "hook")
     account.seed("triggers", "POST", "/api/triggers", {"name": f"{m} trigger"}, "trigger")
+    # Content Studio format cards (2026-11-10) are written by the team's bots through their tools, not a route, so one is
+    # put straight into the account's own studio store; the read routes are then tried across accounts like the rest.
+    from services.content_studio import studio
+    from datetime import date
+    with accounts.as_account(auth_manager.account_id(account.name)):
+        card = studio.save_format({"name": f"{m} format", "premise": f"{m} premise", "beats": ["hook", "payoff"],
+                                   "length_min_s": 30, "length_max_s": 60, "source_niche": m,
+                                   "audience": {"age_band": "18-30", "interests": m, "platform": "youtube", "why": m},
+                                   "evidence": [{"url": "https://www.example.test/v", "channel": f"{m} channel",
+                                                 "checked": date.today().isoformat()}]})
+    account.ids.setdefault("format", []).append(str(card["id"]))
+    account.seeded["format cards"] = "file"
 
 
 ID_PARAMS = {"session": "session", "note": "note", "event": "event", "document": "document", "doc": "document",
              "project": "project", "endpoint": "endpoint", "task": "task", "routine": "task", "agent": "agent",
-             "bot": "agent", "design": "design", "skill": "skill", "slug": "skill", "hook": "hook", "trigger": "trigger"}
+             "bot": "agent", "design": "design", "skill": "skill", "slug": "skill", "hook": "hook", "trigger": "trigger",
+             "format_id": "format"}
 
 
 # Fields the edit routes accept; extra ones are ignored. A route that refuses the body (422) proves nothing
@@ -239,6 +252,10 @@ class AccountIsolation(unittest.TestCase):
     def tearDownClass(cls):
         for p in cls.patches:
             p.stop()
+        from services.content_studio import close_all
+        close_all()  # the studio stores the format cards were written to
+        from core import bot_rooms_store
+        bot_rooms_store.close()  # so the throwaway folder can be deleted on Windows
         # Let the throwaway folder go: the app's own log handlers keep its log files open.
         import logging
         for logger in [logging.getLogger()] + [logging.getLogger(n) for n in logging.root.manager.loggerDict]:

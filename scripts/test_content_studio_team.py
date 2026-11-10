@@ -20,6 +20,10 @@ from services.content_studio import StudioError, delivery, pipeline, policy, rep
 from services import bot_package as pkg, bot_departments, bot_rooms, bot_usage, studio_team_package as team
 from services.agent_service import agent_service
 from services.task_service import task_service
+import atexit
+
+# Registered after the data folder's own cleanup, so it runs first: open SQLite files block deleting it on Windows.
+atexit.register(lambda: (close_all(), bot_rooms_store.close()))
 
 ROOT = Path(__file__).resolve().parents[1]
 NAMES = ["Producer", "Researcher", "Evaluator", "Script Writer", "Editor", "Publisher", "Executor"]
@@ -223,13 +227,15 @@ class StudioToolTests(unittest.TestCase):
 
     def test_tools_are_registered_agent_only_and_none_approves_or_posts(self):
         names = sorted(n for n in tool_registry._REGISTRY if n.startswith("content_studio_"))
-        self.assertEqual(names, ["content_studio_add_topic", "content_studio_check_post", "content_studio_confirm_decision",
+        self.assertEqual(names, ["content_studio_add_topic", "content_studio_check_port", "content_studio_check_post",
+                                 "content_studio_confirm_decision", "content_studio_decide_port", "content_studio_formats",
                                  "content_studio_mark_posted", "content_studio_pick_topic", "content_studio_pipeline",
-                                 "content_studio_post_evidence", "content_studio_propose_niche",
+                                 "content_studio_post_evidence", "content_studio_propose_niche", "content_studio_propose_port",
                                  "content_studio_publish_youtube", "content_studio_record_metrics", "content_studio_record_render",
                                  "content_studio_record_warning", "content_studio_reject_decision", "content_studio_run_review",
-                                 "content_studio_save_script", "content_studio_save_shot_plan", "content_studio_send_report",
-                                 "content_studio_submit_post", "content_studio_watch", "content_studio_youtube_trending"])
+                                 "content_studio_save_format", "content_studio_save_script", "content_studio_save_shot_plan",
+                                 "content_studio_send_report", "content_studio_submit_post", "content_studio_watch",
+                                 "content_studio_youtube_trending"])
         for name in names:
             self.assertTrue(tool_registry._REGISTRY[name].agent_only)
         self.assertFalse(any("approve" in n for n in names), "no tool approves a post")
@@ -237,7 +243,8 @@ class StudioToolTests(unittest.TestCase):
     def test_import_seeds_the_starting_strategies_once(self):
         active = {(s["owner_role"], s["name"]): bool(s["is_default"]) for s in studio.list_strategies()}
         self.assertEqual(active, {("script_writer", "hook-first"): True, ("script_writer", "story-first"): False,
-                                  ("evaluator", "trend-weighted"): True, ("evaluator", "track-record-weighted"): False})
+                                  ("evaluator", "trend-weighted"): True, ("evaluator", "track-record-weighted"): False,
+                                  ("evaluator", "port-proven-format"): False})
         self.assertEqual(studio_roles.seed_strategies(studio), [], "a second import adds none")
         studio.drop_strategy(next(s["id"] for s in studio.list_strategies() if s["name"] == "story-first"))
         self.assertEqual(studio_roles.seed_strategies(studio), [], "a dropped strategy is never brought back")
@@ -663,6 +670,178 @@ class PolicyTests(unittest.TestCase):
         self.assertIn("narration line", souls["Script Writer"])
         self.assertIn("shot plan", souls["Script Writer"])
         self.assertIn("content_studio_post_evidence", souls["Producer"])
+
+
+def example_card(**extra):
+    """An example format card for tests only (example.test links, made-up numbers): never shipped as data."""
+    from datetime import date
+    return {"name": "Impossible ability, one person at a time",
+            "premise": "An impossible ability applied to everyone, revealed one person at a time.",
+            "beats": ["hook", "rules of the premise", "repeating segment", "escalation", "twist", "payoff"],
+            "length_min_s": 60, "length_max_s": 300, "source_niche": "Pop psychology",
+            "audience": {"age_band": "16-30", "interests": "psychology, what-if questions", "platform": "youtube", "why": "Curiosity"},
+            "do_not_use": ["Mister Glimpse", "see you on the other side"],
+            "evidence": [{"url": "https://www.example.test/watch?v=abc", "channel": "Glimpse Lab", "views": 1200000, "age_days": 12,
+                          "title": "What if you could see everyone's future wealth", "checked": date.today().isoformat()}], **extra}
+
+
+def example_port(format_id, niche_id, **extra):
+    from datetime import date
+    return {"format_id": format_id, "niche_id": niche_id,
+            "audience_match": "Both audiences are curious 16 to 30 year olds who watch what-if science videos on YouTube.",
+            "audience_evidence": [{"url": "https://www.example.test/audience", "supports": "Viewer overlap", "checked": date.today().isoformat()}],
+            "premise": "A hidden number floats above every animal and we read them one by one.", "subject": "Animal senses",
+            "mascot": "Pip the owl", "style_pack": "motion-type", "thumbnail": "An owl with a glowing number above a crowd of animals",
+            "example_title": "Every animal has a secret number", **extra}
+
+
+class FormatToolTests(unittest.TestCase):
+    """Format cards and the port strategy through the team's tools (Video Styles build spec section 2, build unit 2)."""
+
+    def setUp(self):
+        clean()
+        wipe_studio()
+        with patch.object(agent_service, "chat_endpoint", return_value={"id": "x"}, create=True):
+            pkg.import_(pkg.inspect(pkg.canonical(team.build()))["token"])
+        self.bots = {a["name"]: a["id"] for a in agent_service.list_agents()}
+        self.patch = patch.object(delivery, "inbox_notifier", Fake())
+        self.patch.start()
+        self.niche = studio.create_niche("Animals")
+        self.channel = studio.create_channel(self.niche["id"], "youtube", "@animals")
+
+    def tearDown(self):
+        self.patch.stop()
+        clean()
+        wipe_studio()
+        bot_usage.update_settings(budget={"monthly_usd": None, "warn_percent": 80})
+
+    def accepted_port(self):
+        b = self.bots
+        call("content_studio_save_format", b["Researcher"], **example_card())
+        card = studio.list_formats()[0]
+        call("content_studio_propose_port", b["Researcher"], **example_port(card["id"], self.niche["id"]))
+        port = studio.list_ports()[0]
+        call("content_studio_decide_port", b["Evaluator"], port_id=port["id"], verdict="accepted", reason="Same audience, cheap to make.")
+        return card, studio.get_port(port["id"])
+
+    def test_the_researcher_writes_cards_and_ports_and_the_evaluator_decides(self):
+        b = self.bots
+        self.assertIn("Only the Researcher", call("content_studio_save_format", b["Evaluator"], **example_card()))
+        bad = example_card(evidence=[{"url": "https://www.example.test/x", "channel": "Glimpse Lab", "views": 900000, "checked": "last week"}])
+        self.assertIn("is a date like", call("content_studio_save_format", b["Researcher"], **bad))
+        self.assertEqual(studio.list_formats(), [], "a number without its date is not stored")
+        out = call("content_studio_save_format", b["Researcher"], **example_card())
+        self.assertIn("Propose a port", out)
+        card = studio.list_formats()[0]
+        self.assertEqual(card["created_by"], "Researcher")
+        listing = call("content_studio_formats", b["Producer"])
+        for text in ("Impossible ability", "Glimpse Lab", '"motion-type"', '"available": false'):
+            self.assertIn(text, listing)
+        # A port into a pack that is not built yet is proposed, but the checks say so and the Evaluator cannot accept it.
+        out = call("content_studio_propose_port", b["Researcher"], **example_port(card["id"], self.niche["id"], style_pack="glossy-3d"))
+        self.assertIn("cannot be made yet", out)
+        heavy = studio.list_ports()[0]
+        self.assertEqual(heavy["checks"]["ok"], False)
+        self.assertIn("Only the Evaluator", call("content_studio_decide_port", b["Researcher"], port_id=heavy["id"], verdict="accepted", reason="x"))
+        self.assertIn("the port checks refuse it", call("content_studio_decide_port", b["Evaluator"], port_id=heavy["id"], verdict="accepted", reason="x"))
+        self.assertEqual(studio.get_port(heavy["id"])["status"], "proposed")
+        call("content_studio_decide_port", b["Evaluator"], port_id=heavy["id"], verdict="rejected", reason="Pack B is not built.")
+        self.assertEqual(studio.get_port(heavy["id"])["verdict_reason"], "Pack B is not built.")
+        out = call("content_studio_propose_port", b["Researcher"], **example_port(card["id"], self.niche["id"]))
+        self.assertIn("The Evaluator checks it and decides", out)
+        port = studio.list_ports(status="proposed")[0]
+        self.assertIn('"ok": true', call("content_studio_check_port", b["Producer"], port_id=port["id"]))
+        self.assertIn("Only the Evaluator or Producer", call("content_studio_check_port", b["Editor"], port_id=port["id"]))
+        self.assertIn("Pick its episodes", call("content_studio_decide_port", b["Evaluator"], port_id=port["id"], verdict="accepted", reason="Fits."))
+        self.assertIn('"ports_accepted": [{"id": %d' % port["id"], call("content_studio_pipeline", b["Evaluator"]))
+
+    def test_a_ported_episode_is_picked_with_the_port_strategy_and_checked(self):
+        b = self.bots
+        card, port = self.accepted_port()
+        strategies = {st["name"]: st["id"] for st in studio.list_strategies()}
+        owls = studio.add_topic(self.niche["id"], "Owls hunting at night", "https://t.example.test")
+        pick = dict(channel_id=self.channel["id"], topic_id=owls["id"], reason="Owls rise every autumn.", port_id=port["id"])
+        self.assertIn("a pick from a port records a port-proven-format strategy",
+                      call("content_studio_pick_topic", b["Evaluator"], **pick, strategy="trend-weighted"))
+        self.assertIn("picks ported formats: pass port_id",
+                      call("content_studio_pick_topic", b["Evaluator"], **{k: v for k, v in pick.items() if k != "port_id"}, strategy="port-proven-format"))
+        self.assertIn("uses \"Mister Glimpse\"", call("content_studio_pick_topic", b["Evaluator"], **pick, title="Mister Glimpse reads owls"))
+        self.assertIn("could be mistaken for the source video",
+                      call("content_studio_pick_topic", b["Evaluator"], **pick, title="What if you could see everyone's future owls"))
+        out = call("content_studio_pick_topic", b["Evaluator"], **pick, title="The number above every owl")
+        self.assertIn("own concept, script and opening", out)
+        post = studio.list_posts()[0]
+        self.assertEqual((post["format_id"], post["port_id"], post["style_pack"], post["evaluator_strategy_id"], post["format"]),
+                         (card["id"], port["id"], "motion-type", strategies["port-proven-format"], card["name"]))
+        [kept] = studio.evidence(post["id"], "port")
+        self.assertEqual((kept["body"]["format"]["evidence"][0]["views"], kept["body"]["port"]["mascot"]), (1200000, "Pip the owl"))
+        # Series rule: the next episode needs its own concept.
+        again = studio.add_topic(self.niche["id"], "How owls hunt at night", "https://t.example.test")
+        self.assertIn("had the same concept", call("content_studio_pick_topic", b["Evaluator"], channel_id=self.channel["id"],
+                                                   topic_id=again["id"], reason="x", port_id=port["id"], title="Owl numbers at night"))
+        sharks = studio.add_topic(self.niche["id"], "Sharks sensing electricity", "https://t.example.test")
+        self.assertIn("Script Writer writes it next", call("content_studio_pick_topic", b["Evaluator"], channel_id=self.channel["id"],
+                                                           topic_id=sharks["id"], reason="x", port_id=port["id"]))
+        # A plain pick still uses a plain strategy.
+        plain = studio.add_topic(self.niche["id"], "Why cats purr", "https://t.example.test")
+        call("content_studio_pick_topic", b["Evaluator"], channel_id=self.channel["id"], topic_id=plain["id"], reason="x")
+        last = studio.list_posts()[-1]
+        self.assertEqual((last["format_id"], last["style_pack"], last["evaluator_strategy_id"]), (None, "motion-type", strategies["trend-weighted"]))
+        # The script and thumbnail keep the source's lines and names out.
+        out = call("content_studio_save_script", b["Script Writer"], post_id=post["id"],
+                   script="Owls hear mice under the snow. Owls track sound with uneven ears. See you on the other side!")
+        self.assertIn('uses "see you on the other side"', out)
+        call("content_studio_save_script", b["Script Writer"], post_id=post["id"],
+             script="Owls hear mice under the snow. Their ears sit at different heights, so they can pinpoint a sound.",
+             shot_plan="00:00-00:04 owl over snow")
+        out = call("content_studio_record_render", b["Editor"], post_id=post["id"], status="ok", render_ref="/generated-files/owl.mp4",
+                   thumbnail="Mister Glimpse next to an owl")
+        self.assertEqual(studio.get_post(post["id"])["thumbnail"], "Mister Glimpse next to an owl")
+        self.assertIn("policy checks stopped this post", call("content_studio_submit_post", b["Editor"], post_id=post["id"]))
+        call("content_studio_record_render", b["Editor"], post_id=post["id"], status="ok", render_ref="/generated-files/owl.mp4",
+             thumbnail="A snowy owl with a glowing number")
+        self.assertIn("waits for the person's approval", call("content_studio_submit_post", b["Editor"], post_id=post["id"]))
+
+    def test_a_dropped_port_strategy_stops_port_picks_and_an_old_team_gains_it_once(self):
+        b = self.bots
+        card, port = self.accepted_port()
+        port_strategy = next(st for st in studio.list_strategies() if st["name"] == "port-proven-format")
+        studio.drop_strategy(port_strategy["id"])
+        topic = studio.add_topic(self.niche["id"], "Owls hunting at night", "https://t.example.test")
+        out = call("content_studio_pick_topic", b["Evaluator"], channel_id=self.channel["id"], topic_id=topic["id"], reason="x", port_id=port["id"])
+        self.assertIn("ports are not picked now", out)
+        call("content_studio_pipeline", b["Evaluator"])
+        self.assertEqual([st["status"] for st in studio.list_strategies() if st["name"] == "port-proven-format"], ["dropped"],
+                         "a dropped strategy never comes back")
+        studio._write("DELETE FROM strategies WHERE name = 'port-proven-format'")  # a team imported before unit 2
+        call("content_studio_pipeline", b["Evaluator"])
+        self.assertEqual([st["status"] for st in studio.list_strategies() if st["name"] == "port-proven-format"], ["active"])
+
+    def test_formats_stay_in_their_account(self):
+        b = self.bots
+        self.accepted_port()
+        try:
+            with accounts.as_account("otheraccount"):
+                self.assertEqual(studio.list_formats(), [])
+                self.assertIn("Not run", call("content_studio_save_format", b["Researcher"], **example_card()))
+                self.assertIn("Not run", call("content_studio_formats", b["Producer"]))
+                self.assertEqual(studio.list_formats(), [])
+            self.assertEqual(len(studio.list_formats()), 1)
+        finally:
+            close_all()
+
+    def test_instructions_carry_formats_ports_and_the_series_rule(self):
+        souls = {bot["name"]: bot["soul"] for bot in team.build()["bots"]}
+        for phrase in ("content_studio_save_format", "content_studio_propose_port", "Every number keeps its source and date",
+                       "do_not_use", "our own mascot", "unverified"):
+            self.assertIn(phrase, souls["Researcher"])
+        for phrase in ("content_studio_check_port", "content_studio_decide_port", "port-proven-format", "could be mistaken for the source",
+                       "cost to make", "own concept, research and script"):
+            self.assertIn(phrase, souls["Evaluator"])
+        for phrase in ("port-proven-format", "content_studio_post_evidence", "ranks formats and style packs"):
+            self.assertIn(phrase, souls["Producer"])
+        self.assertIn("what the thumbnail shows", souls["Editor"])
+        self.assertNotIn("\u2014", "".join(souls.values()), "no em-dashes in copy")
 
 
 if __name__ == "__main__":

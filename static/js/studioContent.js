@@ -6,9 +6,10 @@ import * as M from './studioContentModel.js';
 // and the numbers import for the Content Studio team (routes/content_studio_routes.py). Drawn with the Settings kit
 // rows and pills. Approving only marks a post approved; preparing it for the platform comes with the Kairos Browser.
 // A YouTube post can also go out through the person's own Google project when they connect posting (Channels tab).
+// Formats shows the Researcher's format cards and the ports the Evaluator checked; the bots write them, this only reads.
 
 const BASE = '/api/content-studio';
-const TABS = [['approvals', 'Approvals'], ['pipeline', 'Pipeline'], ['channels', 'Channels'], ['scoreboard', 'Scoreboard'], ['report', 'Report']];
+const TABS = [['approvals', 'Approvals'], ['pipeline', 'Pipeline'], ['channels', 'Channels'], ['formats', 'Formats'], ['scoreboard', 'Scoreboard'], ['report', 'Report']];
 const get = path => api(BASE + path);
 const send = (path, body = {}) => api(BASE + path, { method: 'POST', body: JSON.stringify(body), toast: false });
 const put = (path, body) => api(BASE + path, { method: 'PUT', body: JSON.stringify(body), toast: false });
@@ -318,10 +319,13 @@ export async function mountContent(host, { signal } = {}) {
     const renderNode = !link ? el('span', { class: 'sc-dim', text: 'No render yet' })
       : link.href ? el('a', { href: link.href, text: link.label, ...(link.external ? { target: '_blank', rel: 'noopener noreferrer' } : {}) })
       : el('span', { text: link.label });
+    const made = M.postFormatText(post);
     return el('div', { class: 'sc-preview' }, [
       post.pick_reason ? el('div', { class: 'sc-block' }, [el('h4', { text: 'Why this topic' }), el('p', { class: 'sc-text', text: post.pick_reason })]) : null,
+      made ? el('div', { class: 'sc-block', 'data-post-format': '' }, [el('h4', { text: 'Format' }), el('p', { class: 'sc-text', text: made })]) : null,
       el('div', { class: 'sc-block' }, [el('h4', { text: 'Caption' }), el('p', { class: 'sc-text', text: post.caption || 'No caption yet.' })]),
       post.tags ? el('div', { class: 'sc-block' }, [el('h4', { text: 'Tags' }), el('p', { class: 'sc-text', text: post.tags })]) : null,
+      post.thumbnail ? el('div', { class: 'sc-block' }, [el('h4', { text: 'Thumbnail' }), el('p', { class: 'sc-text', text: post.thumbnail })]) : null,
       el('div', { class: 'sc-block' }, [el('h4', { text: 'Script' }), el('p', { class: 'sc-text', text: post.script_ref || 'No script yet.' })]),
       el('div', { class: 'sc-block' }, [el('h4', { text: 'Video' }), renderNode]),
       el('div', { class: 'sc-block', 'data-ai-label': label.required ? 'required' : 'none' }, [el('h4', { text: 'AI label' }),
@@ -399,7 +403,8 @@ export async function mountContent(host, { signal } = {}) {
     for (const [role, rows] of Object.entries(board.strategies)) {
       out.push(group({ title: M.roleTitle(role) }, rows.length ? M.rankRows(rows).map(r => scoreRow(r, r.status === 'dropped' ? 'Dropped' : r.is_default ? 'Default' : '')) : [empty('No strategies yet.')]));
     }
-    if (board.formats.length) out.push(group({ title: 'Formats' }, M.rankRows(board.formats).map(r => scoreRow(r, ''))));
+    if (board.formats.length) out.push(group({ title: 'Formats' }, M.rankRows(board.formats).map(r => scoreRow(r, r.status === 'retired' ? 'Retired' : r.kind === 'card' ? '' : 'No card'))));
+    if (board.style_packs?.length) out.push(group({ title: 'Style packs' }, M.rankRows(board.style_packs).map(r => scoreRow(r, r.available === false ? 'Not built yet' : ''))));
     out.push(group({ title: 'Recent decisions', description: 'Every retirement, promotion and swap is kept with its numbers.' },
       sorted.recent.length ? sorted.recent.slice(0, 12).map(d => decisionRow(d)) : [empty('No decisions yet.')]));
     out.push(settingsGroup());
@@ -448,6 +453,51 @@ export async function mountContent(host, { signal } = {}) {
         await send(`/decisions/${d.id}/confirm`, { actor: 'user' }); toast('Confirmed.'); await reload();
       }, 'primary', { 'aria-label': `Confirm: ${M.decisionTitle(d)}` }),
       btn('Reject', async () => { await send(`/decisions/${d.id}/reject`, { reason: '' }); toast('Rejected. Nothing changed.'); await reload(); }, 'quiet danger', { 'aria-label': `Reject: ${M.decisionTitle(d)}` })]);
+  }
+
+  // -- format cards and ports ----------------------------------------------------------------------
+
+  async function formatsView() {
+    const got = await get('/formats');
+    const packs = got.style_packs || [];
+    const out = [note('A format card is the structure of a video that worked somewhere else: its premise, beats, length and audience, with the links and dates behind every number. The Researcher can propose porting it into one of your niches with a new premise, our own mascot, title and look. The Evaluator checks each port before any episode is made, and every post still waits for your OK.')];
+    if (!got.formats.length) out.push(empty('No format cards yet. The Researcher writes one when it finds a format that works, with its sources.'));
+    for (const card of got.formats) out.push(formatCard(card, got.ports.filter(p => p.format_id === card.id), packs));
+    out.push(group({ title: 'Style packs', description: 'How a post looks and is rendered. Only packs that are built can be picked; cost is a planning estimate, not measured.' },
+      packs.map(p => row({ title: p.name, description: p.note, control: pill(p.available ? 'Available' : 'Not built yet', p.available ? 'ok' : 'muted'), attrs: { 'data-pack': p.id } }))));
+    return out;
+  }
+
+  function formatCard(card, ports, packs) {
+    const rows = [
+      row({ title: 'Beats', description: card.beats.join(', '), stack: true }),
+      row({ title: 'Typical length', control: el('span', { class: 'set-mono', text: M.formatLength(card.length_min_s, card.length_max_s) }) }),
+      row({ title: 'Audience', description: M.audienceText(card.audience), stack: true }),
+      row({ title: 'Seen in', description: card.source_niche || 'Not named', stack: true }),
+      ...card.evidence.map(e => row({ title: [el('a', { href: e.url, text: e.title || e.channel, target: '_blank', rel: 'noopener noreferrer' })],
+        description: `${e.channel}. ${M.evidenceText(e)}`, stack: true, attrs: { 'data-evidence': e.url } })),
+      row({ title: 'Not ours to use', description: card.do_not_use.join(', ') || 'Nothing listed', stack: true }),
+    ];
+    if (!ports.length) rows.push(row({ title: 'Ports', description: 'Not ported into any of your niches yet.' }));
+    for (const port of ports) rows.push(portRow(port, packs));
+    return group({ title: card.name, description: card.premise, cls: 'sc-format' }, rows);
+  }
+
+  function portRow(port, packs) {
+    const [label, tone] = M.portStatus(port);
+    const checks = M.portChecks(port.checks);
+    const changes = [['New premise', port.premise], ['Subject', port.subject], ['Mascot', port.mascot], ['Style pack', M.packName(port.style_pack, packs)],
+      ['Thumbnail', port.thumbnail], ['Example title', port.example_title]];
+    const below = el('div', { class: 'sc-port' }, [
+      el('p', { class: 'sc-text', text: `Because: ${port.audience_match}` }),
+      ...port.audience_evidence.map(e => el('p', { class: 'sc-dim' }, [el('a', { href: e.url, text: e.supports, target: '_blank', rel: 'noopener noreferrer' }), ` Checked ${e.checked}.`])),
+      el('dl', { class: 'sc-changes' }, changes.flatMap(([k, v]) => [el('dt', { text: k }), el('dd', { text: v || 'None' })])),
+      checks.length ? el('div', { class: 'sc-checks', 'data-port-checks': '' }, checks.map(([name, result, t]) => pill(`${name}: ${result}`, t))) : el('p', { class: 'sc-dim', text: 'Not checked yet.' }),
+      ...M.portReasons(port.checks).map(r => el('p', { class: 'sc-dim', text: r })),
+      port.checks?.cost ? el('p', { class: 'sc-dim', text: M.costText(port.checks.cost) }) : null,
+      port.verdict_reason ? el('p', { class: 'sc-dim', text: `The Evaluator: ${port.verdict_reason}` }) : null]);
+    return row({ title: `From ${port.source_niche || 'another niche'} into ${port.niche_name}`, control: pill(label, tone), below, stack: true,
+      attrs: { 'data-port-id': port.id } });
   }
 
   // -- report and numbers import -------------------------------------------------------------------
@@ -521,7 +571,7 @@ export async function mountContent(host, { signal } = {}) {
     const panel = el('div', { class: 'sc-body', id: 'sc-body', role: 'tabpanel', 'aria-labelledby': `sc-tab-${tab}` }, [el('p', { role: 'status', text: 'Loading...' })]);
     root.replaceChildren(...[alerts(), data.failed.length ? el('p', { class: 'set-error', role: 'alert', text: 'Some parts did not load. Try again in a moment.' }) : null, bar, panel].filter(Boolean));
     const shown = tab;
-    const build = { approvals: approvalsView, pipeline: pipelineView, channels: channelsView, scoreboard: scoreboardView, report: reportView }[shown];
+    const build = { approvals: approvalsView, pipeline: pipelineView, channels: channelsView, formats: formatsView, scoreboard: scoreboardView, report: reportView }[shown];
     try {
       const content = await build();
       if (alive() && tab === shown && panel.isConnected) panel.replaceChildren(...content);

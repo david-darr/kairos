@@ -12,6 +12,17 @@ post from moving on (core/bot_content_studio_tools.py and the store's submit ste
   niche, its YouTube, TikTok and Instagram channels carry the same video by design (locked spec section 4).
 - The AI label stays on every post: the store refuses to turn it off (store.py).
 
+Ported formats (section 2, build unit 2). A post made from a format card, and every port proposal, also gets:
+- Distance from the source: no name on the card's do-not-use list (the source channels, their mascots, series names and
+  lines) in the title, thumbnail, mascot, premise or script, and no title close enough to a source video's title to be
+  mistaken for it. Structure and premise type may be reused; names, mascots, artwork and lines may not.
+- Audience match (ports): why the audiences match, with linked, dated evidence; stale evidence and a target niche with no
+  channel on the source audience's platform are warnings.
+- Cost to make (ports): a pack that is not built yet, or a format longer than the pack can make, is refused; a pack
+  much dearer than the cheapest one that could make it is a warning (formats.cost; planning units, not measured).
+- Series rule: each episode is its own concept. The last few episodes of the same format on the channel are compared,
+  and one with the same concept is refused (YouTube: "each video has a distinct storyline, focus, or concept").
+
 Evidence for an appeal (approval, shot plan, sources, these checks) is stored per post in `post_evidence`.
 """
 import re
@@ -160,6 +171,125 @@ def crosspost_findings(store, post):
     return found
 
 
+# -- ported formats (build unit 2) ---------------------------------------------------------------------------------
+
+SERIES_LOOKBACK = 5        # the last episodes of one format on a channel compared for the same concept
+SERIES_SAME = .5           # share of content words two concepts have in common at which they are the same concept
+SOURCE_TITLE_SAME = .6     # share of title words at which a title could be mistaken for a source video's
+PREMISE_REWORD = .8
+_STOP = {"a", "an", "the", "of", "to", "in", "on", "for", "and", "or", "is", "are", "be", "you", "your", "it", "its", "this",
+         "that", "with", "at", "by", "from", "as", "how", "why", "what", "if", "we", "our", "i", "my", "can", "could"}
+
+
+def _content(text):
+    return {w for w in _words(text) if w not in _STOP and len(w) > 1}
+
+
+def _named(text, name):
+    return re.search(r"(?<![a-z0-9])" + re.escape(name.lower()) + r"(?![a-z0-9])", (text or "").lower()) is not None
+
+
+def distance_findings(card, fields):
+    """fields: {label: text} of ours (title, thumbnail, mascot, premise, script). Nothing of the source's may be in them."""
+    found = []
+    for label, text in fields.items():
+        if not text:
+            continue
+        hit = next((n for n in card["do_not_use"] if _named(text, n)), None)
+        if hit:
+            found.append({"check": "distance", "result": "reject", "field": label, "quote": hit,
+                          "reason": f"The {label} uses \"{hit}\", which belongs to the source (format card \"{card['name']}\"). "
+                                    "The structure may be reused; names, mascots, artwork and lines may not."})
+    title = fields.get("title") or ""
+    mine = set(_words(title))
+    for row in card["evidence"]:
+        if title and row.get("title") and _jaccard(mine, set(_words(row["title"]))) >= SOURCE_TITLE_SAME:
+            found.append({"check": "distance", "result": "reject", "field": "title", "quote": row["title"][:120],
+                          "reason": f"The title \"{title}\" could be mistaken for the source video \"{row['title']}\" "
+                                    f"on {row['channel']}. Word it our own way."})
+            break
+    premise = fields.get("premise")
+    if premise and _jaccard(set(_words(premise)), set(_words(card["premise"]))) >= PREMISE_REWORD:
+        found.append({"check": "distance", "result": "warn", "field": "premise",
+                      "reason": "The premise is worded almost as the card's. Give the port its own wording for the new niche."})
+    return found
+
+
+def _concept(store, post):
+    if post.get("topic_id"):
+        return store.get_topic(post["topic_id"])["title"]
+    return post["title"]
+
+
+def _pattern(store, format_id):
+    """The words every episode of a format shares by design (the card's and its ports' premises), left out of a concept."""
+    card = store.get_format(format_id)
+    return _content(" ".join([card["premise"]] + [p["premise"] for p in store.list_ports(format_id=format_id)]))
+
+
+def series_findings(store, channel_id, format_id, concept, exclude_post=None):
+    """Each episode of a format is its own concept: the channel's last episodes of it must not share this one's.
+    The words of the format's own premise do not count, so a series title pattern is not a shared concept."""
+    episodes = [p for p in store.list_posts(channel_id=channel_id) if p["format_id"] == format_id
+                and p["id"] != exclude_post and p["state"] != "rejected"][-SERIES_LOOKBACK:]
+    shared = _pattern(store, format_id)
+    mine = _content(concept) - shared
+    for post in reversed(episodes):
+        theirs = _content(_concept(store, post)) - shared
+        if mine and theirs and _jaccard(mine, theirs) >= SERIES_SAME:
+            return [{"check": "series", "result": "reject", "post_id": post["id"],
+                     "reason": f"Episode {post['id']} (\"{post['title']}\") had the same concept. Each episode of a series "
+                               "needs its own concept, research and script, never the same setup with the same outcome."}]
+    return []
+
+
+def port_findings(store, port, today=None):
+    """The Evaluator's checks on a port proposal: audience match, distance from the source, cost to make, series rule."""
+    from . import formats
+    card = store.get_format(port["format_id"])
+    found = []
+    # 1. Audience match, stated with evidence.
+    if len(_words(port["audience_match"])) < 6:
+        found.append({"check": "audience_match", "result": "reject",
+                      "reason": "Say why the audiences match in a full sentence: who they are, what they watch and where."})
+    stale = [e for e in port["audience_evidence"] + card["evidence"] if formats.is_stale(e["checked"], today)]
+    if stale:
+        found.append({"check": "audience_match", "result": "warn",
+                      "reason": f"{len(stale)} evidence row(s) were checked more than {formats.STALE_DAYS} days ago. Check them again."})
+    platforms = {c["platform"] for c in store.list_channels(niche_id=port["niche_id"], status="live")}
+    if card["audience"].get("platform") not in platforms:
+        found.append({"check": "audience_match", "result": "warn",
+                      "reason": f"The source audience watches on {card['audience'].get('platform')}, and {port['niche_name']} has no "
+                                "live channel there."})
+    # 2. Distance from the source.
+    found += distance_findings(card, {"title": port["example_title"], "thumbnail": port["thumbnail"], "mascot": port["mascot"],
+                                      "premise": port["premise"], "subject": port["subject"]})
+    # 3. Cost to make in the chosen pack.
+    pack = formats.STYLE_PACKS[port["style_pack"]]
+    typical = (card["length_min_s"] + card["length_max_s"]) / 2
+    cost = formats.cost(port["style_pack"], min(typical, pack["max_seconds"]))
+    if not pack["available"]:
+        found.append({"check": "cost", "result": "reject", "reason": f"{pack['name']} cannot be made yet. {pack['note']}"})
+    elif card["length_min_s"] > pack["max_seconds"]:
+        found.append({"check": "cost", "result": "reject",
+                      "reason": f"The format runs at least {card['length_min_s'] / 60:.0f} minutes; {pack['name']} makes up to "
+                                f"{pack['max_seconds'] / 60:.0f} minutes today."})
+    elif card["length_max_s"] > pack["max_seconds"]:
+        found.append({"check": "cost", "result": "warn",
+                      "reason": f"Keep episodes under {pack['max_seconds'] / 60:.0f} minutes: that is what {pack['name']} makes today."})
+    if cost["ratio"] and cost["ratio"] >= formats.COST_WARN_RATIO:
+        found.append({"check": "cost", "result": "warn",
+                      "reason": f"{pack['name']} costs about {cost['ratio']:.0f} times the cheapest pack that could make this. "
+                                "Pick it only if the look is worth that."})
+    # 4. Series rule: the example episode against what this format already made in the niche.
+    for channel in store.list_channels(niche_id=port["niche_id"], status="live"):
+        hit = series_findings(store, channel["id"], card["id"], f"{port['subject']} {port['example_title']}")
+        if hit:
+            found += hit
+            break
+    return {"ok": not any(f["result"] == "reject" for f in found), "findings": found, "cost": cost}
+
+
 def check(store, post_id, title=None, script=None, fmt=None):
     """Every policy check on a post, or on a draft of it (title, script, format not yet saved)."""
     post = store.get_post(post_id)
@@ -171,6 +301,11 @@ def check(store, post_id, title=None, script=None, fmt=None):
     findings += hook_findings(title, script)
     findings += sameness_findings(store, post["channel_id"], title, script, fmt, exclude_post=post_id)
     findings += crosspost_findings(store, {**post, "title": title, "script_ref": script})
+    if post.get("format_id"):
+        card = store.get_format(post["format_id"])
+        findings += distance_findings(card, {"title": title, "thumbnail": post.get("thumbnail"), "script": script})
+        concept = store.get_topic(post["topic_id"])["title"] if post.get("topic_id") else title
+        findings += series_findings(store, post["channel_id"], post["format_id"], concept, exclude_post=post_id)
     if not post.get("ai_label", 1):
         findings.append({"check": "ai_label", "result": "reject", "reason": "The AI label is off; every post carries it."})
     return {"ok": not any(f["result"] == "reject" for f in findings), "findings": findings}

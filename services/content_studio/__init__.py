@@ -8,7 +8,7 @@ import os
 
 from core import accounts
 
-from . import delivery, pipeline, report, review, scoring, team, youtube, youtube_publish
+from . import delivery, formats, pipeline, report, review, scoring, team, youtube, youtube_publish
 from .store import StudioError, Store
 
 
@@ -26,4 +26,4 @@ def close_all():
     studio.forget()
 
 
-__all__ = ["studio", "close_all", "StudioError", "Store", "delivery", "pipeline", "report", "review", "scoring", "team", "youtube", "youtube_publish"]
+__all__ = ["studio", "close_all", "StudioError", "Store", "delivery", "formats", "pipeline", "report", "review", "scoring", "team", "youtube", "youtube_publish"]

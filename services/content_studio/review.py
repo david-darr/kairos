@@ -7,6 +7,7 @@ ever creates an account or deletes anything: retired means out of the rotation, 
 import time
 
 from . import scoring
+from .formats import STYLE_PACKS
 from .store import DAY, HARD_MAX_NICHES, StudioError, conflict
 
 OPEN = ("proposed", "awaiting_user")
@@ -55,9 +56,11 @@ def scoreboard(store, now=None):
         strategies[role] = [{**blank, **rows.get(st["id"], {}), "id": st["id"], "name": st["name"], "status": st["status"],
                              "is_default": bool(st["is_default"]), "parent_id": st["parent_id"]}
                             for st in store.list_strategies(role)]
-    format_rows = _table(store, posted, scored, now, lambda p: p["format"])
-    formats = sorted(({**{k: v for k, v in r.items() if k != "key"}, "name": r["key"]} for r in format_rows.values()),
-                     key=lambda r: r["name"])
+    formats = _format_rows(store, posted, scored, now, blank)
+    pack_rows = _table(store, posted, scored, now, lambda p: p["style_pack"])
+    packs = [{**blank, **{k: v for k, v in pack_rows.get(pid, {}).items() if k != "key"}, "id": pid, "name": pack["name"],
+              "available": pack["available"]}
+             for pid, pack in STYLE_PACKS.items() if pid in pack_rows or pack["available"]]
     for row in niches:
         row.pop("key", None)
     for rows in strategies.values():
@@ -66,10 +69,24 @@ def scoreboard(store, now=None):
     titles = {p["id"]: p for p in posted}
     best = sorted(scored.items(), key=lambda kv: -kv[1]["score"])[:10]
     return {"at": now, "weights": s["weights"], "minimum": {"weeks": s["min_weeks"], "posts": s["min_posts"]},
-            "niches": niches, "strategies": strategies, "formats": formats,
+            "niches": niches, "strategies": strategies, "formats": formats, "style_packs": packs,
             "top_posts": [{"post_id": pid, "title": titles[pid]["title"], "platform": titles[pid]["platform"],
                            "niche": titles[pid]["niche_name"], "posted_url": titles[pid]["posted_url"], **row} for pid, row in best],
             "posts_scored": len(scored), "posts_posted": len(posted)}
+
+
+def _format_rows(store, posted, scored, now, blank):
+    """Format cards by card (every card, scored or not), then free-text formats of posts made without a card."""
+    rows = _table(store, posted, scored, now, lambda p: ("card", p["format_id"]) if p["format_id"] else
+                  (("label", p["format"]) if p["format"] else None))
+    out = []
+    for card in store.list_formats():
+        row = {k: v for k, v in rows.get(("card", card["id"]), {}).items() if k != "key"}
+        out.append({**blank, **row, "id": card["id"], "name": card["name"], "kind": "card", "status": card["status"]})
+    labels = sorted(((key[1], row) for key, row in rows.items() if key[0] == "label"), key=lambda kv: kv[0])
+    out += [{**{k: v for k, v in row.items() if k != "key"}, "id": None, "name": name, "kind": "label", "status": "live"}
+            for name, row in labels]
+    return out
 
 
 # -- the weekly review ---------------------------------------------------------------------------
@@ -135,6 +152,29 @@ def run_review(store, now=None, dry_run=True, proposed_by="executor"):
                             "freed_slots": loser["slots"], "live_channels": len(channels),
                             "winner": {"id": winner["id"], "name": winner["name"], "score": winner["score"]}}})
 
+    # Content layer: format cards. The same rule as niches; a retired card only leaves the rotation (no channel changes).
+    cards = sorted((f for f in board["formats"] if f["kind"] == "card" and f["status"] == "active" and f["eligible"]),
+                   key=lambda f: (f["score"], f["id"]))
+    card_median = scoring.median([f["score"] for f in cards])
+    for f in cards:
+        f["behind"] = len(cards) >= 2 and f["score"] < s["behind_ratio"] * card_median
+        marks.append({"subject_type": "format", "subject_id": f["id"], "score": f["score"], "median": card_median, "behind": f["behind"]})
+    if cards and cards[0]["behind"]:
+        loser = cards[0]
+        if not _behind_before(store, "format", loser["id"], s["behind_reviews"] - 1):
+            notes.append(f"format {loser['name']} is behind the median but has not been for {s['behind_reviews']} reviews running")
+        elif _has_open(store, "retire", "format", loser["id"]):
+            notes.append(f"format {loser['name']} already has a retirement waiting")
+        else:
+            winner = cards[-1]
+            proposals.append({
+                "kind": "retire", "subject_type": "format", "subject_id": loser["id"], "subject_name": loser["name"],
+                "reason": f"Below {s['behind_ratio']:.0%} of the format median for {s['behind_reviews']} reviews running.",
+                "numbers": {"score": loser["score"], "team_median": card_median, "threshold": s["behind_ratio"] * card_median,
+                            "posts_scored": loser["posts_scored"], "age_days": loser["age_days"],
+                            "reviews_running": s["behind_reviews"],
+                            "winner": {"id": winner["id"], "name": winner["name"], "score": winner["score"]}}})
+
     # Bot layer: strategies, per role.
     for role, rows in board["strategies"].items():
         pool = sorted((r for r in rows if r["status"] == "active" and r["eligible"]), key=lambda r: (r["score"], r["id"]))
@@ -197,8 +237,8 @@ def needs_user(store, decision):
     niche: its channels are ones only the person can create."""
     if decision["kind"] == "add":
         return True
-    if decision["kind"] != "retire":
-        return False
+    if decision["kind"] != "retire" or decision["subject_type"] == "format":
+        return False  # a format card only leaves the rotation; no channel changes, so the Producer's confirm is enough
     if decision["subject_type"] == "channel":
         return True
     return bool(store.list_channels(niche_id=decision["subject_id"], status="live"))
@@ -244,6 +284,9 @@ def _apply(store, decision, name, now):
         return {"created_niche": niche["id"]}
     if decision["kind"] == "retire" and decision["subject_type"] == "niche":
         return _apply_retire_niche(store, decision, name, now)
+    if decision["kind"] == "retire" and decision["subject_type"] == "format":
+        store.retire_format(decision["subject_id"], decision["reason"] or "underperformed", now)
+        return {"retired_format": decision["subject_id"]}
     if decision["kind"] == "retire" and decision["subject_type"] == "channel":
         store.archive_channel(decision["subject_id"], decision["reason"] or "retired", now)
         return {"archived_channel": decision["subject_id"]}

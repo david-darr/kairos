@@ -39,10 +39,12 @@ ASPECTS = ("9:16", "16:9", "1:1")
 LATER_COLUMNS = {"snapshots": {"source": "TEXT NOT NULL DEFAULT 'manual'"},
                  "channels": {"look": "TEXT", "aspect": "TEXT", "notes": "TEXT NOT NULL DEFAULT ''", "voice": "TEXT"},
                  "posts": {"pick_reason": "TEXT NOT NULL DEFAULT ''", "tags": "TEXT NOT NULL DEFAULT ''",
-                           "ai_label": "INTEGER NOT NULL DEFAULT 1"}}
+                           "ai_label": "INTEGER NOT NULL DEFAULT 1", "format_id": "INTEGER REFERENCES formats(id)",
+                           "port_id": "INTEGER REFERENCES ports(id)", "style_pack": "TEXT",
+                           "thumbnail": "TEXT NOT NULL DEFAULT ''"}}
 # What a post keeps as appeal evidence (Video Styles build spec section 7): the person's approval, the shot plan,
 # the sources behind its facts, and the policy checks it passed.
-EVIDENCE_KINDS = ("approval", "shot_plan", "sources", "policy_check")
+EVIDENCE_KINDS = ("approval", "shot_plan", "sources", "policy_check", "port")
 VOICE_ID = re.compile(r"^[a-z]{2}_[a-z0-9]{1,30}$")
 
 
@@ -98,6 +100,19 @@ CREATE TABLE IF NOT EXISTS post_evidence (
   id INTEGER PRIMARY KEY, post_id INTEGER NOT NULL REFERENCES posts(id), kind TEXT NOT NULL,
   body TEXT NOT NULL DEFAULT '{}', at REAL NOT NULL);
 CREATE INDEX IF NOT EXISTS post_evidence_post ON post_evidence(post_id, id);
+CREATE TABLE IF NOT EXISTS formats (
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL, premise TEXT NOT NULL, beats TEXT NOT NULL DEFAULT '[]',
+  length_min_s REAL NOT NULL, length_max_s REAL NOT NULL, audience TEXT NOT NULL DEFAULT '{}',
+  source_niche TEXT NOT NULL DEFAULT '', do_not_use TEXT NOT NULL DEFAULT '[]', evidence TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'active', created_by TEXT NOT NULL DEFAULT '', created_at REAL NOT NULL,
+  updated_at REAL NOT NULL, retired_at REAL, retire_reason TEXT);
+CREATE TABLE IF NOT EXISTS ports (
+  id INTEGER PRIMARY KEY, format_id INTEGER NOT NULL REFERENCES formats(id), niche_id INTEGER NOT NULL REFERENCES niches(id),
+  audience_match TEXT NOT NULL, audience_evidence TEXT NOT NULL DEFAULT '[]', premise TEXT NOT NULL,
+  subject TEXT NOT NULL, mascot TEXT NOT NULL DEFAULT '', style_pack TEXT NOT NULL, thumbnail TEXT NOT NULL DEFAULT '',
+  example_title TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'proposed', checks TEXT NOT NULL DEFAULT '{}',
+  verdict_by TEXT, verdict_reason TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL DEFAULT '', created_at REAL NOT NULL,
+  decided_at REAL);
 CREATE TABLE IF NOT EXISTS review_marks (
   review_id INTEGER NOT NULL REFERENCES reviews(id), subject_type TEXT NOT NULL, subject_id INTEGER NOT NULL,
   score REAL NOT NULL, median REAL, behind INTEGER NOT NULL);
@@ -107,7 +122,8 @@ CREATE TABLE IF NOT EXISTS decisions (
   payload TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL, proposed_by TEXT NOT NULL,
   confirmed_by TEXT, user_ok_by TEXT, at REAL NOT NULL, resolved_at REAL);
 """
-JSON_COLS = {"numbers", "payload", "body"}
+JSON_COLS = {"numbers", "payload", "body", "beats", "audience", "do_not_use", "evidence", "audience_evidence", "checks"}
+JSON_LISTS = {"beats", "do_not_use", "evidence", "audience_evidence"}
 
 
 def _clean_text(value, what, limit=300, required=True):
@@ -155,7 +171,7 @@ class Store:
             for row in self.db.execute(sql, args).fetchall():
                 item = dict(row)
                 for col in JSON_COLS & item.keys():
-                    item[col] = json.loads(item[col] or "{}")
+                    item[col] = json.loads(item[col] or ("[]" if col in JSON_LISTS else "{}"))
                 out.append(item)
             return out
 
@@ -456,13 +472,108 @@ class Store:
             raise conflict("that strategy is already dropped")
         self._update("strategies", strategy_id, status="dropped", dropped_at=now, is_default=0)
 
+    # -- format cards and ports (formats.py validates; policy.py checks a port) ---------------------
+
+    def save_format(self, data, by="", format_id=None, now=None):
+        """A new format card, or a new version of one (the whole card is given again; evidence keeps its dates)."""
+        from .formats import clean_format
+        now = time.time() if now is None else now
+        fields = clean_format(data)
+        with self.lock:
+            clash = self._row("SELECT id FROM formats WHERE lower(name) = lower(?) AND status = 'active' AND id IS NOT ?",
+                              (fields["name"], format_id))
+            if clash:
+                raise conflict(f"an active format card is already called {fields['name']!r} (format {clash['id']})")
+            if format_id is None:
+                format_id = self._insert("formats", **fields, created_by=_clean_text(by, "by", 80, False), created_at=now,
+                                         updated_at=now)
+            else:
+                if self.get_format(format_id)["status"] != "active":
+                    raise conflict("that format card is retired")
+                self._update("formats", format_id, **fields, updated_at=now)
+        return self.get_format(format_id)
+
+    def get_format(self, format_id):
+        row = self._row("SELECT * FROM formats WHERE id = ?", (format_id,))
+        if not row:
+            raise not_found("format card")
+        return row
+
+    def list_formats(self, status=None):
+        if status:
+            return self._rows("SELECT * FROM formats WHERE status = ? ORDER BY id", (status,))
+        return self._rows("SELECT * FROM formats ORDER BY id")
+
+    def retire_format(self, format_id, reason, now=None):
+        """Out of the rotation, history kept: its ports retire with it and its posts keep their format id."""
+        now = time.time() if now is None else now
+        if self.get_format(format_id)["status"] != "active":
+            raise conflict("that format card is already retired")
+        with self.lock:
+            self._update("formats", format_id, status="retired", retired_at=now, retire_reason=_clean_text(reason, "reason", 300, False))
+            self._write("UPDATE ports SET status = 'retired', decided_at = ? WHERE format_id = ? AND status IN ('proposed', 'accepted')",
+                        (now, format_id))
+        return self.get_format(format_id)
+
+    PORT_SQL = ("SELECT p.*, f.name AS format_name, f.source_niche, n.name AS niche_name FROM ports p "
+                "JOIN formats f ON f.id = p.format_id JOIN niches n ON n.id = p.niche_id")
+
+    def create_port(self, format_id, niche_id, data, by="", now=None):
+        from .formats import clean_port
+        now = time.time() if now is None else now
+        if self.get_format(format_id)["status"] != "active":
+            raise conflict("that format card is retired")
+        if self.get_niche(niche_id)["status"] != "live":
+            raise conflict("a port goes into a live niche")
+        fields = clean_port(data)
+        with self.lock:
+            if self._row("SELECT id FROM ports WHERE format_id = ? AND niche_id = ? AND status IN ('proposed', 'accepted')",
+                         (format_id, niche_id)):
+                raise conflict("that format already has an open port into this niche")
+            port_id = self._insert("ports", format_id=format_id, niche_id=niche_id, **fields,
+                                   created_by=_clean_text(by, "by", 80, False), created_at=now)
+        return self.get_port(port_id)
+
+    def get_port(self, port_id):
+        row = self._row(f"{self.PORT_SQL} WHERE p.id = ?", (port_id,))
+        if not row:
+            raise not_found("port")
+        return row
+
+    def list_ports(self, format_id=None, status=None, niche_id=None):
+        where, args = [], []
+        for col, value in (("p.format_id", format_id), ("p.status", status), ("p.niche_id", niche_id)):
+            if value is not None:
+                where.append(f"{col} = ?")
+                args.append(value)
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        return self._rows(f"{self.PORT_SQL} {clause} ORDER BY p.id", tuple(args))
+
+    def record_port_checks(self, port_id, checks):
+        self.get_port(port_id)
+        self._update("ports", port_id, checks=checks)
+        return self.get_port(port_id)
+
+    def decide_port(self, port_id, status, by, reason="", now=None):
+        """The Evaluator's verdict on a proposed port. Accepting needs checks that passed (policy.port_findings)."""
+        now = time.time() if now is None else now
+        if status not in ("accepted", "rejected"):
+            raise StudioError("a verdict is accepted or rejected")
+        port = self.get_port(port_id)
+        if port["status"] != "proposed":
+            raise conflict(f"that port is already {port['status']}")
+        self._update("ports", port_id, status=status, verdict_by=_clean_text(by, "by", 80, False),
+                     verdict_reason=_clean_text(reason, "reason", 500, False), decided_at=now)
+        return self.get_port(port_id)
+
     # -- posts ----------------------------------------------------------------------------------
 
-    POST_SQL = ("SELECT p.*, c.platform, c.handle, c.niche_id, n.name AS niche_name FROM posts p "
-                "JOIN channels c ON c.id = p.channel_id JOIN niches n ON n.id = c.niche_id")
+    POST_SQL = ("SELECT p.*, c.platform, c.handle, c.niche_id, n.name AS niche_name, f.name AS format_name FROM posts p "
+                "JOIN channels c ON c.id = p.channel_id JOIN niches n ON n.id = c.niche_id LEFT JOIN formats f ON f.id = p.format_id")
 
     def create_post(self, channel_id, title, topic_id=None, script_strategy_id=None, evaluator_strategy_id=None,
-                    script_ref=None, caption="", format=None, pick_reason="", now=None):
+                    script_ref=None, caption="", format=None, pick_reason="", format_id=None, port_id=None, style_pack=None,
+                    now=None):
         now = time.time() if now is None else now
         channel = self.get_channel(channel_id)
         if channel["status"] != "live":
@@ -474,12 +585,28 @@ class Store:
         for sid, role in ((script_strategy_id, "script_writer"), (evaluator_strategy_id, "evaluator")):
             if sid is not None:
                 self._active_strategy(sid, role)
+        if port_id is not None:
+            port = self.get_port(port_id)
+            if port["status"] != "accepted":
+                raise conflict("only an accepted port can be made")
+            if port["niche_id"] != channel["niche_id"]:
+                raise StudioError("that port is for another niche")
+            if format_id is not None and format_id != port["format_id"]:
+                raise StudioError("the port belongs to another format")
+            format_id, style_pack = port["format_id"], style_pack or port["style_pack"]
+        if format_id is not None and self.get_format(format_id)["status"] != "active":
+            raise conflict("that format is retired")
+        from .formats import STYLE_PACKS
+        style_pack = style_pack or "motion-type"
+        if style_pack not in STYLE_PACKS:
+            raise StudioError(f"style pack must be one of {', '.join(STYLE_PACKS)}")
         post_id = self._insert(
             "posts", channel_id=channel_id, topic_id=topic_id, title=_clean_text(title, "title", 200),
             caption=_clean_text(caption, "caption", 5000, False), format=_clean_text(format, "format", 80, False) or None,
             script_strategy_id=script_strategy_id, evaluator_strategy_id=evaluator_strategy_id,
             script_ref=_clean_text(script_ref, "script", self.EDITABLE["script_ref"], False) or None,
-            pick_reason=_clean_text(pick_reason, "pick reason", 500, False), created_at=now, step_since=now)
+            pick_reason=_clean_text(pick_reason, "pick reason", 500, False), format_id=format_id, port_id=port_id,
+            style_pack=style_pack, created_at=now, step_since=now)
         return self.get_post(post_id)
 
     def _active_strategy(self, strategy_id, role):
@@ -504,8 +631,8 @@ class Store:
         return self._rows(f"{self.POST_SQL} {clause} ORDER BY p.id", tuple(args))
 
     EDITABLE = {"title": 200, "caption": 5000, "script_ref": 20000, "render_ref": 500, "format": 80, "tags": 500,
-                "pick_reason": 500}
-    TEXT_FIELDS = ("title", "caption", "tags", "pick_reason")  # stay text when cleared; the others become None
+                "pick_reason": 500, "thumbnail": 300}
+    TEXT_FIELDS = ("title", "caption", "tags", "pick_reason", "thumbnail")  # stay text when cleared; the others become None
 
     def edit_post(self, post_id, now=None, **fields):
         """Content edits (by the user at approval, or by a bot while drafting). Not allowed once approved."""

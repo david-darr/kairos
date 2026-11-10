@@ -42,7 +42,8 @@ def build_report(store, now=None, days=7, spend=None):
     return {
         "from": since, "to": now,
         "won": {"niches": judged[:3], "strategies": {role: rows[:1] for role, rows in strategies.items()},
-                "top_posts": board["top_posts"][:3]},
+                "formats": _ranked(board["formats"], lambda f: f["kind"] != "card" or f["status"] == "active")[:3],
+                "style_packs": _ranked(board["style_packs"])[:3], "top_posts": board["top_posts"][:3]},
         "retiring": {"waiting": [d for d in decisions if d["kind"] == "retire" and d["status"] in review.OPEN],
                      "retired_this_week": [d for d in recent if d["kind"] == "retire" and d["status"] == "confirmed"]},
         "replacing": {"promotions": [d for d in recent if d["kind"] == "promote"],
@@ -57,6 +58,14 @@ def build_report(store, now=None, days=7, spend=None):
     }
 
 
+def _ranked(rows, keep=lambda r: True):
+    return sorted((r for r in rows if keep(r) and r.get("eligible") and r.get("score") is not None), key=lambda r: -r["score"])
+
+
+def _subject(d):
+    return f"format {d['subject_name']}" if d["subject_type"] == "format" else d["subject_name"]
+
+
 def render_text(report):
     def niche(n):
         return f"{n['name']} ({n['score']:.1f})"
@@ -66,11 +75,14 @@ def render_text(report):
     for role, rows in won["strategies"].items():
         if rows:
             lines.append(f"  Best {role.replace('_', ' ')} strategy: {rows[0]['name']} ({rows[0]['score']:.1f}).")
+    for key, label in (("formats", "Formats"), ("style_packs", "Style packs")):
+        if won.get(key):
+            lines.append(f"  {label}, best first: " + ", ".join(niche(r) for r in won[key]) + ".")
     waiting = report["retiring"]["waiting"]
-    lines.append("Retiring: " + ("; ".join(f"{d['subject_name']} ({d['status'].replace('_', ' ')})" for d in waiting) or "nothing waiting") + ".")
+    lines.append("Retiring: " + ("; ".join(f"{_subject(d)} ({d['status'].replace('_', ' ')})" for d in waiting) or "nothing waiting") + ".")
     done = report["retiring"]["retired_this_week"]
     if done:
-        lines.append("  Retired this week: " + ", ".join(d["subject_name"] for d in done) + ".")
+        lines.append("  Retired this week: " + ", ".join(_subject(d) for d in done) + ".")
     rep = report["replacing"]
     bits = [f"{d['subject_name']} takes freed slots" for d in rep["promotions"]]
     bits += [f"{d['subject_name']} swapped for a variation of {d['numbers'].get('winner', {}).get('name', 'the winner')}" for d in rep["strategy_swaps"]]

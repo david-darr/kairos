@@ -36,7 +36,26 @@ const board = () => ({ at: now, weights: { views: 0.4, watch: 0.4, engagement: 0
   niches: [{ id: 1, name: 'Cooking', status: 'live', slots: 1, eligible: false, score: null, posts_posted: 4, posts_scored: 2, age_days: 6, not_yet: '2 of 10 posts with 7 day numbers; 6 of 21 days' },
     { id: 2, name: 'Travel', status: 'live', slots: 1, eligible: true, score: 71.5, posts_posted: 14, posts_scored: 12, age_days: 30, not_yet: '' }],
   strategies: { script_writer: [{ id: 1, name: 'Hook first', status: 'active', is_default: true, eligible: false, score: null, posts_posted: 0, posts_scored: 0, age_days: 0, not_yet: '0 of 10 posts with 7 day numbers; 0 of 21 days' }], evaluator: [] },
-  formats: [], top_posts: [], posts_scored: 14, posts_posted: 18 });
+  formats: [], style_packs: [{ id: 'motion-type', name: 'Motion type', available: true, eligible: false, score: null, posts_posted: 3, posts_scored: 1, age_days: 4, not_yet: '1 of 10 posts with 7 day numbers; 4 of 21 days' }],
+  top_posts: [], posts_scored: 14, posts_posted: 18 });
+// Example format card and ports for this check only (example.test links, made-up numbers).
+const formatsData = () => ({
+  formats: [{ id: 3, name: 'One person at a time', premise: 'An impossible ability applied to everyone, revealed one person at a time.',
+    beats: ['hook', 'rules of the premise', 'repeating segment', 'twist', 'payoff'], length_min_s: 60, length_max_s: 300, source_niche: 'Pop psychology',
+    audience: { age_band: '16-30', interests: 'what-if questions', platform: 'youtube', why: 'Curiosity about other people' },
+    do_not_use: ['Mister Glimpse', 'Glimpse Lab'], status: 'active',
+    evidence: [{ url: 'https://www.example.test/watch?v=abc', channel: 'Glimpse Lab', title: 'A source video', views: 1200000, age_days: 12, checked: '2026-11-10', note: '' }] }],
+  ports: [{ id: 2, format_id: 3, niche_id: 1, niche_name: 'Cooking', source_niche: 'Pop psychology', status: 'accepted', verdict_reason: 'Same audience, cheap to make.',
+    audience_match: 'Both audiences are curious young adults who watch what-if videos on YouTube.',
+    audience_evidence: [{ url: 'https://www.example.test/audience', supports: 'Viewer overlap', checked: '2026-11-10' }],
+    premise: 'A hidden number floats above every dish.', subject: 'Kitchen science', mascot: 'Pip the owl', style_pack: 'motion-type',
+    thumbnail: 'An owl over a steaming pot', example_title: 'Every dish has a secret number',
+    checks: { ok: true, findings: [{ check: 'cost', result: 'warn', reason: 'Keep episodes under 8 minutes: that is what Motion type makes today.' }], cost: { units: 3, ratio: 1 } } },
+  { id: 4, format_id: 3, niche_id: 2, niche_name: 'Travel', source_niche: 'Pop psychology', status: 'rejected', verdict_reason: 'Pack not built.',
+    audience_match: 'Travellers share the curiosity.', audience_evidence: [{ url: 'https://www.example.test/travel', supports: 'Survey', checked: '2026-11-09' }],
+    premise: 'Every city shows a hidden number.', subject: 'Cities', mascot: 'none', style_pack: 'glossy-3d', thumbnail: 'A city skyline', example_title: 'Cities and their numbers',
+    checks: { ok: false, findings: [{ check: 'cost', result: 'reject', reason: 'Glossy 3D mascot cannot be made yet.' }], cost: { units: 30, ratio: 10 } } }],
+  style_packs: [{ id: 'motion-type', name: 'Motion type', available: true, note: 'Exists today.' }, { id: 'glossy-3d', name: 'Glossy 3D mascot', available: false, note: 'Not built yet (build unit 5).' }] });
 const reportData = () => ({ from: now - 7 * 86400, to: now, text: 'Content Studio weekly report\n\nWhat won: Travel (71.5).\n  Best script writer strategy: Hook first (60.0).\nRetiring: Cooking (awaiting user).\nSpend this month: $12.00 (all bots $14.00, cap $50).' });
 function content(method, p, body) {
   if (store.forbidden && method === 'GET') return [403, { detail: 'Forbidden' }];
@@ -77,6 +96,7 @@ function content(method, p, body) {
   if (p === '/scoreboard') return [200, board()];
   if (p === '/decisions') return [200, { decisions: store.decisions }];
   if (/^\/decisions\/\d+\/(confirm|reject)$/.test(p)) { const d = store.decisions.find(x => x.id === id); d.status = p.endsWith('confirm') ? 'confirmed' : 'rejected'; return [200, d]; }
+  if (p === '/formats') return [200, formatsData()];
   if (p === '/report') return [200, reportData()];
   if (p === '/report/send') return [200, { delivered: true }];
   if (p === '/metrics/import') return [200, { stored: body.rows.length }];
@@ -88,7 +108,7 @@ const populate = () => {
       { id: 2, niche_id: 1, platform: 'tiktok', handle: '@cooks.tt', status: 'live', paused: 0, niche_name: 'Cooking' },
       { id: 3, niche_id: 2, platform: 'instagram', handle: '@trips', status: 'archived', paused: 0, niche_name: 'Travel', archive_reason: 'archived by you' }],
     findings: [{ kind: 'platform_warning', severity: 'urgent', channel_id: 1, message: 'YouTube warned @cooks: Reused content notice. The channel is paused.' }],
-    approvals: [post(11, { title: 'Five minute soup' }), post(12, { title: 'Pasta in one pan', platform: 'tiktok', handle: '@cooks.tt', channel_id: 2 }),
+    approvals: [post(11, { title: 'Five minute soup', format_id: 3, format_name: 'One person at a time', port_id: 2, style_pack: 'motion-type', thumbnail: 'A pot with a glowing number' }), post(12, { title: 'Pasta in one pan', platform: 'tiktok', handle: '@cooks.tt', channel_id: 2 }),
       post(13, { title: 'Sauce basics', platform: 'instagram' }), post(14, { title: 'Bread at home' })],
     items: [{ kind: 'topic', id: 1, title: 'Street food trends', niche_name: 'Travel', step: 'pick', owner: 'evaluator', status: 'candidate', age_h: 5, source: 'Search trends' },
       { kind: 'post', id: 21, title: 'Scripting now', niche_name: 'Cooking', platform: 'youtube', step: 'script', owner: 'script_writer', status: 'working', age_h: 30, in_step_h: 30, window_h: 12, overdue: true, rejection_count: 0, state: 'drafted' },
@@ -292,7 +312,9 @@ app.whenReady().then(async () => {
     await wait("document.querySelectorAll('.sc-post').length===4");
     const card = id => `.sc-post[data-post-id="${id}"]`;
     const text = await js(`document.querySelector(${T(card(11))}).textContent`);
-    for (const part of ['Five minute soup', 'A caption', 'Hook, three steps, ask', 'Open render', 'AI label', 'Required', 'The Post action comes later']) assert.ok(text.includes(part), part);
+    for (const part of ['Five minute soup', 'A caption', 'Hook, three steps, ask', 'Open render', 'AI label', 'Required', 'The Post action comes later',
+      'Format: One person at a time (ported). Style pack: Motion type.', 'A pot with a glowing number']) assert.ok(text.includes(part), part);
+    assert.equal(await js(`!!document.querySelector('.sc-post[data-post-id="12"] [data-post-format]')`), false, 'No format block without a format');
     assert.ok((await js(`document.querySelector(${T(card(13))}).textContent`)).includes('Not needed'), 'Instagram needs no AI label');
     assert.ok((await js("document.querySelector('.sc-body').textContent")).includes('Preparing it for the platform comes later'));
     await capture('desktop-approvals');
@@ -333,6 +355,20 @@ app.whenReady().then(async () => {
     await wait("document.querySelectorAll('.sc-post').length===0");
     assert.deepEqual(last('/approvals/approve-batch').body, { post_ids: [14, 15] });
 
+    // 5b. Formats: cards with every number and its date, ports with what changes and the checks. It only reads.
+    await tab('formats');
+    await wait("!!document.querySelector('.sc-format')");
+    const ftext = await js("document.querySelector('.sc-format').textContent");
+    for (const part of ['One person at a time', 'An impossible ability', '1 to 5 minutes', 'Glimpse Lab. 1,200,000 views, 12 days old when seen. Checked 2026-11-10.',
+      'Not ours to use', 'Mister Glimpse', 'From Pop psychology into Cooking', 'Because: Both audiences', 'Pip the owl', 'Every dish has a secret number',
+      'Audience match: Passed', 'Distance from the source: Passed', 'Cost to make: Warning', 'Series rule: Passed', 'The Evaluator: Same audience']) assert.ok(ftext.includes(part), part);
+    assert.ok(await js("document.querySelector('[data-port-id=\"4\"]').textContent.includes('Cost to make: Refused') && document.querySelector('[data-port-id=\"4\"]').textContent.includes('Glossy 3D mascot')"), 'A refused port says why');
+    assert.ok(await js("document.querySelector('[data-pack=\"glossy-3d\"]').textContent.includes('Not built yet')"));
+    assert.equal(await js("document.querySelector('[data-evidence]').querySelector('a').getAttribute('rel')"), 'noopener noreferrer');
+    assert.ok(!(await js("document.querySelector('.sc-body').textContent")).includes('\u2014'), 'No em-dashes in the copy');
+    assert.equal(writes.filter(w => w.path.includes('/formats')).length, 0, 'Formats only reads');
+    await capture('desktop-formats'); await noOverflow(); await labels();
+
     // 6. Scoreboard: needs more data, scores, awaiting decisions with Confirm / Reject.
     await tab('scoreboard');
     await wait("!!document.querySelector('[data-score-row=Cooking]')");
@@ -341,6 +377,7 @@ app.whenReady().then(async () => {
     assert.equal(await js("document.querySelector('[data-score-row=Travel] .sc-score').textContent"), '71.5');
     assert.ok(await js("document.querySelector('[data-score-row=\"Hook first\"]').textContent.includes('Needs more data')"));
     assert.ok(await js("document.querySelector('.sc-body').textContent.includes('Judged after 3 weeks and 10 posts.')"));
+    assert.ok(await js("document.querySelector('[data-score-row=\"Motion type\"]').textContent.includes('Needs more data')"), 'Style packs are ranked');
     assert.ok(await js("document.querySelector('.sc-body').textContent.includes('views 40, watch time 40, follows and engagement 20')"));
     assert.ok(await js("document.querySelector('[data-decision-id=\"2\"]').textContent.includes('Promote niche Travel') && document.querySelector('[data-decision-id=\"2\"]').textContent.includes('score 71.5')"), 'Recent decision with numbers');
     assert.ok(await js("document.querySelector('[data-decision-id=\"1\"]').textContent.includes('team median 71.5')"), 'Awaiting decision with numbers');
@@ -402,7 +439,7 @@ app.whenReady().then(async () => {
 
     // 8. Phone layout: nothing spills sideways and every control is at least 44px.
     win.setContentSize(390, 1000); await pause(350);
-    for (const name of ['approvals', 'pipeline', 'channels', 'scoreboard', 'report']) {
+    for (const name of ['approvals', 'pipeline', 'channels', 'formats', 'scoreboard', 'report']) {
       await tab(name); await pause(250); await noOverflow(); await labels();
       assert.deepEqual(await js("[...document.querySelectorAll('.sc button,.sc select,.sc input:not([type=checkbox]),.sc textarea')].filter(n=>n.getBoundingClientRect().height>0 && n.getBoundingClientRect().height<43).map(n=>n.outerHTML.slice(0,90))"), [], `Phone targets in ${name}`);
       await capture('phone-' + name);
@@ -417,7 +454,7 @@ app.whenReady().then(async () => {
     store.forbidden = false;
 
     assert.deepEqual(errors, []); assert.deepEqual(outside, []);
-    console.log(JSON.stringify({ ok: true, output, writes: writes.length, checks: ['empty state and template deep link', 'add channel', 'warning shown and resolved', 'archive and restore', 'youtube connections and privacy', 'channel look', 'pipeline board', 'details', 'post to youtube', 'approve', 'edit', 'reject with note', 'redraft', 'batch approval', 'scoreboard needs more data', 'niche proposal', 'team settings', 'decisions confirm and reject', 'report', 'csv mapping and import', '390 phone', '403', 'offline'] }));
+    console.log(JSON.stringify({ ok: true, output, writes: writes.length, checks: ['empty state and template deep link', 'add channel', 'warning shown and resolved', 'archive and restore', 'youtube connections and privacy', 'channel look', 'pipeline board', 'details', 'post to youtube', 'approve', 'edit', 'reject with note', 'redraft', 'batch approval', 'scoreboard needs more data', 'niche proposal', 'team settings', 'decisions confirm and reject', 'format cards and ports', 'report', 'csv mapping and import', '390 phone', '403', 'offline'] }));
   } catch (error) {
     console.error(error.stack);
     if (win && !win.isDestroyed()) fs.writeFileSync(path.join(output, 'failure.png'), (await win.webContents.capturePage()).toPNG());

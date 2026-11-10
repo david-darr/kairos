@@ -108,3 +108,11 @@
   .kairos-redesign [data-view][data-custom-tab] .sc .set-row-control .btn, .kairos-redesign [data-view][data-custom-tab] .sc .sc-actions .btn, .kairos-redesign [data-view][data-custom-tab] .sc .sc-tab { min-height: 44px; }
 }
 .sc .sc-body > .set-note:first-child { margin: 0 2px 14px; }
+/* Formats: a format card's ports, what changes and the Evaluator's checks. */
+.sc .sc-port { display: grid; gap: 6px; margin-top: 8px; min-width: 0; }
+.sc .sc-port a, .sc .sc-format a { overflow-wrap: anywhere; color: var(--accent); }
+.sc .sc-changes { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 12px; margin: 4px 0; font-size: 12.5px; }
+.sc .sc-changes dt { color: var(--text-faint); }
+.sc .sc-changes dd { margin: 0; overflow-wrap: anywhere; }
+.sc .sc-checks { display: flex; flex-wrap: wrap; gap: 6px; }
+@media (max-width: 520px) { .sc .sc-changes { grid-template-columns: minmax(0, 1fr); } .sc .sc-changes dd { margin-bottom: 4px; } }

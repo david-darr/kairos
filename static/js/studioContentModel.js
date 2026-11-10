@@ -120,7 +120,7 @@ export const roleTitle = role => ROLE_TITLES[role] || role;
 
 export const DECISION_WORDS = { retire: 'Retire', promote: 'Promote', replace: 'Replace', add: 'Add' };
 export function decisionTitle(d) {
-  const noun = d.subject_type === 'channel' ? 'channel' : d.subject_type === 'strategy' ? 'strategy' : 'niche';
+  const noun = ({ channel: 'channel', strategy: 'strategy', format: 'format' })[d.subject_type] || 'niche';
   return `${DECISION_WORDS[d.kind] || d.kind} ${noun} ${d.subject_name}`.trim();
 }
 
@@ -235,6 +235,80 @@ export function weightsFromPercents(values) {
   }
   if (Object.values(out).reduce((a, b) => a + b, 0) <= 0) return { error: 'At least one weight must be above 0.' };
   return { weights: out };
+}
+
+// -- format cards and ports ---------------------------------------------------------------------------
+
+const span = seconds => {
+  const s = Math.round(Number(seconds) || 0);
+  if (s < 60) return { n: s, unit: 'second' };
+  return { n: Math.round(s / 60), unit: 'minute' };
+};
+const words = ({ n, unit }) => `${n} ${unit}${n === 1 ? '' : 's'}`;
+
+// A card's typical length in plain words: "1 to 5 minutes", "45 seconds to 2 minutes", "about 3 minutes".
+export function formatLength(min, max) {
+  const a = span(min), b = span(max);
+  if (a.n === b.n && a.unit === b.unit) return `about ${words(b)}`;
+  return a.unit === b.unit ? `${a.n} to ${words(b)}` : `${words(a)} to ${words(b)}`;
+}
+
+const count = n => (typeof n === 'number' && Number.isFinite(n) ? n.toLocaleString('en-US') : null);
+
+// One evidence row: every number with the date it was checked.
+export function evidenceText(e) {
+  const bits = [];
+  if (count(e.views) != null) bits.push(`${count(e.views)} views`);
+  if (count(e.age_days) != null) bits.push(`${count(e.age_days)} day${e.age_days === 1 ? '' : 's'} old`);
+  return `${bits.length ? bits.join(', ') + ' when seen. ' : ''}Checked ${e.checked}.${e.note ? ' ' + e.note : ''}`;
+}
+
+export function audienceText(a = {}) {
+  return `${a.age_band || 'Any age'}, ${a.interests || 'no interests named'}, on ${platformName(a.platform)}. Why they watch: ${a.why || 'not stated'}.`;
+}
+
+export const CHECK_NAMES = [['audience_match', 'Audience match'], ['distance', 'Distance from the source'], ['cost', 'Cost to make'], ['series', 'Series rule']];
+
+// Each of the Evaluator's port checks as [name, result, tone]: Passed, Warning or Refused. Empty until checked.
+export function portChecks(checks) {
+  if (!checks || !Array.isArray(checks.findings)) return [];
+  return CHECK_NAMES.map(([key, name]) => {
+    const found = checks.findings.filter(f => f.check === key);
+    if (found.some(f => f.result === 'reject')) return [name, 'Refused', 'error'];
+    if (found.length) return [name, 'Warning', 'warn'];
+    return [name, 'Passed', 'ok'];
+  });
+}
+
+export function portReasons(checks) {
+  return (checks?.findings || []).map(f => f.reason).filter(Boolean);
+}
+
+export function portStatus(port) {
+  return ({ proposed: ['With the Evaluator', 'accent'], accepted: ['Accepted', 'ok'], rejected: ['Rejected', 'muted'],
+    retired: ['Retired', 'muted'] })[port.status] || [port.status, 'muted'];
+}
+
+// The server's style pack list names them; this is the fallback where it is not loaded (services/content_studio/formats.py).
+const PACK_NAMES = { 'motion-type': 'Motion type', 'flat-2d': 'Flat 2D explainer', 'glossy-3d': 'Glossy 3D mascot', 'voxel-3d': 'Blocky voxel 3D' };
+export function packName(id, packs) {
+  return (packs || []).find(p => p.id === id)?.name || PACK_NAMES[id] || id || '';
+}
+
+export function costText(cost) {
+  if (!cost || cost.units == null) return '';
+  const head = `About ${cost.units} planning units`;
+  if (cost.ratio == null) return `${head}; no pack can make this length today.`;
+  return cost.ratio > 1 ? `${head}, ${cost.ratio} times the cheapest pack that could make it.` : `${head}, the cheapest way to make it.`;
+}
+
+// A post made from a format card names it and its style pack; posts without one show nothing.
+export function postFormatText(post, packs) {
+  if (!post.format_id && !post.style_pack) return '';
+  const bits = [];
+  if (post.format_name) bits.push(`Format: ${post.format_name}${post.port_id ? ' (ported)' : ''}.`);
+  if (post.style_pack) bits.push(`Style pack: ${packName(post.style_pack, packs)}.`);
+  return bits.join(' ');
 }
 
 // -- failures -------------------------------------------------------------------------------------

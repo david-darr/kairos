@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from core.middleware import require_user
 from core.middleware import local_api_base
-from services.content_studio import StudioError, delivery, pipeline, report, review, studio, youtube, youtube_publish
+from services.content_studio import StudioError, delivery, formats, pipeline, report, review, studio, youtube, youtube_publish
 
 router = APIRouter(prefix="/api/content-studio", tags=["content-studio"])
 
@@ -84,6 +84,7 @@ class EditBody(Body):
     render_status: Optional[str] = Field(None, max_length=10)
     format: Optional[str] = Field(None, max_length=80)
     tags: Optional[str] = Field(None, max_length=500)
+    thumbnail: Optional[str] = Field(None, max_length=300)
 
 
 class PostedBody(Body):
@@ -217,6 +218,24 @@ def strategies(user: str = Depends(require_user)):
 @router.post("/strategies")
 def add_strategy(body: StrategyBody, user: str = Depends(require_user)):
     return _run(studio.create_strategy, body.owner_role, body.name, body.parent_id, body.make_default)
+
+
+# -- format cards and ports (read here; the Researcher writes them, the Evaluator decides ports) ------
+
+@router.get("/formats")
+def format_cards(include_retired: bool = False, user: str = Depends(require_user)):
+    """The account's format cards, their port proposals with the checks, and the style packs."""
+    cards = studio.list_formats(None if include_retired else "active")
+    ports = [p for p in studio.list_ports() if include_retired or p["status"] in ("proposed", "accepted")]
+    return {"formats": cards, "ports": ports, "style_packs": formats.packs()}
+
+
+@router.get("/formats/{format_id}")
+def format_card(format_id: int, user: str = Depends(require_user)):
+    card = _run(studio.get_format, format_id)
+    return {**card, "ports": studio.list_ports(format_id=format_id),
+            "posts": [{k: p[k] for k in ("id", "title", "state", "platform", "handle", "style_pack", "posted_url")}
+                      for p in studio.list_posts() if p["format_id"] == format_id]}
 
 
 # -- posts and the approval queue -----------------------------------------------------------------

@@ -12,6 +12,11 @@ pick_topic, Script Writer save_script (with the shot plan and sources), Editor r
 person approves, Publisher publish_youtube or mark_posted, Executor record_metrics and run_review, Producer watch,
 confirm and send_report.
 
+Formats (Video Styles build spec section 2): the Researcher writes format cards (save_format) and port proposals
+(propose_port: a proven format from another niche into ours, with what changes); the Evaluator checks a port (audience
+match, distance from the source, cost to make, the series rule) and accepts or rejects it (check_port, decide_port);
+a pick from an accepted port records the 'port-proven-format' strategy, the format and the style pack on the post.
+
 Policy checks (services/content_studio/policy.py) run at the pick, when a script is saved and when a post is queued:
 sameness against the channel's last 30 posts, no narrator presented as a health, legal, money or political expert, no
 distress or rescue hooks, no cross-posting between the team's own channels, and the AI label on every post. The
@@ -24,7 +29,7 @@ from urllib.parse import urlsplit
 
 from core.tool_registry import READ, WRITE, register
 from core.untrusted import wrap_untrusted
-from services.content_studio import StudioError, delivery, pipeline, policy, review, studio, team, youtube, youtube_publish
+from services.content_studio import StudioError, delivery, formats, pipeline, policy, review, studio, team, youtube, youtube_publish
 
 
 def _obj(properties, required=()):
@@ -94,10 +99,14 @@ def _pipeline(args, ctx, bot, role):
                   for r in ("script_writer", "evaluator")}
     wanted = [{"decision_id": d["id"], "replaces": d["subject_name"]} for d in studio.list_decisions(status="open", kind="replace")
               if d["subject_type"] == "niche"]
+    team.seed_strategies(studio)  # a team imported before a starting strategy existed gains it (a dropped one never returns)
     return _data(ctx, "content studio pipeline", {
         "you_are": role, "items": pipeline.pipeline(studio), "approvals_waiting": len(pipeline.approval_queue(studio)),
         "niches": [{"id": n["id"], "name": n["name"], "slots": n["slots"]} for n in studio.list_niches("live")],
-        "channels": channels, "strategies": strategies, "niches_wanted": wanted})
+        "channels": channels, "strategies": strategies, "niches_wanted": wanted,
+        "formats": [{"id": f["id"], "name": f["name"]} for f in studio.list_formats("active")],
+        "ports_accepted": [{"id": p["id"], "format": p["format_name"], "niche_id": p["niche_id"], "style_pack": p["style_pack"]}
+                           for p in studio.list_ports(status="accepted")]})
 
 
 def _drafted(post_id):
@@ -115,18 +124,38 @@ def _refuse_if_rejected(post_id, result, step):
 
 def _pick(args, ctx, bot, role):
     topic = studio.get_topic(args["topic_id"])
-    strategy = team.strategy_by_name(studio, "evaluator", args.get("strategy"))
+    port = studio.get_port(args["port_id"]) if args.get("port_id") else None
+    if port and port["status"] != "accepted":
+        raise StudioError(f"port {port['id']} is {port['status']}; only an accepted port is picked")
+    strategy = team.pick_strategy(studio, args.get("strategy"), ported=port is not None)
     if any(p["topic_id"] == topic["id"] and p["channel_id"] == args["channel_id"] for p in studio.list_posts()):
         raise StudioError("that topic is already picked for this channel")
+    format_id = port["format_id"] if port else args.get("format_id")
+    card = studio.get_format(format_id) if format_id else None
     title = args.get("title") or topic["title"]
+    fmt = card["name"] if card else args.get("format")
     early = (policy.persona_findings(title) + policy.hook_findings(title, "") +
-             policy.sameness_findings(studio, args["channel_id"], title, "", args.get("format")))
+             policy.sameness_findings(studio, args["channel_id"], title, "", fmt))
+    if card:
+        early += policy.distance_findings(card, {"title": title})
+        early += policy.series_findings(studio, args["channel_id"], card["id"], topic["title"])
     if any(f["result"] == "reject" for f in early):
         raise StudioError("the policy checks stopped this pick: " + policy.reasons({"findings": early}))
-    post = studio.create_post(args["channel_id"], args.get("title") or topic["title"], topic_id=topic["id"],
-                              evaluator_strategy_id=strategy["id"] if strategy else None, format=args.get("format"),
-                              pick_reason=args["reason"])
-    return _data(ctx, "content studio post", post) + " The Script Writer writes it next."
+    post = studio.create_post(args["channel_id"], title, topic_id=topic["id"],
+                              evaluator_strategy_id=strategy["id"] if strategy else None, format=fmt,
+                              pick_reason=args["reason"], format_id=format_id, port_id=port["id"] if port else None,
+                              style_pack=args.get("style_pack"))
+    if card:
+        studio.add_evidence(post["id"], "port", {
+            "by": bot["name"], "format": {k: card[k] for k in ("id", "name", "premise", "beats", "source_niche", "evidence")},
+            "port": ({k: port[k] for k in ("id", "niche_name", "audience_match", "audience_evidence", "premise", "subject",
+                                          "mascot", "style_pack", "thumbnail", "checks")} if port else None),
+            "pick_checks": early})
+    tail = " The Script Writer writes it next."
+    if card:
+        tail += (f" It is an episode of the format \"{card['name']}\" in the {post['style_pack']} style pack: give it its own "
+                 "concept, script and opening, and keep every name, mascot, line and look of the source out of it.")
+    return _data(ctx, "content studio post", post) + tail
 
 
 _URL = re.compile(r"^https?://[^\s]+$")
@@ -219,7 +248,7 @@ def _render(args, ctx, bot, role):
         if not studio.evidence(args["post_id"], "shot_plan"):
             raise StudioError("record the shot plan first (content_studio_save_shot_plan with the plan video_narrate returned)")
         note = _channel_voice(post, args.get("render_ref"))
-    for key in ("tags", "caption"):
+    for key in ("tags", "caption", "thumbnail"):
         if args.get(key) is not None:
             fields[key] = args[key]
     post = studio.edit_post(args["post_id"], **fields)
@@ -260,6 +289,51 @@ async def _trending(args, ctx, bot, role):
 def _add_topic(args, ctx, bot, role):
     topic = studio.add_topic(args["niche_id"], args["title"], args["source"], args.get("evidence_date"), args.get("signal", ""))
     return _data(ctx, "content studio topic", topic)
+
+
+def _formats(args, ctx, bot, role):
+    status = None if args.get("include_retired") else "active"
+    cards = studio.list_formats(status)
+    ports = [p for p in studio.list_ports() if args.get("include_retired") or p["status"] in ("proposed", "accepted")]
+    return _data(ctx, "content studio formats", {"formats": cards, "ports": ports, "style_packs": formats.packs()})
+
+
+def _save_format(args, ctx, bot, role):
+    data = {k: v for k, v in args.items() if k != "format_id"}
+    card = studio.save_format(data, by=bot["name"], format_id=args.get("format_id"))
+    return _data(ctx, "content studio format", card) + (" Saved. Propose a port with content_studio_propose_port when another "
+                                                        "of our niches has the same audience.")
+
+
+def _port_result(port):
+    result = policy.port_findings(studio, port)
+    return result, studio.record_port_checks(port["id"], result)
+
+
+def _propose_port(args, ctx, bot, role):
+    data = {k: v for k, v in args.items() if k not in ("format_id", "niche_id")}
+    port = studio.create_port(args["format_id"], args["niche_id"], data, by=bot["name"])
+    result, port = _port_result(port)
+    head = "Proposed. The Evaluator checks it and decides." if result["ok"] else \
+        "Proposed, but the checks found problems the Evaluator will refuse; fix them with a new proposal: " + policy.reasons(result)
+    return _data(ctx, "content studio port", port) + " " + head
+
+
+def _check_port(args, ctx, bot, role):
+    result, port = _port_result(studio.get_port(args["port_id"]))
+    return _data(ctx, "content studio port checks", {"port_id": port["id"], "status": port["status"], **result})
+
+
+def _decide_port(args, ctx, bot, role):
+    port = studio.get_port(args["port_id"])
+    if args["verdict"] == "accepted":
+        result, port = _port_result(port)
+        if not result["ok"]:
+            raise StudioError("the port checks refuse it: " + policy.reasons(result))
+    port = studio.decide_port(port["id"], args["verdict"], bot["name"], args["reason"])
+    tail = (" Pick its episodes with content_studio_pick_topic and port_id; each one needs its own concept."
+            if port["status"] == "accepted" else "")
+    return _data(ctx, "content studio port", port) + tail
 
 
 def _run_review(args, ctx, bot, role):
@@ -310,10 +384,15 @@ def _warning(args, ctx, bot, role):
 _add("content_studio_pipeline", "Read the Content Studio pipeline: each idea's step, owner, age and status, and how many posts wait for approval.",
      _obj({}), READ, ANY, _pipeline)
 _add("content_studio_pick_topic", "Evaluator: pick a topic candidate for one channel, with a short reason. It becomes a post the Script Writer writes. "
-     "strategy is your pick strategy's name (the default when left out); it is recorded on the post.",
+     "strategy is your pick strategy's name (the default when left out); it is recorded on the post. To make an episode of an accepted "
+     "port, pass port_id: the pick records the port-proven-format strategy, the format card and the port's style pack, and the "
+     "distance and series checks run on it. format_id uses one of our own format cards without a port.",
      _obj({"channel_id": _int("A live channel in the topic's niche"), "topic_id": _int(), "reason": _str(500, "Why this topic, in a sentence"),
            "strategy": _str(80), "title": _str(200, "Working title; the topic's title when left out"),
-           "format": _str(80, "The format, for example 'list' or 'explainer'")}, ("channel_id", "topic_id", "reason")),
+           "format": _str(80, "The format, for example 'list' or 'explainer', when there is no format card"),
+           "port_id": _int("An accepted port this episode is made from"), "format_id": _int("A format card, when not from a port"),
+           "style_pack": {"type": "string", "enum": list(formats.STYLE_PACKS), "description": "The style pack; motion-type when left out"}},
+          ("channel_id", "topic_id", "reason")),
      WRITE, ("evaluator",), _pick)
 _add("content_studio_save_script", "Script Writer: save the script with its beat outline and narration lines for a drafted post, and optionally its "
      "title, caption draft, timestamped shot plan and the sources behind its facts (each {url, supports, date}). strategy is your script "
@@ -339,7 +418,7 @@ _add("content_studio_record_render", "Editor: record the render of a scripted po
      "or the Studio video id), or failed. Optionally the tags (comma separated) and the final caption. Needs the shot plan on record. "
      "A narrated render must use the channel's narrator voice; the first one sets it.",
      _obj({"post_id": _int(), "status": {"type": "string", "enum": ["ok", "failed"]}, "render_ref": _str(500), "tags": _str(500),
-           "caption": _str(5000)}, ("post_id", "status")),
+           "caption": _str(5000), "thumbnail": _str(300, "What the thumbnail shows, in a sentence")}, ("post_id", "status")),
      WRITE, ("editor",), _render)
 _add("content_studio_mark_posted", "Publisher: record the live link of an approved post the person posted (Prepare post), so its numbers can be tracked. "
      "The link must be the https link on the post's own platform.",
@@ -360,6 +439,46 @@ _add("content_studio_add_topic", "Researcher: add a sourced topic candidate to a
            "evidence_date": {"type": "number", "description": "Unix time you saw it; defaults to now"},
            "signal": _str(300, "What is rising and by how much")}, ("niche_id", "title", "source")),
      WRITE, ("researcher",), _add_topic)
+_EVIDENCE_ROW = _obj({"url": _str(500, "https link to the source channel or video"), "channel": _str(100, "The source channel's name"),
+                     "title": _str(200, "The source video's title"), "views": _int("Views when you saw it"),
+                     "age_days": _int("The video's age in days when you saw it"), "checked": _str(10, "The date you checked, YYYY-MM-DD"),
+                     "note": _str(300)}, ("url", "channel", "checked"))
+_add("content_studio_formats", "Read the format cards, the port proposals (with their checks) and the style packs, with which packs can be made today.",
+     _obj({"include_retired": {"type": "boolean"}}), READ, ANY, _formats)
+_add("content_studio_save_format", "Researcher: save a format card, the reusable structure of a proven video format (not its content): the premise in "
+     "one line, the beats, the typical length, the audience and the evidence (each row: the source link, channel, views and age when seen, the "
+     "date checked). do_not_use lists the source's own names, mascots, series names and lines; the source channels are added to it. "
+     "Pass format_id to save a new version of a card.",
+     _obj({"format_id": _int("A card to update"), "name": _str(80, "A short name of our own, for example 'Impossible ability, one person at a time'"),
+           "premise": _str(200, "The premise in one line"),
+           "beats": {"type": "array", "minItems": 2, "maxItems": 12, "items": _str(80), "description": "The structure: hook, rules, repeating segment, escalation, twist, payoff"},
+           "length_min_s": {"type": "number"}, "length_max_s": {"type": "number"},
+           "audience": _obj({"age_band": _str(40), "interests": _str(300), "platform": {"type": "string", "enum": ["youtube", "tiktok", "instagram"]},
+                             "why": _str(300, "Why they watch")}, ("age_band", "interests", "platform", "why")),
+           "source_niche": _str(80), "do_not_use": {"type": "array", "maxItems": 30, "items": _str(80)},
+           "evidence": {"type": "array", "minItems": 1, "maxItems": 20, "items": _EVIDENCE_ROW}},
+          ("name", "premise", "beats", "length_min_s", "length_max_s", "audience", "source_niche", "evidence")),
+     WRITE, ("researcher",), _save_format)
+_add("content_studio_propose_port", "Researcher: propose porting a format card into one of our live niches: why that niche's audience matches the "
+     "source's (with dated links), and what changes: the new premise wording, the subject, our own mascot (or 'none'), the style pack, the "
+     "thumbnail and an example title. The Evaluator's checks run at once and are returned; the Evaluator decides.",
+     _obj({"format_id": _int(), "niche_id": _int("Our live niche it goes into"), "audience_match": _str(500, "Why the audiences match"),
+           "audience_evidence": {"type": "array", "minItems": 1, "maxItems": 10, "items": _obj({
+               "url": _str(500), "supports": _str(300, "What it shows"), "checked": _str(10, "YYYY-MM-DD")}, ("url", "supports", "checked"))},
+           "premise": _str(200, "The premise in our own words for the new niche"), "subject": _str(200),
+           "mascot": _str(80, "Our own mascot or character, or 'none'"),
+           "style_pack": {"type": "string", "enum": list(formats.STYLE_PACKS)},
+           "thumbnail": _str(300, "What the thumbnail shows"), "example_title": _str(200)},
+          ("format_id", "niche_id", "audience_match", "audience_evidence", "premise", "subject", "mascot", "style_pack", "thumbnail", "example_title")),
+     WRITE, ("researcher",), _propose_port)
+_add("content_studio_check_port", "Evaluator or Producer: run the port checks: audience match with evidence, distance from the source (no source "
+     "names, mascots or lines; a title or thumbnail that could be mistaken for the source's is refused), cost to make in the chosen style "
+     "pack, and the series rule. The result is kept on the port.",
+     _obj({"port_id": _int()}, ("port_id",)), WRITE, ("evaluator", "producer"), _check_port)
+_add("content_studio_decide_port", "Evaluator: accept or reject a proposed port, with the reason. Accepting runs the checks again and is refused "
+     "while any check refuses it. Only an accepted port's episodes can be picked.",
+     _obj({"port_id": _int(), "verdict": {"type": "string", "enum": ["accepted", "rejected"]}, "reason": _str(500)},
+          ("port_id", "verdict", "reason")), WRITE, ("evaluator",), _decide_port)
 _add("content_studio_run_review", "Executor: run the weekly selection review. dry_run (the default) shows the proposals and records nothing; "
      "dry_run false files them as decisions for the Producer to confirm.", _obj({"dry_run": {"type": "boolean"}}), WRITE, ("executor",), _run_review)
 _add("content_studio_confirm_decision", "Producer: confirm an Executor proposal. A retirement of a channel (or a niche with live channels) is not applied: "

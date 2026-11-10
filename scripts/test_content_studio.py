@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 import app as kairos  # noqa: E402
 from core import accounts  # noqa: E402
 from core.auth import auth_manager  # noqa: E402
-from services.content_studio import StudioError, Store, close_all, delivery, pipeline, report, review, scoring  # noqa: E402
+from services.content_studio import StudioError, Store, close_all, delivery, formats, pipeline, policy, report, review, scoring, team  # noqa: E402
 import atexit  # noqa: E402
 
 _STORES = []
@@ -44,10 +44,10 @@ NOW2 = NOW1 + 7 * DAY
 
 
 def posted(store, channel_id, title, at, views, avd=5.0, length=10.0, likes=0, comments=0, shares=0, follows=0,
-           script=None, evaluator=None, format=None):
+           script=None, evaluator=None, format=None, format_id=None, style_pack=None):
     """A post taken all the way to posted, with a 7 day snapshot."""
     post = store.create_post(channel_id, title, script_strategy_id=script, evaluator_strategy_id=evaluator, format=format,
-                             script_ref=f"The script of {title}", now=at - 7200)
+                             script_ref=f"The script of {title}", format_id=format_id, style_pack=style_pack, now=at - 7200)
     # Each post is its own video: the policy checks refuse one video on two of the team's channels.
     store.edit_post(post["id"], now=at - 3600, render_ref=f"render-{post['id']}.mp4", render_status="ok")
     store.submit_for_approval(post["id"], now=at - 1800)
@@ -576,6 +576,207 @@ class ChannelProfileBatchAndStrategies(unittest.TestCase):
         self.assertEqual((channel["look"], channel["aspect"], channel["notes"]), (None, None, ""))
         post = store.create_post(1, "New", pick_reason="why")
         self.assertEqual((post["pick_reason"], post["tags"]), ("why", ""))
+        self.assertEqual((post["format_id"], post["port_id"], post["style_pack"], post["thumbnail"]), (None, None, "motion-type", ""))
+        self.assertEqual(store.list_formats(), [])
+
+
+def card(name="Impossible ability, one person at a time", **extra):
+    """An example format card for tests only (example.test links, made-up numbers): never shipped as data."""
+    today = __import__("datetime").date.today().isoformat()
+    return {"name": name, "premise": "An impossible ability applied to everyone, revealed one person at a time.",
+            "beats": ["hook", "rules of the premise", "repeating segment", "escalation", "twist", "payoff"],
+            "length_min_s": 60, "length_max_s": 300, "source_niche": "Pop psychology",
+            "audience": {"age_band": "16-30", "interests": "psychology, what-if questions", "platform": "youtube",
+                         "why": "Curiosity about other people"},
+            "do_not_use": ["Mister Glimpse"],
+            "evidence": [{"url": "https://www.example.test/watch?v=abc", "channel": "Glimpse Lab", "views": 1200000, "age_days": 12,
+                          "title": "What if you could see everyone's future wealth", "checked": today}], **extra}
+
+
+PORT = {"audience_match": "Both audiences are curious 16 to 30 year olds who watch what-if science videos on YouTube.",
+        "audience_evidence": [{"url": "https://www.example.test/audience", "supports": "Overlap of viewers", "checked": None}],
+        "premise": "A hidden number floats above every animal and we read them one by one.", "subject": "Animal senses",
+        "mascot": "Pip the owl", "style_pack": "motion-type", "thumbnail": "An owl with a glowing number above a crowd of animals",
+        "example_title": "Every animal has a secret number"}
+
+
+def port_data(**extra):
+    data = {**PORT, **extra}
+    data["audience_evidence"] = [{**PORT["audience_evidence"][0], "checked": __import__("datetime").date.today().isoformat()}]
+    return data
+
+
+class FormatCards(unittest.TestCase):
+    """Format cards, ports, their checks, and formats and style packs in the weekly review (build unit 2)."""
+
+    def setUp(self):
+        self.store = make_store()
+        self.niche = self.store.create_niche("Animals", now=T0 - DAY)
+        self.channel = self.store.create_channel(self.niche["id"], "youtube", "@animals", now=T0 - DAY)
+
+    def test_a_card_keeps_every_number_with_its_source_and_date(self):
+        s = self.store
+        saved = s.save_format(card(), by="Researcher")
+        self.assertEqual(saved["evidence"][0]["views"], 1200000)
+        self.assertEqual(saved["do_not_use"], ["Mister Glimpse", "Glimpse Lab"], "the source channel is never ours to use")
+        self.assertEqual((saved["status"], saved["created_by"], saved["audience"]["platform"]), ("active", "Researcher", "youtube"))
+        bad_rows = ({"url": "http://www.example.test/x", "channel": "A", "checked": "2026-11-10"},
+                    {"url": "https://www.example.test/x", "channel": "A"},
+                    {"url": "https://www.example.test/x", "channel": "A", "checked": "10/11/2026"},
+                    {"url": "https://www.example.test/x", "channel": "A", "checked": "2026-02-31"},
+                    {"url": "https://www.example.test/x", "channel": "A", "checked": "2026-11-10", "views": -3},
+                    {"url": "https://www.example.test/x", "channel": "A", "checked": "2026-11-10", "revenue": 5})
+        for row in bad_rows:
+            with self.assertRaises(StudioError, msg=row):
+                s.save_format(card(name="Other", evidence=[row]))
+        for bad in ({"evidence": []}, {"beats": ["one"]}, {"length_min_s": 400, "length_max_s": 60},
+                    {"audience": {"age_band": "x", "interests": "y", "platform": "myspace", "why": "z"}}, {"premise": ""}):
+            with self.assertRaises(StudioError, msg=bad):
+                s.save_format(card(name="Other", **bad))
+        with self.assertRaises(StudioError) as caught:
+            s.save_format(card())
+        self.assertEqual(caught.exception.status, 409, "one active card per name")
+        updated = s.save_format(card(premise="A new wording of the premise for this card."), format_id=saved["id"])
+        self.assertEqual((updated["id"], updated["premise"]), (saved["id"], "A new wording of the premise for this card."))
+
+    def test_port_checks_audience_distance_cost_and_series(self):
+        s = self.store
+        c = s.save_format(card())
+        good = s.create_port(c["id"], self.niche["id"], port_data(), by="Researcher")
+        result = policy.port_findings(s, good)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual((result["cost"]["pack"], result["cost"]["ratio"]), ("motion-type", 1.0))
+        with self.assertRaises(StudioError):
+            s.create_port(c["id"], self.niche["id"], port_data(), by="Researcher")  # one open port per format and niche
+
+        other = s.create_niche("Space")
+        def checks(**extra):
+            port = s.create_port(c["id"], other["id"], port_data(**extra))
+            out = policy.port_findings(s, port)
+            s.decide_port(port["id"], "rejected", "Evaluator", "test")
+            return out
+        out = checks(example_title="What if you could see everyone's future wealth?")
+        self.assertIn("could be mistaken for the source video", policy.reasons(out))
+        out = checks(mascot="Mister Glimpse junior")
+        self.assertIn('uses "Mister Glimpse"', policy.reasons(out))
+        out = checks(thumbnail="The Glimpse Lab logo over a crowd")
+        self.assertTrue(any(f["check"] == "distance" and f["field"] == "thumbnail" for f in out["findings"]))
+        out = checks(style_pack="glossy-3d")
+        self.assertIn("cannot be made yet", policy.reasons(out))
+        out = checks(audience_match="Same people.")
+        self.assertTrue(any(f["check"] == "audience_match" and f["result"] == "reject" for f in out["findings"]))
+        self.assertTrue(any(f["check"] == "audience_match" and "no live channel" in f["reason"] for f in out["findings"]),
+                        "Space has no YouTube channel: a warning")
+        stale = s.create_port(c["id"], other["id"], {**port_data(), "audience_evidence": [
+            {"url": "https://www.example.test/a", "supports": "x", "checked": "2020-01-01"}]})
+        self.assertTrue(any("checked more than" in f["reason"] for f in policy.port_findings(s, stale)["findings"]))
+        s.decide_port(stale["id"], "rejected", "Evaluator")
+        long_card = s.save_format(card(name="Long documentary", length_min_s=900, length_max_s=1500))
+        out = policy.port_findings(s, s.create_port(long_card["id"], self.niche["id"], port_data()))
+        self.assertIn("makes up to 8 minutes today", policy.reasons(out))
+        with self.assertRaises(StudioError):
+            s.decide_port(good["id"], "maybe", "Evaluator")
+        self.assertEqual(s.decide_port(good["id"], "accepted", "Evaluator", "fits")["status"], "accepted")
+        with self.assertRaises(StudioError):
+            s.decide_port(good["id"], "rejected", "Evaluator")
+
+    def test_cost_compares_with_the_cheapest_pack_that_could_make_it(self):
+        self.assertEqual(formats.cost("motion-type", 120)["units"], 2.0)
+        heavy = formats.cost("glossy-3d", 120)
+        self.assertEqual((heavy["units"], heavy["cheapest_units"], heavy["ratio"], heavy["available"]), (20.0, 2.0, 10.0, False))
+        self.assertIsNone(formats.cost("motion-type", 4000)["cheapest_units"], "nothing makes a video that long today")
+
+    def test_ported_posts_record_format_port_and_style_pack(self):
+        s = self.store
+        c = s.save_format(card())
+        port = s.create_port(c["id"], self.niche["id"], port_data())
+        with self.assertRaises(StudioError):
+            s.create_post(self.channel["id"], "Owls", port_id=port["id"])  # only an accepted port
+        s.decide_port(port["id"], "accepted", "Evaluator")
+        post = s.create_post(self.channel["id"], "Owls", port_id=port["id"])
+        self.assertEqual((post["format_id"], post["port_id"], post["style_pack"], post["format_name"]),
+                         (c["id"], port["id"], "motion-type", c["name"]))
+        with self.assertRaises(StudioError):
+            s.create_post(self.channel["id"], "x", style_pack="oil-painting")
+        space = s.create_niche("Space")
+        elsewhere = s.create_channel(space["id"], "youtube", "@space")
+        with self.assertRaises(StudioError):
+            s.create_post(elsewhere["id"], "x", port_id=port["id"])  # the port is for another niche
+
+    def test_series_rule_and_distance_in_the_post_checks(self):
+        s = self.store
+        c = s.save_format(card())
+        first = s.create_post(self.channel["id"], "Owls hunting at night", format_id=c["id"], script_ref="Owls hear mice under snow.")
+        same = s.create_post(self.channel["id"], "How owls hunt at night", format_id=c["id"], script_ref="A new script about owl hearing.")
+        out = policy.check(s, same["id"])
+        self.assertIn(f"Episode {first['id']}", policy.reasons(out))
+        fresh = s.create_post(self.channel["id"], "Sharks sensing electricity", format_id=c["id"], script_ref="Sharks sense electricity.")
+        self.assertTrue(policy.check(s, fresh["id"])["ok"], policy.check(s, fresh["id"]))
+        s.edit_post(fresh["id"], thumbnail="Mister Glimpse points at a shark")
+        self.assertIn("thumbnail", policy.reasons(policy.check(s, fresh["id"])))
+        s.edit_post(fresh["id"], thumbnail="A shark with a glowing number")
+        self.assertIn("script", policy.reasons(policy.check(s, fresh["id"], script="Glimpse Lab taught me this.")))
+        # A series title pattern is not a shared concept: the premise's own words do not count.
+        a = s.create_post(self.channel["id"], "Hidden number above every animal: bats", format_id=c["id"])
+        self.assertTrue(policy.check(s, a["id"])["ok"], policy.check(s, a["id"]))
+
+    def test_scoreboard_ranks_cards_and_packs_and_the_review_retires_a_card(self):
+        s = self.store
+        strong = s.save_format(card(name="Strong format"))
+        weak = s.save_format(card(name="Weak format", do_not_use=[]))
+        weakest = s.save_format(card(name="Middle format", do_not_use=[]))
+        for i in range(10):
+            posted(s, self.channel["id"], f"strong{i}", T0 + i * DAY, 1000 + i, avd=9, likes=50, format_id=strong["id"])
+            posted(s, self.channel["id"], f"weak{i}", T0 + i * DAY + 600, 5 + i, avd=1, format_id=weak["id"])
+            posted(s, self.channel["id"], f"mid{i}", T0 + i * DAY + 1200, 500 + i, avd=5, likes=10, format_id=weakest["id"])
+        posted(s, self.channel["id"], "label only", T0 + 600, 10, format="list")
+        board = review.scoreboard(s, NOW1)
+        rows = {f["name"]: f for f in board["formats"]}
+        self.assertEqual((rows["Strong format"]["kind"], rows["Strong format"]["eligible"], rows["list"]["kind"]), ("card", True, "label"))
+        self.assertGreater(rows["Strong format"]["score"], rows["Weak format"]["score"])
+        self.assertEqual([p["id"] for p in board["style_packs"]], ["motion-type"])
+        self.assertEqual(board["style_packs"][0]["posts_scored"], 31)
+        first = review.run_review(s, NOW1, dry_run=False)
+        self.assertFalse(any(p["subject_type"] == "format" for p in first["proposals"]), "behind once is not enough")
+        second = review.run_review(s, NOW2, dry_run=False)
+        [proposal] = [p for p in second["proposals"] if p["subject_type"] == "format"]
+        self.assertEqual((proposal["kind"], proposal["subject_name"]), ("retire", "Weak format"))
+        port = s.create_port(weak["id"], self.niche["id"], port_data(example_title="Every reef fish has a secret number"))
+        done = review.confirm(s, proposal["id"], "producer", "Producer", now=NOW2 + 5)
+        self.assertEqual(done["status"], "confirmed", "a format card retires on the Producer's confirm: no channel changes")
+        self.assertEqual(s.get_format(weak["id"])["status"], "retired")
+        self.assertEqual(s.get_port(port["id"])["status"], "retired")
+        self.assertEqual(s.get_channel(self.channel["id"])["status"], "live")
+        text = report.render_text(report.build_report(s, NOW2 + DAY, spend=lambda: {"available": False}))
+        self.assertIn("Formats, best first: Strong format", text)
+        self.assertIn("Retired this week: format Weak format", text)
+        self.assertIn("Style packs, best first: Motion type", text)
+        with self.assertRaises(StudioError):
+            s.create_post(self.channel["id"], "x", format_id=weak["id"])  # a retired card is not made
+
+    def test_port_strategy_competes_and_its_variation_stays_a_port_strategy(self):
+        s = self.store
+        team.seed_strategies(s)
+        ids = {st["name"]: st for st in s.list_strategies("evaluator")}
+        port_strategy = ids["port-proven-format"]
+        self.assertTrue(team.is_port_strategy(s, port_strategy))
+        self.assertFalse(team.is_port_strategy(s, ids["trend-weighted"]))
+        self.assertEqual(team.pick_strategy(s, None, ported=True)["name"], "port-proven-format")
+        self.assertEqual(team.pick_strategy(s, None, ported=False)["name"], "trend-weighted")
+        for name, ported in (("trend-weighted", True), ("port-proven-format", False)):
+            with self.assertRaises(StudioError):
+                team.pick_strategy(s, name, ported)
+        c = s.save_format(card())
+        for i in range(10):
+            posted(s, self.channel["id"], f"port{i}", T0 + i * DAY, 1000 + i, avd=9, likes=40, evaluator=port_strategy["id"], format_id=c["id"])
+            posted(s, self.channel["id"], f"t{i}", T0 + i * DAY + 900, 10 + i, avd=1, evaluator=ids["trend-weighted"]["id"])
+        [proposal] = [p for p in review.run_review(s, NOW1, dry_run=False)["proposals"] if p["subject_type"] == "strategy"]
+        self.assertEqual((proposal["subject_name"], proposal["numbers"]["winner"]["name"]), ("trend-weighted", "port-proven-format"))
+        done = review.confirm(s, proposal["id"], "producer", "Producer", now=NOW1 + 5)
+        variation = s.get_strategy(done["payload"]["variation_id"])
+        self.assertEqual(variation["name"], "port-proven-format v2")
+        self.assertTrue(team.is_port_strategy(s, variation), "a variation of the port strategy still picks ports")
+        self.assertEqual(team.pick_strategy(s, None, ported=False)["name"], "track-record-weighted")
 
 
 class Api(unittest.TestCase):
@@ -600,7 +801,7 @@ class Api(unittest.TestCase):
                   if path.startswith("/api/content-studio") for m in ops]
         self.assertGreater(len(routes), 25)
         for method, path in routes:
-            url = path.replace("{post_id}", "1").replace("{channel_id}", "1").replace("{decision_id}", "1")
+            url = path.replace("{post_id}", "1").replace("{channel_id}", "1").replace("{decision_id}", "1").replace("{format_id}", "1")
             r = self.anon.request(method, url, json={} if method != "GET" else None)
             self.assertEqual(r.status_code, 401, f"{method} {path}")
 
@@ -690,6 +891,25 @@ class Api(unittest.TestCase):
         self.assertEqual(b.post(f"{P}/approvals/approve-batch", json={"post_ids": [batch["id"]]}).status_code, 409, "bea's own setting is off")
         got = d.get(f"{P}/posts/{batch['id']}").json()
         self.assertEqual((got["pick_reason"], got["tags"], got["direct_post_blocker"]), ("why", "a, b", "Connect YouTube posting first."))
+
+    def test_format_cards_are_read_per_account(self):
+        auth_manager.create_user("dee", "fourth-password-4")
+        d, b = TestClient(kairos.app), self.clients["bea"]
+        self.assertEqual(d.post("/api/auth/login", json={"username": "dee", "password": "fourth-password-4"}).status_code, 200)
+        P = "/api/content-studio"
+        with accounts.as_account(auth_manager.account_id("dee")):
+            from services.content_studio import studio
+            saved = studio.save_format(card(name="Api card"), by="Researcher")
+            niche = studio.create_niche("Api niche")
+            port = studio.create_port(saved["id"], niche["id"], port_data())
+        got = d.get(f"{P}/formats").json()
+        self.assertIn("Api card", [f["name"] for f in got["formats"]])
+        self.assertIn(port["id"], [p["id"] for p in got["ports"]])
+        self.assertEqual([p["id"] for p in got["style_packs"]], ["motion-type", "flat-2d", "glossy-3d", "voxel-3d"])
+        one = d.get(f"{P}/formats/{saved['id']}").json()
+        self.assertEqual((one["name"], [p["id"] for p in one["ports"]], one["posts"]), ("Api card", [port["id"]], []))
+        self.assertEqual(b.get(f"{P}/formats").json()["formats"], [], "bea has her own store")
+        self.assertEqual(b.get(f"{P}/formats/{saved['id']}").status_code, 404)
 
     def test_delivery_routes_reach_the_inbox_only_for_the_accounts_own_producer(self):
         d, b = self.clients["cy"], self.clients["bea"]
