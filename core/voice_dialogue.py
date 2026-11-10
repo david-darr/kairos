@@ -65,11 +65,21 @@ class SpeechFilter:
         return None
 
 
+def make_conversation(endpoint_id, model_override=None):
+    """The call's conversation layer for any connection: an API or local model here, a Claude Code, Codex or
+    Antigravity sign-in through core/cli_dialogue.py. Every one is tool-free; real work still goes to the bot."""
+    endpoint = model_endpoints.get_endpoint(endpoint_id)
+    from core import cli_dialogue
+    if endpoint and endpoint.get('kind') in cli_dialogue.CLI_KINDS:
+        return cli_dialogue.conversation_for(endpoint, model_override)
+    return Conversation(endpoint_id, model_override)
+
+
 class Conversation:
     def __init__(self, endpoint_id, model_override=None):
         endpoint = model_endpoints.get_endpoint(endpoint_id)
         if not endpoint or endpoint.get('kind') not in ('api', 'local'):
-            raise ValueError('Choose an API or local conversation model. Your stronger agent keeps its own model.')
+            raise ValueError('Choose a conversation model connection. Add one in Settings > Models.')
         self.base, model, self.key, capacity = model_endpoints.resolve_runtime(endpoint_id)
         self.model = model_override or model
         if not self.model:
@@ -90,7 +100,7 @@ class Conversation:
             response.raise_for_status()
             if response.json().get('error'):raise ValueError('The selected conversation model could not load.')
 
-    async def stream(self, messages, max_tokens=320):
+    async def stream(self, messages, max_tokens=320, oneshot=False):
         mode = native_api.mode(self.base)
         headers = {'Authorization': f'Bearer {self.key}'} if self.key else {}
         ollama = ollama_client.is_ollama_url(self.base)

@@ -36,7 +36,7 @@
 .kairos-redesign .ecosystem-header h2 { font-size: 26px; }
 .kairos-redesign .swarm-view h1 { font-size: 30px; line-height: 1.1; }
 .kairos-redesign .agent-call-scene h1 { font-size: 26px; }
-.kairos-redesign .agent-call:is([data-state=setup], [data-state=preparing]) .agent-call-scene h1 { font-size: 22px; }
+.kairos-redesign .agent-call[data-settings=open] .agent-call-scene h1 { font-size: 22px; }
 /* Small uppercase tracked labels */
 .kairos-redesign :is(.agents-rail-group h3, .agents-rail-history > summary, .swarm-layout > section > h2, .swarm-view .swarm-field > span) {
   font-family: var(--rd-font-ui); font-size: var(--rd-label-size); font-weight: 500;

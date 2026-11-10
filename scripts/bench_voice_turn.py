@@ -722,8 +722,89 @@ def run(args):
         shutil.rmtree(work, ignore_errors=True)
 
 
+CONVERSATION_TURNS = ["Hi, can you hear me?", "What's a good name for a coffee shop?", "Give me one more idea.",
+                      "Thanks. What time of day do people drink the most coffee?", "Great, that's all for now."]
+SENTENCE_END = re.compile(r"[.!?](\s|$)")
+
+
+def conversation_bench(targets, repeats):
+    """The call's real conversation layer (services/agent_calls.py makes the same objects) on real connections: time from
+    sending a turn to its first text and to its first whole sentence (what the call can start speaking), warm (after the
+    call-start prepare, which is timed on its own). Targets: claude_cli, codex_cli, antigravity_cli (this machine's own
+    sign-ins), or ollama:<model> / api:<base url>:<model> (key from BENCH_API_KEY). Uses a throwaway data folder."""
+    import asyncio
+    import contextlib
+    from unittest.mock import patch
+    os.environ.setdefault("JARVIS_DATA_DIR", tempfile.mkdtemp(prefix="kairos-bench-"))
+    sys.path.insert(0, str(ROOT))
+    from core import cli_dialogue, model_endpoints, voice_dialogue
+
+    def make(target):
+        kind, _, rest = target.partition(":")
+        if kind in cli_dialogue.CLI_KINDS:   # claude_cli, or claude_cli:<model>
+            return contextlib.nullcontext(), cli_dialogue.conversation_for({"id": "bench", "kind": kind, "model": ""}, rest or None)
+        if kind == "ollama":
+            runtime, endpoint = ("http://localhost:11434/v1", rest, None, 4096), {"kind": "local"}
+        else:
+            base, _, model = rest.rpartition(":")
+            runtime, endpoint = (base, model, os.environ.get("BENCH_API_KEY"), 4096), {"kind": "api"}
+        stack = contextlib.ExitStack()
+        stack.enter_context(patch.object(model_endpoints, "get_endpoint", return_value=endpoint))
+        stack.enter_context(patch.object(model_endpoints, "resolve_runtime", return_value=runtime))
+        return stack, voice_dialogue.Conversation("bench")
+
+    async def one(target):
+        stack, conversation = make(target)
+        rows = {"target": target, "prepare_ms": None, "first_text_ms": [], "first_sentence_ms": [], "errors": []}
+        with stack:
+            try:
+                started = time.perf_counter()
+                await conversation.prepare()
+                rows["prepare_ms"] = round((time.perf_counter() - started) * 1000)
+                history = []
+                for turn in (CONVERSATION_TURNS * repeats)[:max(1, len(CONVERSATION_TURNS) * repeats)]:
+                    history.append({"role": "user", "content": turn})
+                    messages = [{"role": "system", "content": voice_dialogue.VOICE_PROMPT + "\nYour name: Bench."}] + history
+                    text, first, sentence, started = "", None, None, time.perf_counter()
+                    try:
+                        async with contextlib.aclosing(conversation.stream(messages)) as stream:
+                            async for delta in stream:
+                                now = round((time.perf_counter() - started) * 1000)
+                                first = now if first is None else first
+                                text += delta
+                                if sentence is None and SENTENCE_END.search(text):
+                                    sentence = now
+                    except Exception as error:
+                        rows["errors"].append(f"{type(error).__name__}: {error}"[:200]); history.pop(); continue
+                    rows["first_text_ms"].append(first)
+                    rows["first_sentence_ms"].append(sentence if sentence is not None else round((time.perf_counter() - started) * 1000))
+                    history.append({"role": "assistant", "content": text})
+            except Exception as error:
+                rows["errors"].append(f"{type(error).__name__}: {error}"[:200])
+            finally:
+                await conversation.close()
+        return rows
+
+    def stat(values):
+        values = [v for v in values if v is not None]
+        if not values:
+            return "-"
+        ordered = sorted(values)
+        return f"{statistics.median(ordered):>6.0f} / {ordered[min(len(ordered) - 1, round(0.95 * (len(ordered) - 1)))]:>6.0f}"
+
+    results = [asyncio.run(one(target)) for target in targets]
+    lines = ["Call conversation layer, warm turns (ms, p50 / p95)", f"{'connection':<28}{'call start':>11}{'first text':>17}{'first sentence':>17}  turns"]
+    for row in results:
+        lines.append(f"{row['target']:<28}{str(row['prepare_ms'] if row['prepare_ms'] is not None else '-'):>11}{stat(row['first_text_ms']):>17}"
+                     f"{stat(row['first_sentence_ms']):>17}  {len(row['first_sentence_ms'])}" + (f"  errors: {row['errors'][:2]}" if row["errors"] else ""))
+    return results, "\n".join(lines)
+
+
 def parser():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--conversation", nargs="+", metavar="TARGET",
+                   help="time the call's real conversation layer instead: claude_cli, codex_cli, antigravity_cli, ollama:<model> "
+                        "or api:<base url>:<model> (see conversation_bench); --repeats passes over five turns")
     p.add_argument("--light", action="store_true", help="CI-light: fake speech-to-text and voice, synthetic audio, no models needed")
     p.add_argument("--realtime", action="store_true", help="with --light: feed audio at real-time pace too")
     p.add_argument("--backend", choices=["cuda", "cpu", "both", "none"], default="both", help="none: no voice turns (with --kokoro-bench)")
@@ -754,6 +835,15 @@ def parser():
 
 def main(argv=None):
     args = parser().parse_args(argv)
+    if args.conversation:
+        results, text = conversation_bench(args.conversation, max(1, args.repeats))
+        print(text)
+        if args.out:
+            out = Path(args.out)
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "conversation.txt").write_text(text, encoding="utf-8")
+            (out / "conversation.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
+        return 0
     if args.light:
         args.repeats = min(args.repeats, 1)
     summaries, text = run(args)

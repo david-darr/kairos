@@ -17,6 +17,7 @@ from core.constants import DATA_DIR
 from core.session_manager import session_manager
 from core import model_endpoints, task_scheduler
 from core.voice_dialogue import Conversation, SpeechFilter, VOICE_PROMPT
+from core import cli_dialogue
 from services import chat_live
 from services.agent_service import agent_service
 from services.task_service import task_service
@@ -77,9 +78,43 @@ def view(call):
     return {k: call.get(k) for k in ('id','parent_id','agent_id','room_id','members','ended','summary_state','summary_error','summary','started_at','mode','live_error','live_finalized','live_usage','realtime')} | {'jobs': jobs}
 
 
+CALL_KINDS = ('local', 'api') + cli_dialogue.CLI_KINDS
+
+
+def _first_output(stats, endpoint_id):
+    """This connection's measured median time to first output over its recent runs (core/model_stats.py), or None."""
+    found = (stats.get('endpoints') or {}).get(endpoint_id) or {}
+    value = found.get('ttft_median_s')
+    return value if isinstance(value, (int, float)) else None
+
+
 def choices():
-    return [{'id': e['id'], 'name': e['name'], 'model': e['model'], 'kind': e['kind']}
-            for e in model_endpoints.list_endpoints() if e['kind'] in ('local', 'api')]
+    """Every connection a call can talk through: API and local models, and Claude Code, Codex and Antigravity sign-ins.
+    `slower` marks a kind whose first sentence comes late (cli_dialogue.SLOWER); `first_output_s` is what Kairos has
+    measured on the connection's own runs, so the call screen can pick the quickest one it knows about."""
+    try:
+        from core import model_stats
+        stats = model_stats.stats()
+    except Exception:
+        stats = {}
+    return [{'id': e['id'], 'name': e['name'], 'model': e['model'], 'kind': e['kind'],
+             'slower': e['kind'] in cli_dialogue.SLOWER, 'first_output_s': _first_output(stats, e['id'])}
+            for e in model_endpoints.list_endpoints() if e['kind'] in CALL_KINDS]
+
+
+def _new_conversation(endpoint_id, model):
+    endpoint = model_endpoints.get_endpoint(endpoint_id)
+    if endpoint and endpoint.get('kind') in cli_dialogue.CLI_KINDS:
+        return cli_dialogue.conversation_for(endpoint, model)
+    return Conversation(endpoint_id, model)
+
+
+def _summary_stream(call, messages, max_tokens):
+    """A summary request: on a sign-in it runs in its own short process, apart from the call's warm conversation."""
+    conversation = _conversation(call)
+    if getattr(conversation, 'kind', None) in cli_dialogue.CLI_KINDS:
+        return conversation.stream(messages, max_tokens=max_tokens, oneshot=True)
+    return conversation.stream(messages, max_tokens=max_tokens)
 
 
 def _rooms():
@@ -115,7 +150,7 @@ def start(parent_id, agent_id, endpoint_id, model, user, mode='local', room_id=N
         raise HTTPException(409, 'End an existing call first.')
     # Construction validates the explicit fast-model choice, without loading
     # the ordinary agent's tool catalog or silently selecting a paid model.
-    conversation = Conversation(endpoint_id, model) if mode == 'local' else None
+    conversation = _new_conversation(endpoint_id, model) if mode == 'local' else None
     opening = ''
     if ring_id:
         # The call answers a ring (services/rings.py): its reason is what the bot opens with. Only the person's own, once.
@@ -136,7 +171,7 @@ def start(parent_id, agent_id, endpoint_id, model, user, mode='local', room_id=N
 
 def _conversation(call):
     if call['id'] not in _conversations:
-        _conversations[call['id']] = Conversation(call['endpoint_id'], call.get('model'))
+        _conversations[call['id']] = _new_conversation(call['endpoint_id'], call.get('model'))
     return _conversations[call['id']]
 
 
@@ -461,13 +496,13 @@ async def finalize(call):
             # middle of a call where a decision may have been made.
             partials = []
             for at in range(0, len(text), 6000):
-                result = ''.join([chunk async for chunk in _conversation(call).stream([{'role':'system','content':prompt},{'role':'user','content':text[at:at+6000]}], max_tokens=500)])
+                result = ''.join([chunk async for chunk in _summary_stream(call, [{'role':'system','content':prompt},{'role':'user','content':text[at:at+6000]}], 500)])
                 partials.append(result)
             notes = '\n'.join(partials)
             while len(partials)>1:
                 combined = []
                 for at in range(0, len(partials), 3):
-                    combined.append(''.join([chunk async for chunk in _conversation(call).stream([{'role':'system','content':prompt},{'role':'user','content':'\n'.join(partials[at:at+3])}], max_tokens=650)]))
+                    combined.append(''.join([chunk async for chunk in _summary_stream(call, [{'role':'system','content':prompt},{'role':'user','content':'\n'.join(partials[at:at+3])}], 650)]))
                 partials = combined
             notes = partials[0]
             if not notes.strip(): raise ValueError('Empty summary')

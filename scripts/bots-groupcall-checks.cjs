@@ -39,15 +39,13 @@ module.exports = async ({ js, waitFor, delay, win, demoState, base }) => {
     // The room header offers a call; the dialog names the members and offers no paid cloud voice.
     await waitFor("!!document.querySelector('.bots-room-call .agent-call-open')");
     await js("document.querySelector('.bots-room-call .agent-call-open').click()");
-    await waitFor(`document.querySelector('.agent-call')?.open && !!document.querySelector('[aria-label="Conversation model connection"] option[value="voice-check-model"]')`);
+    // One tap: a group call goes live at once too.
+    await waitFor("document.querySelector('.agent-call')?.dataset.state==='listening'");
     assert.equal(await js("document.querySelector('.agent-call').getAttribute('aria-label')"), `Group call in Launch ${unique}`);
     assert.equal(await js("document.querySelector('.agent-call-members').textContent"), `With ${names.join(', ')}. Say a name to choose who answers.`);
     assert.equal(await js("!!document.querySelector('[aria-label=\"Call mode\"] option[value=cloud]')"), false, 'group calls are local only');
     assert.match(await js("document.querySelector('.agent-call-privacy').textContent"), /saved in the room/);
-    await js(`(()=>{for(const [label,value] of [['Conversation model connection','voice-check-model'],['Call input mode','hold']]){const node=document.querySelector('[aria-label="'+label+'"]');node.value=value;node.dispatchEvent(new Event('change'));}return true;})()`);
-    await waitFor(`!document.querySelector('.agent-call-setup button[type="submit"]').disabled`);
-    await js("document.querySelector('.agent-call-setup').requestSubmit()");
-    await waitFor("document.querySelector('.agent-call')?.dataset.state==='listening'");
+    assert.equal(await js("document.querySelector('[aria-label=\"Conversation model connection\"]').value"), 'voice-check-model');
     const made = Object.values(demoState.botsVoice.calls || {}).at(-1);
     assert.equal(made.room_id, roomId, 'the call is started for the room');
     assert.equal(made.agent_id, bo, "it opens with the room's chosen responder");

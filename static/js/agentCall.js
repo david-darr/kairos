@@ -13,6 +13,7 @@ import { createVoiceTrace } from './voiceTrace.js';
 import { takePendingRing } from './ringHost.js';
 import { createFillerGate, fetchFillerClip } from './voiceFiller.js';
 import { isBackchannel, endsInQuestion } from './backchannel.js';
+import { pickConversation, pickSpeechModel, pickCallMode, pickVoice, consentKey, conversationLabel, isCliKind } from './callDefaults.js';
 
 // In a call the bot's Kip replaces the orb (Kairos Mascot build spec,
 // 2026-10-22). It reads the orb's --level (microphone) and --word (speech)
@@ -97,6 +98,9 @@ export function agentCall(agent, controller) {
   const conversationKey = `kairos:call-conversation:${agent.id}`;
   const conversation = el('select', {'aria-label':'Conversation model connection'});
   const conversationModel = el('input', {type:'text','aria-label':'Conversation model version',placeholder:'Exact model ID'});
+  // A sign-in needs no version (Claude Code then talks on Haiku, see core/cli_dialogue.py); an API or local model does.
+  const conversationKind = () => endpoints.find(e => e.id === conversation.value)?.kind || '';
+  const needsVersion = () => !isCliKind(conversationKind());
   const modelSuggestions=el('datalist',{id:`call-models-${agent.id}`});conversationModel.setAttribute('list',modelSuggestions.id);
   const workList = el('div', {class:'agent-call-work','aria-label':'Call work'});
   const summaryStatus = el('div', {class:'agent-call-summary',role:'status'});
@@ -170,15 +174,21 @@ export function agentCall(agent, controller) {
   const modelBox = el('div', { class: 'agent-call-model', hidden: true }, [el('label', {}, [el('span', { text: 'Speech recognition' }), model])]);
   const download = el('button', { class: 'btn quiet', type: 'button', text: 'Download speech model', hidden: true, onclick: downloadModel });
   const start = el('button', { class: 'btn primary', type: 'submit', text: 'Start call', disabled: true });
-  const setup = el('form', { class: 'agent-call-setup' }, [readiness, freeVoice,
+  // Call settings (one-tap calls, 2026-11-10): pressing Call starts at once with the defaults in callDefaults.js. Every
+  // choice lives in this form, closed until Call settings opens it; Start call there starts with what it shows.
+  const setup = el('form', { class: 'agent-call-setup', hidden: true, 'aria-label': 'Call settings' }, [readiness, freeVoice,
     el('label', {}, [el('span', { text: 'Voice' }), voice]), modelBox,
     el('label', {}, [el('span', { text: 'Input' }), inputMode]),
     el('label', {}, [el('span', { text: 'Recognition processor' }), acceleration]), runtimeSetup, download, start]);
   const neural = voiceSettings(agent, voice, {changed:()=>{if(speech)syncModel();}});
-  setup.prepend(el('label',{},[el('span',{text:'Conversation model'}),conversation]),el('label',{},[el('span',{text:'Model version'}),conversationModel]),el('p',{text:'Choose a fast API or local model for conversation. Your agent keeps its existing work model.'}),neural.node);
+  setup.prepend(el('label',{},[el('span',{text:'Conversation model'}),conversation]),el('label',{},[el('span',{text:'Model version'}),conversationModel]),el('p',{text:'The model the call talks through. Your bot keeps its own model for real work. A connection marked slower takes a few seconds to answer.'}),neural.node);
   setup.prepend(el('label',{},[el('span',{text:'Call mode'}),callMode]),cloudSetup);
-  callMode.onchange=()=>{cloudSetup.hidden=!isCloud();fillLiveChoices();syncModel();};paid.onchange=syncModel;liveEndpoint.onchange=()=>{fillLiveVoices();syncModel();};
-  conversation.onchange = () => { conversationModel.value=endpoints.find(e=>e.id===conversation.value)?.model||''; saveConversation();loadConversationModels(); };
+  callMode.onchange=()=>{cloudSetup.hidden=!isCloud();fillLiveChoices();if(isCloud())paid.checked=consented();syncModel();};
+  paid.onchange=()=>{remember(paid.checked);syncModel();};liveEndpoint.onchange=()=>{fillLiveVoices();paid.checked=consented();syncModel();};
+  // Paid realtime voice is agreed once per bot and connection (callDefaults.js consentKey), never assumed.
+  const consented=()=>{try{return !!liveEndpoint.value&&localStorage.getItem(consentKey(agent.id,liveEndpoint.value))==='yes';}catch{return false;}};
+  const remember=yes=>{try{if(!liveEndpoint.value)return;if(yes)localStorage.setItem(consentKey(agent.id,liveEndpoint.value),'yes');else localStorage.removeItem(consentKey(agent.id,liveEndpoint.value));}catch{}};
+  conversation.onchange = () => { const chosen=endpoints.find(e=>e.id===conversation.value); conversationModel.value=chosen?.kind==='claude_cli'?'':chosen?.model||''; conversationModel.placeholder=chosen?.kind==='claude_cli'?'Haiku unless you type a model ID':'Exact model ID'; saveConversation();loadConversationModels(); };
   setup.append(modelSuggestions);
   async function loadConversationModels(){const ident=conversation.value;modelSuggestions.replaceChildren();if(!ident)return;try{const models=await api(`/api/models/${encodeURIComponent(ident)}/catalog`);if(conversation.value===ident)modelSuggestions.replaceChildren(...models.map(m=>el('option',{value:m.id,label:m.label||m.id})));}catch{}}
   conversationModel.onchange = saveConversation;
@@ -224,9 +234,20 @@ export function agentCall(agent, controller) {
   function visibilityChanged() { if (document.hidden) loseFocus(); }
   const chat = action('Chat', () => { if (!active) { hangup(); return; } minimize(); });
   const close = action('Close', () => hangup());
+  // One plain line: a fallback the call made for you (notice), or the one thing that stops it, with its fix (blocker).
+  const notice = el('p', { class: 'agent-call-notice', role: 'status', hidden: true });
+  const blockerText = el('p', { role: 'alert' });
+  const blockerAction = el('button', { type: 'button', class: 'btn primary agent-call-blocker-action' });
+  const blocker = el('div', { class: 'agent-call-blocker', hidden: true }, [blockerText, blockerAction]);
+  const settingsToggle = el('button', { type: 'button', class: 'btn quiet agent-call-settings-toggle', text: 'Call settings', 'aria-expanded': 'false', onclick: () => {
+    // In a live call the settings in use cannot change underneath it: this ends the call and opens them here.
+    if (active) { hangup({ keepOpen: true }); say1('Call ended. Change what you need, then press Start call.'); showSettings(true); return; }
+    showSettings(setup.hidden);
+  } });
+  const more = el('div', { class: 'agent-call-more' }, [settingsToggle]);
   dialog.append(el('header', { class: 'agent-call-header' }, [clock,
     el('div', { class: 'agent-call-tabs' }, [chat, el('span', { text: 'Voice', 'aria-current': 'page' })]), close]),
-    el('div', { class: 'agent-call-scene' }, [orb, el('h1', { text: agent.name }), status]), engineStatus, heard, timing, setup, error, controls, holdHint, workList, summaryStatus,
+    el('div', { class: 'agent-call-scene' }, [orb, el('h1', { text: agent.name }), status]), notice, blocker, engineStatus, heard, timing, setup, error, more, controls, holdHint, workList, summaryStatus,
     el('p', { class: 'agent-call-privacy', text: `Recognition stays on this device. Dialogue goes to your selected conversation model. Only a summary is saved in ${savedIn} after the call.` }));
   const membersLine = el('p', { class: 'agent-call-members' });
   const drawMembers = () => { membersLine.textContent = `With ${room.memberIds().map(id => room.memberName(id)).join(', ')}. Say a name to choose who answers.`; };
@@ -237,16 +258,86 @@ export function agentCall(agent, controller) {
   const button = el('button', { type: 'button', class: 'agent-call-open btn quiet', 'aria-label': `Call ${agent.name}`, title: `Call ${agent.name}`, text: 'Call', onclick: async () => {
     if (disposed) return;
     if (room) drawMembers();
-    dialog.showModal();
-    if (active) return;
-    error.textContent = ''; await loadSetup();
+    if (!dialog.open) dialog.showModal();
+    if (active || starting || preparingVoice) return;
+    error.textContent = ''; showSettings(false); clearLines();
+    setState('preparing', `Calling ${agent.name}...`);
+    if (await loadSetup()) autoStart();
   } });
+  // -- One-tap start ------------------------------------------------------------------------------------------------
+  let autoRun = 0, preparingVoice = false;
+  function clearLines() { notice.hidden = true; notice.textContent = ''; blocker.hidden = true; blockerText.textContent = ''; }
+  function say1(text) { notice.textContent = text; notice.hidden = !text; }
+  function block(text, label, fix) {
+    blockerText.textContent = text; blockerAction.textContent = label; blockerAction.onclick = fix; blocker.hidden = false;
+    setState('setup', 'Not connected yet');
+  }
+  function showSettings(open) {
+    setup.hidden = !open; settingsToggle.setAttribute('aria-expanded', String(open));
+    settingsToggle.textContent = open ? 'Hide call settings' : 'Call settings';
+    if (open) { dialog.dataset.settings = 'open'; autoRun++; blocker.hidden = true; if (!starting && !active) setState('setup', 'Ready when you are'); syncModel(); }
+    else delete dialog.dataset.settings;
+  }
+  const goSettings = section => { hangup(); document.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: { tab: 'settings', section } })); };
+  // Pressing Call: the defaults are already chosen (loadSetup); this clears what would stop the call, then starts it.
+  async function autoStart() {
+    const mine = ++autoRun, token = epoch;
+    const stale = () => mine !== autoRun || token !== epoch || disposed || !dialog.open || active || starting;
+    if (stale()) return;
+    if (!endpoints.length) { block('Calls need a model to talk to. Add one, then call again.', 'Add a model', () => goSettings('add-models')); return; }
+    if (isCloud()) {
+      if (!paid.checked) {
+        const choice = realtimeChoice();
+        const line = choice?.free_tier ? `Realtime voice sends your audio to Google on your free Gemini key. There is no charge within Google's free limits.`
+          : choice?.provider === 'openai_live' ? 'GPT-Live sends your audio to OpenAI on your key, about $0.05 a minute.'
+          : `Realtime voice sends your audio to ${choice?.label || 'the provider you chose'} and bills your API account by the minute.`;
+        block(line, 'Continue', () => { remember(true); paid.checked = true; blocker.hidden = true; setState('preparing', `Calling ${agent.name}...`); autoStart(); });
+        return;
+      }
+    } else {
+      if (!isCallRecordingSupported()) { block('This window cannot use a microphone. Open Kairos in the desktop app to call.', 'Try again', () => { blocker.hidden = true; autoStart(); }); return; }
+      if (!speech?.engine_available) { block('Voice recognition is missing from this copy of Kairos. Update Kairos to call.', 'Call settings', () => showSettings(true)); return; }
+      if (!speech.models?.find(item => item.name === model.value)?.downloaded) {
+        const ready = await getVoiceReady();
+        if (stale()) return;
+        if (!ready) return;
+      }
+      if (!neural.ready()) neural.use({ provider: 'device' });
+      if (neural.selection().provider === 'device' && (!isSpeechOutputSupported() || !voices.length)) {
+        block('This device has no voice to speak with. Add one in your system speech settings, then call again.', 'Call settings', () => showSettings(true)); return;
+      }
+    }
+    await beginCall();
+  }
+  // No speech model on this device yet: download the call's default once, saying so in one line, then carry on.
+  async function getVoiceReady() {
+    const name = model.value, token = epoch;
+    preparingVoice = true; setState('preparing', 'Getting voice ready, one time only');
+    try {
+      await api(`/api/speech/models/${encodeURIComponent(name)}/download`, { method: 'POST', toast: false });
+      for (;;) {
+        if (disposed || token !== epoch || !dialog.open) return false;
+        const progress = await api(`/api/speech/models/${encodeURIComponent(name)}/progress`, { toast: false });
+        if (progress.error) throw new Error('The voice download stopped.');
+        if (progress.done) break;
+        if (state === 'preparing') status.textContent = progress.total ? `Getting voice ready, one time only (${Math.round(progress.completed / progress.total * 100)}%)` : 'Getting voice ready, one time only';
+        await new Promise(resolve => setTimeout(resolve, 700));
+      }
+      refreshSpeechStatus();
+      preparingVoice = false;
+      return await loadSetup();
+    } catch (problem) {
+      if (!disposed && token === epoch) block(`${problem.message || 'The voice download stopped.'} Check your internet connection.`, 'Try again', () => { blocker.hidden = true; autoStart(); });
+      return false;
+    } finally { preparingVoice = false; }
+  }
   // Answering a ring (ringHost.js) opens this call screen with the reason it rang; the bot says it first.
   const adoptRing = () => {
     const found = takePendingRing(agent.id);
     if (!found || active || disposed) return;
     ring = found; ringOpening = found.id; ringNote.textContent = `${agent.name} is calling: ${found.reason}`; ringNote.hidden = false;
-    if (!dialog.open) button.click();
+    // Answering goes straight into the call, like pressing Call.
+    button.click();
   };
   document.addEventListener('kairos:ring-answered', adoptRing);
   setTimeout(adoptRing, 0);
@@ -307,49 +398,57 @@ export function agentCall(agent, controller) {
     const token = epoch; start.disabled = true;
     try {
       const [nextSpeech, available, choices, _, prefs, realtimeChoices, realtimePrefs] = await Promise.all([api('/api/speech/status'), whenVoicesReady(), api('/api/agent-calls/choices'), neural.load(), api('/api/bot-voice/live-settings', { toast: false }).catch(() => null), api('/api/agent-calls/realtime-choices', { toast: false }).catch(() => []), api('/api/agent-calls/realtime-settings', { toast: false }).catch(() => null)]);
-      if (disposed || epoch !== token || active || !dialog.open) return;
+      if (disposed || epoch !== token || active || !dialog.open) return false;
       const asList = value => Array.isArray(value) ? value : [];
       liveChoicesByMode = { realtime: asList(realtimeChoices) };
       fillLiveChoices();
       if (prefs) livePrefs = prefs;
-      // "live" is the older GPT-Live call mode: it is now the GPT-Live choice of realtime voice.
-      if ((agent.call_mode === 'realtime' || agent.call_mode === 'live') && liveChoicesByMode.realtime.length) {
-        callMode.value = 'realtime'; cloudSetup.hidden = false; fillLiveChoices();
+      // Call mode: the bot's own (its panel's Local or Realtime). Realtime with no key falls back to Local, said in one line.
+      const mode = pickCallMode(agent, liveChoicesByMode.realtime, !!room);
+      callMode.value = mode.mode; cloudSetup.hidden = mode.mode !== 'realtime';
+      say1(mode.fellBack && !room ? 'Realtime voice needs an API key, so this call uses Local.' : '');
+      if (mode.mode === 'realtime') {
+        fillLiveChoices();
         const mine = (realtimePrefs && typeof realtimePrefs === 'object' && (realtimePrefs.bots?.[agent.id] || realtimePrefs)) || {};
+        // "live" is the older GPT-Live call mode: it is now the GPT-Live choice of realtime voice.
         const gptLive = agent.call_mode === 'live' ? liveChoicesByMode.realtime.find(e => e.provider === 'openai_live') : null;
         if (gptLive) { liveEndpoint.value = gptLive.id; fillLiveVoices(); }
         else if (mine.endpoint_id && liveChoicesByMode.realtime.some(e => e.id === mine.endpoint_id)) { liveEndpoint.value = mine.endpoint_id; fillLiveVoices(); }
         if (mine.voice && [...liveVoiceChoice.options].some(o => o.value === mine.voice)) liveVoiceChoice.value = mine.voice;
+        paid.checked = consented();
       }
-      else if (agent.call_mode === 'turns') { callMode.value = 'local'; cloudSetup.hidden = true; }
-      if (agent.voice_id) {
-        const profile = neural.node.querySelector('[aria-label="Neural voice profile"]');
-        const provider = neural.node.querySelector('[aria-label="Voice provider"]');
-        if ([...profile.options].some(option => option.value === agent.voice_id)) {
-          profile.value = agent.voice_id; provider.value = 'neural'; profile.dispatchEvent(new Event('change'));
-        }
-      }
-      endpoints=choices;let savedConversation={};try{savedConversation=JSON.parse(localStorage.getItem(conversationKey)||'{}');}catch{}
-      conversation.replaceChildren(el('option',{value:'',text:'Choose a connection'}),...endpoints.map(e=>el('option',{value:e.id,text:e.name})));
-      conversation.value=endpoints.some(e=>e.id===savedConversation.endpoint)?savedConversation.endpoint:'';conversationModel.value=savedConversation.model||endpoints.find(e=>e.id===conversation.value)?.model||'';
+      // Voice: the bot's saved voice, else Kokoro when it is ready, else the device voice (callDefaults.js pickVoice).
+      neural.use(pickVoice(agent, neural.saved(), neural.catalog()));
+      // Conversation model: last used for this bot if it still exists, else the bot's own connection, else the quickest.
+      endpoints = asList(choices); let savedConversation = {}; try { savedConversation = JSON.parse(localStorage.getItem(conversationKey) || '{}'); } catch {}
+      conversation.replaceChildren(el('option', { value: '', text: 'Choose a connection' }), ...endpoints.map(e => el('option', { value: e.id, text: conversationLabel(e) })));
+      const picked = pickConversation(endpoints, savedConversation, agent);
+      conversation.value = picked?.endpoint || ''; conversationModel.value = picked?.model || '';
+      conversationModel.placeholder = conversationKind() === 'claude_cli' ? 'Haiku unless you type a model ID' : 'Exact model ID';
       loadConversationModels();
       await loadPendingSummaries();
+      if (disposed || epoch !== token || active || !dialog.open) return false;
       start.textContent = 'Start call'; speech = nextSpeech; voices = available.filter(item => item.localService === true);
       let saved = ''; try { saved = localStorage.getItem(voiceKey) || ''; } catch {}
       voice.replaceChildren(...voices.map(item => el('option', { value: item.name, text: `${item.name} (${item.lang})` })));
       voice.value = voices.some(item => item.name === saved) ? saved : resolveVoice(voices)?.name || '';
       voice.disabled = !voices.length;
+      // Speech recognition: a model already on this device, else the call default (downloaded once when the call starts).
       let savedModel = model.value; try { savedModel ||= localStorage.getItem(modelKey) || ''; } catch {}
       model.replaceChildren(...(speech.models || []).map(item => el('option', { value: item.name, text: `${item.label} (${item.size_mb} MB${item.downloaded ? ', ready' : ', download needed'})` })));
-      model.value = (speech.models || []).some(item => item.name === savedModel) ? savedModel : speech.call_model || 'small.en';
+      model.value = pickSpeechModel(speech, savedModel)?.name || speech.call_model || 'small.en';
+      inputMode.value = (() => { try { return localStorage.getItem(modeKey) === 'hold' ? 'hold' : 'automatic'; } catch { return 'automatic'; } })();
       modelBox.hidden = !speech.engine_available;
       runtimeSetup.hidden = !speech.acceleration?.supported;
       runtimeStatus.textContent = speech.acceleration?.configured ? 'Runtime registered. GPU availability is checked when the call starts.' : 'No GPU runtime configured. CPU recognition is available.';
-      neural.sync();syncModel();
+      neural.sync(); syncModel();
+      return true;
     } catch (problem) {
-      if (disposed || token !== epoch) return;
-      error.textContent = problem.message; readiness.textContent = 'Speech could not load.';
+      if (disposed || token !== epoch) return false;
+      readiness.textContent = 'Speech could not load.';
       start.textContent = 'Retry'; start.disabled = false;
+      block('The call could not get ready. Check that Kairos is running, then try again.', 'Try again', async () => { blocker.hidden = true; setState('preparing', `Calling ${agent.name}...`); if (await loadSetup()) autoStart(); });
+      return false;
     }
   }
   function syncModel() {
@@ -369,13 +468,13 @@ export function agentCall(agent, controller) {
     start.disabled = true;
     if(cloud){
       download.hidden=true;
-      start.disabled=!liveEndpoint.value||!paid.checked||!conversation.value||!conversationModel.value.trim();
+      start.disabled=!liveEndpoint.value||!paid.checked||!conversation.value||needsVersion()&&!conversationModel.value.trim();
       readiness.textContent=!liveEndpoint.value?'Add an API connection with a key for OpenAI, xAI or Google in Settings > Models (mark it for realtime voice if its address is custom). An OpenAI key offers both OpenAI Realtime and GPT-Live.':!conversation.value?'Choose a conversation model below for post-call summaries.':'Realtime voice uses its own recognition and voice. Your selected conversation model generates the summary.';return;
     }
     if (!isCallRecordingSupported()) readiness.textContent = 'Calls need microphone access and AudioWorklet support. Use the Kairos desktop app or an up-to-date secure browser.';
     else if (!speech?.engine_available) readiness.textContent = 'Speech recognition is unavailable in this build. Install the latest Kairos runtime to enable calls.';
-    else if (!chosen?.downloaded) readiness.textContent = 'Download the selected speech model below. Nothing downloads automatically.';
-    else if (!conversation.value || !conversationModel.value.trim()) readiness.textContent='Choose a conversation connection and exact model version. Add connections in Settings > Models.';
+    else if (!chosen?.downloaded) readiness.textContent = 'This speech model is not on this device yet. Download it below, or press Call and it downloads once.';
+    else if (!conversation.value || needsVersion() && !conversationModel.value.trim()) readiness.textContent='Choose a conversation connection and its model version. Add connections in Settings > Models.';
     else if (!neural.ready()) readiness.textContent='Connect a local voice server and choose an installed engine and profile.';
     else if (neural.selection().provider==='device' && (!isSpeechOutputSupported() || !voices.length)) readiness.textContent = 'No device voice is available. Add a voice in your operating system Speech settings, then reopen calls.';
     else { readiness.textContent = `${chosen.label} recognition selected. ${chosen.description || 'Ready on this device.'}`; start.disabled = false; }
@@ -594,11 +693,16 @@ export function agentCall(agent, controller) {
     try { speaker.reset(); speaker.feed(text); speaker.finish(); }
     catch { stopPlayback(); error.textContent = 'Voice playback failed. Check the selected device voice.'; listen(); }
   }
+  // Start call in Call settings: exactly what the form shows (it asks for a download or a voice instead of choosing one).
   setup.addEventListener('submit', async event => {
     event.preventDefault(); if (active || starting) return;
-    if (ongoingCall?.isActive()) { ongoingCall.restore(); return; }
     if (callMode.value==='local' && (!speech?.models?.some(item => item.name === model.value && item.downloaded) || !neural.ready() || (neural.selection().provider==='device'&&!voices.length))) { start.textContent = 'Start call'; await loadSetup(); return; }
-    starting = true; start.disabled = true; error.textContent = '';
+    await beginCall();
+  });
+  async function beginCall() {
+    if (active || starting) return;
+    if (ongoingCall?.isActive()) { ongoingCall.restore(); return; }
+    starting = true; settingsToggle.disabled = true; start.disabled = true; error.textContent = ''; blocker.hidden = true;
     const token = ++epoch;
     workUpdates=[];announcedWork=new Set();
     try {
@@ -629,20 +733,30 @@ export function agentCall(agent, controller) {
       await openMicrophone();
       if (!active || epoch !== token) return;
       }
-      setup.hidden = true; controls.hidden = false; hold.hidden = holdHint.hidden = isCloud()||inputMode.value !== 'hold'; button.classList.add('is-call-active'); startedAt = lastActivity = Date.now(); ongoingCall = { isActive: () => active, restore }; listen();
+      showSettings(false); settingsToggle.textContent = 'End call and change settings'; controls.hidden = false; hold.hidden = holdHint.hidden = isCloud()||inputMode.value !== 'hold'; button.classList.add('is-call-active'); startedAt = lastActivity = Date.now(); ongoingCall = { isActive: () => active, restore }; listen();
       if (ringOpening && callMode.value === 'local') { ringOpening = null; workUpdates.push('ring-opening'); scheduleFlush(); }
       timer = setInterval(() => { const seconds = Math.floor((Date.now() - startedAt) / 1000); clock.textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`; drawRealtimeCost(seconds); if (Date.now() - lastActivity > livePrefs.idle_minutes * 60000 && !voiceBusy && !speechActive) hangup(); }, 1000);
-    } catch (problem) { if (epoch === token) { active = false; live.stop();transport.end();recorder?.close(); recorder = null; setState('setup','Call could not start');error.textContent = problem.message; } }
-    finally { starting = false; start.disabled = false; }
-  });
-  function hangup() {
+    } catch (problem) {
+      if (epoch === token) {
+        active = false; live.stop();transport.end();recorder?.close(); recorder = null;
+        // One plain sentence and the button that fixes it. A refused microphone is the common one.
+        if (['NotAllowedError','SecurityError'].includes(problem?.name)) block('Kairos needs your microphone for calls. Allow it, then try again.', 'Allow microphone', () => { blocker.hidden = true; autoStart(); });
+        else if (problem?.name === 'NotFoundError') block('No microphone was found. Plug one in, then try again.', 'Try again', () => { blocker.hidden = true; autoStart(); });
+        else { block(problem?.message || 'The call could not start.', 'Try again', () => { blocker.hidden = true; autoStart(); }); }
+        setState('setup','Call could not start');
+      }
+    }
+    finally { starting = false; start.disabled = false; settingsToggle.disabled = false; }
+  }
+  function hangup(options) {
+    const keepOpen = options?.keepOpen === true;
     active = false; epoch++; revision++; audioQueue = []; texts = []; workUpdates=[];deferredReply = null; flushQueued = false; clearInterval(timer); timer = null; clearTimeout(downloadTimer); downloadTimer = null;
     cancelHold(); partials.cancel(); recorder?.close(); recorder = null; speechActive = false; pending?.abort(); pending = null; stopPlayback();
     live.stop();transport.end();voiceBusy=false;paid.checked=false;
-    setup.hidden = false; controls.hidden = true; clock.textContent = '00:00'; model.disabled = false;
+    showSettings(false); clearLines(); controls.hidden = true; clock.textContent = '00:00'; model.disabled = false;
     response = null; recognitionTiming = {}; timing.textContent = ''; heard.textContent = '';
     engineStatus.textContent = ''; hold.hidden = holdHint.hidden = true;
-    setState('setup', 'Ready when you are'); dialog.close(); button.classList.remove('is-call-active');
+    setState('setup', 'Ready when you are'); if (!keepOpen) dialog.close(); button.classList.remove('is-call-active');
     minimized = false; ongoingCall = null; speaking = null; delete dialog.dataset.speaker; callBar?.destroy(); callBar = null; emitState();
     if (detached) cleanup();
   }

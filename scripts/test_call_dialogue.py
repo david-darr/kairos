@@ -341,4 +341,112 @@ class ProviderContracts(unittest.IsolatedAsyncioTestCase):
         with patch.object(call_voices,'configuration',return_value={'url':'http://127.0.0.1:8000','protocol':'voicestudio'}),patch.object(voicestudio_voice,'TRANSPORT',client._transport):result=await call_voices.catalog()
         self.assertEqual(result['models'],['tts-1','pockettts']);self.assertEqual([v['id'] for v in result['voices']],['default','profile'])
 
+class CliConversations(unittest.IsolatedAsyncioTestCase):
+    """Claude Code, Codex and Antigravity sign-ins as the call's conversation layer (core/cli_dialogue.py)."""
+    def test_choices_offer_every_sign_in_and_mark_the_slower_ones(self):
+        from core import model_endpoints
+        listed=[{'id':k,'name':k,'model':'','kind':k} for k in ('api','local','claude_cli','codex_cli','antigravity_cli','image')]
+        with patch.object(model_endpoints,'list_endpoints',return_value=listed),patch('core.model_stats.stats',return_value={'endpoints':{'api':{'ttft_median_s':0.4}}}):
+            found={c['id']:c for c in calls.choices()}
+        self.assertEqual(set(found),{'api','local','claude_cli','codex_cli','antigravity_cli'},'every sign-in is offered, an image model is not')
+        self.assertEqual({k for k,c in found.items() if c['slower']},{'codex_cli','antigravity_cli'})
+        self.assertEqual(found['api']['first_output_s'],0.4);self.assertIsNone(found['local']['first_output_s'])
+
+    def test_a_sign_in_makes_a_cli_conversation_and_an_api_model_the_http_one(self):
+        from core import model_endpoints, cli_dialogue
+        with patch.object(model_endpoints,'get_endpoint',return_value={'id':'c','kind':'claude_cli','model':'opus'}):
+            made=calls._new_conversation('c','')
+        self.assertIsInstance(made,cli_dialogue.ClaudeConversation);self.assertEqual(made.model,'haiku','Claude talks on Haiku unless a version is chosen')
+        with patch.object(model_endpoints,'get_endpoint',return_value={'id':'x','kind':'codex_cli','model':'gpt-5'}):
+            self.assertIsInstance(calls._new_conversation('x',None),cli_dialogue.ProcessConversation)
+
+    async def test_claude_keeps_one_warm_tool_free_process_and_sends_only_what_is_new(self):
+        from core import cli_dialogue
+        from claude_agent_sdk import ResultMessage
+        from claude_agent_sdk.types import StreamEvent
+        made=[]
+        class Client:
+            def __init__(self,options):self.options=options;self.queries=[];self.connects=0;self.closed=False;self.replies=[];made.append(self)
+            async def connect(self):self.connects+=1
+            async def query(self,text):self.queries.append(text)
+            async def disconnect(self):self.closed=True
+            def receive_response(self):
+                async def gen():
+                    for word in ('Hello there. ','More words.'):
+                        yield StreamEvent(uuid='u',session_id='s',event={'type':'content_block_delta','delta':{'type':'text_delta','text':word}})
+                    yield ResultMessage(subtype='success',duration_ms=1,duration_api_ms=1,is_error=False,num_turns=1,session_id='s')
+                return gen()
+        with patch('claude_agent_sdk.ClaudeSDKClient',Client):
+            conversation=cli_dialogue.ClaudeConversation({'id':'c','kind':'claude_cli'},None)
+            await conversation.prepare()
+            first=[{'role':'system','content':'RULES-1'},{'role':'user','content':'Hi'}]
+            self.assertEqual(''.join([t async for t in conversation.stream(first)]),'Hello there. More words.')
+            second=first+[{'role':'assistant','content':'Hello there.'},{'role':'user','content':'And then?'}]
+            second[0]={'role':'system','content':'RULES-2'}
+            self.assertEqual(''.join([t async for t in conversation.stream(second)]),'Hello there. More words.')
+            await conversation.close()
+        self.assertEqual(len(made),1,'one process for the whole call');self.assertEqual(made[0].connects,1)
+        options=made[0].options
+        self.assertEqual(options.tools,[]);self.assertEqual(options.mcp_servers,{});self.assertTrue(options.strict_mcp_config)
+        self.assertEqual(options.setting_sources,[]);self.assertEqual(options.model,'haiku');self.assertTrue(options.include_partial_messages)
+        self.assertIn('Hi',made[0].queries[0]);self.assertIn('RULES-1',made[0].queries[0])
+        self.assertNotIn('Hi\n',made[0].queries[1]);self.assertIn('And then?',made[0].queries[1]);self.assertIn('RULES-2',made[0].queries[1])
+        self.assertIn('cut off',made[0].queries[1],'a reply that was cut short says what was heard');self.assertTrue(made[0].closed)
+
+    async def test_an_interrupted_claude_reply_is_read_to_its_end_before_the_next_turn(self):
+        from core import cli_dialogue
+        from claude_agent_sdk import ResultMessage
+        from claude_agent_sdk.types import StreamEvent
+        gate=asyncio.Event();order=[]
+        class Client:
+            def __init__(self,options):self.n=0
+            async def connect(self):pass
+            async def query(self,text):order.append('query')
+            async def disconnect(self):pass
+            def receive_response(self):
+                self.n+=1;n=self.n
+                async def gen():
+                    yield StreamEvent(uuid='u',session_id='s',event={'type':'content_block_delta','delta':{'type':'text_delta','text':f'Reply {n}. '}})
+                    if n==1:await gate.wait();order.append('drained')
+                    yield ResultMessage(subtype='success',duration_ms=1,duration_api_ms=1,is_error=False,num_turns=1,session_id='s')
+                return gen()
+        with patch('claude_agent_sdk.ClaudeSDKClient',Client):
+            conversation=cli_dialogue.ClaudeConversation({'id':'c','kind':'claude_cli'},None)
+            stream=conversation.stream([{'role':'system','content':'R'},{'role':'user','content':'One'}])
+            self.assertEqual(await anext(stream),'Reply 1. ');await stream.aclose()
+            async def collect():return ''.join([t async for t in conversation.stream([{'role':'system','content':'R'},{'role':'user','content':'Two'}])])
+            later=asyncio.ensure_future(collect())
+            await asyncio.sleep(0.05);self.assertEqual(order,['query'],'the next turn waits for the cut-off reply');gate.set()
+            self.assertEqual(await later,'Reply 2. ');self.assertEqual(order,['query','drained','query'])
+            await conversation.close()
+
+    async def test_codex_and_antigravity_answer_from_one_read_only_process_per_turn(self):
+        from core import cli_dialogue, codex_cli, antigravity_cli
+        launched=[]
+        class Proc:
+            def __init__(self,lines):self.lines=list(lines);self.returncode=None;self.stdin=self;self.stdout=self;self.written=b''
+            def write(self,data):self.written+=data
+            async def drain(self):pass
+            def close(self):pass
+            async def readline(self):return self.lines.pop(0) if self.lines else b''
+            async def wait(self):self.returncode=0;return 0
+        def spawn(lines):
+            async def run(*args,**kwargs):proc=Proc(lines);launched.append((args,kwargs,proc));return proc
+            return run
+        codex=[json.dumps({'type':'item.completed','item':{'type':'agent_message','text':'Sure. One idea.'}}).encode()+b'\n']
+        agy=[json.dumps({'event':'step_update','step_update':{'step_type':'agent_response','text_delta':'Hi. '}}).encode()+b'\n',
+             json.dumps({'event':'result','result':{'status':'SUCCESS'}}).encode()+b'\n']
+        messages=[{'role':'system','content':'RULES'},{'role':'user','content':'Name a cafe'}]
+        with patch.object(codex_cli,'find_codex',return_value='codex'),patch.object(antigravity_cli,'find_antigravity',return_value='agy'):
+            with patch('asyncio.create_subprocess_exec',spawn(codex)):
+                said=''.join([t async for t in cli_dialogue.ProcessConversation({'id':'x','kind':'codex_cli','model':''},None).stream(messages)])
+            with patch('asyncio.create_subprocess_exec',spawn(agy)):
+                spoke=''.join([t async for t in cli_dialogue.ProcessConversation({'id':'a','kind':'antigravity_cli','model':''},None).stream(messages)])
+        self.assertEqual(said,'Sure. One idea.');self.assertEqual(spoke,'Hi. ')
+        codex_args,agy_args=launched[0][0],launched[1][0]
+        self.assertIn('read-only',codex_args);self.assertIn('--ephemeral',codex_args);self.assertIn('approval_policy="never"',codex_args)
+        self.assertEqual(agy_args[agy_args.index('--mode')+1],'plan');self.assertIn('--sandbox',agy_args)
+        for _args,kwargs,proc in launched:
+            self.assertNotIn('JARVIS_TOOL_TOKEN',kwargs['env']);self.assertIn(b'Name a cafe',proc.written);self.assertIn(b'RULES',proc.written)
+
 if __name__=='__main__':unittest.main()

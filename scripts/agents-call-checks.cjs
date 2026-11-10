@@ -43,7 +43,7 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
       if(path==='/api/agent-calls/voices')return json({url:'',protocol:'voicestudio',models:[],voices:[]});
       if(path.startsWith('/api/agent-calls/pending/'))return json([]);
       if(path==='/api/agent-calls') {
-        const make=()=>{const id=String(++t.callCounter).padStart(32,'0');const value={id,parent_id:JSON.parse(options.body).parent_id,ended:false,summary_state:'open',jobs:[]};t.calls[id]=value;return json(value);};
+        const make=()=>{const id=String(++t.callCounter).padStart(32,'0');const body=JSON.parse(options.body);(t.callBodies||=[]).push(body);const value={id,parent_id:body.parent_id,ended:false,summary_state:'open',jobs:[]};t.calls[id]=value;return json(value);};
         if(t.holdCreation){t.creationPending=true;return new Promise(resolve=>t.releaseCreation=()=>resolve(make()));}
         return make();
       }
@@ -51,6 +51,7 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
       if(match){const call=t.calls[match[1]], action=match[2];
         if(!action)return json(call);
         if(action==='prepare'||action==='timing')return json({ok:true,prepare_ms:12});
+        if(action==='opening'){t.openings=(t.openings||0)+1;return new Response(new TextEncoder().encode(JSON.stringify({type:'text',delta:'Hi, your build finished.'})+'\n'+JSON.stringify({type:'done',reply_ms:0})+'\n'),{headers:{'Content-Type':'application/x-ndjson'}});}
         if(action==='end'){t.callEnds.push(call.id);call.ended=true;call.summary_state='saved';call.summary='**Call summary**\n\nDiscussed the new layout.';return json(call);}
         if(action==='interrupt'){t.callStops.push(call.id);t.callStopBodies.push(options&&options.body||'');t.releaseReply?.();return json({ok:true});}
         if(action==='watch')return new Response(new ReadableStream({start(c){t.pushEvent=e=>c.enqueue(new TextEncoder().encode(JSON.stringify(e)+'\n'));options.signal?.addEventListener('abort',()=>{try{c.close()}catch{}});}}),{headers:{'Content-Type':'application/x-ndjson'}});
@@ -94,9 +95,28 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
     localStorage.setItem('kairos:call-conversation:'+window.__callBot,JSON.stringify({endpoint:'fast',model:'llama3.2'}));
     const input=document.querySelector('.bots-composer-input');input.value='My typed draft stays';input.dispatchEvent(new Event('input',{bubbles:true}));
   })()`);
+  // One-tap calls (2026-11-10): one click on Call reaches the live call with the defaults. No form, no Start call.
+  await js("(()=>{window.__callStatuses=[];window.__statusWatch?.disconnect();const s=document.querySelector('.agent-call-status');window.__statusWatch=new MutationObserver(()=>window.__callStatuses.push(s.textContent));window.__statusWatch.observe(s,{childList:true,characterData:true,subtree:true});return true})()");
   await click('.agent-call-open'); await waitFor("document.querySelector('.agent-call').open");
+  await waitFor("document.querySelector('.agent-call').dataset.state==='listening'").catch(async error=>{ console.log(await js("({state:document.querySelector('.agent-call').dataset.state,blocker:document.querySelector('.agent-call-blocker').textContent,error:document.querySelector('.agent-call-error').textContent})")); throw error; });
+  assert.equal(await js("document.querySelector('.agent-call-setup').hidden"),true,'The settings stay out of the way');
+  assert.deepEqual(await js("(({endpoint_id,model})=>({endpoint_id,model}))(window.__callTest.callBodies.at(-1))"),{endpoint_id:'fast',model:'llama3.2'},'The call uses the conversation model this bot used last');
+  assert.equal(await js('window.__callTest.prepared'),'small.en','and the speech model already on this device');
+  assert.equal(await js("document.querySelector('.agent-call').dataset.inputMode"),'automatic','Input is automatic');
+  assert.equal(await js("window.__callStatuses.some(s=>/one time only/.test(s))"),false,'Nothing downloads when a speech model is here');
+  assert.equal(await js("document.querySelector('.agent-call-blocker').hidden&&document.querySelector('.agent-call-notice').hidden"),true,'and nothing needs saying');
+  await capture('agents-call-one-tap');
+  // Call settings are still one click away: in a live call the button ends it and opens them in place.
+  assert.equal(await js("document.querySelector('.agent-call-settings-toggle').textContent"),'End call and change settings');
+  await click('.agent-call-settings-toggle');
+  await waitFor("document.querySelector('.agent-call').open && !document.querySelector('.agent-call-setup').hidden && document.querySelector('.agent-call').dataset.state==='setup'");
+  assert.equal(await js("document.querySelector('.agent-call-notice').textContent"),'Call ended. Change what you need, then press Start call.');
+  assert.equal(await js("Object.values(window.__callTest.calls).at(-1).ended"),true,'The live call ended');
+  const micBase=await js('window.__callTest.closed');
+  assert.equal(await js('window.__callTest.opened'),micBase,'and let go of the microphone');
   await waitFor("!document.querySelector('.agent-call-setup button[type=submit]').disabled");
   assert.equal(await js("document.querySelector('[aria-label=\"Speech recognition model\"]').value"),'small.en','Calls start with the Voice-line accuracy model');
+  assert.equal(await js("document.querySelector('[aria-label=\"Conversation model version\"]').value"),'llama3.2','The exact model ID lives only in Call settings');
   // Dropdowns in the modal call dialog open above it, inside the viewport, and can be picked.
   for (const label of ['Call mode','Conversation model connection','Speech recognition model','Call input mode','Speech acceleration']) {
     const opened = await js(`(()=>{const s=document.querySelector('.agent-call [aria-label="${label}"]');s.scrollIntoView({block:'center'});s.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,button:0}));const m=document.querySelector('.custom-select-menu');if(!m)return 'no menu';const r=m.getBoundingClientRect(),i=m.querySelector('.custom-select-item');if(!i)return 'no items';const q=i.getBoundingClientRect(),h=document.elementFromPoint(q.left+q.width/2,q.top+q.height/2);return [m.closest('dialog')===document.querySelector('.agent-call'),i.contains(h),r.top>=0&&r.left>=0&&r.bottom<=innerHeight&&r.right<=innerWidth].join()})()`);
@@ -213,8 +233,8 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   await waitFor('window.__callTest.workUpdates.length===1',900);
   assert.deepEqual(await js('window.__callTest.workUpdates'),['work/t1/update'],'A pushed finish requests its spoken update without waiting for the poll');
   await click('.agent-call-controls button:nth-child(2)');
-  assert.equal(await js('window.__callTest.closed'),1,'Microphone mute releases the device');
-  await click('.agent-call-controls button:nth-child(2)'); await waitFor('window.__callTest.opened===2');
+  assert.equal(await js('window.__callTest.closed'),micBase+1,'Microphone mute releases the device');
+  await click('.agent-call-controls button:nth-child(2)'); await waitFor(`window.__callTest.opened===${micBase+2}`);
   await capture('agents-call-muted-assistant');
   win.setContentSize(375,812); await delay(150); await capture('agents-call-phone');
   assert.ok(await js("(()=>{const n=document.querySelector('.agent-call');return n.scrollWidth<=n.clientWidth+1})()"),'Call fits phone');
@@ -223,19 +243,24 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   assert.ok(await js("document.querySelector('.agent-call-heard').getBoundingClientRect().height>=20"),'Recognition caption stays readable in landscape');
   win.setContentSize(375,812);await delay(100);
   await click('.agent-call .is-end');
-  assert.ok(await js("!document.querySelector('.agent-call').open && window.__callTest.closed===2"),'End call releases the microphone');
+  assert.ok(await js(`!document.querySelector('.agent-call').open && window.__callTest.closed===${micBase+2}`),'End call releases the microphone');
   const summaries="[...document.querySelectorAll('.bots-log .bots-msg.bot')].filter(n=>n.textContent.includes('Call summary'))";
-  await waitFor(`${summaries}.length===1`);
-  assert.ok(await js(`${summaries}[0].textContent.includes('Discussed the new layout.')`),'Only the final summary appears in the conversation');
+  const endedCalls="Object.values(window.__callTest.calls).filter(c=>c.ended).length";
+  // Two calls so far: the one-tap call that Call settings ended, and this one. Each leaves exactly one summary.
+  await waitFor(`${summaries}.length===2`);
+  assert.ok(await js(`${summaries}.some(n=>n.textContent.includes('Discussed the new layout.'))`),'Only the final summary appears in the conversation');
   await js("Object.values(window.__callTest.calls)[0].summary='**Call summary** Updated verified work result.';true;");
   // The saved card is updated through the same callback used by the live
   // work watcher, without repainting the chat or replacing typed drafts.
   await js("document.querySelector('.agent-call-open').click();true;");
-  await click('.agent-call .agent-call-header button:last-child');
-  assert.equal(await js(`${summaries}.length`),1,'Reopening setup does not duplicate a summary card');
-  await js('window.__callTest.holdReply=true');
-  await click('.agent-call-open');await waitFor("!document.querySelector('.agent-call-setup button[type=submit]').disabled");await js("document.querySelector('.agent-call-setup').requestSubmit()");
   await waitFor("document.querySelector('.agent-call').dataset.state==='listening'");
+  await click('.agent-call .agent-call-header button:last-child');
+  await waitFor(`${summaries}.length===${endedCalls}`);
+  assert.equal(await js(`${summaries}.length`),await js(endedCalls),'Calling again adds one summary per call and never duplicates one');
+  // A call ended while it was still being created leaves no stray record behind.
+  await js('window.__callTest.holdReply=true');
+  const callNow=async()=>{await click('.agent-call-open');await waitFor("document.querySelector('.agent-call').dataset.state==='listening'");};
+  await callNow();
   const playedBefore=await js('window.__callTest.played');
   await js('window.__callTest.level=.5');await delay(300);await js('window.__callTest.level=0');
   await waitFor(`window.__callTest.played>${playedBefore}`);
@@ -246,14 +271,12 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   assert.equal(writes.filter(w=>w.path==='/api/chat/live/stop'||w.path==='/api/bot-chat/'+SID+'/interrupt').length,0,'Interrupt leaves ordinary typed bot work alone');
   await js('window.__callTest.holdReply=false');
   await click('.agent-call .is-end');
-  await click('.agent-call-open'); await waitFor("!document.querySelector('.agent-call-setup button[type=submit]').disabled");await js("document.querySelector('.agent-call-setup').requestSubmit()");
-  await waitFor("document.querySelector('.agent-call').dataset.state==='listening'");
+  await callNow();
   await navigate('home');
   assert.ok(await js("!document.querySelector('.agent-call') && window.__callTest.opened===window.__callTest.closed"),'Leaving the bot tears down dialog and every microphone track');
   await openBot();await waitFor("!!document.querySelector('.agent-call-open')");
   await js("window.__callTest.holdCreation=false;window.__callTest.holdTranscription=true;window.__callTest.nextText='Discard this interrupted sentence.';true;");
-  await click('.agent-call-open');await waitFor("!document.querySelector('.agent-call-setup button[type=submit]').disabled");await js("document.querySelector('.agent-call-setup').requestSubmit()");
-  await waitFor("document.querySelector('.agent-call').dataset.state==='listening'");
+  await callNow();
   const interruptedCount=await js('window.__callTest.transcripts');
   const interruptedTurns=await js('window.__callTest.callTurns.length');
   await js('window.__callTest.level=.5');await delay(300);await js('window.__callTest.level=0');
@@ -268,8 +291,7 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   // speaker, and when the first pause arrives the last partial already covers every voiced sample, so the final transcript is
   // that text with NO upload at the end of the turn. A failing partial endpoint falls back to the whole clip.
   await js("window.__callTest.engine='cuda';window.__callTest.partialMode='ok';window.__callTest.partialText='Rolling words arrived before the endpoint.';window.__callTest.nextText='THE WHOLE CLIP WAS SENT';true;");
-  await click('.agent-call-open');await waitFor("!document.querySelector('.agent-call-setup button[type=submit]').disabled");await js("document.querySelector('.agent-call-setup').requestSubmit()");
-  await waitFor("document.querySelector('.agent-call').dataset.state==='listening'");
+  await callNow();
   assert.equal(await js("document.querySelector('.agent-call').dataset.partials"),'on','Rolling transcription is on for a GPU call');
   const rollTranscripts=await js('window.__callTest.transcripts'), rollTurns=await js('window.__callTest.callTurns.length'), rollRequests=await js('window.__callTest.partialRequests.length');
   await js('window.__callTest.level=.5');
@@ -295,9 +317,10 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   assert.equal(await js("document.querySelector('.agent-call-error').textContent"),'','and says nothing alarming about it');
   await js("window.__callTest.engine='';window.__callTest.partialMode='busy';window.__callTest.nextText='';true;");
   await click('.agent-call .is-end');
-  await click('.agent-call-open');await waitFor("!document.querySelector('.agent-call-setup button[type=submit]').disabled");
-  await js("document.querySelector('[aria-label=\"Call input mode\"]').value='hold';window.__callTest.nextText='Keep my complete sentence with its pause.';document.querySelector('.agent-call-setup').requestSubmit();true;");
-  await waitFor("document.querySelector('.agent-call').dataset.state==='listening'");
+  // Hold to talk, chosen earlier in Call settings, is remembered for this bot and used by the next one-tap call.
+  await js("localStorage.setItem('kairos:call-input:'+window.__callBot,'hold');window.__callTest.nextText='Keep my complete sentence with its pause.';true;");
+  await callNow();
+  assert.equal(await js("document.querySelector('.agent-call').dataset.inputMode"),'hold');
   const heldBefore=await js('window.__callTest.transcripts');
   await js("document.querySelector('.agent-call').dispatchEvent(new KeyboardEvent('keydown',{code:'F9',bubbles:true}));window.__callTest.level=.02;true;");await delay(300);
   await js('window.__callTest.level=0');await delay(1100);
@@ -320,19 +343,27 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   await navigate('home');
   await js("window.localStorage.removeItem('kairos:call-input:'+window.__callBot);true;");
   await js('window.__callTest.missingModel=true');await openBot();await waitFor("!!document.querySelector('.agent-call-open')");
-  await click('.agent-call-open');await waitFor("document.querySelector('.agent-call-readiness').textContent.includes('Download the selected')");
-  assert.ok(await js("document.querySelector('.agent-call-setup button[type=submit]').disabled"),'Missing model has an honest setup state');
+  // No speech model on the device: the call says so in one line, downloads the default small model once, then connects.
   const downloadsBefore=writes.filter(w=>w.path.includes('/speech/models/')&&w.path.endsWith('/download')).length;
-  assert.equal(downloadsBefore,0,'Opening calls never downloads a model automatically');
-  await js("[...document.querySelectorAll('.agent-call-setup button')].find(b=>b.textContent==='Download speech model').click()");
-  await waitFor("!document.querySelector('.agent-call-setup button[type=submit]').disabled");
-  assert.equal(writes.filter(w=>w.path.includes('/speech/models/')&&w.path.endsWith('/download')).length,downloadsBefore+1,'User can set up native speech inside the call screen');
+  await js("(()=>{window.__callStatuses=[];window.__statusWatch?.disconnect();const s=document.querySelector('.agent-call-status');window.__statusWatch=new MutationObserver(()=>window.__callStatuses.push(s.textContent));window.__statusWatch.observe(s,{childList:true,characterData:true,subtree:true});return true})()");
+  await callNow();
+  assert.ok(await js("window.__callStatuses.includes('Getting voice ready, one time only')"),'The call says it is getting the voice ready, once');
+  assert.deepEqual(writes.filter(w=>w.path.includes('/speech/models/')&&w.path.endsWith('/download')).slice(downloadsBefore).map(w=>w.path),['/api/speech/models/small.en/download'],'and downloads the default small model itself');
+  assert.equal(await js('window.__callTest.prepared'),'small.en','then connects with it');
+  await click('.agent-call .is-end');
+  // Answering a ring goes straight into the call too, and the bot opens with the reason it rang.
+  const ringId='a'.repeat(32);
+  await js(`import('/static/js/ringHost.js').then(m=>{m.setPendingRing({id:'${ringId}',agentId:window.__callBot,reason:'Your build finished.'});document.dispatchEvent(new CustomEvent('kairos:ring-answered'));return true;})`);
+  await waitFor("document.querySelector('.agent-call').open && document.querySelector('.agent-call').dataset.state!=='setup' && !!window.__callTest.openings",8000);
+  assert.equal(await js('window.__callTest.callBodies.at(-1).ring_id'),ringId,'The answered ring starts the call without a click');
+  assert.equal(await js("document.querySelector('.agent-call-setup').hidden"),true,'and without the settings');
+  await click('.agent-call .is-end');
   await navigate('home');
   await openBot();await waitFor("!!document.querySelector('.agent-call-open')");
   await js('window.__callTest.holdCreation=true;window.__callTest.creationPending=false;true;');
   const lateTurns=await js('window.__callTest.callTurns.length');
   const lateOpened=await js('window.__callTest.opened');
-  await click('.agent-call-open');await waitFor("!document.querySelector('.agent-call-setup button[type=submit]').disabled");await js("document.querySelector('.agent-call-setup').requestSubmit()");
+  await click('.agent-call-open');
   await waitFor('window.__callTest.creationPending');
   await click('.agent-call .agent-call-header button:last-child');
   await js('window.__callTest.releaseCreation();window.__callTest.holdCreation=false;true;');await delay(350);
@@ -374,7 +405,7 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
     window.__lateSpeechEventsSafe=ended===before;speaker.cancel();
   })()`);
   assert.ok(await js('window.__lateSpeechEventsSafe'),'Late native speech events cannot settle a newer reply');
-  await js(`navigator.mediaDevices.getUserMedia=window.__callTest.getUserMedia;window.__callTest.destination.stream.getTracks().forEach(t=>t.stop());window.__callTest.inputContext.close();window.SpeechSynthesisUtterance=window.__callTest.utterance;if(window.__callTest.synthesis)Object.defineProperty(window,'speechSynthesis',window.__callTest.synthesis);else delete window.speechSynthesis;window.fetch=window.__callTest.fetch;true;`);
+  await js(`window.__statusWatch?.disconnect();navigator.mediaDevices.getUserMedia=window.__callTest.getUserMedia;window.__callTest.destination.stream.getTracks().forEach(t=>t.stop());window.__callTest.inputContext.close();window.SpeechSynthesisUtterance=window.__callTest.utterance;if(window.__callTest.synthesis)Object.defineProperty(window,'speechSynthesis',window.__callTest.synthesis);else delete window.speechSynthesis;window.fetch=window.__callTest.fetch;true;`);
   win.setContentSize(1440,900);
   console.log('PASS Agent calls: actual AudioWorklet/PCM, quiet pre-roll, transcription/thinking continuations, selected model/warmup, call-owned streaming/draft controls, echo gate, phone/themes/reduced motion and cancellation (synthetic microphone; mocked recognition/voice).');
   } finally {

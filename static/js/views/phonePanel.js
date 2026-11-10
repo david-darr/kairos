@@ -17,12 +17,14 @@ const errorText = (error) => (error && error.message) || 'That could not be save
 export async function renderPhonePanel(content) {
   const root = el('section', { class: 'phone-panel' });
   content.append(root);
-  const [state, bots, choices, outbound] = await Promise.all([
+  const [state, bots, offered, outbound] = await Promise.all([
     api('/api/phone').catch(() => ({ connection: { configured: false } })),
     api('/api/agents').catch(() => []),
     api('/api/agent-calls/choices').catch(() => []),
     api('/api/phone/outbound', { toast: false }).catch(() => ({ calls: [], blocked: [] })),
   ]);
+  // Phone lines still need an exact model version, so they keep to API and local models (in-app calls take every sign-in).
+  const choices = (Array.isArray(offered) ? offered : []).filter(c => c.kind === 'api' || c.kind === 'local');
   const saved = state.connection || { configured: false };
   const values = { provider: saved.provider || 'twilio' };
 

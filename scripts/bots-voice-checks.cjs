@@ -29,11 +29,11 @@ module.exports = async ({ js, waitFor, navigate, win, demoState, base, capture }
       return true;
     })()`);
     await navigate('botsShell', { agentId: botId, sessionId: sid }); await waitFor("!!document.querySelector('.agent-call-open')");
-    await click('.agent-call-open'); await waitFor(`document.querySelector('.agent-call')?.open && !!document.querySelector('[aria-label="Conversation model connection"] option[value="voice-check-model"]')`);
-    await js(`(()=>{for(const [label,value] of [['Conversation model connection','voice-check-model'],['Call input mode','hold']]){const node=document.querySelector('[aria-label="'+label+'"]');node.value=value;node.dispatchEvent(new Event('change'));}return true;})()`);
-    await waitFor(`!document.querySelector('.agent-call-setup button[type="submit"]').disabled`);
-    await js("document.querySelector('.agent-call-setup').requestSubmit()");
+    // One tap: the only connection is picked by itself and the call goes live (no setup form).
+    await click('.agent-call-open');
     await waitFor("document.querySelector('.agent-call')?.dataset.state==='listening'");
+    assert.equal(await js("document.querySelector('[aria-label=\"Conversation model connection\"]').value"), 'voice-check-model');
+    assert.equal(await js("document.querySelector('.agent-call-setup').hidden"), true);
     await js("[...document.querySelectorAll('.agent-call-tabs button')].find(n=>n.textContent==='Chat').click()");
     await waitFor("!!document.querySelector('.bots-call-bar:not([hidden])') && !document.querySelector('.agent-call').open");
     await js("document.dispatchEvent(new KeyboardEvent('keydown',{key:'m',ctrlKey:true,shiftKey:true,bubbles:true,cancelable:true}))");
