@@ -550,6 +550,28 @@ def video_resources(video_id, user):
             **_long_video(video_id)}
 
 
+def video_narration_peaks(video_id, user, per_second=40):
+    """Peak levels of each narrated beat's cached line, for Studio's timeline (read only: nothing is spoken or
+    written). Each beat's peaks start at the line's start, LEAD seconds into the beat; 0 to 255 at per_second."""
+    import wave
+    from core import video_narration, video_store
+    video_store.require_user_access(video_id, user, is_admin(user))
+    project, out = video_store.get(video_id), {}
+    step = video_narration.RATE // per_second
+    for b in project["beats"]:
+        key = (b.get("spoken") or {}).get("key")
+        try:
+            samples = video_narration.read_clip(video_id, key)
+        except (OSError, LookupError, ValueError, EOFError, wave.Error):
+            continue
+        n = len(samples) // step
+        if n:
+            peak = abs(samples[:n * step].astype("int32")).reshape(n, step).max(axis=1)
+            out[b["id"]] = {"key": key, "rate": per_second, "offset": video_store.LEAD,
+                            "peaks": [min(255, int(v) * 255 // 32767) for v in peak]}
+    return {"beats": out}
+
+
 def _long_video(video_id):
     from core import video_longform, video_plan, video_store
     project = video_store.get(video_id)

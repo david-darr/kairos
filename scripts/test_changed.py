@@ -94,8 +94,9 @@ ELECTRON_SUITES = {
     "video-render-smoke": ["electron/designRender.js", "static/motion/*", "core/video_*.py", "core/ffmpeg_tools.py",
                            "core/design_render_bridge.py", "routes/video_routes.py", "scripts/video_render_smoke.py",
                            "scripts/video-render-smoke.cjs"],
-    "studio-checks": ["tabs/studio/*", "static/motion/*", "scripts/studio-checks.cjs"],
-    "studio-content-checks": ["static/js/studioContent*.js", "scripts/studio-content-checks.cjs"],
+    "studio-checks": ["tabs/studio/*", "static/motion/*", "static/js/studioEditor*.js", "static/js/studioTimeline.js", "static/js/studioSceneForm.js",
+                      "static/css/studio-editor.css", "scripts/studio-checks.cjs"],
+    "studio-content-checks": ["static/js/studioContent*.js", "static/css/studio-content.css", "static/css/studio-editor.css", "scripts/studio-content-checks.cjs"],
     "motion-engine-checks": ["static/motion/*", "scripts/motion-engine-checks.cjs"],
 }
 

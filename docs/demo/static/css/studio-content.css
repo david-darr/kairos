@@ -117,12 +117,12 @@
 .sc .sc-checks { display: flex; flex-wrap: wrap; gap: 6px; }
 @media (max-width: 520px) { .sc .sc-changes { grid-template-columns: minmax(0, 1fr); } .sc .sc-changes dd { margin-bottom: 4px; } }
 /* Character sheets (Pack A): the full sheet on an approval card, a thumbnail per version in Characters. */
-.sc-sheet-img { display: block; width: 100%; max-width: 960px; height: auto; border-radius: 8px; border: 1px solid var(--border, rgba(127,127,127,.25)); background: #f6f3ee; margin: 8px 0; }
+.sc-sheet-img { display: block; width: 100%; max-width: 960px; height: auto; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); margin: 8px 0; }
 .sc-sheet-link { display: inline-block; margin-top: 6px; }
-.sc-sheet-thumb { display: block; width: 240px; max-width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--border, rgba(127,127,127,.25)); background: #f6f3ee; }
+.sc-sheet-thumb { display: block; width: 240px; max-width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-2); }
 /* Style packs (Styles tab and Approvals): the sample video beside its contact sheet. */
 .sc-pack-media { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin: 8px 0; }
-.sc-pack-video { width: 100%; border-radius: 8px; background: #000; aspect-ratio: 16 / 9; }
+.sc-pack-video { width: 100%; border-radius: 8px; background: rgb(var(--shade-rgb)); aspect-ratio: 16 / 9; }
 .sc-pack-links { display: flex; gap: 12px; flex-wrap: wrap; font-size: 13px; }
 .sc-brief p { white-space: pre-wrap; margin: 6px 0 0; }
 

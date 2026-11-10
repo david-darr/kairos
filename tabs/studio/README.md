@@ -14,9 +14,40 @@ The editor uses `/static/motion/engine.js`, the same engine as rendering.
 Look variables and self-hosted font-face rules come from the same design
 system helpers as the render player. Nothing is loaded from outside Kairos.
 Preview remounts after 250 ms; saving waits 500 ms and serializes writes.
-The last 30 edits can be undone and redone in this renderer session.
-Move buttons and Alt + Up/Down provide keyboard alternatives to dragging.
+The last 30 edits can be undone and redone in this renderer session; typing in
+one field or dragging one slider counts as one step.
 Project versions refresh every three seconds when there are no local edits.
+
+### Editor layout (Content Studio Editor build spec, steps 1 and 2)
+
+Docked panes in Kairos's own tokens (`static/css/studio-editor.css`): Beats,
+Assets and Ask Kairos on the left; the preview with safe-area guides (the
+engine's copy area and, when narrated, the caption band) and the transport in
+the middle; Beat, Project, Render and History on the right; the timeline
+underneath. The splitters resize the panes (drag, arrow keys, double-click to
+reset) and the sizes, the open tabs, snapping and guides are remembered per
+person on this device (`kairos:studio-editor:v1:<username>`). At 760 px and
+below the same parts stack: preview, a timeline strip, the inspector, the list.
+
+The timeline (`static/js/studioTimeline.js`, maths in
+`static/js/studioEditorModel.js`) draws a ruler with zoom (buttons, the
+slider, = and -, Ctrl + wheel, Fit), a playhead you drag (snapping to beat
+edges, chapters, the playhead and the work area; Shift turns it off), the beats
+as clips sized by their real length, chapter markers, the narration lane (each
+spoken line's peak levels from `GET /api/tab-studio/videos/<id>/waveform`,
+read from its cached audio; caption spans before that) and the music lane (the
+bed's level as the mix ducks it, read only). Drag a clip to reorder; drag its
+right edge to change its bars in half steps (narrated beats are as long as
+their line). Press ? in the editor for the keyboard shortcuts.
+
+A scene beat's setting, shot, characters on screen (position, view,
+expression, action, facing, head turn, who speaks) and props are a form
+(`static/js/studioSceneForm.js`), no longer raw JSON. A Pack B stage beat's set,
+shot, pedestal, 3D characters (position, expression, action, facing, who speaks,
+a reaction), stand-in people, glossy props and labels over heads are a form too
+(`static/js/studioStageForm.js`); Project > 3D picks three.js or, when installed,
+Blender. Project > Cast pins the account's characters to a version; a scene shows
+only 2D cast characters and a stage only 3D ones.
 
 Rendering uses the existing video API and FFmpeg on this computer. Studio
 never installs it. Job IDs are kept in device storage and reconciled with
@@ -67,9 +98,10 @@ node --check tabs/studio/view.js
 node --check static/js/chatContent.js
 node --check static/js/app.js
 node --check scripts/studio-checks.cjs
-node scripts/studio-checks.cjs
+node scripts/test_studio_editor_model.cjs
+node scripts/run-electron-test.cjs studio-checks
 node scripts/test_studio_content_model.cjs
-node scripts/studio-content-checks.cjs
+node scripts/run-electron-test.cjs studio-content-checks
 ```
 
 The Electron script launches the real app shell against a synthetic local
@@ -78,7 +110,10 @@ requests, records writes, and saves screenshots under `data/ui-review`.
 It covers projects, setup guidance, preview pixels, editing and inline
 validation, reorder and undo, playback/aspects, render progress/downloads,
 history confirmation, chat cards, recovery, deep links, labels and phone
-targets at 1440 and 390 pixels. Its MP4 fixture is the repository's existing
+targets at 1440 and 390 pixels, and the editor: docked panes, timeline zoom,
+playhead drag and snapping, clip selection, drag to reorder and edge trim,
+every shortcut through real DevTools input, pane sizes kept across a reload,
+a dark base, the phone stack, and the scene form's edits with undo and redo. Its MP4 fixture is the repository's existing
 demo film, not output produced by the fixture's mock render queue.
 
 ## Limits to review
@@ -99,4 +134,4 @@ its reference sheet and status. New character starts from Kairos's own round, sq
 design; New version changes colours, accessory or name (any change is a new version, older ones stay).
 Make sheet renders the sheet in the desktop app and sends it to Approvals, where only the person
 approves or rejects it (`/api/characters`, routes/character_routes.py). A video can only render a
-cast version that is approved. The beat editor has a `scene` kind with its scene as JSON.
+cast version that is approved. The beat editor has a `scene` kind with its own form.

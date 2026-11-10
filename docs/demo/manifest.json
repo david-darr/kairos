@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "dbf870ad77196c391a86870a89790caf55804dd1461add43994dd1345bf02cc3",
+  "app.js": "a1436ef63dcb8f42b41e26a1b8d5319a474093ef504c1b139a9ab38080ddec68",
   "fixtures.js": "b137d6d7586b7059984b39c1c3b37447c746559f29f997ced25fc220dcc665e9",
   "index.html": "765d80b018d722a27e29860be2ae3b86e889fe704be8a9dfdc0752e78379ad19",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -75,7 +75,8 @@
   "static/css/redesign.css": "d1485aae3a4ded144849698bd90ca04d1e310231485c63d5aeca6cb0e7fc1b87",
   "static/css/ring.css": "06a1a94a65022b46c5d199d26b9eb5c3636a20ef449e1a51fadfbc9274f35c9a",
   "static/css/settings.css": "8b17458227310ea14550d45fad8624fba94feb9a312329796fb713e63f4c6738",
-  "static/css/studio-content.css": "f8f22d8c805e7fe2805cb774027f6167b5c20bd6192c75cb9eda5704f6fc2bce",
+  "static/css/studio-content.css": "40c90bf469e7802844489c840c1ee92dabd7d5a311227ec7aac6e34d7ae23467",
+  "static/css/studio-editor.css": "aa6c4d1354cbfc3952c5165f73ad7ede9af2081e5723dbd4b0c2233c057af6e7",
   "static/css/style.css": "9a2e987ec537fdd3b3350aaeab4f4d678b9d052f70e5dffcf4a29aac2a792c5d",
   "static/css/swarm.css": "c5416a3f3d94b736f53563f341e61d10cc538766e6cf6809e3004e567c7ef93f",
   "static/css/vault.css": "d65c61ab5fd0195217de837009a06bb037c0cbc27d5bab2808d5cc9937e210a3",
@@ -1185,7 +1186,8 @@
   "static/css/redesign.css": "d1485aae3a4ded144849698bd90ca04d1e310231485c63d5aeca6cb0e7fc1b87",
   "static/css/ring.css": "06a1a94a65022b46c5d199d26b9eb5c3636a20ef449e1a51fadfbc9274f35c9a",
   "static/css/settings.css": "8b17458227310ea14550d45fad8624fba94feb9a312329796fb713e63f4c6738",
-  "static/css/studio-content.css": "f8f22d8c805e7fe2805cb774027f6167b5c20bd6192c75cb9eda5704f6fc2bce",
+  "static/css/studio-content.css": "40c90bf469e7802844489c840c1ee92dabd7d5a311227ec7aac6e34d7ae23467",
+  "static/css/studio-editor.css": "aa6c4d1354cbfc3952c5165f73ad7ede9af2081e5723dbd4b0c2233c057af6e7",
   "static/css/style.css": "151a5688c9c9ce88c5f4b981e195360e8297528ed38f8a58a70c5f5e66d5e321",
   "static/css/swarm.css": "c5416a3f3d94b736f53563f341e61d10cc538766e6cf6809e3004e567c7ef93f",
   "static/css/vault.css": "d65c61ab5fd0195217de837009a06bb037c0cbc27d5bab2808d5cc9937e210a3",
@@ -1552,6 +1554,10 @@
   "static/js/storePublish.js": "58ddd702fef6e0bc429428ff7ee635cb19e5ba11c56f1c70aa71dcaacaeb4cf7",
   "static/js/studioContent.js": "0c067e9af3a051f89b508c2822d76fb382811ae7470723251431b0b183e1f345",
   "static/js/studioContentModel.js": "360eca03dc60d725907ee1621ff12bfe9faf1516351118e277fa7f3ad798010a",
+  "static/js/studioEditorModel.js": "a647a14af3a9232650872e0a7fa0be1a1dd5ed26bf36cbeb360bef6df0eff688",
+  "static/js/studioSceneForm.js": "e3d974840668bd9a1bd1c2b889fecca92377e0ad33b68590fa47950b50663dd3",
+  "static/js/studioStageForm.js": "f434e4a71c99e91770096b569bb0ee9a203d275c53414a9cb3bb8d9d89a82364",
+  "static/js/studioTimeline.js": "d9ae6c8558cb41464f93d507d34ccbff1dd70c816ddaf359c06b9db1d3f2c367",
   "static/js/swarmBoard.js": "699d24aaaf8f84e12fb7365b598fae373f4c0e1b4696cf3425b5406eeea9a596",
   "static/js/swarmEvents.js": "513eb95038447edc16840b73b046cf89b528202f633abec89f56aa908130b3f4",
   "static/js/swarmGraph.js": "d42cba53b2dd8516aa074d95cd4907723b253f2f26ec08faca1e6631d19bb6e6",
@@ -2597,6 +2603,6 @@
   "tabs/school/view.js": "ebdc4818f6ca446e2aae949af7ea3f08a7f46eaa6dc0320e7da1e4d1befc6399",
   "tabs/studio/tab.json": "28f1e091d41cb463851b41c3aeb27e8bf66adbcc98844f63423d09bada77b837",
   "tabs/studio/view.css": "8a0ccf87630e1d16eacdaa7dc9cc2d0ebcaae0aaabf9751b01a254a3de955c68",
-  "tabs/studio/view.js": "e56586e033d63ff12f4f42c958a38c48597bc809062cc4f1543ab63bbbf39d94"
+  "tabs/studio/view.js": "c72d04f80e29e63c35f1d4636f3821b677afd53f5b9b4dbe06e80eeee8e1aadd"
  }
 }

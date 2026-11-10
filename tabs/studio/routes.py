@@ -84,6 +84,12 @@ def resources(video_id: str, user: str = Depends(active_user)):
     return call(tab_api.video_resources, video_id, user)
 
 
+@router.get("/videos/{video_id}/waveform")
+def waveform(video_id: str, user: str = Depends(active_user)):
+    """The narration lane of the editor's timeline: each spoken line's peak levels, read from its cached audio."""
+    return call(tab_api.video_narration_peaks, video_id, user)
+
+
 @router.post("/from-design")
 def from_design(body: DesignBody, user: str = Depends(active_user)):
     source = call(tab_api.video_design_source, body.design_id, user)

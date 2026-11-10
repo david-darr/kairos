@@ -137,6 +137,58 @@ class StudioTests(unittest.TestCase):
         self.assertEqual(video_store.require_chat_access(p["id"], session_id)["id"], p["id"])
         self.assertTrue(design_store.design_mode(session_id))
 
+    def test_waveform_reads_each_spoken_line_and_nothing_else(self):
+        import wave
+        import numpy as np
+        from core import video_narration
+        p = video_store.create("Narrated", owner="alice", look="sport", beats=[
+            {"id": "a", "kind": "title", "text": "Hi", "bars": 1}, {"id": "b", "kind": "statement", "text": "Line", "bars": 1}])
+        key = "0123456789abcdef"
+        path = video_narration.clip_path(p["id"], key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tone = (np.sin(np.linspace(0, 200 * np.pi, video_narration.RATE)) * 16000).astype("<i2")   # one second at half scale
+        with wave.open(str(path), "wb") as out:
+            out.setnchannels(1); out.setsampwidth(2); out.setframerate(video_narration.RATE); out.writeframes(tone.tobytes())
+        stored = video_store.get(p["id"])
+        stored["beats"][1]["spoken"] = {"key": key, "seconds": 1.0, "parts": [[.25, 1.25, "Line."]]}
+        stored["beats"][0]["spoken"] = {"key": "fedcba9876543210", "seconds": 1.0, "parts": [[.25, 1.25, "Gone."]]}   # no file
+        with patch.object(video_store, "get", return_value=stored):
+            response = self.client.get(f'/api/tab-studio/videos/{p["id"]}/waveform')
+        self.assertEqual(response.status_code, 200, response.text)
+        beats = response.json()["beats"]
+        self.assertEqual(list(beats), ["b"], "A beat without its audio file is left out")
+        self.assertEqual((beats["b"]["key"], beats["b"]["rate"], beats["b"]["offset"], len(beats["b"]["peaks"])), (key, 40, video_store.LEAD, 40))
+        self.assertTrue(120 <= max(beats["b"]["peaks"]) <= 130, max(beats["b"]["peaks"]))
+        private = video_store.create("Private", owner="bob", look="sport", beats=[{"id": "end", "kind": "end", "bars": 1}])
+        self.assertEqual(self.client.get(f'/api/tab-studio/videos/{private["id"]}/waveform').status_code, 404)
+
+    def test_editor_lists_match_the_server(self):
+        """The inspector's choices (static/js/studioEditorModel.js, tabs/studio/view.js) are the schema's own lists."""
+        import re
+        from core import character_store, style_packs
+        model = (ROOT / "static/js/studioEditorModel.js").read_text(encoding="utf-8")
+        view = (ROOT / "tabs/studio/view.js").read_text(encoding="utf-8")
+        def js_list(source, name):
+            body = re.search(rf"export const {name} = \[(.*?)\];|const {name} = \[(.*?)\];", source, re.S)
+            return re.findall(r"'([^']+)'", body.group(1) or body.group(2))
+        self.assertEqual(js_list(model, "SETTINGS"), list(style_packs.SETTINGS))
+        self.assertEqual(js_list(model, "SHOTS"), list(style_packs.SHOTS))
+        self.assertEqual(js_list(model, "PROPS"), list(style_packs.PROPS))
+        self.assertEqual(js_list(model, "VIEWS"), list(character_store.VIEWS))
+        self.assertEqual(js_list(model, "EXPRESSIONS"), list(character_store.EXPRESSIONS))
+        self.assertEqual(js_list(model, "ACTIONS"), list(video_store.ACTIONS))
+        self.assertEqual(js_list(view, "PALETTES"), list(style_packs.PALETTES))
+        self.assertEqual(js_list(model, "STAGE_SETS"), list(style_packs.STAGE_SETS))
+        self.assertEqual(js_list(model, "STAGE_PROPS"), list(style_packs.STAGE_PROPS))
+        self.assertEqual(js_list(model, "STAGE_FACINGS"), list(style_packs.STAGE_FACINGS))
+        self.assertIn(f"MAX_PEOPLE = {style_packs.MAX_PEOPLE}, MAX_LABELS = {style_packs.MAX_LABELS}", model)
+        self.assertEqual(js_list(view, "KINDS"), list(video_store.KINDS))
+        self.assertEqual(js_list(view, "CAMERAS"), list(video_store.CAMERAS))
+        self.assertEqual(js_list(view, "TRANSITIONS"), list(video_store.TRANSITIONS))
+        self.assertIn(f"LEAD = {video_store.LEAD}".replace("0.", "."), model)
+        for path in ("tabs/studio/view.js", "static/js/studioEditorModel.js", "static/js/studioTimeline.js", "static/js/studioSceneForm.js", "static/js/studioStageForm.js", "static/css/studio-editor.css"):
+            self.assertNotIn("—", (ROOT / path).read_text(encoding="utf-8"), path + " has an em-dash")
+
     def test_failed_asset_copy_rolls_back_new_project(self):
         data, _, _ = self.design()
         before = {p["id"] for p in video_store.list_for_user("alice")}

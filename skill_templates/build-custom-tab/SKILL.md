@@ -154,6 +154,7 @@ Module functions (call as `tab_api.<name>`):
 - `video_look_tokens(look, user)`: a visible look's `--ds-*` variables and its font-face CSS, for a live motion preview.
 - `video_design_source(design_id, user)`: a design this person can open, as title, look, boards (title and HTML) and asset names.
 - `video_resources(video_id, user)`: a video's asset and render file names, its latest thumbnail and its render jobs.
+- `video_narration_peaks(video_id, user, per_second=40)`: each narrated beat's peak levels (0 to 255) read from its cached spoken line, for drawing a waveform; read only.
 - `video_create_project(user, project)`: create a video owned by the signed-in person; the project is validated and its look must be visible.
 - `video_save_project(video_id, project, user)`: save a video this person can edit; validated like the video routes.
 - `video_delete_project(video_id, user)`: delete a video this person can edit.

@@ -614,13 +614,18 @@ app.whenReady().then(async () => {
     assert.ok(await js("document.querySelector('.sc-import-count').textContent.includes('2 of 3 rows ready')"));
     assert.ok(await js("document.querySelector('.sc-problems').textContent.includes('Line 4: no posted post matches')"), 'Unmatched rows are named');
     await capture('desktop-report'); await noOverflow(); await labels();
+    // Content keeps the Studio section bar and its own header; the editor hides them only while a video is open.
+    assert.ok(await js("!document.querySelector('.studio-view').classList.contains('studio-editing') && !document.querySelector('.studio-sections').hidden && getComputedStyle(document.querySelector('.studio-view > .view-header')).display !== 'none'"), 'Content keeps its header and sections');
     await click('.sc-import button', 'Import 2 rows');
     for (let n = 0; n < 100 && !last('/metrics/import'); n++) await pause(50);
     assert.deepEqual(last('/metrics/import').body, { rows: [
       { post_id: 24, views: 1200, avg_view_duration_s: 30, video_length_s: 45, likes: 12 },
       { post_id: 25, views: 800, avg_view_duration_s: 22, video_length_s: 45 }] });
 
-    // 8. Phone layout: nothing spills sideways and every control is at least 44px.
+    // 8. Phone layout: nothing spills sideways and every control is at least 44px. The video editor's stylesheet is
+    // loaded too (it stays in the page once a video was opened), so its dense desktop rules cannot reach Content.
+    await js("new Promise(r => { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = '/static/css/studio-editor.css'; l.onload = l.onerror = r; document.head.append(l); })");
+    assert.ok(await js("[...document.styleSheets].some(s => (s.href || '').endsWith('/studio-editor.css') && s.cssRules.length > 20)"), 'Editor stylesheet loaded');
     win.setContentSize(390, 1000); await pause(350);
     for (const name of ['approvals', 'pipeline', 'channels', 'formats', 'characters', 'styles', 'scoreboard', 'report']) {
       await tab(name); await pause(250); await noOverflow(); await labels();

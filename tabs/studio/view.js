@@ -1,7 +1,13 @@
 import { api, clearSharedReads, el, toast, confirmDialog } from '/static/js/api.js';
+import { createMascot } from '/static/js/mascot.js';
+import * as M from '/static/js/studioEditorModel.js';
+import { createTimeline } from '/static/js/studioTimeline.js';
+import { sceneForm } from '/static/js/studioSceneForm.js';
+import { stageForm } from '/static/js/studioStageForm.js';
 
-// Runtime URL also works in the generated website demo, which keeps motion modules.
+// Runtime URLs also work in the generated website demo, which keeps motion modules.
 const MOTION_URL = '/static/motion/engine.js';
+const LAYOUT_URL = '/static/motion/layout.js';  // read only: the copy safe area and caption band for the guides
 
 const BASE = '/api/tab-studio';
 const ASPECTS = ['16:9', '9:16', '1:1'];
@@ -23,6 +29,7 @@ async function castSpecs(p) {
 const CAMERAS = ['still', 'push', 'pull', 'pan', 'shake'];
 const TRANSITIONS = ['cut', 'whip', 'zoom', 'flip', 'dither', 'mosaic', 'wipe'];
 const MOODS = ['energetic', 'calm', 'warm', 'dark', 'playful'];
+const PALETTES = ['dawn', 'mint', 'dusk', 'night', 'paper'];
 const clone = value => structuredClone(value);
 // A narrated beat lasts as long as its spoken line (the server measures it into `seconds`); others last their bars.
 const beatSeconds = (b, p) => Number.isFinite(b.seconds) && b.seconds > 0 ? b.seconds : Number(b.bars) * 240 / p.bpm;
@@ -100,9 +107,22 @@ async function preview(canvas, p, aspect) {
     document.head.append(style);
   }
   const characters = p.cast?.length ? await castSpecs(p) : {};
-  const player = mount(canvas, { ...p, characters }, { aspect, tokens: data.variables, assetsBase: `/api/videos/${p.id}/assets/` });
-  await player.ready;
-  return player;
+  const options = { aspect, tokens: data.variables, assetsBase: `/api/videos/${p.id}/assets/` };
+  try {
+    const player = mount(canvas, { ...p, characters }, options);
+    await player.ready;
+    return player;
+  } catch (error) {
+    // Pack B's 3D shots load three.js by its bare name, which only the render player's page maps; the app page cannot
+    // yet. Preview them as stand-in cards of the same length instead of losing the whole preview; renders are unchanged.
+    if (!p.beats.some(b => b.kind === 'stage') || !/three/i.test(error.message)) throw error;
+    const flat = { ...p, characters, beats: p.beats.map(b => b.kind !== 'stage' ? b : { ...b, kind: 'statement', stage: undefined, text: b.text || '3D shot', sub: '3D shot, drawn in the render' }) };
+    delete flat.renderer;
+    const player = mount(canvas, flat, options);
+    await player.ready;
+    player.standIn = true;
+    return player;
+  }
 }
 function loadJobs(id) {
   try { return JSON.parse(localStorage.getItem('kairos:studio-jobs:' + id) || '[]'); } catch { return []; }
@@ -227,49 +247,118 @@ export async function render(container, tabId, options = {}) {
   return cleanup;
 }
 
+// The editor (Content Studio Editor build spec, steps 1 and 2): docked panes (beats and assets, the preview with
+// safe-area guides, the inspector, the timeline), dense and in Kairos's own tokens, resizable and remembered per person.
+// Phone widths stack the same parts. The project stays the beat sheet the server validates; nothing here changes it.
+let editorStyles;
+function loadEditorStyles() {
+  editorStyles ||= new Promise(resolve => {
+    const link = el('link', { rel: 'stylesheet', href: '/static/css/studio-editor.css' });
+    link.addEventListener('load', () => resolve(), { once: true }); link.addEventListener('error', () => resolve(), { once: true });
+    document.head.append(link);
+  });
+  return editorStyles;
+}
+let username = null;
+async function whoAmI() {
+  if (username === null) { try { username = (await api('/api/auth/status')).username || 'local'; } catch { username = 'local'; } }
+  return username;
+}
+function loadPanes(user) { try { return JSON.parse(localStorage.getItem(M.panesKey(user)) || '{}'); } catch { return {}; } }
+function storePanes(user, panes) { try { localStorage.setItem(M.panesKey(user), JSON.stringify(panes)); } catch { /* applies for this visit */ } }
+function tabs(label, items, onShow) {
+  const list = el('div', { class: 'ste-tabs', role: 'tablist', 'aria-label': label });
+  const panels = items.map(([key, name, panel]) => {
+    panel.setAttribute('role', 'tabpanel'); panel.classList.add('ste-tabpanel'); panel.dataset.panel = key;
+    const tab = el('button', { type: 'button', role: 'tab', class: 'ste-tab', 'data-tab': key, text: name });
+    tab.addEventListener('click', () => show(key));
+    list.append(tab);
+    return [key, tab, panel];
+  });
+  function show(key) {
+    if (!panels.some(([k]) => k === key)) key = panels[0][0];
+    for (const [k, tab, panel] of panels) { const on = k === key; tab.setAttribute('aria-selected', String(on)); tab.tabIndex = on ? 0 : -1; panel.hidden = !on; }
+    onShow(key);
+  }
+  list.addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+    const at = panels.findIndex(([, tab]) => tab === document.activeElement); if (at < 0) return;
+    const next = panels[(at + (event.key === 'ArrowRight' ? 1 : panels.length - 1)) % panels.length];
+    event.preventDefault(); event.stopPropagation(); next[1].focus(); show(next[0]);
+  });
+  return { list, panels: panels.map(([, , panel]) => panel), show, current: () => panels.find(([, tab]) => tab.getAttribute('aria-selected') === 'true')?.[0] };
+}
+
 async function editor(host, id, looks, back, parentDisposed) {
-  let disposed = false, timer, previewTimer, pollTimer, frame = 0, mountGeneration = 0;
-  let selected = 0, aspect = '16:9', playing = false, looping = true, time = 0, lastFrame = 0, player;
-  let resources = { assets: [], renders: [], jobs: [] }, jobs = [], errors = {}, plan = null;
+  let disposed = false, timer, previewTimer, pollTimer, frame = 0, mountGeneration = 0, lastGroup = '', lastGroupAt = 0;
+  let selected = 0, aspect = '16:9', rate = 0, looping = true, time = 0, lastFrame = 0, player, layoutModule = null;
+  let resources = { assets: [], renders: [], jobs: [] }, jobs = [], errors = {}, plan = null, peaks = {}, peaksKey = '', accountCharacters = null;
+  const names = {}, forms = {};  // each cast character's name and its form (2d draws scenes, 3d plays stage beats)
   const state = sessions.get(id) || { p: null, undo: [], redo: [], dirty: false, revision: 0, saving: null, error: '' };
+  state.view ||= {};
   sessions.set(id, state);
+  const view = state.view;
   const endpoint = `/api/videos/${id}`;
-  const status = el('span', { role: 'status', 'aria-live': 'polite' });
-  const summaryError = el('p', { role: 'alert', class: 'studio-error' });
-  const list = el('div', { class: 'studio-beats', role: 'list', 'aria-label': 'Video beats' });
-  const inspector = el('aside', { class: 'studio-inspector', 'aria-label': 'Beat and project fields' });
-  const stage = el('div', { class: 'studio-stage' });
-  const previewError = el('p', { role: 'status', class: 'studio-error' });
-  const scrub = el('input', { type: 'range', min: 0, step: .01, value: 0, 'aria-label': 'Preview time' });
-  const markers = el('div', { class: 'studio-markers' });
-  const clock = el('output', { 'aria-label': 'Current preview time' });
-  const queue = el('section', { class: 'studio-queue', 'aria-label': 'Render queue' });
-  const historyHost = el('div');
-  const undo = button('Undo', () => travel('undo', 'redo'));
-  const redo = button('Redo', () => travel('redo', 'undo'));
-  const play = button('Play', () => { playing = !playing; play.textContent = playing ? 'Pause' : 'Play'; if (time >= duration(state.p)) time = 0; lastFrame = 0; });
-  const ask = el('textarea', { placeholder: 'Describe a change', 'aria-label': 'Describe a change', rows: 2, maxlength: 4000 });
-  const shell = el('div', { class: 'studio-editor', 'data-video-id': id });
   host.replaceChildren(el('p', { role: 'status', text: 'Loading video...' }));
+  let user = 'local';
   try {
-    const latest = await api(endpoint);
+    const [latest] = await Promise.all([api(endpoint), loadEditorStyles(), whoAmI().then(u => { user = u; })]);
     if (!state.dirty) state.p = latest;
     resources = await api(`${BASE}/videos/${id}/resources`);
     const recovered = await Promise.allSettled(loadJobs(id).map(jobId => api(`/api/video-jobs/${jobId}`)));
     jobs = [...new Map([...resources.jobs, ...recovered.filter(r => r.status === 'fulfilled').map(r => r.value)].map(j => [j.id, j])).values()];
-    aspect = state.p.aspects[0];
+    aspect = view.aspect && state.p.aspects.includes(view.aspect) ? view.aspect : state.p.aspects[0];
     await loadPlan();
   } catch (error) { host.replaceChildren(el('p', { role: 'alert', text: error.message }), button('Back to projects', back)); return () => { disposed = true; }; }
   if (parentDisposed()) return () => {};
+  let panes = M.clampPanes(loadPanes(user), { width: innerWidth, height: innerHeight });
+  const savePanes = () => storePanes(user, panes);
+  const total = () => M.totalSeconds(state.p);
+  const clipList = () => M.clips(state.p);
+
+  // -- the parts ------------------------------------------------------------------------------------------------
+  const status = el('span', { role: 'status', 'aria-live': 'polite', class: 'ste-status' });
+  const summaryError = el('p', { role: 'alert', class: 'studio-error' });
+  const list = el('div', { class: 'studio-beats', role: 'list', 'aria-label': 'Video beats' });
+  const inspector = el('div', { class: 'studio-inspector', 'aria-label': 'Beat fields' });
+  const projectPanel = el('div', { class: 'ste-project', 'aria-label': 'Project fields' });
+  const stage = el('div', { class: 'studio-stage' });
+  const frameBox = el('div', { class: 'ste-frame' });
+  const guides = el('div', { class: 'ste-guides', 'aria-hidden': 'true' });
+  stage.append(frameBox);
+  const previewError = el('p', { role: 'status', class: 'studio-error' });
+  const previewNote = el('p', { class: 'meta ste-preview-note', role: 'status' });
+  const clock = el('output', { 'aria-label': 'Current preview time', class: 'ste-clock' });
+  const rateBadge = el('span', { class: 'ste-rate', 'aria-live': 'polite' });
+  const queue = el('section', { class: 'studio-queue', 'aria-label': 'Render queue' });
+  const historyHost = el('div', { class: 'ste-history' });
+  const undo = button('Undo', () => travel('undo', 'redo'), { title: 'Undo (Ctrl + Z)' });
+  const redo = button('Redo', () => travel('redo', 'undo'), { title: 'Redo (Ctrl + Shift + Z)' });
+  const play = button('Play', () => togglePlay(), { class: 'btn primary ste-play', title: 'Play or pause (Space)' });
+  const guideToggle = button('Guides', () => run('guides'), { 'aria-pressed': String(panes.guides), title: 'Safe area guides (G)' });
+  const ask = el('textarea', { placeholder: 'Describe a change', 'aria-label': 'Describe a change', rows: 4, maxlength: 4000 });
+  const shell = el('div', { class: 'studio-editor ste-shell', 'data-video-id': id });
+  const timeline = createTimeline({
+    seek: t => { stop(); time = t; drawFrame(); },
+    select: index => selectBeat(index, { seek: true }),
+    move: (from, to) => move(from, to),
+    trim: (index, bars) => { selected = index; changed(p => { p.beats[index].bars = bars; }); drawInspector(); },
+    zoom: (z, anchor, offset) => { view.zoom = z; view.fit = anchor === 0 && offset === undefined && z === M.fitZoom(total(), timeline.width()); refreshTimeline(); timeline.keep(anchor ?? time, offset); },
+    toggleSnap: () => run('snap'),
+    clearWorkArea: () => run('clear-work-area'),
+  });
+
+  // -- saving, undo and the timing of everything ---------------------------------------------------------------
   function renderErrors() {
     summaryError.textContent = state.error;
     for (const node of shell.querySelectorAll('[data-error-path]')) {
-      const path = node.dataset.errorPath;
-      node.textContent = Object.entries(errors).filter(([key]) => key === path || key.startsWith(path + '[')).map(([, value]) => value).join(' ');
+      const path = node.dataset.errorPath, exact = node.hasAttribute('data-error-exact');
+      node.textContent = Object.entries(errors).filter(([key]) => key === path || (!exact && key.startsWith(path + '['))).map(([, value]) => value).join(' ');
       const input = node.parentElement.querySelector('input,textarea,select');
       input?.setAttribute('aria-invalid', String(!!node.textContent));
     }
     status.textContent = state.saving ? 'Saving...' : state.error ? 'Changes need attention' : state.dirty ? 'Unsaved changes' : 'Saved';
+    status.dataset.state = state.saving ? 'saving' : state.error ? 'error' : state.dirty ? 'dirty' : 'saved';
     undo.disabled = !state.undo.length; redo.disabled = !state.redo.length;
   }
   async function save() {
@@ -291,14 +380,17 @@ async function editor(host, id, looks, back, parentDisposed) {
         }
         const match = /(?:\d+: )?([\w]+(?:\[\d+\])?(?:\.[\w]+(?:\[\d+\])?)*): (.+)/.exec(error.message);
         if (match) errors[match[1]] = match[2];
-      } finally { state.saving = null; if (!disposed) renderErrors(); }
+      } finally { state.saving = null; if (!disposed) { renderErrors(); timing(); } }
     })();
     renderErrors(); await state.saving;
     if (state.dirty && !state.error) return save();
     return !state.error;
   }
-  function changed(action, record = true) {
-    if (record) { state.undo.push(clone(state.p)); state.undo = state.undo.slice(-30); state.redo = []; }
+  // Every edit goes through here. Typing in one field, or dragging one slider, is one undo step, not one per key.
+  function changed(action, record = true, group = '') {
+    const now = Date.now();
+    if (record && !(group && group === lastGroup && now - lastGroupAt < 1500)) { state.undo.push(clone(state.p)); state.undo = state.undo.slice(-30); state.redo = []; }
+    lastGroup = record ? group : ''; lastGroupAt = now;
     action(state.p); state.revision++; state.dirty = true; state.error = ''; errors = {};
     clearTimeout(timer); timer = setTimeout(save, 500);
     clearTimeout(previewTimer); previewTimer = setTimeout(remount, 250);
@@ -306,70 +398,227 @@ async function editor(host, id, looks, back, parentDisposed) {
   }
   function travel(from, to) {
     if (!state[from].length) return;
-    state[to].push(clone(state.p)); state.p = state[from].pop();
+    state[to].push(clone(state.p)); state.p = state[from].pop(); lastGroup = '';
     selected = Math.min(selected, state.p.beats.length - 1);
-    changed(() => {}, false); drawInspector();
+    changed(() => {}, false); drawInspector(); drawProject();
+  }
+  function selectBeat(index, { seek = false } = {}) {
+    if (index < 0 || index >= state.p.beats.length) return;
+    selected = index;
+    if (seek) { const c = clipList()[index]; if (time < c.start || time >= c.end) { stop(); time = c.start; } }
+    drawBeats(); drawInspector(); refreshTimeline(); timeline.reveal(index); drawFrame();
   }
   function move(from, to) {
     if (from < 0 || from >= state.p.beats.length || to < 0 || to >= state.p.beats.length || from === to) return;
     changed(p => { const [beat] = p.beats.splice(from, 1); p.beats.splice(to, 0, beat); });
-    selected = to; drawBeats(); drawInspector();
+    selected = to; drawBeats(); drawInspector(); refreshTimeline();
     list.querySelector(`[data-index="${to}"] button`)?.focus();
   }
-  function drawBeats() {
-    list.replaceChildren();
-    const starts = new Map((state.p.chapters || []).map((c, n) => [c.start, [c, n]]));
-    state.p.beats.forEach((beat, index) => {
-      if (starts.has(beat.id)) { const [c, n] = starts.get(beat.id); list.append(el('h4', { class: 'studio-chapter', role: 'presentation', text: `Chapter ${n + 1}: ${c.title}` })); }
-      const row = el('div', { class: 'studio-beat' + (index === selected ? ' selected' : ''), draggable: true, role: 'listitem', 'data-index': index });
-      row.append(button(`${index + 1}. ${beat.kind}: ${beat.text || beat.number || (beat.items || []).filter(Boolean).join(', ') || 'No text'} (${seconds(beatSeconds(beat, state.p))})`, () => { selected = index; drawBeats(); drawInspector(); }, { 'aria-pressed': String(index === selected) }),
-        el('div', { class: 'studio-actions' }, [button('Move up', () => move(index, index - 1), { disabled: index === 0, 'aria-label': `Move beat ${index + 1} up` }), button('Move down', () => move(index, index + 1), { disabled: index === state.p.beats.length - 1, 'aria-label': `Move beat ${index + 1} down` })]));
-      row.addEventListener('dragstart', event => event.dataTransfer.setData('text/plain', String(index)));
-      row.addEventListener('dragover', event => event.preventDefault());
-      row.addEventListener('drop', event => { event.preventDefault(); const from = Number(event.dataTransfer.getData('text/plain')); if (Number.isInteger(from)) move(from, index); });
-      row.addEventListener('keydown', event => { if (event.altKey && ['ArrowUp', 'ArrowDown'].includes(event.key)) { event.preventDefault(); move(index, index + (event.key === 'ArrowUp' ? -1 : 1)); } });
-      list.append(row);
-    });
+  function duplicateBeat() {
+    if (state.p.beats.length >= maxBeats(state.p)) throw Error(`A video can have at most ${maxBeats(state.p)} beats.`);
+    changed(p => p.beats.splice(selected + 1, 0, { ...clone(p.beats[selected]), id: beatId() })); selected++; drawBeats(); drawInspector(); refreshTimeline();
+  }
+  function deleteBeat() {
+    if (state.p.beats.length === 1) throw Error('Keep at least one beat.');
+    changed(p => {
+      const [gone] = p.beats.splice(selected, 1), next = p.beats[selected];
+      // A chapter that started at the deleted beat now starts at the next one (or ends, when that one starts a chapter).
+      if (p.chapters?.length) p.chapters = p.chapters.flatMap(c => c.start !== gone.id ? [c] : next && !p.chapters.some(o => o.start === next.id) ? [{ ...c, start: next.id }] : []);
+    }); selected = Math.min(selected, state.p.beats.length - 1); drawBeats(); drawInspector(); refreshTimeline();
+  }
+  function refreshTimeline() {
+    const clipsNow = clipList(), sum = total();
+    // Until the person zooms, the whole video fits, at any pane width.
+    if (!Number.isFinite(view.zoom) || view.fit !== false) { view.zoom = M.fitZoom(sum, timeline.width() || 900); view.fit ??= true; }
+    if (Number.isFinite(view.inPoint) && view.inPoint > sum) delete view.inPoint;
+    if (Number.isFinite(view.outPoint) && view.outPoint > sum) delete view.outPoint;
+    timeline.update({ p: state.p, list: clipsNow, total: sum, time, selected, zoom: view.zoom, snap: panes.snap, inPoint: view.inPoint, outPoint: view.outPoint,
+      marks: M.chapterMarks(state.p, clipsNow), peaks, spans: M.speechSpans(state.p, clipsNow), music: state.p.music });
   }
   function timing() {
-    const total = duration(state.p); scrub.max = total;
-    let start = 0; markers.replaceChildren();
-    for (const [index, beat] of state.p.beats.entries()) {
-      const at = start;
-      markers.append(button(String(index + 1), () => { time = at; selected = index; drawBeats(); drawInspector(); drawFrame(); }, { 'aria-label': `Seek to beat ${index + 1}`, style: `flex:${beatSeconds(beat, state.p)}` }));
-      start += beatSeconds(beat, state.p);
-    }
-    time = Math.min(time, total); drawFrame();
+    time = Math.min(time, total()); refreshTimeline(); drawFrame(); loadPeaks();
   }
   function drawFrame() {
     try { player?.drawFrame(Math.min(time, player.duration)); } catch (error) { previewError.textContent = error.message; }
-    scrub.value = time; clock.textContent = `${seconds(time)} / ${seconds(duration(state.p))}`;
+    clock.textContent = `${M.timecode(time)} / ${M.timecode(total())}`;
+    timeline.setTime(time, rate !== 0);
+  }
+  // The narration lane draws each spoken line's own peak levels (read from its cached audio by the server).
+  async function loadPeaks() {
+    const key = state.p.beats.map(b => b.spoken?.key || '').join(',');
+    if (key === peaksKey) return;
+    peaksKey = key;
+    if (!state.p.beats.some(b => b.spoken)) { peaks = {}; return; }
+    try {
+      const result = await api(`${BASE}/videos/${id}/waveform`);
+      if (disposed || key !== peaksKey) return;
+      peaks = result.beats || {}; refreshTimeline();
+    } catch { /* the lane keeps the measured caption spans */ }
   }
   async function remount() {
     const generation = ++mountGeneration;
     const canvas = el('canvas', { 'aria-label': 'Live video preview' });
+    // The browser can drop a canvas's pixels (a GPU reset); the engine's own buffers go too, so mount it again.
+    canvas.addEventListener('contextrestored', () => { if (!disposed && canvas.isConnected) remount(); });
     try {
-      const next = await preview(canvas, clone(state.p), aspect);
+      const [next] = await Promise.all([preview(canvas, clone(state.p), aspect), layoutModule || import(LAYOUT_URL).then(m => { layoutModule = m; })]);
       if (disposed || generation !== mountGeneration) return;
-      player = next; stage.replaceChildren(canvas); stage.dataset.aspect = aspect; previewError.textContent = ''; drawFrame();
+      let named = false;
+      for (const [cid, entry] of Object.entries(await castSpecs(state.p).catch(() => ({})))) { const form = entry.spec?.form === '3d' ? '3d' : '2d'; if ((entry.spec?.name && names[cid] !== entry.spec.name) || forms[cid] !== form) { names[cid] = entry.spec?.name || names[cid]; forms[cid] = form; named = true; } }
+      if (named) { drawInspector(); drawProject(); }
+      player = next; frameBox.replaceChildren(canvas, guides); stage.dataset.aspect = aspect; previewError.textContent = ''; previewNote.textContent = next.standIn ? 'The 3D shots show here as stand-in cards of the same length; renders draw them in 3D.' : ''; fitFrame(); drawFrame();
     } catch (error) { if (!disposed && generation === mountGeneration) { player = null; previewError.textContent = 'Preview unavailable: ' + error.message; } }
+  }
+  // The preview keeps its aspect inside whatever room the pane has; the guides sit over it, never in the video.
+  function fitFrame() {
+    const [w, h] = { '16:9': [1920, 1080], '9:16': [1080, 1920], '1:1': [1080, 1080] }[aspect];
+    const room = stage.getBoundingClientRect();
+    if (!(room.width > 0)) return;
+    const phone = matchMedia('(max-width: 760px)').matches;
+    const scale = Math.max(.05, Math.min((room.width - 16) / w, phone ? 300 / h : (room.height - 16) / h));
+    frameBox.style.width = Math.round(w * scale) + 'px'; frameBox.style.height = Math.round(h * scale) + 'px';
+    // A resized canvas element can come back blank in some compositors: draw the current frame again.
+    if (player) try { player.drawFrame(Math.min(time, player.duration)); } catch { /* drawFrame reports its own errors */ }
+    guides.hidden = !panes.guides;
+    if (!layoutModule) return;
+    const captioned = state.p.narration?.captions !== false && state.p.beats.some(b => b.spoken?.parts?.length);
+    const box = (name, r, label) => { const node = el('div', { class: 'ste-guide ' + name, 'data-guide': name }, [el('span', { text: label })]);
+      Object.assign(node.style, { left: r.x / w * 100 + '%', top: r.y / h * 100 + '%', width: r.w / w * 100 + '%', height: r.h / h * 100 + '%' }); return node; };
+    guides.replaceChildren(box('copy', layoutModule.safeArea(aspect, captioned), 'Copy safe area'));
+    if (captioned) guides.append(box('captions', layoutModule.captionBand(aspect), 'Captions'));
+  }
+
+  // -- playback -------------------------------------------------------------------------------------------------
+  function setRate(next) {
+    rate = next; lastFrame = 0;
+    play.textContent = rate ? 'Pause' : 'Play';
+    rateBadge.textContent = rate && rate !== 1 ? `${rate > 0 ? '' : '-'}${Math.abs(rate)}x` : '';
+  }
+  function stop() { if (rate) setRate(0); }
+  function togglePlay() {
+    if (rate) return setRate(0);
+    const range = M.playRange(total(), view.inPoint, view.outPoint);
+    if (time >= range.end - 1 / 30 || time < range.start) time = range.start;
+    return setRate(1);
   }
   function animate(now) {
     if (disposed) return;
-    if (playing && player) {
-      if (lastFrame) time += Math.min((now - lastFrame) / 1000, .1);
-      if (time >= player.duration) { time = looping ? time % player.duration : player.duration; if (!looping) { playing = false; play.textContent = 'Play'; } }
+    if (rate && player) {
+      if (lastFrame) {
+        const out = M.advance(time, Math.min((now - lastFrame) / 1000, .1), rate, M.playRange(Math.min(total(), player.duration), view.inPoint, view.outPoint), looping);
+        time = out.t; if (out.stopped) setRate(0);
+      }
       drawFrame();
     }
     lastFrame = now; frame = requestAnimationFrame(animate);
   }
-  scrub.addEventListener('input', () => { time = Number(scrub.value); drawFrame(); });
+
+  // -- the keyboard ---------------------------------------------------------------------------------------------
+  const sheet = el('dialog', { class: 'ste-sheet', 'aria-label': 'Keyboard shortcuts' }, [el('h3', { text: 'Keyboard shortcuts' }),
+    el('p', { class: 'meta', text: 'They work anywhere in the editor except while you type in a field. Ctrl is Cmd on a Mac. Enter presses a focused button.' }),
+    el('dl', {}, M.SHORTCUTS.flatMap(([keys, what]) => [el('dt', {}, [el('kbd', { text: keys })]), el('dd', { text: what })])),
+    el('form', { method: 'dialog' }, [el('button', { type: 'submit', class: 'btn primary', text: 'Close' })])]);
+  function run(action) {
+    const sum = total(), clipsNow = clipList();
+    switch (action) {
+      case 'play': return togglePlay();
+      case 'shuttle-j': case 'shuttle-k': case 'shuttle-l': return setRate(M.shuttle(rate, action.slice(-1)));
+      case 'back-1': case 'forward-1': case 'back-10': case 'forward-10':
+        stop(); time = M.stepFrames(time, (action.startsWith('back') ? -1 : 1) * (action.endsWith('10') ? 10 : 1), sum); return drawFrame();
+      case 'previous-edge': case 'next-edge': stop(); time = M.edgeTime(clipsNow, time, action === 'previous-edge' ? -1 : 1); return drawFrame();
+      case 'start': stop(); time = 0; return drawFrame();
+      case 'end': stop(); time = M.stepFrames(sum, 0, sum); return drawFrame();
+      case 'mark-in': view.inPoint = time; if (Number.isFinite(view.outPoint) && view.outPoint <= time) delete view.outPoint; return refreshTimeline();
+      case 'mark-out': view.outPoint = time; if (Number.isFinite(view.inPoint) && view.inPoint >= time) delete view.inPoint; return refreshTimeline();
+      case 'clear-work-area': delete view.inPoint; delete view.outPoint; return refreshTimeline();
+      case 'delete': return deleteBeat();
+      case 'duplicate': return duplicateBeat();
+      case 'move-earlier': return move(selected, selected - 1);
+      case 'move-later': return move(selected, selected + 1);
+      case 'undo': return travel('undo', 'redo');
+      case 'redo': return travel('redo', 'undo');
+      case 'zoom-in': case 'zoom-out': view.fit = false; view.zoom = M.zoomBy(view.zoom, action === 'zoom-in' ? 1.5 : 1 / 1.5); refreshTimeline(); return timeline.keep(time);
+      case 'zoom-fit': view.fit = true; refreshTimeline(); return timeline.keep(0, 0);
+      case 'snap': panes.snap = !panes.snap; savePanes(); return refreshTimeline();
+      case 'guides': panes.guides = !panes.guides; savePanes(); guideToggle.setAttribute('aria-pressed', String(panes.guides)); guideToggle.classList.toggle('primary', panes.guides); return fitFrame();
+      case 'shortcuts': if (!sheet.open) sheet.showModal(); return undefined;
+      default: return undefined;
+    }
+  }
+  let spaceTaken = false;
+  function onKey(event) {
+    if (disposed || !shell.isConnected || event.defaultPrevented || event.isComposing) return;
+    if (M.isTyping(event.target) || sheet.open || document.querySelector('.confirm-panel, dialog[open]')) return;
+    if (event.target && event.target !== document.body && !shell.contains(event.target)) return;
+    const action = M.keyAction(event);
+    if (!action) return;
+    // Space plays even on a focused button (Enter still presses it), as in other video editors.
+    event.preventDefault(); spaceTaken = event.key === ' ';
+    try { run(action); } catch (error) { toast(error.message, 'error'); }
+  }
+  const onKeyUp = event => { if (spaceTaken && event.key === ' ') { event.preventDefault(); spaceTaken = false; } };
+  document.addEventListener('keydown', onKey);
+  document.addEventListener('keyup', onKeyUp, true);
+
+  // -- the left pane: beats, assets, Ask Kairos ------------------------------------------------------------------
+  function drawBeats() {
+    list.replaceChildren();
+    const starts = new Map((state.p.chapters || []).map((c, n) => [c.start, [c, n]]));
+    const clipsNow = clipList();
+    state.p.beats.forEach((beat, index) => {
+      if (starts.has(beat.id)) { const [c, n] = starts.get(beat.id); list.append(el('h4', { class: 'studio-chapter', role: 'presentation', text: `Chapter ${n + 1}: ${c.title}` })); }
+      const row = el('div', { class: 'studio-beat' + (index === selected ? ' selected' : ''), draggable: true, role: 'listitem', 'data-index': index });
+      row.append(button(`${index + 1}. ${beat.kind}: ${M.beatLabel(beat)} (${seconds(clipsNow[index].seconds)})`, () => selectBeat(index, { seek: true }), { 'aria-pressed': String(index === selected), class: 'btn studio-beat-pick' }),
+        el('div', { class: 'studio-actions ste-move' }, [button('Up', () => move(index, index - 1), { disabled: index === 0, 'aria-label': `Move beat ${index + 1} up` }), button('Down', () => move(index, index + 1), { disabled: index === state.p.beats.length - 1, 'aria-label': `Move beat ${index + 1} down` })]));
+      row.addEventListener('dragstart', event => event.dataTransfer.setData('text/plain', String(index)));
+      row.addEventListener('dragover', event => event.preventDefault());
+      row.addEventListener('drop', event => { event.preventDefault(); const from = Number(event.dataTransfer.getData('text/plain')); if (Number.isInteger(from)) move(from, index); });
+      row.addEventListener('keydown', event => { if (event.altKey && ['ArrowUp', 'ArrowDown'].includes(event.key)) { event.preventDefault(); event.stopPropagation(); move(index, index + (event.key === 'ArrowUp' ? -1 : 1)); } });
+      list.append(row);
+    });
+  }
+  const addKind = select('Kind of beat to add', KINDS, 'statement', () => {});
+  const beatsPanel = el('div', {}, [list, el('div', { class: 'ste-add' }, [addKind, button('Add beat', () => {
+    if (state.p.beats.length >= maxBeats(state.p)) throw Error(`A video can have at most ${maxBeats(state.p)} beats.`);
+    changed(p => p.beats.splice(selected + 1, 0, { id: beatId(), kind: addKind.value, text: '', bars: 1, ...(addKind.value === 'scene' ? { scene: structuredClone(NEW_SCENE) } : {}), ...(addKind.value === 'stage' ? { stage: structuredClone(NEW_STAGE) } : {}) }));
+    selectBeat(selected + 1);
+  })]), el('p', { class: 'meta', text: 'Drag on the timeline or here to reorder. Alt + Up or Down moves a beat in this list.' })]);
+  const assetsPanel = el('div', { class: 'ste-assets' });
+  function drawAssets() {
+    const beat = state.p.beats[selected], pictured = ['image', 'split', 'logo'].includes(beat?.kind);
+    assetsPanel.replaceChildren(el('p', { class: 'meta', text: pictured ? `Choose an image for beat ${selected + 1}.` : 'Images in this video. Select an image, split or logo beat to use one.' }));
+    const grid = el('div', { class: 'ste-asset-tiles' });
+    for (const asset of resources.assets) {
+      const on = beat?.image === asset;
+      grid.append(el('button', { type: 'button', class: 'ste-asset' + (on ? ' selected' : ''), disabled: !pictured, 'aria-pressed': String(on), 'aria-label': `Use image ${asset.slice(7, 19)} on beat ${selected + 1}`,
+        onclick: () => { changed(p => { p.beats[selected].image = asset; }); drawInspector(); drawAssets(); } }, [el('img', { src: `/api/videos/${id}/assets/${asset.slice(7)}`, alt: '' })]));
+    }
+    if (!resources.assets.length) grid.append(el('p', { class: 'meta', text: 'No images yet. Upload one from the Beat panel of an image beat, or bring one from a design.' }));
+    assetsPanel.append(grid);
+  }
+  const askMascot = createMascot({ state: 'idle', size: 56 });
+  const askPanel = el('div', { class: 'ste-ask' }, [el('div', { class: 'ste-ask-head' }, [askMascot, el('p', { class: 'meta', text: 'Kairos opens a chat about this video with your words as a draft. Nothing is sent until you send it.' })]),
+    field('Describe a change', ask), button('Ask Kairos', async () => {
+      if (!ask.value.trim()) { ask.focus(); return; }
+      askMascot.setAttribute('state', 'thinking');
+      try {
+        if (!await save()) throw Error('Fix the highlighted fields before asking Kairos.');
+        const result = await write(`${BASE}/chat`, { video_id: id });
+        go('chat', { sessionId: result.session_id, mobileDraft: `For [Video: ${state.p.title}](/videos/${id}): ${ask.value.trim()}`, mobileConversation: true });
+      } finally { askMascot.setAttribute('state', 'idle'); }
+    }, { class: 'btn primary' })]);
+  const leftTabs = tabs('Beats and assets', [['beats', 'Beats', beatsPanel], ['assets', 'Assets', assetsPanel], ['ask', 'Ask Kairos', askPanel]],
+    key => { panes.leftTab = key; savePanes(); if (key === 'assets') drawAssets(); });
+
+  // -- the right pane: the selected beat, the project, renders, history -------------------------------------------
+  const group = (title, children, extra = {}) => el('section', { class: 'ste-group', ...extra }, [el('h4', { text: title }), ...children]);
+  const sceneHelpers = { field, select, change: (mutate, g) => changed(mutate, true, g), redraw: () => drawInspector() };
   function drawInspector() {
     inspector.replaceChildren();
-    const beat = state.p.beats[selected], path = `beats[${selected}]`;
-    const setBeat = (key, value) => changed(p => { if ((key === 'image' || key === 'say') && !value) delete p.beats[selected][key]; else p.beats[selected][key] = value; });
+    const beat = state.p.beats[selected], path = `beats[${selected}]`, c = clipList()[selected];
+    const setBeat = (key, value) => changed(p => { if ((key === 'image' || key === 'say') && !value) delete p.beats[selected][key]; else p.beats[selected][key] = value; }, true, path + '.' + key);
     const textField = (label, key, limit, multiline = false) => {
-      const input = el(multiline ? 'textarea' : 'input', { value: beat[key] ?? '', 'aria-label': label, maxlength: limit, ...(multiline ? { rows: 3 } : {}) });
+      const input = el(multiline ? 'textarea' : 'input', { value: beat[key] ?? '', 'aria-label': label, maxlength: limit, ...(multiline ? { rows: 2 } : {}) });
       input.value = beat[key] ?? '';
       const node = field(label, input, path + '.' + key, `${String(beat[key] ?? '').length}/${limit} characters`);
       input.addEventListener('input', () => { setBeat(key, input.value); node.querySelector('.meta').textContent = `${input.value.length}/${limit} characters`; });
@@ -379,56 +628,25 @@ async function editor(host, id, looks, back, parentDisposed) {
     // so switching kinds back keeps what was typed.
     const kind = beat.kind, pictured = ['image', 'split', 'logo'].includes(kind);
     const only = (node, shown) => { node.hidden = !shown; return node; };
-    inspector.append(el('h3', { text: `Beat ${selected + 1}` }), field('Kind', select('Beat kind', KINDS, beat.kind, v => {
+    inspector.append(el('div', { class: 'ste-inspector-head' }, [el('h3', { text: `Beat ${selected + 1} of ${state.p.beats.length}` }),
+      el('p', { class: 'meta', text: `${M.timecode(c.start)} to ${M.timecode(c.end)}, ${seconds(c.seconds)}${c.narrated ? ', length set by its narration' : ''}` })]));
+    const items = el('textarea', { rows: 4, 'aria-label': 'List items, one per line', value: (beat.items || []).join('\n') });
+    items.value = (beat.items || []).join('\n');
+    const itemField = field('List items, one per line', items, path + '.items', `${(beat.items || []).length}/5 items; 60 characters each`);
+    items.addEventListener('input', () => { const lines = items.value ? items.value.split('\n') : []; setBeat('items', lines); itemField.querySelector('.meta').textContent = `${lines.length}/5 items; ${lines.map(s => s.length + '/60').join(', ')} characters`; });
+    inspector.append(group('Content', [field('Kind', select('Beat kind', KINDS, beat.kind, v => {
       // A scene needs its scene; another kind must not keep one.
       changed(p => {
         const b = p.beats[selected]; b.kind = v;
         if (v === 'scene') b.scene ||= structuredClone(NEW_SCENE); else delete b.scene;
         if (v === 'stage') b.stage ||= structuredClone(NEW_STAGE); else delete b.stage;
-      }); drawInspector();
+      }); drawInspector(); drawProject();
     }), path + '.kind'),
-      textField('Text', 'text', 140, true), only(textField('Supporting text', 'sub', 100), !['big-number', 'list'].includes(kind)),
-      only(textField('Number', 'number', 140), kind === 'big-number'));
-    const items = el('textarea', { rows: 5, 'aria-label': 'List items, one per line', value: (beat.items || []).join('\n') });
-    items.value = (beat.items || []).join('\n');
-    const itemField = field('List items, one per line', items, path + '.items', `${(beat.items || []).length}/5 items; 60 characters each`);
-    items.addEventListener('input', () => { const lines = items.value ? items.value.split('\n') : []; setBeat('items', lines); itemField.querySelector('.meta').textContent = `${lines.length}/5 items; ${lines.map(s => s.length + '/60').join(', ')} characters`; });
-    // A scene's setting, shot, cast and props as JSON (the Editor bot usually writes these; character ids come from the cast).
-    const sceneText = el('textarea', { rows: 8, 'aria-label': 'Scene as JSON', spellcheck: 'false' });
-    sceneText.value = JSON.stringify(beat.scene || NEW_SCENE, null, 1);
-    const sceneField = field('Scene (setting, shot, cast, props)', sceneText, path + '.scene', 'Settings: meadow, city, space, room, ocean, lab. Shots: wide, medium, close.');
-    sceneText.addEventListener('input', () => {
-      try { const value = JSON.parse(sceneText.value); setBeat('scene', value); sceneField.querySelector('.meta').textContent = 'Saved.'; }
-      catch { sceneField.querySelector('.meta').textContent = 'Not valid JSON yet; nothing saved.'; }
-    });
-    const stageText = el('textarea', { rows: 10, 'aria-label': 'Stage as JSON', spellcheck: 'false' });
-    stageText.value = JSON.stringify(beat.stage || NEW_STAGE, null, 1);
-    const stageField = field('3D stage (set, shot, cast, people, props, labels)', stageText, path + '.stage',
-      'Sets: lavender, peach, mint, sky, night. Shots: wide, medium, close. Props: ball, block, pillar, ring, coin. Labels float over c0 (the first cast member) or p0 (the first person).');
-    stageText.addEventListener('input', () => {
-      try { setBeat('stage', JSON.parse(stageText.value)); stageField.querySelector('.meta').textContent = 'Saved.'; }
-      catch { stageField.querySelector('.meta').textContent = 'Not valid JSON yet; nothing saved.'; }
-    });
-    inspector.append(only(itemField, kind === 'list'), only(sceneField, kind === 'scene'), only(stageField, kind === 'stage'), textField('Narration (the line spoken over this beat)', 'say', 400, true));
-    // Chapters: a long narrated video (up to 20 minutes) in parts; each chapter starts at a beat and needs a title.
-    const chapter = (state.p.chapters || []).find(c => c.start === beat.id);
-    const chapterTitle = el('input', { value: chapter?.title || '', maxlength: 80, 'aria-label': 'Chapter that starts at this beat' });
-    chapterTitle.value = chapter?.title || '';
-    const chapterField = field('Chapter that starts here', chapterTitle, 'chapters', 'Leave empty for none. A long video has 2 to 30 chapters, the first at the first beat; YouTube shows 3 or more, each at least 10 seconds.');
-    chapterTitle.addEventListener('input', () => changed(p => {
-      const order = new Map(p.beats.map((b, i) => [b.id, i])), title = chapterTitle.value;
-      let list = (p.chapters || []).filter(c => c.start !== beat.id);
-      if (title.trim()) list.push({ ...(chapter ? { id: chapter.id } : { id: 'c' + crypto.randomUUID().replaceAll('-', '').slice(0, 10) }), title, start: beat.id });
-      list = list.sort((a, b) => order.get(a.start) - order.get(b.start));
-      if (list.length) p.chapters = list; else delete p.chapters;
-    }));
-    inspector.append(only(chapterField, !!beat.say || !!state.p.chapters?.length));
-    const bars = el('input', { type: 'number', min: .5, max: 8, step: .5, value: beat.bars, 'aria-label': 'Beat bars', oninput: event => setBeat('bars', Number(event.target.value)) });
-    inspector.append(field('Bars', bars, path + '.bars', beat.say ? 'This beat is narrated, so it lasts as long as its spoken line; bars do not change it.'
-      : '0.5 to 8, in half-bar steps. Total video: at most 120 seconds, 480 when narrated, or 20 minutes in chapters.'),
-      field('Camera', select('Camera', CAMERAS, beat.camera || 'still', v => setBeat('camera', v)), path + '.camera'),
-      field('Transition to next beat', select('Transition', TRANSITIONS, beat.transition || 'cut', v => setBeat('transition', v)), path + '.transition'), only(textField('Image treatment', 'treatment', 80), pictured));
-    inspector.append(only(field('Image', select('Video image', [['', 'No image'], ...resources.assets.map(a => [a, a.slice(7, 23) + '…'])], beat.image || '', v => setBeat('image', v)), path + '.image'), pictured));
+    textField('Text', 'text', 140, true), only(textField('Supporting text', 'sub', 100), !['big-number', 'list'].includes(kind)),
+    only(textField('Number', 'number', 140), kind === 'big-number'), only(itemField, kind === 'list')]));
+    if (kind === 'scene') inspector.append(group('Scene', [sceneForm({ beat, path, cast: state.p.cast || [], names, forms, helpers: sceneHelpers })], { 'data-group': 'scene' }));
+    if (kind === 'stage') inspector.append(group('3D stage', [stageForm({ beat, path, cast: state.p.cast || [], names, forms, helpers: sceneHelpers })], { 'data-group': 'stage' }));
+    // Pictures.
     const upload = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/gif,image/webp', 'aria-label': 'Upload an image' });
     upload.addEventListener('change', async () => {
       if (!upload.files[0]) return;
@@ -439,56 +657,72 @@ async function editor(host, id, looks, back, parentDisposed) {
         changed(p => { const target = p.beats.find(b => b.id === targetId); if (target) target.image = result.asset; }); drawInspector();
       } catch (error) { toast(error.message, 'error'); } finally { upload.disabled = false; }
     });
-    inspector.append(only(field('Upload an image', upload, '', 'PNG, JPEG, GIF or WebP. Up to 25 MB and 40 megapixels.'), pictured), only(button('Choose image from a design', async () => {
-      const designs = await api('/api/designs');
-      const targetId = beat.id;
-      const assetsHost = el('div');
-      const designPicker = select('Design images', [['', 'Choose a design'], ...designs.map(d => [d.id, d.title])], '', async designId => {
-        try {
-          assetsHost.replaceChildren();
-          if (!designId) return;
-          const assets = await api(`${BASE}/designs/${designId}/assets`);
-          if (!assets.length) assetsHost.append(el('p', { text: 'This design has no images.' }));
-          for (const asset of assets) assetsHost.append(button('Use image ' + asset.slice(7, 19), async () => {
-            const result = await write(endpoint + '/assets', { design_id: designId, asset });
-            resources.assets = [...new Set([...resources.assets, result.asset])];
-            changed(p => { const target = p.beats.find(b => b.id === targetId); if (target) target.image = result.asset; }); drawInspector();
-          }), el('img', { src: `/api/designs/${designId}/${asset}`, alt: 'Design image ' + asset.slice(7, 19), class: 'studio-thumbnail' }));
-        } catch (error) { toast(error.message, 'error'); }
-      });
-      inspector.append(field('Design images', designPicker), assetsHost); designPicker.focus();
-    }), pictured), el('div', { class: 'studio-actions' }, [button('Duplicate beat', () => {
-      if (state.p.beats.length >= maxBeats(state.p)) throw Error(`A video can have at most ${maxBeats(state.p)} beats.`);
-      changed(p => p.beats.splice(selected + 1, 0, { ...clone(p.beats[selected]), id: beatId() })); selected++; drawBeats(); drawInspector();
-    }), button('Delete beat', () => {
-      if (state.p.beats.length === 1) throw Error('Keep at least one beat.');
-      changed(p => {
-        const [gone] = p.beats.splice(selected, 1), next = p.beats[selected];
-        // A chapter that started at the deleted beat now starts at the next one (or ends, when that one starts a chapter).
-        if (p.chapters?.length) p.chapters = p.chapters.flatMap(c => c.start !== gone.id ? [c] : next && !p.chapters.some(o => o.start === next.id) ? [{ ...c, start: next.id }] : []);
-      }); selected = Math.min(selected, state.p.beats.length - 1); drawBeats(); drawInspector();
-    })]));
+    const designHost = el('div');
+    inspector.append(only(group('Picture', [field('Image', select('Video image', [['', 'No image'], ...resources.assets.map(a => [a, a.slice(7, 23) + '…'])], beat.image || '', v => setBeat('image', v)), path + '.image'),
+      textField('Image treatment', 'treatment', 80), field('Upload an image', upload, '', 'PNG, JPEG, GIF or WebP. Up to 25 MB and 40 megapixels.'),
+      button('Choose image from a design', async () => {
+        const designs = await api('/api/designs');
+        const targetId = beat.id;
+        const assetsHost = el('div');
+        const designPicker = select('Design images', [['', 'Choose a design'], ...designs.map(d => [d.id, d.title])], '', async designId => {
+          try {
+            assetsHost.replaceChildren();
+            if (!designId) return;
+            const assets = await api(`${BASE}/designs/${designId}/assets`);
+            if (!assets.length) assetsHost.append(el('p', { text: 'This design has no images.' }));
+            for (const asset of assets) assetsHost.append(button('Use image ' + asset.slice(7, 19), async () => {
+              const result = await write(endpoint + '/assets', { design_id: designId, asset });
+              resources.assets = [...new Set([...resources.assets, result.asset])];
+              changed(p => { const target = p.beats.find(b => b.id === targetId); if (target) target.image = result.asset; }); drawInspector();
+            }), el('img', { src: `/api/designs/${designId}/${asset}`, alt: 'Design image ' + asset.slice(7, 19), class: 'studio-thumbnail' }));
+          } catch (error) { toast(error.message, 'error'); }
+        });
+        designHost.replaceChildren(field('Design images', designPicker), assetsHost); designPicker.focus();
+      }), designHost]), pictured));
+    // Narration and chapters: a long narrated video (up to 20 minutes) in parts; each chapter starts at a beat.
+    const chapter = (state.p.chapters || []).find(ch => ch.start === beat.id);
+    const chapterTitle = el('input', { value: chapter?.title || '', maxlength: 80, 'aria-label': 'Chapter that starts at this beat' });
+    chapterTitle.value = chapter?.title || '';
+    const chapterField = field('Chapter that starts here', chapterTitle, 'chapters', 'Leave empty for none. A long video has 2 to 30 chapters, the first at the first beat; YouTube shows 3 or more, each at least 10 seconds.');
+    chapterTitle.addEventListener('input', () => changed(p => {
+      const order = new Map(p.beats.map((b, i) => [b.id, i])), title = chapterTitle.value;
+      let next = (p.chapters || []).filter(ch => ch.start !== beat.id);
+      if (title.trim()) next.push({ ...(chapter ? { id: chapter.id } : { id: 'c' + crypto.randomUUID().replaceAll('-', '').slice(0, 10) }), title, start: beat.id });
+      next = next.sort((a, b) => order.get(a.start) - order.get(b.start));
+      if (next.length) p.chapters = next; else delete p.chapters;
+    }, true, path + '.chapter'));
+    inspector.append(group('Narration', [textField('Narration (the line spoken over this beat)', 'say', 400, true), only(chapterField, !!beat.say || !!state.p.chapters?.length)]));
+    const bars = el('input', { type: 'number', min: .5, max: 8, step: .5, value: beat.bars, 'aria-label': 'Beat bars', oninput: event => setBeat('bars', Number(event.target.value)) });
+    inspector.append(group('Timing and camera', [field('Bars', bars, path + '.bars', beat.say ? 'This beat is narrated, so it lasts as long as its spoken line; bars do not change it.'
+      : '0.5 to 8, in half-bar steps, or drag the clip\'s right edge on the timeline. Total: at most 120 seconds, 480 when narrated, or 20 minutes in chapters.'),
+    el('div', { class: 'ste-row2' }, [field('Camera', select('Camera', CAMERAS, beat.camera || 'still', v => setBeat('camera', v)), path + '.camera'),
+      field('Transition to next beat', select('Transition', TRANSITIONS, beat.transition || 'cut', v => setBeat('transition', v)), path + '.transition')])]));
+    inspector.append(el('div', { class: 'studio-actions' }, [button('Duplicate beat', duplicateBeat, { title: 'Duplicate (Ctrl + D)' }), button('Delete beat', deleteBeat, { class: 'btn danger', title: 'Delete (Delete key)' })]));
+    renderErrors();
+    if (leftTabs.current() === 'assets') drawAssets();
+  }
+  function drawProject() {
+    projectPanel.replaceChildren();
     const title = el('input', { value: state.p.title, maxlength: 120, 'aria-label': 'Video title' });
+    title.value = state.p.title;
     const titleField = field('Title', title, 'title', `${state.p.title.length}/120 characters`);
-    title.addEventListener('input', () => { changed(p => { p.title = title.value; }); titleField.querySelector('.meta').textContent = `${title.value.length}/120 characters`; });
-    inspector.append(el('h3', { text: 'Project' }), titleField,
-      field('Look', select('Project look', looks.map(l => [l.id, l.name]), state.p.look, v => { changed(p => { p.look = v; }); drawInspector(); }), 'look'));
+    title.addEventListener('input', () => { changed(p => { p.title = title.value; }, true, 'title'); titleField.querySelector('.meta').textContent = `${title.value.length}/120 characters`; titleText.textContent = title.value || 'Untitled video'; });
     const swatches = el('div', { class: 'studio-swatches', 'aria-label': 'Look colours' });
-    inspector.append(swatches);
     lookTokens(state.p.look).then(data => { if (!swatches.isConnected) return; for (const key of ['--ds-bg', '--ds-text', '--ds-accent', '--ds-accent-2']) { const swatch = el('span', { title: `${key}: ${data.variables[key]}`, 'aria-label': `${key}: ${data.variables[key]}` }); swatch.style.background = data.variables[key]; swatches.append(swatch); } }).catch(() => {});
     const aspects = el('fieldset', {}, [el('legend', { text: 'Aspects to render' })]);
     for (const a of ASPECTS) aspects.append(el('label', { class: 'studio-check' }, [el('input', { type: 'checkbox', checked: state.p.aspects.includes(a), onchange: event => {
       changed(p => { p.aspects = event.target.checked ? [...p.aspects, a] : p.aspects.filter(v => v !== a); });
     } }), el('span', { text: a })]));
-    inspector.append(aspects, el('small', { class: 'studio-error', 'data-error-path': 'aspects', role: 'alert' }),
-      field('Tempo (BPM)', el('input', { type: 'number', min: 60, max: 180, value: state.p.bpm, 'aria-label': 'Tempo in beats per minute', oninput: e => changed(p => { p.bpm = Number(e.target.value); }) }), 'bpm', '60 to 180 BPM'),
-      field('Music mood', select('Music mood', MOODS, state.p.music.mood, v => changed(p => { p.music.mood = v; })), 'music.mood'),
-      field('Music volume', el('input', { type: 'range', min: 0, max: 1, step: .01, value: state.p.music.volume, 'aria-label': 'Music volume', oninput: e => changed(p => { p.music.volume = Number(e.target.value); }) }), 'music.volume', '0 to 1'));
+    projectPanel.append(group('Video', [titleField, field('Look', select('Project look', looks.map(l => [l.id, l.name]), state.p.look, v => { changed(p => { p.look = v; }); drawProject(); }), 'look'), swatches,
+      aspects, el('small', { class: 'studio-error', 'data-error-path': 'aspects', role: 'alert' })]),
+    group('Music', [el('div', { class: 'ste-row2' }, [field('Tempo (BPM)', el('input', { type: 'number', min: 60, max: 180, value: state.p.bpm, 'aria-label': 'Tempo in beats per minute', oninput: e => changed(p => { p.bpm = Number(e.target.value); }, true, 'bpm') }), 'bpm', '60 to 180 BPM'),
+      field('Music mood', select('Music mood', MOODS, state.p.music.mood, v => changed(p => { p.music.mood = v; })), 'music.mood')]),
+    field('Music volume', el('input', { type: 'range', min: 0, max: 1, step: .01, value: state.p.music.volume, 'aria-label': 'Music volume', oninput: e => changed(p => { p.music.volume = Number(e.target.value); }, true, 'music.volume') }), 'music.volume', '0 to 1. The music ducks under narration on its own.')]));
     // Pack B: what draws the 3D stage beats. Blender is offered only when this computer has it (Kairos never installs it).
     if (state.p.beats.some(b => b.kind === 'stage')) {
       const choice = select('3D renderer', [['threejs', 'three.js (built in)'], ['blender', 'Blender']], state.p.renderer || 'threejs', v => changed(p => { p.renderer = v; }));
       const host = field('3D renderer', choice, 'renderer', 'three.js is built in and fast.');
-      inspector.append(host);
+      projectPanel.append(group('3D', [host], { 'data-group': 'renderer' }));
       api('/api/video-renderers').then(status => {
         const b = status.blender, option = choice.querySelector('option[value="blender"]');
         option.textContent = b.supported ? `Blender ${b.version} (installed)` : 'Blender (not installed)';
@@ -497,8 +731,55 @@ async function editor(host, id, looks, back, parentDisposed) {
           : `three.js is built in and fast. ${b.message}`;
       }).catch(() => {});
     }
-    renderErrors();
+    projectPanel.append(castGroup());
   }
+  // The project's cast: characters pinned to a version. A scene can only show characters cast here.
+  function castGroup() {
+    const box = group('Cast', [], { 'data-group': 'cast' });
+    const cast = state.p.cast || [];
+    const used = new Set(state.p.beats.flatMap(b => b.kind === 'scene' ? (b.scene?.cast || []).map(m => m.character) : b.kind === 'stage' ? (b.stage?.cast || []).map(m => m.character) : []));
+    if (state.p.beats.some(b => b.kind === 'scene') || cast.length) box.append(field('Scene palette', select('Scene palette', PALETTES, state.p.palette || 'dawn', v => changed(p => { p.palette = v; })), 'palette'));
+    cast.forEach((entry, i) => {
+      const known = accountCharacters?.find(c => c.id === entry.character), name = names[entry.character] || known?.name || 'Character';
+      const versions = known ? known.versions.map(v => [String(v.version), `Version ${v.version}, ${v.status.replaceAll('_', ' ')}`]) : [[String(entry.version), `Version ${entry.version}`]];
+      box.append(el('div', { class: 'ste-member', 'data-cast': entry.character }, [el('div', { class: 'ste-member-head' }, [el('strong', { text: name }),
+        button('Remove', () => { changed(p => { p.cast.splice(i, 1); if (!p.cast.length) delete p.cast; }); drawProject(); }, { class: 'btn quiet', disabled: used.has(entry.character), 'aria-label': `Remove ${name} from the cast`,
+          title: used.has(entry.character) ? 'A scene shows this character; take it out of the scene first.' : 'Remove from the cast' })]),
+      field('Version', select(`Version of ${name}`, versions, String(entry.version), v => changed(p => { p.cast[i].version = Number(v); })), `cast[${i}]`, 'A video renders only an approved version.')]));
+    });
+    const add = select('Add a character to the cast', [['', accountCharacters ? 'Add a character' : 'Loading characters...']], '', v => {
+      const c = accountCharacters?.find(x => x.id === v); if (!c) return;
+      changed(p => { (p.cast ||= []).push({ character: c.id, version: c.approved_version || c.versions.at(-1).version }); }); names[c.id] = c.name; drawProject(); drawInspector();
+    });
+    box.append(field('Add a character', add, 'cast', 'Characters come from Content > Characters.'));
+    if (accountCharacters === null) {
+      accountCharacters = undefined;
+      api('/api/characters').then(r => { accountCharacters = r.characters || []; if (!disposed) { drawProject(); if (state.p.beats[selected]?.kind === 'scene') drawInspector(); } }).catch(() => { accountCharacters = []; if (!disposed) drawProject(); });
+    } else if (accountCharacters) {
+      for (const c of accountCharacters) names[c.id] ||= c.name;
+      const free = accountCharacters.filter(c => !cast.some(e => e.character === c.id));
+      add.replaceChildren(el('option', { value: '', text: free.length ? 'Add a character' : 'No more characters to add' }), ...free.map(c => el('option', { value: c.id, text: `${c.name}${c.approved_version ? '' : ' (not approved yet)'}` })));
+    }
+    return box;
+  }
+  async function drawHistory() {
+    historyHost.replaceChildren(el('p', { role: 'status', text: 'Loading versions...' }));
+    try {
+      const history = await api(endpoint + '/history');
+      historyHost.replaceChildren(...history.map(p => el('div', { class: 'studio-actions' }, [el('span', { text: `Version ${p.version} · ${new Date(p.updated * 1000).toLocaleString()}` }), button('Restore version ' + p.version, async () => {
+        if (!await confirmDialog({ title: 'Restore this version?', message: 'This saves the older version as a new version. Your current version stays in history.', confirmLabel: 'Restore', danger: false })) return;
+        if (!await save()) throw Error('Fix the highlighted fields first.');
+        state.p = await write(endpoint + `/restore/${p.version}`, {}); state.dirty = false; state.undo = []; state.redo = []; selected = 0;
+        drawBeats(); drawInspector(); drawProject(); timing(); remount();
+      })])));
+      if (!history.length) historyHost.append(el('p', { text: 'No earlier versions yet.' }));
+    } catch (error) { historyHost.textContent = error.message; }
+  }
+  const rightTabs = tabs('Inspector', [['beat', 'Beat', inspector], ['project', 'Project', projectPanel], ['render', 'Render', queue],
+    ['history', 'History', el('div', {}, [el('p', { class: 'meta', text: 'Every save is a version. Restoring one saves it again as the newest.' }), historyHost])]],
+  key => { panes.rightTab = key; savePanes(); if (key === 'history') drawHistory(); });
+
+  // -- render queue (unchanged behaviour) -----------------------------------------------------------------------
   function planPanel() {
     if (!state.p.chapters?.length) return null;
     const status = plan?.status || 'none';
@@ -525,10 +806,10 @@ async function editor(host, id, looks, back, parentDisposed) {
   }
   function longJob(job) {
     const stopped = job.status === 'paused' || job.status === 'interrupted' || job.status === 'failed' || job.status.startsWith('failed:');
-    const done = (job.chapters || []).filter(c => c.state === 'done').length, total = (job.chapters || []).length;
+    const done = (job.chapters || []).filter(c => c.state === 'done').length, count = (job.chapters || []).length;
     const overall = job.frames_total ? Math.round((job.frames_done ?? (job.chapters || []).reduce((n, c) => n + (c.state === 'done' ? c.frames : c.done || 0), 0)) / job.frames_total * 100) : 0;
     const head = job.status === 'ready' ? 'Ready' : stopped ? (STOPPED[job.status] || 'Failed') : job.status === 'joining' ? 'Joining the chapters' : job.status === 'narrating' ? 'Narrating' : `Rendering ${overall}%`;
-    const facts = [`${done} of ${total} chapters done`];
+    const facts = [`${done} of ${count} chapters done`];
     if (job.fps) facts.push(`${Number(job.fps).toFixed(1)} frames a second`);
     if (!stopped && job.status !== 'ready' && job.eta_seconds) facts.push(minutes(job.eta_seconds));
     if (job.render_seconds) facts.push(`rendered in ${Math.round(job.render_seconds / 60)} min`);
@@ -604,7 +885,7 @@ async function editor(host, id, looks, back, parentDisposed) {
         state.undo = []; state.redo = []; state.p = latest; selected = Math.min(selected, latest.beats.length - 1);
         resources = await api(`${BASE}/videos/${id}/resources`);
         if (disposed) return;
-        drawBeats(); drawInspector(); timing(); remount();
+        drawBeats(); drawInspector(); drawProject(); timing(); remount();
       }
       let jobChanged = false;
       for (const result of results.slice(1)) if (result.status === 'fulfilled') {
@@ -619,42 +900,77 @@ async function editor(host, id, looks, back, parentDisposed) {
     } catch (error) { if (!disposed) previewError.textContent = 'Refresh unavailable: ' + error.message; }
     finally { if (!disposed) pollTimer = setTimeout(poll, 3000); }
   }
-  const addKind = select('Kind of beat to add', KINDS, 'statement', () => {});
-  shell.append(el('div', { class: 'studio-editor-top studio-actions' }, [button('Projects', async () => { if (await save()) await back(); }), undo, redo, status, button('Save now', save)]), summaryError,
-    el('div', { class: 'studio-columns' }, [el('aside', { 'aria-label': 'Beat sequence' }, [el('h3', { text: 'Beats' }), el('p', { class: 'meta', text: 'Drag to reorder, use Move buttons, or Alt + Arrow keys.' }), list,
-      field('Add beat by kind', addKind), button('Add beat', () => {
-        if (state.p.beats.length >= maxBeats(state.p)) throw Error(`A video can have at most ${maxBeats(state.p)} beats.`);
-        changed(p => p.beats.push({ id: beatId(), kind: addKind.value, text: '', bars: 1, ...(addKind.value === 'scene' ? { scene: structuredClone(NEW_SCENE) } : {}), ...(addKind.value === 'stage' ? { stage: structuredClone(NEW_STAGE) } : {}) })); selected = state.p.beats.length - 1; drawBeats(); drawInspector();
-      })]), el('section', { class: 'studio-centre', 'aria-label': 'Preview and rendering' }, [
-      field('Preview aspect', select('Preview aspect', ASPECTS, aspect, value => { aspect = value; remount(); })), stage, previewError,
-      el('div', { class: 'studio-actions' }, [play, el('label', { class: 'studio-check' }, [el('input', { type: 'checkbox', checked: looping, onchange: e => { looping = e.target.checked; } }), el('span', { text: 'Loop' })]), clock]),
-      scrub, markers, el('small', { class: 'studio-error', 'data-error-path': 'beats', role: 'alert' }), queue,
-      el('h3', { text: 'Ask Kairos' }), field('Describe a change', ask), button('Ask Kairos', async () => {
-        if (!ask.value.trim()) { ask.focus(); return; }
-        if (!await save()) throw Error('Fix the highlighted fields before asking Kairos.');
-        const result = await write(`${BASE}/chat`, { video_id: id });
-        go('chat', { sessionId: result.session_id, mobileDraft: `For [Video: ${state.p.title}](/videos/${id}): ${ask.value.trim()}`, mobileConversation: true });
-      }), el('details', { class: 'disclosure-panel', ontoggle: async event => {
-        if (!event.target.open) return;
-        try {
-          const history = await api(endpoint + '/history');
-          historyHost.replaceChildren(...history.map(p => el('div', { class: 'studio-actions' }, [el('span', { text: `Version ${p.version} · ${new Date(p.updated * 1000).toLocaleString()}` }), button('Restore version ' + p.version, async () => {
-            if (!await confirmDialog({ title: 'Restore this version?', message: 'This saves the older version as a new version. Your current version stays in history.', confirmLabel: 'Restore', danger: false })) return;
-            if (!await save()) throw Error('Fix the highlighted fields first.');
-            state.p = await write(endpoint + `/restore/${p.version}`, {}); state.dirty = false; state.undo = []; state.redo = []; selected = 0;
-            drawBeats(); drawInspector(); timing(); remount();
-          })])));
-          if (!history.length) historyHost.append(el('p', { text: 'No earlier versions yet.' }));
-        } catch (error) { historyHost.textContent = error.message; }
-      } }, [el('summary', { text: 'Version history' }), historyHost]),
-    ]), inspector]));
+
+  // -- the shell: top bar, panes, splitters ---------------------------------------------------------------------
+  const titleText = el('h2', { class: 'ste-title', text: state.p.title || 'Untitled video' });
+  const aspectPicker = select('Preview aspect', ASPECTS, aspect, value => { aspect = view.aspect = value; remount(); });
+  const transport = el('div', { class: 'ste-transport' }, [
+    button('|<', () => run('start'), { 'aria-label': 'Go to the start (Home)', title: 'Go to the start (Home)' }),
+    button('<', () => run('back-1'), { 'aria-label': 'One frame back (Left)', title: 'One frame back (Left)' }), play,
+    button('>', () => run('forward-1'), { 'aria-label': 'One frame forward (Right)', title: 'One frame forward (Right)' }),
+    button('>|', () => run('end'), { 'aria-label': 'Go to the end (End)', title: 'Go to the end (End)' }), clock, rateBadge,
+    el('span', { class: 'ste-tl-spacer' }),
+    button('In', () => run('mark-in'), { 'aria-label': 'Set the work area start here (I)', title: 'Work area start (I)' }),
+    button('Out', () => run('mark-out'), { 'aria-label': 'Set the work area end here (O)', title: 'Work area end (O)' }),
+    el('label', { class: 'studio-check' }, [el('input', { type: 'checkbox', checked: looping, onchange: e => { looping = e.target.checked; } }), el('span', { text: 'Loop' })])]);
+  const top = el('div', { class: 'studio-editor-top ste-top' }, [button('Projects', async () => { if (await save()) await back(); }), titleText, undo, redo, status, button('Save now', save),
+    el('span', { class: 'ste-tl-spacer' }), aspectPicker, guideToggle, button('?', () => run('shortcuts'), { 'aria-label': 'Keyboard shortcuts (?)', title: 'Keyboard shortcuts (?)' })]);
+  guideToggle.classList.toggle('primary', panes.guides);
+  const left = el('aside', { class: 'ste-pane ste-left', 'aria-label': 'Beats and assets' }, [leftTabs.list, ...leftTabs.panels]);
+  const right = el('aside', { class: 'ste-pane ste-right', 'aria-label': 'Inspector' }, [rightTabs.list, ...rightTabs.panels]);
+  const centre = el('section', { class: 'ste-centre studio-centre', 'aria-label': 'Preview' }, [stage, previewError, previewNote, transport,
+    el('small', { class: 'studio-error', 'data-error-path': 'beats', 'data-error-exact': '', role: 'alert' })]);
+  function splitter(name, label, orientation) {
+    const node = el('div', { class: `ste-split ste-split-${name}`, role: 'separator', tabindex: '0', 'aria-label': label, 'aria-orientation': orientation, 'data-split': name });
+    let start = null;
+    const apply = () => { panes = M.clampPanes(panes, { width: innerWidth, height: innerHeight }); layout(); };
+    node.addEventListener('pointerdown', event => { node.setPointerCapture(event.pointerId); start = { x: event.clientX, y: event.clientY, ...panes }; node.classList.add('active'); event.preventDefault(); });
+    node.addEventListener('pointermove', event => {
+      if (!start) return;
+      if (name === 'left') panes.left = start.left + event.clientX - start.x;
+      if (name === 'right') panes.right = start.right - (event.clientX - start.x);
+      if (name === 'timeline') panes.timeline = start.timeline - (event.clientY - start.y);
+      apply();
+    });
+    const end = () => { if (!start) return; start = null; node.classList.remove('active'); savePanes(); refreshTimeline(); };
+    node.addEventListener('pointerup', end); node.addEventListener('pointercancel', end);
+    node.addEventListener('dblclick', () => { panes[name] = M.PANES[name][2]; apply(); savePanes(); refreshTimeline(); });
+    node.addEventListener('keydown', event => {
+      const step = event.shiftKey ? 48 : 16, sign = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[event.key];
+      if (!sign) return;
+      event.preventDefault(); event.stopPropagation();
+      if (name === 'left') panes.left += sign * step;
+      if (name === 'right') panes.right -= sign * step;
+      if (name === 'timeline') panes.timeline -= sign * step;
+      apply(); savePanes();
+    });
+    return node;
+  }
+  const splits = [splitter('left', 'Resize the beats panel', 'vertical'), splitter('right', 'Resize the inspector', 'vertical'), splitter('timeline', 'Resize the timeline', 'horizontal')];
+  const grid = el('div', { class: 'ste-dock' }, [left, splits[0], centre, splits[1], right, splits[2], timeline.node]);
+  shell.append(top, summaryError, grid, sheet);
+  function layout() {
+    shell.style.setProperty('--ste-left', panes.left + 'px'); shell.style.setProperty('--ste-right', panes.right + 'px'); shell.style.setProperty('--ste-timeline', panes.timeline + 'px');
+    const room = Math.max(560, Math.floor(innerHeight - grid.getBoundingClientRect().top - 12));
+    shell.style.setProperty('--ste-height', room + 'px');
+    for (const node of splits) { const name = node.dataset.split; node.setAttribute('aria-valuenow', String(panes[name])); node.setAttribute('aria-valuemin', String(M.PANES[name][0])); node.setAttribute('aria-valuemax', String(M.PANES[name][1])); }
+    fitFrame();
+  }
+  const onResize = () => { panes = M.clampPanes(panes, { width: innerWidth, height: innerHeight }); layout(); refreshTimeline(); };
+  const stageObserver = new ResizeObserver(() => fitFrame());
   host.replaceChildren(shell);
-  drawBeats(); drawInspector(); timing(); drawJobs(); remount();
+  host.closest('.studio-view')?.classList.add('studio-editing');
+  layout(); stageObserver.observe(stage); addEventListener('resize', onResize);
+  leftTabs.show(panes.leftTab || 'beats'); rightTabs.show(panes.rightTab || 'beat');
+  drawBeats(); drawInspector(); drawProject(); timing(); drawJobs(); remount();
   frame = requestAnimationFrame(animate); pollTimer = setTimeout(poll, 3000);
   if (state.dirty) timer = setTimeout(save, 500);
   return () => {
-    disposed = true; mountGeneration++; playing = false; player = null;
+    disposed = true; mountGeneration++; rate = 0; player = null;
     clearTimeout(timer); clearTimeout(previewTimer); clearTimeout(pollTimer); cancelAnimationFrame(frame);
+    document.removeEventListener('keydown', onKey); document.removeEventListener('keyup', onKeyUp, true); removeEventListener('resize', onResize); stageObserver.disconnect();
+    if (sheet.open) sheet.close();
+    host.closest('.studio-view')?.classList.remove('studio-editing');
     rememberJobs(id, jobs); if (state.dirty && !state.error) void save();
   };
 }

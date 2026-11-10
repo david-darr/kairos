@@ -42,7 +42,8 @@ _LEGACY_SEED_HASHES = {
     # Every shipped version (git log of skill_templates/build-custom-tab), plus
     # the pre-bundling 2026-09-07 draft that early installs already had under
     # this slug, which seeding then refused to overwrite.
-    "build-custom-tab": {"5c25edf522860b764fe9287895aea9508da5a2332a3097a5a3aa39b1513bd3af",  # before per-account tab data (2026-11-06)
+    "build-custom-tab": {"d8b2798ebd65997fa039e6c9682ba2f711cccdd529739ffc8a335672b2bc1471",  # before video_narration_peaks (2026-11-10)
+                         "5c25edf522860b764fe9287895aea9508da5a2332a3097a5a3aa39b1513bd3af",  # before per-account tab data (2026-11-06)
                          "cb601557a8d3156a08a2a10d5f6a753ca075e16c36259925250ffccfb77fd125",  # before the video tab_api (2026-11-04)
                          "9208f6c1ecd88727c39e4da118b643adda15ab4d6b9fcff5be2ffe91c678ac50",
                          "b3099ef75916ad7fcb0ad94ede4e39f268db52d6bb6ea261172dc60c38940a60",
