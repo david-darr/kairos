@@ -109,10 +109,8 @@ def engine_available() -> bool:
     """Whether the binding imports at all. Separate from whether a model is
     present, because the two fail for different reasons and the UI should say
     which."""
-    from core import vc_runtime
-    if vc_runtime.missing():
-        # whisper.cpp needs the Microsoft Visual C++ runtime; importing it without would only log a DLL traceback.
-        return False
+    # Not gated on core/vc_runtime: pywhispercpp's wheel carries its own renamed copy of msvcp140 (checked in the
+    # 2.3.0-beta.2 runtime), so dictation works on a PC without the Microsoft Visual C++ runtime.
     try:
         import pywhispercpp.model  # noqa: F401
         return True

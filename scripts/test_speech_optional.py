@@ -213,7 +213,11 @@ class Catalog(Base):
                 self.assertEqual(s['missing_runtime'][0], 'vc_runtime')
             self.assertEqual(turn_detect.ready(), (False, message))
             self.assertEqual(kokoro_voice.ready(), (False, message))
-            self.assertFalse(speech.engine_available())
+            # Dictation is not affected: pywhispercpp's wheel carries its own renamed msvcp140.
+            with patch.dict(sys.modules, {'pywhispercpp': object(), 'pywhispercpp.model': object()}):
+                self.assertTrue(speech.engine_available())
+            with patch.object(vc_runtime, 'missing_dlls', return_value=('msvcp140_1.dll',)):
+                self.assertEqual(speech.status()['vc_runtime']['message'], message)
             with patch.object(llamacpp_engine, '_model_path', return_value=__file__), self.assertRaises(RuntimeError) as raised:
                 asyncio.run(llamacpp_engine.start('any'))
             self.assertIn(message, str(raised.exception))

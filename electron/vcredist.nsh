@@ -1,7 +1,7 @@
 ; Microsoft Visual C++ 2015-2022 x64 runtime, installed only when a PC lacks it.
 ;
-; The bundled Python's onnxruntime (Kokoro, Smart Turn), pywhispercpp (dictation) and llama-cpp-python import
-; MSVCP140.dll and MSVCP140_1.dll, which only this runtime provides. Microsoft's supported way to get them onto a PC is
+; The bundled Python's onnxruntime (Kokoro, Smart Turn), spaCy (Kokoro's phonemizer) and llama-cpp-python import
+; MSVCP140.dll, MSVCP140_1.dll and VCOMP140.dll, which only this runtime provides. Microsoft's supported way to get them onto a PC is
 ; its own Redistributable, so the installer carries the official vc_redist.x64.exe (fetched and pinned by
 ; scripts/build_runtime.py: URL, size, SHA-256 and a Microsoft Corporation signature) and runs it quietly when the
 ; registry says the runtime is missing or older than the copy carried here.

@@ -1,7 +1,9 @@
 """Whether Windows can load the Microsoft Visual C++ runtime the local speech and model engines are built against.
 
-onnxruntime (Kokoro, Smart Turn), pywhispercpp (dictation) and llama-cpp-python import MSVCP140.dll and MSVCP140_1.dll.
-The bundled Python carries only vcruntime140*.dll, so those two come from the Microsoft Visual C++ 2015-2022
+onnxruntime (Kokoro, Smart Turn) imports MSVCP140.dll and MSVCP140_1.dll; spaCy (Kokoro's phonemizer) and
+llama-cpp-python (local models) import MSVCP140.dll and VCOMP140.dll. (pywhispercpp and numpy carry their own renamed
+copies, so dictation does not depend on this; checked in the 2.3.0-beta.2 runtime.) The bundled Python carries only
+vcruntime140*.dll, so the rest come from the Microsoft Visual C++ 2015-2022
 Redistributable, which the Windows installer runs when a PC lacks it (electron/vcredist.nsh). If that was declined or
 failed, importing those engines dies inside Windows' DLL loader with a traceback nobody can act on. This checks the two
 DLLs up front, the same way Windows will look for them, so Settings > Speech can say the one thing that fixes it.

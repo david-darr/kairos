@@ -99,8 +99,8 @@ GET_PIP_SHA256 = "fb24e693bab954209a063d90953621412ccad4a500905a726286e038f508dd
 # It is uninstalled from the shipped runtime once the packages are in.
 PIP_VERSION = "26.2.1"
 
-# Windows installer only: Microsoft's Visual C++ 2015-2022 x64 Redistributable. onnxruntime, pywhispercpp and
-# llama-cpp-python import MSVCP140.dll and MSVCP140_1.dll, which the embeddable Python does not carry; Microsoft's
+# Windows installer only: Microsoft's Visual C++ 2015-2022 x64 Redistributable. onnxruntime, spaCy and
+# llama-cpp-python import MSVCP140.dll, MSVCP140_1.dll and VCOMP140.dll, which the embeddable Python does not carry; Microsoft's
 # supported route is its own redistributable, which electron/vcredist.nsh runs quietly when a PC lacks it. Microsoft's
 # permalink (https://aka.ms/vs/17/release/vc_redist.x64.exe) moves with every release, so the pin is the versioned
 # file it redirected to on 2026-11-10 (the path carries Microsoft's own SHA-256 of the file). Signed by Microsoft
