@@ -78,12 +78,15 @@ class Backend:
              "--host", "127.0.0.1", "--port", str(self.port)],
             cwd=ROOT, env=env, stdout=self.log, stderr=subprocess.STDOUT)
         self.url = f"http://127.0.0.1:{self.port}"
+        # Since 2026-11-10 (core/startup_progress.py) the port answers 503 "updating" while a fresh data folder's
+        # layout is set up, so a non-200 answer means wait too, not only a refused connection.
         for _ in range(120):
             try:
                 if httpx.get(self.url + "/api/health", timeout=2).status_code == 200:
                     break
             except httpx.HTTPError:
-                time.sleep(0.5)
+                pass
+            time.sleep(0.5)
         else:
             raise RuntimeError("test backend did not start")
 

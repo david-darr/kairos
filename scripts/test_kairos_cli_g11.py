@@ -248,12 +248,13 @@ class Restart(unittest.IsolatedAsyncioTestCase):
         b.process = subprocess.Popen([L.BACKEND_PYTHON, "-m", "uvicorn", "cli_backend_fixture:app", "--app-dir", "scripts",
                                       "--host", "127.0.0.1", "--port", str(b.port)], cwd=ROOT, env=env, stdout=b.log, stderr=subprocess.STDOUT)
         b.url = f"http://127.0.0.1:{b.port}"
-        for _ in range(120):
+        for _ in range(120):  # a 503 "updating" from the start-up progress server means wait, as a refused connection does
             try:
                 if httpx.get(b.url + "/api/health", timeout=2).status_code == 200:
                     return b
             except httpx.HTTPError:
-                time.sleep(0.5)
+                pass
+            time.sleep(0.5)
         raise RuntimeError("backend did not start")
 
     def kill(self, b):
