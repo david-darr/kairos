@@ -33,7 +33,8 @@ def diagnostics() -> dict:
     vault_dir = resolve_vault_dir()
 
     data_size = 0
-    for root, _, files in os.walk(DATA_DIR):
+    from core import links  # never through a junction (a generated snapshot can link an outside node_modules)
+    for root, _, files, _ in links.walk(DATA_DIR):
         for f in files:
             try:
                 data_size += os.path.getsize(os.path.join(root, f))

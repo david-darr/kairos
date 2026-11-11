@@ -25,6 +25,8 @@
          animation:slide 1.6s ease-in-out infinite}
   @keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(350%)}}
   @media (prefers-reduced-motion: reduce){.bar i{animation:none;width:100%;opacity:.5}}
+  .counted .bar{width:320px}
+  .counted .bar i{animation:none;transition:width .4s ease;opacity:1}
   .err #msg{color:#A8432F}
   .err .bar{display:none}
 </style>
@@ -43,6 +45,13 @@
     document.getElementById('msg').textContent = msg;
     document.getElementById('detail').textContent = detail || '';
     document.body.classList.toggle('err', !!isError);
+  };
+  // A fraction from 0 to 1 fills the bar (an update with counted steps); null goes back to the moving bar.
+  window.setProgress = (fraction) => {
+    const fill = document.querySelector('.bar i');
+    const known = typeof fraction === 'number' && fraction >= 0;
+    document.body.classList.toggle('counted', known);
+    fill.style.width = known ? `${Math.max(2, Math.round(fraction * 100))}%` : '';
   };
 </script>
 </body>

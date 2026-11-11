@@ -87,6 +87,25 @@ class GoogleError(Exception):
         self.retry_after = retry_after  # seconds, from a Retry-After header when Google sent one
 
 
+class GoogleOffline(GoogleError):
+    """Google could not be reached at all (no connection, name lookup, time-out). A plain offline state, not
+    a fault: routes answer 503 with this sentence, and calendar reads fall back to what they last fetched.
+    Found by the 2.3.0 upgrade rehearsal, run offline: httpx's ConnectError from the token refresh was not a
+    GoogleError, so /api/calendar/events and the Google routes answered 500."""
+
+    def __init__(self):
+        super().__init__("Google can't be reached right now. Kairos shows what it already has and tries again "
+                         "when the connection is back.", 503, "offline")
+
+
+@contextmanager
+def _reaching_google():
+    try:
+        yield
+    except httpx.TransportError as error:  # connect, read and pool errors and every time-out
+        raise GoogleOffline() from error
+
+
 # Multi-Account group 6: the OAuth app (client id and secret, set once by an admin) stays in FILE for the
 # whole install; each account's signed-in Google accounts and choices live in its own folder.
 PERSONAL = ("accounts", "default_account", "active_account", "calendar_account", *ACCOUNT_KEYS)
@@ -379,7 +398,8 @@ async def finish_sign_in(state: str, code: str | None, redirect_uri: str, error:
     if data.get("client_secret"):
         body["client_secret"] = decrypt_install(data["client_secret"])
     async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.post(TOKEN_URL, data=body)
+        with _reaching_google():
+            response = await client.post(TOKEN_URL, data=body)
         if response.status_code >= 400:
             raise GoogleError("Google rejected the sign-in code", response.status_code)
         tokens = response.json()
@@ -389,8 +409,9 @@ async def finish_sign_in(state: str, code: str | None, redirect_uri: str, error:
         access = tokens.get("access_token")
         # The email names the account in the switcher and finds it again on
         # reconnect, so a sign-in without one is refused rather than saved.
-        profile = await client.get("https://openidconnect.googleapis.com/v1/userinfo",
-                                   headers={"Authorization": f"Bearer {access}"}) if access else None
+        with _reaching_google():
+            profile = await client.get("https://openidconnect.googleapis.com/v1/userinfo",
+                                       headers={"Authorization": f"Bearer {access}"}) if access else None
         email = profile.json().get("email") if profile is not None and profile.is_success else None
         if not email:
             raise GoogleError("Could not read the Google account's email address; try signing in again", 502)
@@ -474,8 +495,9 @@ async def _token(account_id: str | None = None, force: bool = False) -> str:
                 "grant_type": "refresh_token"}
         if data.get("client_secret"):
             body["client_secret"] = decrypt_install(data["client_secret"])
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(TOKEN_URL, data=body)
+        with _reaching_google():
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(TOKEN_URL, data=body)
         if response.status_code >= 400:
             # Expired or revoked: flagged on this account only, until it reconnects.
             _mark(ident, error="Google sign-in expired or was revoked. Reconnect this account.")
@@ -509,9 +531,10 @@ async def request(api: str, method: str, path: str, *, params: dict | None = Non
         headers = {"Authorization": f"Bearer {token}"}
         if content_type:
             headers["Content-Type"] = content_type
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.request(method, url, params=params, json=body if content is None else None,
-                                            content=content, headers=headers)
+        with _reaching_google():
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.request(method, url, params=params, json=body if content is None else None,
+                                                content=content, headers=headers)
         if response.status_code == 401 and retry == 0:
             continue
         if response.is_redirect:
@@ -822,7 +845,23 @@ def calendar_settings(calendar_ids: list[str]) -> dict:
 
 
 async def calendar_list() -> list[dict]:
+    """The account's calendars from Google, kept for _cached_calendar_list; offline, the last ones fetched."""
     _calendar_access()
+    account = _calendar_account().get("id")
+    generation = _calendar_generation
+    try:
+        calendars = await _fetch_calendar_list()
+    except GoogleOffline:
+        cached = _calendar_list_cache.get(account)
+        if cached:
+            return deepcopy(cached[1])
+        raise
+    if generation == _calendar_generation:
+        _calendar_list_cache[account] = (time.monotonic(), deepcopy(calendars))
+    return calendars
+
+
+async def _fetch_calendar_list() -> list[dict]:
     calendars, page = [], None
     while True:
         result = await request("calendar", "GET", "/users/me/calendarList",
@@ -846,11 +885,7 @@ async def _cached_calendar_list() -> list[dict]:
     cached = _calendar_list_cache.get(account)
     if cached and time.monotonic() - cached[0] < 60:
         return deepcopy(cached[1])
-    generation = _calendar_generation
-    calendars = await calendar_list()
-    if generation == _calendar_generation:
-        _calendar_list_cache[account] = (time.monotonic(), deepcopy(calendars))
-    return calendars
+    return await calendar_list()  # refreshes the cache, or answers from it while Google can't be reached
 
 
 def _timed(value: str, zone: str = "UTC") -> str:
@@ -913,6 +948,15 @@ async def calendar_events(calendar_ids: list[str], start: str, end: str) -> list
         return deepcopy(cached[1])
     if not ids:
         return []
+    try:
+        return await _fetch_calendar_events(key, ids, start, end)
+    except GoogleOffline:
+        if cached:  # what was last fetched for this range stays on screen until Google answers again
+            return deepcopy(cached[1])
+        raise
+
+
+async def _fetch_calendar_events(key: tuple, ids: tuple, start: str, end: str) -> list[dict]:
     generation = _calendar_generation
     calendars = {c["id"]: c for c in await _cached_calendar_list()}
     events = []

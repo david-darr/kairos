@@ -262,11 +262,11 @@ class Migration(unittest.TestCase):
 
     def backup(self, path):
         self.backups.append(path)
-        Path(path).write_text("backup", encoding="utf-8")
+        self.assertTrue(os.path.isdir(path), "called with the finished safety copy")
 
     def run_steps(self, steps=None, **kwargs):
         return account_migration.run(str(self.data), self.steps if steps is None else steps, account="abc123",
-                                     backup=kwargs.pop("backup", self.backup), **kwargs)
+                                     safety=kwargs.pop("safety", self.backup), **kwargs)
 
     def test_group_one_moves_its_five_stores(self):
         self.assertEqual([s.version for s in account_migration.STEPS], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], "phase 4c added the bot keys, logins and skills library step")
@@ -274,7 +274,7 @@ class Migration(unittest.TestCase):
             "notes.json", "calendar_events.json", "documents", "documents_index.json", "projects.json", "contacts.json"})
         (self.data / "documents").mkdir()
         (self.data / "documents" / "a.md").write_text("doc", encoding="utf-8")
-        result = account_migration.run(str(self.data), account="abc123", backup=self.backup)
+        result = account_migration.run(str(self.data), account="abc123", safety=self.backup)
         self.assertTrue(result["ok"], result)
         account = self.data / "accounts" / "abc123"
         self.assertTrue((account / "notes.json").exists() and (account / "documents" / "a.md").exists())
@@ -283,11 +283,11 @@ class Migration(unittest.TestCase):
     def test_a_new_install_records_the_layout_without_a_backup(self):
         empty = TemporaryDirectory(prefix="kairos-layout-new-", dir=tempfile.gettempdir())
         self.addCleanup(empty.cleanup)
-        result = account_migration.run(empty.name, account="abc123", backup=self.backup)
+        result = account_migration.run(empty.name, account="abc123", safety=self.backup)
         self.assertTrue(result["ok"])
         self.assertEqual(self.backups, [], "nothing to back up")
         self.assertEqual(account_migration.layout_version(empty.name), account_migration.STEPS[-1].version)
-        self.assertIsNone(account_migration.run(empty.name, account="abc123", backup=self.backup))
+        self.assertIsNone(account_migration.run(empty.name, account="abc123", safety=self.backup))
 
     def test_pending_steps_move_into_the_account_after_a_backup(self):
         result = self.run_steps()
@@ -414,11 +414,13 @@ class Migration(unittest.TestCase):
     def test_no_backup_no_move(self):
         def broken(path):
             raise OSError("disk full")
-        result = self.run_steps(backup=broken)
+        result = self.run_steps(safety=broken)
         self.assertFalse(result["ok"])
-        self.assertIn("backup failed", result["error"])
+        self.assertIn("safety copy failed", result["error"])
         self.assertTrue((self.data / "chats").exists())
         self.assertEqual(account_migration.layout_version(str(self.data)), 0)
+        self.assertEqual([n for n in os.listdir(self.data / ".layout") if n.startswith("run-")], [],
+                         "a safety copy that failed leaves nothing behind")
 
     def test_backups_and_restores_leave_the_safety_copies_alone(self):
         self.run_steps()
@@ -434,7 +436,7 @@ class Stores(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        account_migration.run(_DATA.name, backup=lambda path: None)  # what app.py does at start
+        account_migration.run(_DATA.name)  # what app.py does at start
         assert "notes.json" in account_migration.moved_names()
 
     def test_until_the_move_the_stores_stay_where_they_were(self):
@@ -637,10 +639,10 @@ class VaultMigration(unittest.TestCase):
         self.assertEqual((self.step.version, self.step.entries, self.step.copy_first), (2, ("memory", "vault"), ("vault",)))
 
     def backup(self, path):
-        Path(path).write_text("backup", encoding="utf-8")
+        self.assertTrue(os.path.isdir(path), "called with the finished safety copy")
 
     def run_step(self, step=None):
-        return account_migration.run(str(self.data), [step or self.step], account="abc123", backup=self.backup)
+        return account_migration.run(str(self.data), [step or self.step], account="abc123", safety=self.backup)
 
     def vault_files(self, folder):
         return sorted(os.path.relpath(os.path.join(root, name), folder).replace(os.sep, "/")
@@ -656,10 +658,9 @@ class VaultMigration(unittest.TestCase):
         self.assertEqual(self.vault_files(self.account / "vault"), before)
         self.assertTrue((self.account / "memory" / "vault-abc.db").exists())
         (copy,) = result["copies"]
-        self.assertRegex(os.path.basename(copy), r"^before-layout-2-\d{8}-\d{6}-vault$")
-        self.assertEqual(os.path.dirname(copy), str(self.layout))
+        self.assertRegex(os.path.relpath(copy, self.layout), r"^run-2-\d{8}-\d{6}-[0-9a-f]{6}[\\/]copy-first[\\/]vault$")
         self.assertEqual(self.vault_files(copy), before, "the copy holds the same files")
-        self.assertTrue(result["backup"].endswith(".zip") and os.path.exists(result["backup"]))
+        self.assertTrue(os.path.isdir(result["safety"]))
         self.assertEqual(account_migration.layout_version(str(self.data)), 2)
         self.assertIn("vault", account_migration.moved_names(str(self.data)))
 
@@ -690,40 +691,67 @@ class VaultMigration(unittest.TestCase):
         self.assertTrue((self.data / "vault").exists())
 
     def plant_old(self):
+        """What older starts left: a finished whole-folder zip and vault copy (the safety net before
+        2026-11-10), and a zip that a start cut off before it was finished."""
         self.layout.mkdir(exist_ok=True)
         old_zip = self.layout / "before-layout-1-20200101-000000.zip"
+        with zipfile.ZipFile(old_zip, "w") as archive:
+            archive.writestr("notes.json", "[]")
         old_copy = self.layout / "before-layout-1-20200101-000000-vault"
-        old_zip.write_text("old", encoding="utf-8")
         old_copy.mkdir()
         (old_copy / "n.md").write_text("old", encoding="utf-8")
-        return old_zip, old_copy
+        cut_off = self.layout / "before-layout-11-20261110-180000.zip"
+        cut_off.write_bytes(b"PK\x03\x04" + b"\0" * 4096)  # a zip whose writer was killed: no directory at the end
+        return old_zip, old_copy, cut_off
 
     def test_a_good_run_removes_older_safety_copies_and_keeps_its_own(self):
-        old_zip, old_copy = self.plant_old()
+        old_zip, old_copy, cut_off = self.plant_old()
         result = self.run_step()
         self.assertTrue(result["ok"], result)
+        self.assertEqual(result["tidied"], [cut_off.name], "the cut-off zip goes first, whatever happens next")
         self.assertEqual(sorted(result["pruned"]), sorted([old_zip.name, old_copy.name]))
-        self.assertFalse(old_zip.exists() or old_copy.exists())
-        self.assertTrue(os.path.exists(result["backup"]))
+        self.assertFalse(old_zip.exists() or old_copy.exists() or cut_off.exists())
+        self.assertTrue(os.path.isdir(result["safety"]))
         self.assertTrue(os.path.isdir(result["copies"][0]), "this run's own copy stays")
+        self.assertEqual(sorted(os.listdir(self.layout)), sorted(["last-run.json", os.path.basename(result["safety"])]))
 
-    def test_a_failed_run_keeps_older_backups_drops_its_own_and_moves_everything_back(self):
-        old_zip, old_copy = self.plant_old()
+    def test_a_conflict_stops_the_run_before_anything_moves(self):
+        old_zip, old_copy, cut_off = self.plant_old()
         (self.account / "vault").mkdir(parents=True)
         (self.account / "vault" / "theirs.md").write_text("theirs", encoding="utf-8")
         result = self.run_step()
         self.assertFalse(result["ok"])
         self.assertIn("already in the account folder", result["error"])
         self.assertTrue(old_zip.exists() and old_copy.exists() and (old_copy / "n.md").exists())
-        # Everything went back, so nothing changed: this run's own backup and vault copy are not kept,
-        # or a start that fails every time would add one each time.
-        self.assertEqual(sorted(result["pruned"]), sorted(os.path.basename(p) for p in [result["backup"], *result["copies"]]))
-        self.assertFalse(os.path.exists(result["backup"]))
-        self.assertFalse(os.path.exists(result["copies"][0]))
-        self.assertTrue((self.data / "memory" / "vault-abc.db").exists(), "memory moved back")
+        self.assertFalse(cut_off.exists(), "a cut-off zip never stays")
+        self.assertEqual([n for n in os.listdir(self.layout) if n.startswith("run-")], [], "no safety copy made")
+        self.assertTrue((self.data / "memory" / "vault-abc.db").exists(), "memory never left")
         self.assertFalse((self.account / "memory").exists())
         self.assertTrue((self.data / "vault" / "01 - Daily Notes" / "today.md").exists(), "the vault never left")
         self.assertEqual((self.account / "vault" / "theirs.md").read_text(encoding="utf-8"), "theirs", "never merged")
+        self.assertEqual(account_migration.layout_version(str(self.data)), 0)
+
+    def test_a_failed_run_keeps_older_backups_drops_its_own_and_moves_everything_back(self):
+        old_zip, old_copy, _ = self.plant_old()
+        real = account_migration._move
+
+        def failing(source, destination, *args, **kwargs):
+            if os.path.basename(source) == "vault" and "accounts" in destination:
+                raise OSError("disk full")
+            return real(source, destination, *args, **kwargs)
+        with patch.object(account_migration, "_move", failing):
+            result = self.run_step()
+        self.assertFalse(result["ok"])
+        self.assertIn("disk full", result["error"])
+        self.assertTrue(old_zip.exists() and old_copy.exists() and (old_copy / "n.md").exists())
+        # Everything went back, so nothing changed: this run's own safety copy is not kept,
+        # or a start that fails every time would add one each time.
+        self.assertEqual(result["pruned"], [os.path.basename(result["safety"])])
+        self.assertFalse(os.path.exists(result["safety"]))
+        self.assertFalse((self.layout / "journal.json").exists(), "the undo finished, so no journal is left")
+        self.assertTrue((self.data / "memory" / "vault-abc.db").exists(), "memory moved back")
+        self.assertFalse((self.account / "memory").exists())
+        self.assertTrue((self.data / "vault" / "01 - Daily Notes" / "today.md").exists(), "the vault never left")
         self.assertEqual(account_migration.layout_version(str(self.data)), 0)
 
 
@@ -828,7 +856,7 @@ class ChatsPerAccount(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        account_migration.run(_DATA.name, backup=lambda path: None)  # layout 3, as app.py leaves it
+        account_migration.run(_DATA.name)  # layout 3, as app.py leaves it
         assert "sessions.db" in account_migration.moved_names()
 
     def setUp(self):
@@ -1000,8 +1028,7 @@ class ChatsMigration(unittest.TestCase):
         (self.data / "layout.json").write_text(json.dumps({"version": 2}), encoding="utf-8")
         step = account_migration.STEPS[2]
         self.assertEqual(step.version, 3)
-        result = account_migration.run(str(self.data), [step], account="abc123",
-                                       backup=lambda path: Path(path).write_text("backup", encoding="utf-8"))
+        result = account_migration.run(str(self.data), [step], account="abc123")
         self.assertTrue(result["ok"], result)
         self.assertEqual((result["from_version"], result["to_version"]), (2, 3))
         for name in self.STEP3_FILES:
@@ -1057,7 +1084,7 @@ class BotsPerAccount(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        account_migration.run(_DATA.name, backup=lambda path: None)  # layout 4, as app.py leaves it
+        account_migration.run(_DATA.name)  # layout 4, as app.py leaves it
         assert "agents.json" in account_migration.moved_names()
 
     def setUp(self):
@@ -1255,8 +1282,7 @@ class BotsMigration(unittest.TestCase):
         self.assertEqual(step.version, 4)
         self.plant(self.step4_files() + list(self.INSTALL_LEVEL))
         (self.data / "layout.json").write_text(json.dumps({"version": 3}), encoding="utf-8")
-        result = account_migration.run(str(self.data), [step], account="abc123",
-                                       backup=lambda path: Path(path).write_text("backup", encoding="utf-8"))
+        result = account_migration.run(str(self.data), [step], account="abc123")
         self.assertTrue(result["ok"], result)
         self.assertEqual((result["from_version"], result["to_version"]), (3, 4))
         for name in self.step4_files():
@@ -1282,7 +1308,7 @@ class BotsMigration(unittest.TestCase):
         account_migration._moved.pop(data, None)
 
     def test_a_bot_database_path_is_in_the_account_folder_once_moved(self):
-        account_migration.run(_DATA.name, backup=lambda path: None)
+        account_migration.run(_DATA.name)
         fresh_users()
         auth_manager.create_user("david-darr", "password-one-1", is_admin=True)
         account_id = auth_manager.account_id("david-darr")
@@ -1302,7 +1328,7 @@ class TasksPerAccount(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        account_migration.run(_DATA.name, backup=lambda path: None)  # layout 5, as app.py leaves it
+        account_migration.run(_DATA.name)  # layout 5, as app.py leaves it
         assert "tasks.json" in account_migration.moved_names()
 
     def setUp(self):
@@ -1467,8 +1493,7 @@ class TasksMigration(unittest.TestCase):
         (self.data / "layout.json").write_text(json.dumps({"version": 4}), encoding="utf-8")
         step = account_migration.STEPS[4]
         self.assertEqual(step.version, 5)
-        result = account_migration.run(str(self.data), [step], account="abc123",
-                                       backup=lambda path: Path(path).write_text("backup", encoding="utf-8"))
+        result = account_migration.run(str(self.data), [step], account="abc123")
         self.assertTrue(result["ok"], result)
         self.assertEqual((result["from_version"], result["to_version"]), (4, 5))
         for name in self.MOVES:
@@ -1488,7 +1513,7 @@ class MailAndSettingsPerAccount(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        account_migration.run(_DATA.name, backup=lambda path: None)  # layout 6, as app.py leaves it
+        account_migration.run(_DATA.name)  # layout 6, as app.py leaves it
         assert "email_accounts.json" in account_migration.moved_names()
 
     def setUp(self):
@@ -1568,7 +1593,7 @@ class GoogleSplitPerAccount(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        account_migration.run(_DATA.name, backup=lambda path: None)
+        account_migration.run(_DATA.name)
 
     def setUp(self):
         from core import google_workspace
@@ -1648,7 +1673,7 @@ class DiscordAndConnectorsPerAccount(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        account_migration.run(_DATA.name, backup=lambda path: None)
+        account_migration.run(_DATA.name)
 
     def setUp(self):
         from core import discord_bots_store
@@ -1783,8 +1808,7 @@ class MailMigration(unittest.TestCase):
         (self.data / "layout.json").write_text(json.dumps({"version": 5}), encoding="utf-8")
         step = account_migration.STEPS[5]
         self.assertEqual(step.version, 6)
-        result = account_migration.run(str(self.data), [step], account="abc123",
-                                       backup=lambda path: Path(path).write_text("backup", encoding="utf-8"))
+        result = account_migration.run(str(self.data), [step], account="abc123")
         self.assertTrue(result["ok"], result)
         self.assertEqual((result["from_version"], result["to_version"]), (5, 6))
         for name in self.MOVES:
@@ -1804,7 +1828,7 @@ class TabDataPerAccount(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        account_migration.run(_DATA.name, backup=lambda path: None)
+        account_migration.run(_DATA.name)
         assert "tab-data" in account_migration.moved_names()
 
     def setUp(self):
@@ -1857,8 +1881,7 @@ class TabDataMigration(unittest.TestCase):
         (self.data / "layout.json").write_text(json.dumps({"version": 8}), encoding="utf-8")
         step = account_migration.STEPS[8]
         self.assertEqual(step.version, 9)
-        result = account_migration.run(str(self.data), [step], account="abc123",
-                                       backup=lambda path: Path(path).write_text("backup", encoding="utf-8"))
+        result = account_migration.run(str(self.data), [step], account="abc123")
         self.assertTrue(result["ok"], result)
         self.assertEqual((self.account / "tab-data" / "crm" / "crm.json").read_text(encoding="utf-8"), "crm")
         self.assertFalse((self.data / "tab-data").exists())
@@ -1928,7 +1951,7 @@ class ModelConnectionsPerAccount(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        account_migration.run(_DATA.name, backup=lambda path: None)
+        account_migration.run(_DATA.name)
         assert "model_endpoints.json" in account_migration.moved_names()
 
     def setUp(self):
@@ -1999,8 +2022,7 @@ class ModelConnectionsMigration(unittest.TestCase):
         (data / "layout.json").write_text(json.dumps({"version": 9}), encoding="utf-8")
         step = account_migration.STEPS[9]
         self.assertEqual(step.version, 10)
-        result = account_migration.run(str(data), [step], account="abc123",
-                                       backup=lambda path: Path(path).write_text("backup", encoding="utf-8"))
+        result = account_migration.run(str(data), [step], account="abc123")
         self.assertTrue(result["ok"], result)
         self.assertTrue((data / "accounts" / "abc123" / "model_endpoints.json").is_file())
         self.assertFalse((data / "model_endpoints.json").exists())
@@ -2025,8 +2047,7 @@ class BotKeysLoginsMigration(unittest.TestCase):
         (data / "layout.json").write_text(json.dumps({"version": 10}), encoding="utf-8")
         step = account_migration.STEPS[10]
         self.assertEqual((step.version, step.copy_first), (11, ("bot-secrets",)))
-        result = account_migration.run(str(data), [step], account="abc123",
-                                       backup=lambda path: Path(path).write_text("backup", encoding="utf-8"))
+        result = account_migration.run(str(data), [step], account="abc123")
         self.assertTrue(result["ok"], result)
         self.assertEqual((result["from_version"], result["to_version"]), (10, 11))
         for name in self.NAMES:
@@ -2043,7 +2064,7 @@ class BotKeysLoginsMigration(unittest.TestCase):
         self.addCleanup(root.cleanup)
         data = Path(root.name)
         (data / "layout.json").write_text(json.dumps({"version": 10}), encoding="utf-8")
-        result = account_migration.run(str(data), [account_migration.STEPS[10]], account="abc123", backup=lambda path: None)
+        result = account_migration.run(str(data), [account_migration.STEPS[10]], account="abc123")
         self.assertTrue(result["ok"], result)
         self.assertEqual(account_migration.layout_version(str(data)), 11)
         account_migration._moved.pop(str(data), None)
@@ -2055,7 +2076,7 @@ class BotKeysLoginsPerAccount(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        account_migration.run(_DATA.name, backup=lambda path: None)
+        account_migration.run(_DATA.name)
 
     def setUp(self):
         fresh_users()
@@ -2143,7 +2164,7 @@ class KeysPerAccount(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        account_migration.run(_DATA.name, backup=lambda path: None)
+        account_migration.run(_DATA.name)
 
     def setUp(self):
         from core import secret_storage
@@ -2263,7 +2284,7 @@ class CliHomesPerAccount(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        account_migration.run(_DATA.name, backup=lambda path: None)
+        account_migration.run(_DATA.name)
 
     def setUp(self):
         fresh_users()

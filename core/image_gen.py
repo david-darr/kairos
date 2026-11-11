@@ -68,11 +68,16 @@ def sweep_scratch(now: float | None = None) -> int:
     if not os.path.isdir(scratch):
         return 0
     cutoff, removed = (now or time.time()) - SCRATCH_MAX_AGE, 0
-    for root, dirs, files in os.walk(scratch, topdown=False, followlinks=False):
-        for name in files:
+    # core/links.py's walk, not os.walk: os.walk goes through Windows junctions even with followlinks=False,
+    # and scratch holds worktrees with junctions (a .venv, a node_modules) whose targets are not Kairos's
+    # to delete (found 2026-11-10 with the backup walker's junction bug). A link is never entered or removed.
+    from core import links
+    folders = [root for root, _, _, _ in links.walk(scratch)]
+    for root in reversed(folders):  # deepest first, so emptied folders can go
+        for name in os.listdir(root) if os.path.isdir(root) else ():
             path = os.path.join(root, name)
             try:
-                if not os.path.islink(path) and os.path.getmtime(path) < cutoff:
+                if not links.is_link(path) and os.path.isfile(path) and os.path.getmtime(path) < cutoff:
                     os.remove(path)
                     removed += 1
             except OSError:

@@ -39,11 +39,14 @@ import uuid
 from contextlib import contextmanager, closing
 from typing import Optional
 
+from core import links
 from core.bot_held_secrets import SECRET_FOLDER
 
 logger = logging.getLogger(__name__)
 
 MANIFEST = "jarvis-backup.json"
+LINKS = "jarvis-backup-links.json"  # junctions and symlinks, by target: never followed, made again on restore
+MAX_LINKS = 1000
 VERSION = 1
 KEY_FILE = ".secret_key"
 RESTORE_DIR = ".restore"
@@ -129,18 +132,39 @@ def _vaults_inside(data_dir: str) -> set:
     return found
 
 
-def _files(data_dir: str):
+def _walk(data_dir: str):
+    """(folder, files, links) for every folder a backup reads. Junctions and symlinks are never entered
+    (core/links.py): os.path.islink() is False for a junction, so this used to pack whatever a junction in
+    generated_files pointed at (2.18 GB of an outside node_modules on David's profile)."""
     vaults = _vaults_inside(data_dir)
-    for folder, dirs, files in os.walk(data_dir):
+    for folder, dirs, files, found_links in links.walk(data_dir):
         dirs[:] = [d for d in dirs if d not in SKIPPED_DIRS and not d.startswith("pre-")
                    and os.path.relpath(os.path.join(folder, d), data_dir).replace(os.sep, "/") != "computer/profiles"
-                   and os.path.realpath(os.path.join(folder, d)) not in vaults
-                   and not os.path.islink(os.path.join(folder, d))]
+                   and os.path.realpath(os.path.join(folder, d)) not in vaults]
+        yield folder, files, [name for name in found_links if name not in SKIPPED_DIRS]
+
+
+def _files(data_dir: str):
+    for folder, files, _ in _walk(data_dir):
         for name in files:
             path = os.path.join(folder, name)
-            if name.endswith(SKIPPED_SUFFIXES) or ".corrupt-" in name or ".pre-v" in name or os.path.islink(path):
+            if name.endswith(SKIPPED_SUFFIXES) or ".corrupt-" in name or ".pre-v" in name:
                 continue
             yield path, os.path.relpath(path, data_dir).replace(os.sep, "/")
+
+
+def _links(data_dir: str) -> list[dict]:
+    """Every junction and symlink a backup passes, recorded by where it points (never followed); a restore
+    makes them again."""
+    found = []
+    for folder, _, names in _walk(data_dir):
+        for name in names:
+            path = os.path.join(folder, name)
+            to = links.target(path)
+            if to:
+                found.append({"path": os.path.relpath(path, data_dir).replace(os.sep, "/"), "target": to,
+                              "kind": links.kind(path)})
+    return found
 
 
 def _blank_secrets(value):
@@ -209,8 +233,11 @@ def make_backup(target: str, include_keys: bool = False) -> dict:
                 count += 1
             except (OSError, ValueError, sqlite3.Error) as e:
                 logger.warning("backup: left out %s (%s)", rel, e)
+        found_links = _links(data_dir)[:MAX_LINKS]
+        if found_links:
+            archive.writestr(LINKS, json.dumps(found_links, indent=2))
         manifest = {"version": VERSION, "created_at": time.time(), "includes_keys": include_keys, "files": count,
-                    "schema_version": session_manager_store.SCHEMA_VERSION}
+                    "links": len(found_links), "schema_version": session_manager_store.SCHEMA_VERSION}
         archive.writestr(MANIFEST, json.dumps(manifest, indent=2))
     return manifest
 
@@ -248,6 +275,10 @@ def check_backup(path: str) -> dict:
                         or stat.S_ISLNK(info.external_attr >> 16)):
                     raise BackupRefused("the backup contains excluded sign-ins, temporary state or a link")
                 total += info.file_size
+            if LINKS in names:
+                if archive.getinfo(LINKS).file_size > 1024 * 1024:
+                    raise BackupRefused("the backup's list of links is too large")
+                _read_links(archive)
             if total > MAX_RESTORE_BYTES:
                 raise BackupRefused("the backup is larger than Kairos restores (10 GB)")
             bad = archive.testzip()
@@ -256,6 +287,46 @@ def check_backup(path: str) -> dict:
             return manifest
     except (zipfile.BadZipFile, json.JSONDecodeError, UnicodeError, TypeError, AttributeError):
         raise BackupRefused("this is not a zip file")
+
+
+def _read_links(archive: zipfile.ZipFile) -> list[dict]:
+    """The backup's links, checked: each inside the data folder, outside the areas a backup never carries,
+    pointing at an absolute place. BackupRefused otherwise."""
+    if LINKS not in archive.namelist():
+        return []
+    try:
+        rows = json.loads(archive.read(LINKS))
+    except (ValueError, UnicodeError):
+        raise BackupRefused("the backup's list of links is damaged")
+    if not isinstance(rows, list) or len(rows) > MAX_LINKS:
+        raise BackupRefused("the backup's list of links is damaged")
+    for row in rows:
+        rel, to = (row.get("path"), row.get("target")) if isinstance(row, dict) else (None, None)
+        if not isinstance(rel, str) or not isinstance(to, str) or row.get("kind") not in ("junction", "symlink"):
+            raise BackupRefused("the backup's list of links is damaged")
+        parts = rel.replace("\\", "/").split("/")
+        if (not rel or rel.startswith(("/", "\\")) or ":" in rel or ".." in parts or "" in parts
+                or parts[0].casefold() in {RESTORE_DIR, LAYOUT_DIR, "bot-secrets", "bot_lifecycle", SECRET_FOLDER.casefold()}
+                or parts[:2] == ["computer", "profiles"] or not os.path.isabs(to)):
+            raise BackupRefused(f"the backup names a link it can't make: {rel}")
+    return rows
+
+
+def _make_links(archive: zipfile.ZipFile, data_dir: str) -> list[str]:
+    """Make the backup's links again, each pointing where it pointed. One whose place is taken, or whose
+    target no longer exists, is left out (and named in the result): a restore never fails over a link."""
+    skipped = []
+    for row in _read_links(archive):
+        path = os.path.join(data_dir, *row["path"].split("/"))
+        try:
+            if os.path.lexists(path) or not os.path.exists(row["target"]):
+                raise OSError("its place is taken or its target is gone")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            links.make(path, row["target"], row["kind"])
+        except OSError as e:
+            logger.warning("restore: left out the link %s -> %s (%s)", row["path"], row["target"], e)
+            skipped.append(row["path"])
+    return skipped
 
 
 def stage_restore(path: str, *, disable_automations: bool = False) -> dict:
@@ -271,6 +342,12 @@ def stage_restore(path: str, *, disable_automations: bool = False) -> dict:
     write_json_atomic(os.path.join(folder, PENDING_OPTIONS), {"disable_automations": disable_automations})
     os.replace(staging, os.path.join(folder, PENDING))
     return manifest
+
+
+def pending_restore_file() -> Optional[str]:
+    """The staged backup's path, without checking it (that reads the whole zip), or None."""
+    path = os.path.join(_data_dir(), RESTORE_DIR, PENDING)
+    return path if os.path.exists(path) else None
 
 
 def pending_restore() -> Optional[dict]:
@@ -341,8 +418,11 @@ def apply_pending_restore(data_dir: Optional[str] = None) -> Optional[dict]:
         swapped = True
         with zipfile.ZipFile(pending) as archive:
             for info in archive.infolist():
-                if info.filename != MANIFEST:
+                if info.filename not in (MANIFEST, LINKS):
                     archive.extract(info, data_dir)
+            skipped_links = _make_links(archive, data_dir)
+            if skipped_links:
+                result["links_skipped"] = skipped_links
         # A backup made without keys keeps this install's key, so anything
         # entered again after the restore is encrypted with a key that exists.
         if not manifest.get("includes_keys") and os.path.exists(os.path.join(safety, KEY_FILE)):

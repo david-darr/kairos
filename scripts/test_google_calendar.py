@@ -254,6 +254,50 @@ class GoogleTests(unittest.IsolatedAsyncioTestCase):
              self.assertLogs("routes.calendar_routes", level="WARNING"):
             self.assertEqual(await calendar_routes.list_events(START, END, "fixture"), [{"id": "local"}])
 
+    def offline(self, req):
+        raise httpx.ConnectError("getaddrinfo failed", request=req)
+
+    async def test_offline_token_refresh_keeps_the_calendar_route_answering(self):
+        # The 2.3.0 rehearsal ran offline: the token refresh's ConnectError was not a GoogleError, so
+        # /api/calendar/events answered 500. It now answers with the local events.
+        self.patches[2].stop()  # the real _token, with an expired access token so it must refresh
+        self.data.update(access_token=None, expires_at=0, refresh_token=google.encrypt("saved"))
+        self.response_override = self.offline
+        with patch.object(google, "_mark", lambda *a, **k: None), \
+             patch.object(calendar_routes.calendar_service, "list_range", return_value=[{"id": "local"}]), \
+             patch("core.tab_hooks.calendar_items", AsyncMock(return_value=[])), \
+             patch.object(calendar_routes.auth_manager, "is_admin", return_value=True), \
+             self.assertLogs("routes.calendar_routes", level="WARNING"):
+            response = await self.web(f"/api/calendar/events?start={START.replace('+', '%2B')}&end={END.replace('+', '%2B')}")
+        self.patches[2].start()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), [{"id": "local"}])
+        self.assertTrue(any(r.url.host == "oauth2.googleapis.com" for r in self.requests), "the refresh was tried")
+
+    async def test_offline_google_routes_answer_a_plain_offline_state(self):
+        self.response_override = self.offline
+        for path in ("/api/google/calendar/calendars", "/api/google/drive/files", "/api/google/drive/storage",
+                     f"/api/google/calendar/events?start={START.replace('+', '%2B')}&end={END.replace('+', '%2B')}"):
+            response = await self.web(path)
+            self.assertEqual(response.status_code, 503, path)
+            self.assertIn("can't be reached", response.json()["detail"], path)
+
+    async def test_offline_calendar_keeps_what_it_last_fetched(self):
+        fresh = await google.calendar_events(["primary"], START, END)
+        calendars = await google.calendar_list()
+        self.assertEqual(len(fresh), 2)
+        self.response_override = self.offline
+        for cache in (google._calendar_cache, google._calendar_list_cache):  # the cache's 60 s are long gone
+            for key, (at, value) in list(cache.items()):
+                cache[key] = (at - 3600, value)
+        self.assertEqual(await google.calendar_events(["primary"], START, END), fresh)
+        self.assertEqual(await google.calendar_list(), calendars)
+        response = await self.web("/api/google/calendar/calendars")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), calendars)
+        with self.assertRaises(google.GoogleOffline):  # a range never fetched has nothing to show
+            await google.calendar_events(["primary"], "2026-12-01T00:00:00Z", "2026-12-02T00:00:00Z")
+
     async def test_every_calendar_chat_mutation_asks_permission_and_denial_stops_http(self):
         ctx = tool_registry.ToolContext(session_id="session", is_admin=True, turn_taint=TurnTaint())
         ctx.turn_taint.mark("Outside content")

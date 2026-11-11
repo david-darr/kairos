@@ -11,11 +11,16 @@ from fastapi.responses import FileResponse
 # reads the data folder (core/backup.py, roadmap phase 8). Most services load
 # their files when imported.
 from core import backup as _backup
+from core import account_migration as _account_migration
+# Either can take minutes on a large profile, and uvicorn only opens the port after this file and the
+# start-up below: until then the port answers with the progress (core/startup_progress.py), from the first second.
+from core import startup_progress as _startup_progress
+_startup_progress.serve_if_needed(_backup.pending_restore_file() is not None, _account_migration.pending())
 _RESTORED = _backup.apply_pending_restore()
 # Then personal data moves into account folders, still before anything opens it (core/account_migration.py).
-from core import account_migration as _account_migration
 from core import accounts as _accounts_module
 _LAYOUT = _account_migration.run()
+_startup_progress.update("starting", "Starting Kairos")
 
 from core.constants import STATIC_DIR
 from core.middleware import SecurityHeadersMiddleware
@@ -223,6 +228,9 @@ async def lifespan(_app: FastAPI):
         from services import bot_push
         bot_push.start()
         await agent_calls.recover()
+        # Start-up is done: the progress answer (if one was open) gives uvicorn its port.
+        from core import startup_progress
+        startup_progress.stop()
         yield
     finally:
         remove_card_listener()

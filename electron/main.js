@@ -104,6 +104,7 @@ const { createDesktopLog } = require("./desktop-log");
 const { createUiSecret, uiCookie, browserHandoffUrl } = require("./ui-access");
 const { resolveInstance } = require("./instance");
 const { wantsBackground } = require("./launch-flags");
+const backendWait = require("./backend-wait");
 const { installChatWindows } = require('./chat-windows');
 
 // Which copy this is (electron/instance.js): the real app, or a named
@@ -331,18 +332,16 @@ function stopBackend() {
 // minutes costs nothing when startup is fast and avoids declaring failure on
 // a machine that was merely busy.
 const BACKEND_TIMEOUT_MS = 120000;
+// While the backend reports an update in progress (moving data on the first start of a new version, or a
+// restore), it may take as long as it needs; only this long with no progress at all counts as stuck.
+const UPDATE_STALL_MS = 5 * 60 * 1000;
 
-async function waitForBackend(timeoutMs = BACKEND_TIMEOUT_MS, onProgress) {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/health`);
-      if (res.ok) return true;
-    } catch (_) { /* not up yet */ }
-    if (onProgress) onProgress(Date.now() - started);
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  return false;
+function waitForBackend({ onWaiting, onUpdating } = {}) {
+  return backendWait.waitForBackend({
+    fetchImpl: (url) => fetch(url, { signal: AbortSignal.timeout(5000) }),
+    baseUrl: BACKEND_URL, timeoutMs: BACKEND_TIMEOUT_MS, stallMs: UPDATE_STALL_MS, onWaiting, onUpdating,
+    sleep: (ms) => new Promise((r) => setTimeout(r, ms)), now: () => Date.now(),
+  });
 }
 
 // createWindow() is async, so anything it throws becomes a rejected promise.
@@ -581,14 +580,42 @@ async function createWindow() {
     startBackend();
   }
 
-  const ok = await waitForBackend(BACKEND_TIMEOUT_MS, (elapsed) => {
-    if (elapsed > 15000) {
-      say("Still starting…", `Waiting for the local engine (${Math.round(elapsed / 1000)}s). ` +
-          "First launch can take a minute or two.");
-    }
+  const progress = (fraction) => {
+    win.webContents.executeJavaScript(`window.setProgress && window.setProgress(${JSON.stringify(fraction)})`).catch(() => {});
+  };
+  const waited = await waitForBackend({
+    onWaiting: (elapsed, updated) => {
+      if (!updated && elapsed > 15000) {
+        say("Still starting…", `Waiting for the local engine (${Math.round(elapsed / 1000)}s). ` +
+            "First launch can take a minute or two.");
+      }
+    },
+    // The backend is moving data for this version (or restoring a backup) before it can start: say so,
+    // with how far it has come, instead of timing out.
+    onUpdating: (state) => {
+      if (state.phase === "starting") {
+        say("Almost ready…", "Starting Kairos");
+        progress(null);
+      } else {
+        say(backendWait.UPDATE_HEADLINE, backendWait.describe(state));
+        progress(state.total > 0 ? Math.min(1, state.done / state.total) : null);
+      }
+    },
   });
+  progress(null);
 
-  if (!ok) {
+  if (!waited.ok && waited.stalled) {
+    say(
+      "Kairos stopped while updating your data",
+      `Nothing has been lost: the update keeps a record of every step and picks up where it stopped.\n\n` +
+      `Last step: ${backendWait.describe(waited.last) || "unknown"}.\n\n` +
+      "Quit Kairos from the tray icon and open it again.\n\n" +
+      `Details are logged to:\n${path.join(app.getPath("userData"), "data", "logs", "backend.log")}`,
+      true,
+    );
+    return;
+  }
+  if (!waited.ok) {
     say(
       "Kairos couldn't start",
       "The local engine didn't come up in time.\n\n" +
