@@ -7,7 +7,8 @@ every required step is done (he can hide it and open it again from the rail). Th
 bots, their approval level, their routines and the monthly spend cap), whether the setup was hidden, and the last
 "run one cycle now".
 
-Locked rules kept: every post waits for the person's OK (nothing here approves or posts), bots never create accounts
+Locked rules kept: nothing here approves or posts (every post waits for the person's OK unless they turned on hands-off
+posting themselves, handsoff.py; the setup says which), bots never create accounts
 (nothing here makes a channel), routines start paused (only the person's click turns them on, `start_routines`), and the
 only Google call is the person's own Check again (youtube.check), never this file.
 """
@@ -96,7 +97,13 @@ def state(store, user):
             continue
         bots.append({"id": bot_id, "name": agent.get("name") or role, "role": role, "mode": _mode(bot_id)})
     routines, cycle = _routines(user, set(roles)) if bots else ([], None)
-    return {"dismissed": bool(_load().get("dismissed")),
+    try:   # hands-off posting (handsoff.py): the setup's copy says who approves posts
+        from . import handsoff
+        posting = handsoff.state(store)
+        hands_off = {"on": posting["on"], "paused": posting["paused"]}
+    except Exception:  # noqa: BLE001 - unknown: the copy then says every post waits for the person
+        hands_off = {"on": False, "paused": False}
+    return {"dismissed": bool(_load().get("dismissed")), "hands_off": hands_off,
             "team": {"imported": bool(bots), "bots": bots, "routines": routines, "cycle": cycle,
                      "producer": team.producer_id(store) if bots else None, "budget": _budget()}}
 
@@ -106,8 +113,9 @@ def _cycle_prompt(channel):
             f"(channel {channel['id']}). Ask the Researcher for sourced candidates, ask the Evaluator for a pick with a reason "
             "(content_studio_pick_topic), ask the Script Writer for the script (content_studio_save_script), ask the Editor to "
             "render and draft the post (content_studio_record_render), then queue the post in the approval queue with "
-            "content_studio_submit_post and tell me it is waiting. Do not publish anything. Run content_studio_watch and "
-            "check spend against the cap.")
+            "content_studio_submit_post and tell me it is waiting (with hands-off posting on, approve it yourself with "
+            "content_studio_approve_post instead; Kairos posts it). Do not publish anything yourself. Run "
+            "content_studio_watch and check spend against the cap.")
 
 
 async def run_cycle(store, user, channel_id):

@@ -1500,7 +1500,7 @@ export async function mountContent(host, { signal, openVideos } = {}) {
     return el('section', { class: 'sc-setup', 'data-setup': '', 'aria-labelledby': 'sc-setup-title' }, [
       el('header', { class: 'sc-setup-head' }, [
         el('div', {}, [el('h3', { id: 'sc-setup-title', class: 'sc-setup-title', tabindex: '-1', text: 'Content setup' }),
-          el('p', { class: 'sc-dim', 'data-setup-left': left.length, text: left.length ? `${required - left.length} of ${required} required steps done. Nothing is posted without your OK, and Kairos never creates accounts.` : 'Every required step is done.' })]),
+          el('p', { class: 'sc-dim', 'data-setup-left': left.length, text: left.length ? `${required - left.length} of ${required} required steps done. ${M.approvalLine(data.setup)} Kairos never creates accounts.` : 'Every required step is done.' })]),
         data.channels.length || data.niches.length ? hide : null]),
       el('ol', { class: 'sc-steps' }, steps.map(setupStep))]);
   }
@@ -1557,14 +1557,14 @@ export async function mountContent(host, { signal, openVideos } = {}) {
         const cap = step.cap != null ? `$${Math.round(step.cap)}` : null;
         const run = pick ? btn(step.running ? 'Cycle running' : 'Run one cycle now', async () => {
           const c = channelOf(Number(pick.value));
-          const ok = await confirmDialog({ title: `Run one cycle for ${c.handle}?`, message: `The Producer runs today's cycle for ${M.channelName(c)} now: a topic, a script, a render and a post draft. The post waits for your OK in Approvals; nothing is posted.${cap ? ` It counts toward the team's ${cap} monthly cap.` : ''}`, confirmLabel: 'Run one cycle', danger: false });
+          const ok = await confirmDialog({ title: `Run one cycle for ${c.handle}?`, message: `The Producer runs today's cycle for ${M.channelName(c)} now: a topic, a script, a render and a post draft. ${M.handsOff(data.setup) ? 'Hands-off posting is on, so the Producer approves it and Kairos posts it.' : 'The post waits for your OK in Approvals; nothing is posted.'}${cap ? ` It counts toward the team's ${cap} monthly cap.` : ''}`, confirmLabel: 'Run one cycle', danger: false });
           if (!ok) return;
           const out = await send('/setup/run-cycle', { channel_id: c.id });
-          data.setup = out.setup; toast(out.started ? `The Producer started a cycle for ${c.handle}. Its post comes to Approvals.` : 'That cycle is already running.'); await draw();
+          data.setup = out.setup; toast(out.started ? `The Producer started a cycle for ${c.handle}. ${M.handsOff(data.setup) ? 'It approves the post itself (hands-off posting).' : 'Its post comes to Approvals.'}` : 'That cycle is already running.'); await draw();
         }, 'primary', { 'aria-label': 'Run one cycle now', ...(step.running ? { disabled: '' } : {}) }) : null;
         const total = step.routinesTotal;
         const routines = !total ? null : step.routinesOn < total ? btn('Turn on daily routines', async () => {
-          const ok = await confirmDialog({ title: 'Turn on the team\'s daily routines?', message: `The Producer runs the content cycle every day for every live channel, the weekly review on Mondays, and the Executor takes a daily metrics snapshot. Every post still waits for your OK. ${cap ? `Spending stops at the ${cap} monthly cap.` : 'No monthly spend cap is set: set one in Bots > Usage first.'}`, confirmLabel: 'Turn on routines', danger: false });
+          const ok = await confirmDialog({ title: 'Turn on the team\'s daily routines?', message: `The Producer runs the content cycle every day for every live channel, the weekly review on Mondays, and the Executor takes a daily metrics snapshot. ${M.approvalLine(data.setup)} ${cap ? `Spending stops at the ${cap} monthly cap.` : 'No monthly spend cap is set: set one in Bots > Usage first.'}`, confirmLabel: 'Turn on routines', danger: false });
           if (!ok) return;
           const out = await send('/setup/routines', { enabled: true }); data.setup = out.setup; toast(`Routines on: ${out.changed.join(', ') || 'already on'}.`); await draw();
         }, step.ran ? 'primary' : '', { 'aria-label': 'Turn on the team\'s daily routines' })

@@ -1031,6 +1031,30 @@ class YouTubeContentSetup(YouTubeAnalytics):
         link = self.channel_link(self.d.get(f"{P}/analytics/youtube/status").json(), "@alpha")
         self.assertIsNone(link["problem"])
 
+    def test_the_setup_state_and_its_team_actions(self):
+        r = self.d.get(f"{P}/setup")
+        self.assertEqual(r.status_code, 200, r.text)
+        state = r.json()
+        self.assertEqual((state["dismissed"], state["team"]["imported"], state["team"]["bots"]), (False, False, []))
+        self.assertEqual(state["hands_off"], {"on": False, "paused": False})
+        # Hide is per account.
+        self.assertTrue(self.d.put(f"{P}/setup", json={"dismissed": True}).json()["dismissed"])
+        self.assertFalse(self.b.get(f"{P}/setup").json()["dismissed"], "Bea's setup is her own")
+        self.assertFalse(self.d.put(f"{P}/setup", json={"dismissed": False}).json()["dismissed"])
+        # Without the team, nothing runs and nothing turns on; a user is always needed.
+        cid = self.channel(self.d)
+        self.assertEqual(self.d.post(f"{P}/setup/run-cycle", json={"channel_id": cid}).status_code, 409)
+        self.assertEqual(self.d.post(f"{P}/setup/routines", json={"enabled": True}).status_code, 409)
+        self.assertEqual(self.b.post(f"{P}/setup/run-cycle", json={"channel_id": cid}).status_code, 404, "another account's channel")
+        self.assertEqual(self.anon.get(f"{P}/setup").status_code, 401)
+        self.assertEqual(self.d.put(f"{P}/setup", json={"dismissed": True, "x": 1}).status_code, 422)
+        self.d.put(f"{P}/setup", json={"dismissed": False})
+        # The one-off cycle's instructions name only the chosen channel and never publish.
+        from services.content_studio import setup
+        prompt = setup._cycle_prompt({"id": cid, "platform": "youtube", "handle": "@alpha"})
+        self.assertIn("youtube @alpha", prompt)
+        self.assertIn("Do not publish anything yourself", prompt)
+
     def test_the_status_names_the_project_of_the_oauth_client(self):
         self.assertIsNone(self.d.get(f"{P}/analytics/youtube/status").json()["project"]["number"], "the fixture id has no number")
         with patch.object(google, "project_number", lambda client_id=None: "123456789012"):

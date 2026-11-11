@@ -297,6 +297,10 @@ export const SETUP_STEPS = [['team', 'Import the Content Studio team'], ['channe
 const live = channels => (channels || []).filter(c => c.status !== 'archived');
 const hasLook = c => !!(c.style_pack || c.look || c.aspect || c.voice || c.notes);
 const yes = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
+// Hands-off posting (services/content_studio/handsoff.py): when the person turned it on, the Producer approves posts.
+export const handsOff = setup => !!setup?.hands_off?.on;
+// Who approves posts, in one sentence, for the setup's header and its confirms.
+export const approvalLine = setup => handsOff(setup) ? 'Hands-off posting is on: the Producer approves posts and Kairos posts them.' : 'Nothing is posted without your OK.';
 
 // Each step: { id, title, required, state: done | todo | blocked | warn | optional, text (its live status), why (one plain
 // line), ... facts the screen's actions need }. `input` is what Studio > Content loaded: setup (team facts), channels,
@@ -354,13 +358,14 @@ export function setupSteps(input = {}) {
   const cycle = team.cycle;
   out.push({ id: 'start', required: true, state: !team.imported || !mine.length ? 'blocked' : on ? 'done' : 'todo', ran: !!cycle?.last_run, running: !!cycle?.running,
     routinesOn: on, routinesTotal: routines.length, cap: team.budget?.monthly_usd ?? null,
-    why: 'Run one cycle now to see the team work, then turn on the daily routines. They start paused; nothing posts without your OK.',
+    why: `Run one cycle now to see the team work, then turn on the daily routines. They start paused; ${handsOff(setup) ? 'hands-off posting is on, so the Producer approves posts.' : 'nothing posts without your OK.'}`,
     text: !team.imported ? 'Import the team first.' : !mine.length ? 'Add a channel first.'
       : `${cycle?.running ? 'A cycle is running now.' : cycle?.last_run ? `Last cycle: ${cycle.last_run.status || 'started'}.` : 'No cycle run yet.'} ${on ? `${on} of ${routines.length} routines on.` : 'Daily routines paused.'}` });
-  // 8. The first post: approved by the person, then published (Private first on YouTube).
+  // 8. The first post: approved by the person (or by the Producer while hands-off posting is on), then published.
   const posted = pubItems.filter(i => i.state === 'posted').length, ready = pubItems.filter(i => ['approved', 'prepared', 'waiting_for_you'].includes(i.state)).length;
   out.push({ id: 'post', required: true, state: posted ? 'done' : approvals.length || ready ? 'todo' : 'blocked', toApprove: approvals.length, ready,
-    why: 'Every post waits for your OK. On YouTube, post the first one as Private and check it in YouTube Studio.',
+    why: handsOff(setup) ? 'Hands-off posting is on: the Producer approves posts and Kairos posts them; TikTok waits for your tap. Check the first one on the platform.'
+      : 'Every post waits for your OK. On YouTube, post the first one as Private and check it in YouTube Studio.',
     text: posted ? `${yes(posted, 'post')} published.` : approvals.length ? `${yes(approvals.length, 'post')} waiting for your approval.` : ready ? `${yes(ready, 'approved post')} ready to publish.` : 'No post yet: the team brings one after its first cycle.' });
   const titles = Object.fromEntries(SETUP_STEPS);
   return out.map((s, i) => ({ ...s, n: i + 1, title: titles[s.id] }));

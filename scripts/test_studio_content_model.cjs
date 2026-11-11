@@ -400,6 +400,13 @@ const { pathToFileURL } = require('node:url');
     social: { connections: [{ channel_id: 2, connected: true }] } });
   assert.deepEqual([get('social').state, get('social').required, get('youtube').required], ['done', false, false]);
   for (const s of M.setupSteps(base)) for (const t of [s.why, s.text, s.title]) assert.ok(!t.includes('—'), 'no em-dashes in the setup');
+  // Hands-off posting (the person's own switch): the setup never promises an OK it will not ask for.
+  assert.equal(M.approvalLine(base.setup), 'Nothing is posted without your OK.');
+  const handsOn = { ...base, setup: { ...base.setup, hands_off: { on: true, paused: false } } };
+  assert.ok(M.approvalLine(handsOn.setup).includes('the Producer approves posts'));
+  steps = M.setupSteps(handsOn);
+  assert.ok(get('post').why.startsWith('Hands-off posting is on') && !get('post').why.includes('waits for your OK'));
+  assert.ok(get('start').why.includes('the Producer approves posts'));
   for (const f of [fix, both, wrong, refused, ...['signed_out', 'quota', 'scopes', 'not_owned', 'other'].map(kind => M.problemFix({ kind }))]) assert.ok(!f.text.includes('—') && !f.title.includes('—'));
 
   console.log('studio content model ok');
