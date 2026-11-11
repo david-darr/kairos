@@ -57,7 +57,11 @@ module.exports = async ({ js, win, waitFor, capture, delay, navigate, writes, ov
   })()`);
   // Since ae29cc9c a right swipe on a pushed page (this conversation) goes back first; mobile-sidebar-checks.cjs covers it.
   assert.equal(await swipe('#chat-messages', 40, 160, 120), true, 'A right swipe in a conversation goes back');
+  // The back finishes after its slide animation; opening the chat again before then lets the late Back undo it, and the
+  // page stays on the empty Home chat (found in the full gate, 2026-11-10: this check failed 5 of 6 runs alone).
+  await waitFor("document.documentElement.dataset.view !== 'chat'");
   await navigate('chat', { sessionId: 's1' });
+  await waitFor("document.documentElement.dataset.view === 'chat' && !!document.querySelector('.ms-conversation .chat-phone-tools > button')?.getClientRects().length");
   await waitFor("!!document.querySelector('.ms-conversation .chat-phone-tools')");
   assert.equal(await swipe('#chat-messages', 40, 160, 15, 90), false, 'Vertical scrolling stays native');
   assert.equal(await swipe('#chat-messages', 10, 160, 120), false, 'System back edge stays free');

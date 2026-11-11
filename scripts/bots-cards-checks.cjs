@@ -54,6 +54,9 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
 
     const open = (extra) => call('/api/bot-cards/__fixture/open', 'POST', { thread_id: threadId, bot_id: botId, ...extra }).then(r => { assert.equal(r.status, 200); return r.body; });
     const rows = () => js("[...document.querySelectorAll('#cards-transcript .bots-card-row')].map(n => ({ id: n.dataset.cardId, status: n.dataset.status, text: n.querySelector('.bots-card-row-text').textContent }))");
+    // The transcript slot learns of a settlement through its own refresh (a fetch after the event), so it can trail the composer
+    // slot, which already shows the next card. Wait for the row to say it before asserting (found in the full run, 2026-11-10).
+    const rowSays = (id, expected) => waitFor(`document.querySelector('#cards-transcript .bots-card-row[data-card-id=${q(id)}] .bots-card-row-text')?.textContent === ${q(expected)}`);
     const rowText = id => js(`document.querySelector('#cards-transcript .bots-card-row[data-card-id=${q(id)}] .bots-card-row-text')?.textContent || ''`);
     const mount = (slot, id, side) => js(`(async () => {
       const M = await import('/static/js/botsApprovalCards.js');
@@ -95,6 +98,7 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
     const first = await waitWrite(start, `/api/bot-cards/${approval.id}/respond`, 'POST');
     assert.deepEqual(body(first), { action: 'allow', remember: 'once', reviewed_revision: 1 });
     await waitFor("!!document.querySelector('#cards-composer .bots-cards-panel.connector, #cards-composer .bots-cards-panel.question')");
+    await rowSays(approval.id, 'Allowed once');
     assert.equal(await rowText(approval.id), 'Allowed once');
     assert.equal(demoState.botsCards.settled[approval.id], 1, 'one settlement');
     assert.deepEqual(await js('window.__settled'), [approval.id], 'the page is told once');
@@ -114,6 +118,7 @@ module.exports = async ({ js, waitFor, delay, win, capture, writes, demoState, b
     await click('#cards-composer [data-action="done"]');
     assert.deepEqual(body(await waitWrite(start, `/api/bot-cards/${connector.id}/resume`, 'POST')), { outcome: 'done' });
     await waitFor("!!document.querySelector('#cards-composer .bots-cards-panel.question')");
+    await rowSays(connector.id, 'Answered');
     assert.equal(await rowText(connector.id), 'Answered');
 
     // ======================= Six questions =========================================================================

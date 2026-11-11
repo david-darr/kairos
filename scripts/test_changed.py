@@ -2,7 +2,7 @@
 
     .venv\\Scripts\\python.exe -X utf8 scripts\\test_changed.py            run what the change touches
     .venv\\Scripts\\python.exe -X utf8 scripts\\test_changed.py --list     show the choice, run nothing
-    .venv\\Scripts\\python.exe -X utf8 scripts\\test_changed.py --full     everything (the release gate)
+    .venv\\Scripts\\python.exe -X utf8 scripts\\test_changed.py --full     everything (the release gate: the full ui-smoke, then each flag-only ui-smoke area it never reaches)
     .venv\\Scripts\\python.exe -X utf8 scripts\\test_changed.py --refresh-coverage   re-record which files each UI unit loads
 
 What changed: everything committed on this branch since it left `dev` (--base to choose another), plus
@@ -273,6 +273,13 @@ def node_tests(changed):
 # g7 pass on dev again (fixed by later work).
 STALE = {}
 
+# Units the default (flag-less) ui-smoke run already goes through, read from scripts/ui-smoke.cjs (the Bots checks
+# are all in it too). Every other unit only runs behind its own flag, so --full runs it after the full ui-smoke:
+# the release gate then covers every area. A new unit is flag-only until it is listed here, so the gate errs toward
+# running more, never less.
+IN_DEFAULT_RUN = {"design", "google", "mascot", "agents-layout", "agents-birth", "agents-phone", "agents-profile",
+                  "agents-appearance", "app-shell", "g4-calendar", "home", "media-viewer", "chat-references", "mobile-shell"}
+
 
 def ui_units():
     units = {k: v for k, v in UI_FLAGS.items() if k not in STALE}
@@ -474,7 +481,11 @@ def main():
     if args.full:
         py = {t.name: ["--full"] for t in python_suites()}
         node = {t.name: ["--full"] for t in sorted(set(SCRIPTS.glob("test_*.cjs")) | set(SCRIPTS.glob("test-*.cjs")) | set(SCRIPTS.glob("test_*.mjs")))}
-        ui, full_ui, other = {}, True, {s: ["--full"] for s in ELECTRON_SUITES}
+        # The full ui-smoke, then each flag-only area it never reaches (g1, g2, g3, g4, g5, g6, g7, g8, g10, a13, a14,
+        # interface, mobile, agents-call and the rest), so no area slips past the release gate unrun.
+        ui = {u: ["flag-only area, not in the full ui-smoke"] for u in units
+              if u not in IN_DEFAULT_RUN and not u.startswith("bots-")}
+        full_ui, other = True, {s: ["--full"] for s in ELECTRON_SUITES}
     else:
         py, node = python_tests(changed), node_tests(changed)
         ui, full_ui = ui_selection(changed, units, coverage)
@@ -484,9 +495,10 @@ def main():
     demo = any(f.startswith(("static/", "tabs/")) for f in changed)
     ui_work = bool(ui or other or full_ui)
     print(f"{len(changed)} changed file(s)" + ("" if args.full else ": " + ", ".join(changed[:12]) + (" ..." if len(changed) > 12 else "")))
-    print(f"Python suites: {len(py)}   Node tests: {len(node)}   ui-smoke: {'the full run' if full_ui else str(len([u for u in ui if u != 'boot'])) + ' unit(s)'}"
+    extra = len([u for u in ui if u != 'boot'])
+    print(f"Python suites: {len(py)}   Node tests: {len(node)}   ui-smoke: {('the full run + ' + str(extra) + ' flag-only unit(s)') if full_ui else str(extra) + ' unit(s)'}"
           f"   other Electron suites: {len(other)}   boot check: {'yes' if ui_work else 'no'}   site demo: {'rebuild and test' if demo else 'no'}")
-    for title, picks in (("Python", py), ("Node", node), ("ui-smoke", {} if full_ui else ui), ("Electron", other)):
+    for title, picks in (("Python", py), ("Node", node), ("ui-smoke", ui), ("Electron", other)):
         for name, why in picks.items():
             print(f"  {title:9} {name:40} {'; '.join(why)[:110]}")
     stale = sorted(u for u in STALE if not full_ui and any(words(Path(f).stem) & unit_words(u) for f in changed
@@ -524,8 +536,7 @@ def main():
             plan = [("boot", ["ui-smoke", "--boot-only"])]
             if full_ui:
                 plan.append(("ui-smoke (full)", ["ui-smoke"]))
-            else:
-                plan += [(u, ["ui-smoke", units[u]]) for u in ui if u in units]
+            plan += [(u, ["ui-smoke", units[u]]) for u in ui if u in units]
             plan += [(s, [s]) for s in other]
             for name, cmd in plan:
                 code, out, secs = electron(cmd)
