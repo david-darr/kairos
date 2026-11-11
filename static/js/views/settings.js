@@ -1665,6 +1665,8 @@ async function renderAccountPanel(body, status) {
   });
   const totp = el("div");
   await renderTotpSection(totp);
+  const switching = el("div");
+  await renderSwitchingSection(switching, status);
   body.replaceChildren(
     group({}, [row({ icon: badge(status.username, hueFor(status.username)), title: status.username,
       description: status.is_admin ? "Admin" : "Member" }),
@@ -1675,8 +1677,56 @@ async function renderAccountPanel(body, status) {
         control: pill(status.is_admin || status.machine_access ? "Allowed" : "Not allowed", status.is_admin || status.machine_access ? "ok" : "muted") })]),
     group({ title: "Password" }, [field("Current password", current), field("New password", next),
       el("div", { class: "set-row-actions" }, [err, ok, change])]),
+    switching,
     totp,
   );
+}
+
+// The account switcher (2026-11-11): this account's colour, and the PIN asked when switching into it on a device.
+async function renderSwitchingSection(host, status) {
+  const { deviceAccounts, loadDeviceAccounts, paintAccountColor, refreshSwitcher } = await import("../accountSwitcher.js");
+  if (!deviceAccounts().colors.length) await loadDeviceAccounts();
+  const send = (path, body) => fetch(path, { method: "PUT", credentials: "same-origin", body: JSON.stringify(body),
+    headers: { "Content-Type": "application/json", "X-Kairos-Switch": "1" } }).then(async r => ({ ok: r.ok, data: await r.json().catch(() => ({})) }));
+  let color = status.color;
+  const swatches = el("div", { class: "acct-swatches", role: "radiogroup", "aria-label": "Account colour" });
+  const paintSwatches = () => swatches.querySelectorAll("button").forEach(b => b.setAttribute("aria-checked", String(b.dataset.color === color)));
+  for (const name of deviceAccounts().colors) {
+    const swatch = el("button", { type: "button", role: "radio", class: "acct-swatch", "data-color": name, "aria-label": name, title: name,
+      onclick: async () => {
+        const answer = await send("/api/auth/account/color", { color: name });
+        if (!answer.ok) { toast(answer.data.detail || "That colour could not be saved.", "error"); return; }
+        color = name; paintSwatches(); paintAccountColor(name);
+        await loadDeviceAccounts(); refreshSwitcher();
+      } });
+    swatch.style.setProperty("--chip-color", `var(--acct-${name})`);
+    swatches.append(swatch);
+  }
+  paintSwatches();
+  let hasPin = !!status.switch_pin;
+  const password = el("input", { type: "password", autocomplete: "current-password", placeholder: "Your password" });
+  const pin = el("input", { type: "password", inputmode: "numeric", autocomplete: "off", maxlength: "8", placeholder: "4 to 8 digits" });
+  const pinErr = el("div", { class: "set-error" });
+  const save = el("button", { class: "btn primary", text: "Save PIN" });
+  const clear = el("button", { class: "btn quiet danger", text: "Remove PIN" });
+  const state = el("span");
+  const paintPin = () => { clear.style.display = hasPin ? "" : "none"; state.replaceChildren(pill(hasPin ? "On" : "Off", hasPin ? "ok" : "muted")); };
+  const setPin = async value => {
+    pinErr.textContent = "";
+    const answer = await send("/api/auth/account/switch-pin", { password: password.value, pin: value });
+    if (!answer.ok) { pinErr.textContent = answer.data.detail || "The PIN could not be saved."; return; }
+    hasPin = answer.data.switch_pin; password.value = ""; pin.value = ""; paintPin();
+    toast(hasPin ? "Switching into this account now asks the PIN." : "The PIN is removed.", "success");
+  };
+  save.addEventListener("click", () => setPin(pin.value.trim()));
+  clear.addEventListener("click", () => setPin(null));
+  paintPin();
+  host.replaceChildren(group({ title: "Switching accounts" }, [
+    row({ title: "Account colour", description: "On your avatar, the account switcher and the top edge of the app, so it is always clear whose account is open.",
+      below: swatches }),
+    row({ title: "Switching PIN", description: "Asked when someone switches into your account on a device where it is signed in. Wrong tries make them wait, then the password is needed.",
+      control: state, below: el("div", {}, [field("Password", password), field("PIN", pin), el("div", { class: "set-row-actions" }, [pinErr, clear, save])]) }),
+  ]));
 }
 
 async function renderTotpSection(host, on) {

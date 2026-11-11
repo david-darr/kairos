@@ -56,6 +56,21 @@
   --m-body-cdbfd9: #CDBFD9;  /* lilac */
 }
 
+/* Account colours (the account switcher, 2026-11-11): each account's own colour, on its avatar ring, the
+   switcher and the app's top edge, so it is always clear whose account is open. The backend stores the name
+   (core/auth.py ACCOUNT_COLORS); css/account-switcher.css uses --account-color, which accountSwitcher.js points
+   at one of these. Fixed like the mascot pastels, and mid-tone so a ring reads on light and dark grounds. */
+:root {
+  --acct-teal:   #2E8A86;
+  --acct-blue:   #3F6FB5;
+  --acct-plum:   #8A4F9E;
+  --acct-red:    #C2453A;
+  --acct-amber:  #C98A1B;
+  --acct-green:  #4E8A3E;
+  --acct-slate:  #5E6B7A;
+  --acct-orange: #D2692A;
+}
+
 /* The call screen (2026-11-10): a night ground in every theme, like a phone's
    call screen, warm like the brand (bistre to near black). Fixed like the
    mascot pastels: Appearance changes the app around a call, not the call.

@@ -34,8 +34,15 @@ export async function run(overlay) {
 
   await new Promise((resolve) => {
     if (status.setup_required) renderSetup(overlay, resolve);
-    else renderLogin(overlay, resolve);
+    else renderLogin(overlay, resolve, { chooser: true });
   });
+}
+
+// "Add another account" from the switcher (accountSwitcher.js), or the password again for one whose remembered
+// sign-in expired: the same sign-in card over the app, with a way back.
+export function renderAddAccount(overlay, { username = '', reason = '', onCancel, onDone }) {
+  renderLogin(overlay, onDone, { username, reason, onCancel,
+    title: username ? `Sign in to ${username}` : 'Add another account' });
 }
 
 function renderLocalAccessLocked(overlay) {
@@ -99,8 +106,9 @@ function renderSetup(overlay, onDone) {
   userInput.focus();
 }
 
-function renderLogin(overlay, onDone) {
+function renderLogin(overlay, onDone, { chooser = false, username = '', reason = '', title = '', onCancel = null } = {}) {
   const userInput = el("input", { placeholder: "Username", autocomplete: "username" });
+  userInput.value = username;
   const passInput = el("input", { type: "password", placeholder: "Password", autocomplete: "current-password" });
   const totpInput = el("input", { placeholder: "2FA code", style: "display:none;" });
   const err = el("div", { class: "meta", style: "color: var(--danger); min-height: 18px; margin-top: 8px;" });
@@ -127,20 +135,43 @@ function renderLogin(overlay, onDone) {
   passInput.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
 
   overlay.innerHTML = "";
-  overlay.appendChild(card([
-    el("h2", { text: appName }),
-    el("div", { class: "sub", text: "Sign in to continue." }),
+  const host = card([
+    el("h2", { text: title || appName }),
+    el("div", { class: "sub", text: reason || (title ? "It joins the accounts on this device. Switch between them with one click." : "Sign in to continue.") }),
     userInput,
     passInput,
     totpInput,
     err,
     el("div", { class: "onboarding-actions" }, [
-      el("div", {}),
+      onCancel ? el("button", { class: "btn quiet", text: "Cancel", onclick: onCancel }) : el("div", {}),
       el("button", { class: "btn", text: "Log In", onclick: submit }),
     ]),
     backLink("Forgot password?", () => renderForgotPassword(overlay, onDone)),
-  ]));
-  userInput.focus();
+  ]);
+  overlay.appendChild(host);
+  if (onCancel) host.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); onCancel(); } });
+  (username ? passInput : userInput).focus();
+  // Signed out, with other accounts still signed in on this device: they are one click away, as on the switcher.
+  if (chooser) import("./accountSwitcher.js").then(async (switcher) => {
+    const device = await switcher.loadDeviceAccounts();
+    if (!device.enabled || !device.accounts.length || !host.isConnected) return;
+    const list = el("div", { class: "acct-chooser", role: "group", "aria-label": "Accounts on this device" });
+    for (const account of device.accounts) {
+      const pick = el("button", { type: "button", class: "acct-chooser-row", "data-account": account.username,
+        onclick: () => {
+          if (account.expired) { userInput.value = account.username; passInput.focus(); err.textContent = "That sign-in has expired. Enter the password."; return; }
+          switcher.switchAccount(account.username, { fromSignIn: true });
+        } }, [
+        el("span", { class: "acct-chip", "aria-hidden": "true" }, [el("span", { class: "acct-chip-initial", text: account.username.slice(0, 1).toUpperCase() })]),
+        el("span", { class: "acct-row-name", text: account.username }),
+        el("span", { class: "meta", text: account.expired ? "Sign in again" : account.pin ? "PIN" : "Signed in" }),
+      ]);
+      if (/^[a-z]{2,16}$/.test(account.color || "")) pick.querySelector(".acct-chip").style.setProperty("--chip-color", `var(--acct-${account.color})`);
+      list.append(pick);
+    }
+    host.querySelector(".sub").after(el("div", { class: "acct-chooser-label meta", text: "Signed in on this device" }), list,
+      el("div", { class: "acct-chooser-label meta", text: "Or sign in to another account" }));
+  }).catch(() => {});
 }
 
 // Forgot password (David's ask 2026-09-10): there's no per-user email field

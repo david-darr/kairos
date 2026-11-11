@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 from core import mobile_activity as store
-from core.auth import SESSION_COOKIE_NAME
+from core.auth import SESSION_COOKIE_NAME, auth_manager
 from core.middleware import require_user
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
@@ -31,7 +31,7 @@ class Preferences(BaseModel):
 @router.get("")
 def status(request: Request, user: str = Depends(require_user)):
     config = store.config(create=True)
-    return {"public_key": config["public"], "devices": store.devices(user, store.binding(request.cookies.get(SESSION_COOKIE_NAME)))}
+    return {"public_key": config["public"], "devices": store.devices(user, store.binding(auth_manager.binding_token(request.cookies.get(SESSION_COOKIE_NAME))))}
 
 
 @router.post("/devices")
@@ -41,7 +41,7 @@ def enroll(body: Enrollment, request: Request, user: str = Depends(require_user)
         raise HTTPException(400, "Open Kairos through HTTPS Remote Access to enable notifications")
     try:
         store.config(create=True, subject=str(request.base_url).rstrip("/"))
-        device_id = store.enroll(user, body.subscription, store.binding(request.cookies.get(SESSION_COOKIE_NAME)))
+        device_id = store.enroll(user, body.subscription, store.binding(auth_manager.binding_token(request.cookies.get(SESSION_COOKIE_NAME))))
     except (ValueError, TypeError, KeyError) as error:
         raise HTTPException(422, str(error))
     return {"id": device_id}

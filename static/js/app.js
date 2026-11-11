@@ -28,6 +28,7 @@ import './cliPair.js'; // terminal pairing prompts (Kairos CLI)
 import { mascotPng } from './mascot.js';
 import { avatarSpec } from './agentAvatar.js';
 import { notchNavigation, whenReady } from './notchNavigate.js';
+import { mountAccountSwitcher, refreshSwitcher, followOtherWindows, paintAccountColor, addAccount, signOutAll, leaveAccount } from './accountSwitcher.js';
 
 let forgeRailCleanup = () => {};
 let botsRailCleanup = () => {};
@@ -531,48 +532,24 @@ async function buildSidebarFooter() {
   menu.className = "overflow-menu rd-menu-in hidden";
   menu.style.cssText = "position:absolute;bottom:calc(100% + 6px);left:0;min-width:170px;";
 
-  // No stored multi-account sessions exist to actually swap accounts without
-  // re-entering a password (see core/auth.py) — "Switch User" logs out and
-  // lands back on the real login screen for the next person to sign in,
-  // same as Log Out. Real gating here, though (David's follow-up ask
-  // 2026-08-31): Switch User is only enabled when a second account
-  // genuinely exists (`other_users_exist` from /api/auth/status, a plain
-  // boolean — the actual username list stays admin-only, see the route's
-  // own comment) so it isn't offered as a meaningful action when there's
-  // truly nowhere else to switch to.
+  // The account menu (the account switcher, 2026-11-11): add another account to this device, sign the open one out
+  // of it (the others stay one click away on the switcher), or sign every account out of it. Profile shows these
+  // same items (workspaceProfile.js). With accounts off there is nothing to sign in or out of.
   const authOff = status && !status.auth_enabled;
-  const switchItem = document.createElement("button");
-  switchItem.type = "button";
-  switchItem.className = "overflow-menu-item";
-  switchItem.textContent = "Switch User";
-  const logoutItem = document.createElement("button");
-  logoutItem.type = "button";
-  logoutItem.className = "overflow-menu-item";
-  logoutItem.textContent = "Log Out";
-
-  if (authOff) {
-    switchItem.disabled = true;
-    switchItem.title = "Auth is off (single local user) — nothing to switch to.";
-    logoutItem.disabled = true;
-    logoutItem.title = "Auth is off (single local user) — nothing to log out of.";
-  } else {
-    if (!status.other_users_exist) {
-      switchItem.disabled = true;
-      switchItem.title = "No other users registered yet — add one in Settings > Admin > Users.";
-    } else {
-      switchItem.addEventListener("click", async () => {
-        await api("/api/auth/logout", { method: "POST" });
-        navigator.serviceWorker?.controller?.postMessage({ type: 'kairos:clear-notifications' });
-        window.location.reload();
-      });
-    }
-    logoutItem.addEventListener("click", async () => {
-      await api("/api/auth/logout", { method: "POST" });
-      navigator.serviceWorker?.controller?.postMessage({ type: 'kairos:clear-notifications' });
-      window.location.reload();
-    });
-  }
-  menu.append(switchItem, logoutItem);
+  const item = (text, onclick) => {
+    const node = document.createElement("button");
+    node.type = "button"; node.className = "overflow-menu-item"; node.textContent = text;
+    if (authOff) { node.disabled = true; node.title = "Accounts are off (single local user): nothing to sign in or out of."; }
+    else node.addEventListener("click", onclick);
+    return node;
+  };
+  const addItem = item("Add another account", () => addAccount());
+  const logoutItem = item("Log Out", async () => {
+    await api("/api/auth/logout", { method: "POST" });
+    await leaveAccount();
+  });
+  const allItem = item("Sign out of all accounts", () => signOutAll());
+  menu.append(addItem, logoutItem, allItem);
 
   const cardWrap = document.createElement("div");
   cardWrap.style.cssText = "position:relative;flex:1;min-width:0;";
@@ -594,6 +571,7 @@ async function buildSidebarFooter() {
   // Layout changes rebuild this asynchronously. Keep Settings and Account
   // available while auth is loading, then replace the footer in one step.
   footer.replaceChildren(row);
+  refreshSwitcher();  // the browser's switcher sits above this row
   if (navigator.userAgent.includes('KairosMobile/')) {
     const nativeSettings = document.createElement('a');
     nativeSettings.className = 'nav-item native-mobile-settings';
@@ -643,6 +621,7 @@ async function boot() {
   overlay.classList.remove("hidden");
   await auth.run(overlay);
   const identity = await api('/api/auth/status');
+  paintAccountColor(identity.auth_enabled ? identity.color : null);  // whose account is open, from the first frame
   await initAppearance(identity.username);
   setPaneUser(identity.username);
   initLayout(identity.username);
@@ -679,6 +658,7 @@ async function startApp() {
   const customTabs = await buildSidebar();
   setupSidebar();
   setupMobileMenu();
+  mountAccountSwitcher(await api('/api/auth/status').catch(() => null)).catch(() => {});
   // A bot ringing you: an incoming-call sheet in any window but a single-chat popup (ringHost.js).
   if (!chatWindow) import('./ringHost.js').then(module => module.mountRingHost()).catch(() => {});
   // A bot phoning someone else for you: the live transcript, its questions and Hang up (outboundCallHost.js).
@@ -818,4 +798,5 @@ async function startApp() {
 }
 
 useAppMenusForSelects();
+followOtherWindows();
 boot();

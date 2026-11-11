@@ -17,6 +17,7 @@ removed in roadmap phase 2 (2026-10-05).
 """
 import os
 import hashlib
+import re
 import secrets
 import time
 from typing import Optional
@@ -33,6 +34,31 @@ PASSWORD_RESETS_FILE = os.path.join(DATA_DIR, "password_resets.json")
 
 SESSION_COOKIE_NAME = "jarvis_session"
 SESSION_TTL_SECONDS = 7 * 24 * 60 * 60  # 7 days, matches Odysseus
+
+# The account switcher (David's ask 2026-11-11, like Google's): each person signs in once on a device, and the
+# device remembers that sign-in so switching back is one click. The device holds, in this cookie, one "remembered"
+# token per account signed in on it. A remembered token is not a session: no route accepts it as one. Only
+# POST /api/auth/switch turns it into a fresh session for the open account (jarvis_session), after the account's
+# switching PIN when it has one. So a device can only ever reach the accounts signed in on it, and copying the
+# cookie out of the browser does not get round a PIN. A remembered sign-in lasts as long as the session it came
+# from (SESSION_TTL_SECONDS from the password): after that the switcher asks for the password again.
+ACCOUNTS_COOKIE_NAME = "kairos_accounts"
+MAX_DEVICE_ACCOUNTS = 9
+# An expired remembered sign-in still shows on the switcher (as "sign in again") for this long.
+REMEMBER_SHOWN_AFTER_EXPIRY_SECONDS = 30 * 24 * 60 * 60
+_TOKEN_SHAPE = re.compile(r"^[A-Za-z0-9_-]{20,64}$")
+
+# A switching PIN (4 to 8 digits, per account, optional): wrong tries are limited. PIN_TRIES_PER_LOCK wrong tries
+# in a row lock switching into that account for PIN_LOCK_SECONDS; PIN_FORGET_AFTER wrong tries in a row drop the
+# device's remembered sign-in, so only the password gets back in.
+PIN_SHAPE = re.compile(r"^[0-9]{4,8}$")
+PIN_TRIES_PER_LOCK = 5
+PIN_LOCK_SECONDS = 60
+PIN_FORGET_AFTER = 10
+
+# Each account's colour, on its avatar ring, the switcher and the app's top edge. Names, not colours: the colours
+# themselves are theme tokens (static/css/kairos-theme.css, --acct-<name>), so the CSS never holds raw values.
+ACCOUNT_COLORS = ("teal", "blue", "plum", "red", "amber", "green", "slate", "orange")
 
 # Forgot-password (David's ask 2026-09-10): a 6-digit code emailed through
 # whichever configured Email-tab account matches the address the user typed
@@ -154,8 +180,92 @@ class AuthManager:
             "created_at": time.time(),
             "account_id": account_id,
             "machine_access": bool(is_admin),
+            "color": self._next_color(),
         }
         write_json_atomic(AUTH_FILE, self._users)
+
+    # -- account colour (the switcher) -----------------------------------
+
+    def _next_color(self) -> str:
+        """The least used colour of the palette, earliest first on a tie, so the first eight accounts all differ."""
+        used = [u.get("color") for u in self._users["users"].values()]
+        return min(ACCOUNT_COLORS, key=lambda c: (used.count(c), ACCOUNT_COLORS.index(c)))
+
+    def account_color(self, username: str) -> Optional[str]:
+        """An account's colour; accounts made before colours get theirs the first time it is asked for."""
+        user = self._users["users"].get(username)
+        if not user:
+            return None
+        if user.get("color") not in ACCOUNT_COLORS:
+            user["color"] = self._next_color()
+            write_json_atomic(AUTH_FILE, self._users)
+        return user["color"]
+
+    def set_account_color(self, username: str, color: str) -> None:
+        user = self._users["users"].get(username)
+        if not user:
+            raise KeyError(f"no such user: {username}")
+        if color not in ACCOUNT_COLORS:
+            raise ValueError("pick one of the account colours")
+        user["color"] = color
+        write_json_atomic(AUTH_FILE, self._users)
+
+    # -- switching PIN (optional, per account) ---------------------------
+
+    def has_switch_pin(self, username: str) -> bool:
+        user = self._users["users"].get(username)
+        return bool(user and user.get("switch_pin_hash"))
+
+    def set_switch_pin(self, username: str, pin: Optional[str]) -> None:
+        """Sets (4 to 8 digits) or clears (None) the PIN asked when switching into this account on a device."""
+        user = self._users["users"].get(username)
+        if not user:
+            raise KeyError(f"no such user: {username}")
+        if pin is None:
+            user.pop("switch_pin_hash", None)
+        else:
+            if not PIN_SHAPE.match(pin):
+                raise ValueError("Use 4 to 8 digits.")
+            user["switch_pin_hash"] = bcrypt.hashpw(pin.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+        user.pop("pin_failures", None)
+        user.pop("pin_locked_until", None)
+        write_json_atomic(AUTH_FILE, self._users)
+
+    def check_switch_pin(self, username: str, pin: Optional[str]) -> dict:
+        """One try at an account's PIN. Answers {"ok": True}, or {"ok": False, "reason": ...} where reason is
+        "required" (no PIN given), "wrong" (with "tries_left" before the next lock), "locked" (with
+        "retry_after" seconds; the try was not even checked) or "forget" (too many wrong tries: the caller drops
+        the device's remembered sign-in, so only the password gets back in). Wrong tries are counted on the
+        account, so they add up across devices and restarts."""
+        user = self._users["users"].get(username)
+        if not user or not user.get("switch_pin_hash"):
+            return {"ok": True}
+        now = time.time()
+        locked_until = user.get("pin_locked_until") or 0
+        if locked_until > now:
+            return {"ok": False, "reason": "locked", "retry_after": int(locked_until - now) + 1}
+        if not pin:
+            return {"ok": False, "reason": "required"}
+        if PIN_SHAPE.match(pin) and bcrypt.checkpw(pin.encode("utf-8"), user["switch_pin_hash"].encode("utf-8")):
+            if user.get("pin_failures") or user.get("pin_locked_until"):
+                user.pop("pin_failures", None)
+                user.pop("pin_locked_until", None)
+                write_json_atomic(AUTH_FILE, self._users)
+            return {"ok": True}
+        failures = int(user.get("pin_failures") or 0) + 1
+        if failures >= PIN_FORGET_AFTER:
+            user.pop("pin_failures", None)
+            user.pop("pin_locked_until", None)
+            write_json_atomic(AUTH_FILE, self._users)
+            return {"ok": False, "reason": "forget"}
+        user["pin_failures"] = failures
+        if failures % PIN_TRIES_PER_LOCK == 0:
+            wait = PIN_LOCK_SECONDS
+            user["pin_locked_until"] = now + wait
+            write_json_atomic(AUTH_FILE, self._users)
+            return {"ok": False, "reason": "locked", "retry_after": wait}
+        write_json_atomic(AUTH_FILE, self._users)
+        return {"ok": False, "reason": "wrong", "tries_left": PIN_TRIES_PER_LOCK - failures % PIN_TRIES_PER_LOCK}
 
     # -- account folders (core/accounts.py, Multi-Account phase 1) ----
 
@@ -339,12 +449,20 @@ class AuthManager:
         session = self._sessions.get(token)
         if not session:
             return None
+        # A device's remembered sign-in is never a session itself: only the switch route opens one from it.
+        if session.get("kind") == "remember":
+            return None
         if session["expires_at"] < time.time():
             self.delete_session(token)
             return None
         # Re-check the user still exists — a deleted account's cookie stops
         # authenticating on its next use rather than continuing to work.
         if session["username"] not in self._users["users"]:
+            return None
+        # A session opened from a remembered sign-in ends with it (signed out of that account on this device).
+        parent = session.get("remember")
+        if parent and parent not in self._sessions:
+            self.delete_session(token)
             return None
         return session["username"]
 
@@ -354,11 +472,103 @@ class AuthManager:
             write_json_atomic(SESSIONS_FILE, self._sessions)
 
     def notification_session_valid(self, username: str, binding: str) -> bool:
-        """Validate device enrollment without persisting a bearer session token."""
-        return username in self._users["users"] and any(
-            row["username"] == username and row["expires_at"] > time.time()
-            and secrets.compare_digest(hashlib.sha256(token.encode()).hexdigest(), binding)
-            for token, row in self._sessions.items())
+        """Validate device enrollment without persisting a bearer session token. An enrollment made since the
+        account switcher is bound to the device's remembered sign-in for the account, and is valid only while
+        that account is the one open on the device: another account's open app never gets this one's pushes."""
+        if username not in self._users["users"]:
+            return False
+        now = time.time()
+        for token, row in self._sessions.items():
+            if row.get("username") != username or row.get("expires_at", 0) <= now:
+                continue
+            if not secrets.compare_digest(hashlib.sha256(token.encode()).hexdigest(), binding):
+                continue
+            if row.get("kind") == "remember":
+                return any(other.get("remember") == token and other.get("expires_at", 0) > now
+                           for other in self._sessions.values())
+            return True
+        return False
+
+    # -- sign-ins remembered on a device (the account switcher) ----------
+
+    def sign_in(self, username: str) -> tuple[str, str]:
+        """A password sign-in on a device: a remembered token for the device's cookie and the session opened
+        from it. Both end SESSION_TTL_SECONDS from now; switching never extends them."""
+        now = time.time()
+        remember, session = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+        self._sessions[remember] = {"username": username, "expires_at": now + SESSION_TTL_SECONDS,
+                                    "kind": "remember", "created_at": now}
+        self._sessions[session] = {"username": username, "expires_at": now + SESSION_TTL_SECONDS, "remember": remember}
+        self._purge_remembered(now)
+        write_json_atomic(SESSIONS_FILE, self._sessions)
+        return remember, session
+
+    def _purge_remembered(self, now: float) -> None:
+        stale = [t for t, s in self._sessions.items() if s.get("kind") == "remember"
+                 and s.get("expires_at", 0) + REMEMBER_SHOWN_AFTER_EXPIRY_SECONDS < now]
+        for token in stale:
+            del self._sessions[token]
+
+    def remembered(self, tokens: list[str]) -> list[dict]:
+        """The accounts a device's cookie remembers, in sign-in order, each {"username", "token", "expired"}.
+        Unknown tokens, deleted accounts and anything that is not a remembered sign-in are left out; one row per
+        account (the newest)."""
+        now, rows = time.time(), {}
+        for token in tokens:
+            row = self._sessions.get(token)
+            if not row or row.get("kind") != "remember" or row.get("username") not in self._users["users"]:
+                continue
+            if row.get("expires_at", 0) + REMEMBER_SHOWN_AFTER_EXPIRY_SECONDS < now:
+                continue
+            previous = rows.get(row["username"])
+            if previous and self._sessions[previous["token"]].get("created_at", 0) > row.get("created_at", 0):
+                continue
+            rows[row["username"]] = {"username": row["username"], "token": token, "expired": row["expires_at"] <= now}
+        return sorted(rows.values(), key=lambda r: self._sessions[r["token"]].get("created_at", 0))
+
+    def remember_of(self, session_token: Optional[str]) -> Optional[str]:
+        """The remembered sign-in a session was opened from, if any."""
+        row = self._sessions.get(session_token or "")
+        return row.get("remember") if row and row.get("kind") != "remember" else None
+
+    def binding_token(self, session_token: Optional[str]) -> Optional[str]:
+        """What a device's push enrollment is bound to: the remembered sign-in behind the session (it outlives the
+        sessions switching opens and closes), else the session itself."""
+        return self.remember_of(session_token) or session_token
+
+    def adopt(self, session_token: str) -> Optional[str]:
+        """A session from before the switcher (no remembered sign-in behind it) gets one, ending when it does,
+        so the device keeps that account on its switcher. Answers the remembered token, or None."""
+        row = self._sessions.get(session_token or "")
+        if not row or row.get("kind") == "remember" or row.get("remember") or not self.validate_session(session_token):
+            return None
+        remember = secrets.token_urlsafe(32)
+        self._sessions[remember] = {"username": row["username"], "expires_at": row["expires_at"], "kind": "remember",
+                                    "created_at": time.time()}
+        row["remember"] = remember
+        write_json_atomic(SESSIONS_FILE, self._sessions)
+        return remember
+
+    def open_remembered(self, remember: str) -> Optional[str]:
+        """A fresh session from a device's remembered sign-in (the switch route, after any PIN), ending when the
+        remembered sign-in does. None if it is gone or expired."""
+        row = self._sessions.get(remember or "")
+        if not row or row.get("kind") != "remember" or row.get("username") not in self._users["users"]:
+            return None
+        if row["expires_at"] <= time.time():
+            return None
+        session = secrets.token_urlsafe(32)
+        self._sessions[session] = {"username": row["username"], "expires_at": row["expires_at"], "remember": remember}
+        write_json_atomic(SESSIONS_FILE, self._sessions)
+        return session
+
+    def forget(self, remember: str) -> None:
+        """Signs one account out of one device: its remembered sign-in and every session opened from it."""
+        stale = [t for t, s in self._sessions.items() if t == remember or s.get("remember") == remember]
+        for token in stale:
+            del self._sessions[token]
+        if stale:
+            write_json_atomic(SESSIONS_FILE, self._sessions)
 
     # -- password reset (forgot password, David's ask 2026-09-10) ---------
     # Callers (routes/auth_routes.py) MUST return an identical response

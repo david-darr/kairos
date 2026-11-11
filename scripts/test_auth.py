@@ -95,7 +95,7 @@ class AuthTests(unittest.TestCase):
         client, _ = self.login("david", "first-password")
         token = client.cookies.get(SESSION_COOKIE_NAME)
         self.assertEqual(client.get("/api/auth/users").status_code, 200)
-        self.assertEqual(client.post("/api/auth/logout").json(), {"ok": True})
+        self.assertEqual(client.post("/api/auth/logout").json(), {"ok": True, "remaining": []}, "no other account was signed in here")
         replay = make_client()
         replay.cookies.set(SESSION_COOKIE_NAME, token)
         self.assertEqual(replay.get("/api/auth/users").status_code, 401, "the old cookie no longer works")

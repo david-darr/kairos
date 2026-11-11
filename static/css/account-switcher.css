@@ -1,0 +1,92 @@
+/* The account switcher (2026-11-11; static/js/accountSwitcher.js). Every colour is a theme token: an account's own
+   colour is --account-color (the open one) or --chip-color (each avatar), both pointing at --acct-<name> in
+   css/kairos-theme.css. */
+
+/* The avatars: the account's initial on its colour, a ring when it is the open one. */
+.acct-switcher { display: flex; align-items: center; gap: 6px; }
+.acct-chip {
+  --chip-color: var(--text-faint);
+  position: relative; display: grid; place-items: center; flex: none; width: 24px; height: 24px; padding: 0;
+  border: 0; border-radius: 50%; background: var(--chip-color); color: var(--k-surface);
+  font: 600 11px var(--k-font-sans); line-height: 1; cursor: pointer;
+  box-shadow: 0 0 0 2px var(--sidebar-bg); transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+}
+.acct-chip:hover:not(:disabled) { transform: translateY(-1px); }
+.acct-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.acct-chip[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--sidebar-bg), 0 0 0 4px var(--chip-color); cursor: default; }
+.acct-chip.is-expired { opacity: .45; }
+.acct-chip-large { width: 34px; height: 34px; font-size: 15px; }
+/* A PIN: a small dot on the avatar's edge. */
+.acct-chip-lock { position: absolute; right: -2px; bottom: -2px; width: 9px; height: 9px; border-radius: 50%;
+  background: var(--text); box-shadow: 0 0 0 2px var(--sidebar-bg); }
+.acct-add { background: transparent; color: var(--text-dim); border: 1px dashed var(--border-strong); box-shadow: none; font-size: 15px; font-weight: 400; }
+.acct-add:hover:not(:disabled) { color: var(--text); border-color: var(--text-dim); }
+.acct-add:disabled { opacity: .4; cursor: not-allowed; }
+
+/* Desktop app: in the title bar, at its right end before the window controls. */
+.acct-switcher-titlebar { margin-left: auto; -webkit-app-region: no-drag; }
+.acct-switcher-titlebar .acct-chip { width: 22px; height: 22px; font-size: 10.5px; }
+/* Browser on a desktop: above the account row at the foot of the sidebar. */
+.acct-switcher-sidebar { flex-wrap: wrap; padding: 4px 6px 8px; }
+@media (min-width: 769px) { .sidebar-collapsed .acct-switcher-sidebar { flex-direction: column; padding: 4px 0 8px; } }
+/* Phone: a row of its own at the top of the drawer's foot. */
+.ms-drawer-foot:has(.acct-switcher-drawer) { flex-wrap: wrap; }
+.acct-switcher-drawer { flex: 1 0 100%; gap: 10px; padding: 0 6px 6px; }
+.acct-switcher-drawer .acct-chip { width: 34px; height: 34px; font-size: 15px; }
+
+/* Whose account is open, at a glance: its colour on the avatar, the title bar's lower edge (desktop app), a band
+   along the top of the page (browser on a desktop) and a dot on the phone's menu button. */
+:root[data-account-color] :is(.sidebar-avatar, .ms-drawer-avatar, .workspace-profile-avatar) {
+  box-shadow: 0 0 0 2px var(--sidebar-bg), 0 0 0 4px var(--account-color);
+}
+:root.electron-shell[data-account-color] .titlebar { box-shadow: inset 0 -2px 0 var(--account-color); }
+@media (min-width: 769px) {
+  :root[data-account-color]:not(.electron-shell) body::before {
+    content: ""; position: fixed; inset: 0 0 auto; height: 3px; z-index: 10050; pointer-events: none; background: var(--account-color);
+  }
+}
+:root[data-account-color] .ms-menu-btn::after {
+  content: ""; position: absolute; top: 2px; right: 2px; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--account-color); box-shadow: 0 0 0 2px var(--bg-panel-solid);
+}
+
+/* Profile: the accounts on this device, each with Sign out. */
+.acct-profile-section { display: grid; gap: 8px; }
+.acct-row { display: flex; align-items: center; gap: 12px; padding: 6px 4px; }
+.acct-row-text { display: grid; flex: 1; min-width: 0; }
+.acct-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-weight: 500; }
+.acct-profile-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 4px; }
+.acct-profile-section .acct-chip { box-shadow: 0 0 0 2px var(--bg-panel-solid); }
+.acct-profile-section .acct-chip[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--bg-panel-solid), 0 0 0 4px var(--chip-color); }
+
+/* The sign-in card: accounts still signed in on this device, one click each. */
+.acct-chooser { display: grid; gap: 6px; margin: 6px 0 4px; }
+.acct-chooser-label { margin-top: 10px; }
+.acct-chooser-row {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 6px 10px;
+  border: 1px solid var(--border-strong); border-radius: 10px; background: var(--bg-panel-solid); color: var(--text);
+  font: inherit; text-align: left; cursor: pointer;
+}
+.acct-chooser-row:hover { border-color: var(--text-dim); }
+.acct-chooser-row .acct-chip { width: 28px; height: 28px; font-size: 13px; box-shadow: none; cursor: inherit; }
+.acct-chooser-row .acct-row-name { flex: 1; }
+
+/* The PIN sheet. */
+.acct-pin-dialog {
+  width: min(340px, calc(100vw - 32px)); padding: 20px; border: 1px solid var(--border-strong); border-radius: 14px;
+  background: var(--bg-panel-solid); color: var(--text); box-shadow: var(--shadow-elevated);
+}
+.acct-pin-dialog::backdrop { background: color-mix(in srgb, var(--text) 35%, transparent); }
+.acct-pin-dialog h2 { margin: 0 0 4px; font-size: 18px; }
+.acct-pin-input { width: 100%; margin-top: 12px; font-size: 20px; letter-spacing: .3em; text-align: center; }
+.acct-pin-error { min-height: 18px; margin-top: 8px; color: var(--danger); font-size: 13px; }
+.acct-pin-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+
+/* My account: the colour swatches. */
+.acct-swatches { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+.acct-swatch {
+  width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%; background: var(--chip-color); cursor: pointer;
+  box-shadow: 0 0 0 2px var(--bg-panel-solid);
+}
+.acct-swatch[aria-checked="true"] { box-shadow: 0 0 0 2px var(--bg-panel-solid), 0 0 0 4px var(--chip-color); }
+.acct-swatch:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }

@@ -30,6 +30,8 @@ export function shortcutGroups(quickEntry = null) {
       shortcut(formatShortcut('CommandOrControl+K'), 'Open the command palette'),
       shortcut(quickEntry === '' ? 'Tray menu' : formatShortcut(quickEntry || DEFAULT_QUICK_ENTRY), 'Open Quick Entry', quickNote),
       shortcut('Escape', 'Close the current menu or panel'),
+      shortcut(formatShortcut('CommandOrControl+Shift') + ' + 1 to 9', 'Switch to an account signed in on this device',
+        'In the order the account switcher shows them. With accounts on, on a desktop.'),
     ] },
     { title: 'Composer', items: [
       shortcut('Enter', 'Send your message on desktop', 'On phones, Return starts a new line. Tap Send to send.'),

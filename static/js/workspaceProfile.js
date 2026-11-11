@@ -27,6 +27,12 @@ export async function openWorkspaceProfile(opener) {
     el('div', {}, [el('strong', { text: name }), el('p', { class: 'meta', text: identity.auth_enabled ? (identity.is_admin ? 'Admin' : 'Member') : 'This computer' })]),
     el('button', { type: 'button', class: 'btn', text: 'Edit', onclick: () => navigate('settings', { section: 'account' }) }),
   ]), stats]));
+  // Accounts on this device, right under whose profile this is (the account switcher): each with Sign out, then Add another account and Sign out of all.
+  const switcher = await import('./accountSwitcher.js');
+  await switcher.loadDeviceAccounts();
+  if (dialog.signal.aborted) return;
+  const accountsHere = switcher.profileSection();
+  if (accountsHere) body.append(accountsHere);
   const settings = el('section', { class: 'workspace-profile-settings' });
   for (const [label, icon, tab, section] of [
     ['Models', 'models', 'settings', 'added-models'], ['Appearance', 'settings', 'settings', 'appearance'],
@@ -44,7 +50,7 @@ export async function openWorkspaceProfile(opener) {
     actions.append(el('button', { type: 'button', class: 'btn quiet', text: source.textContent, disabled: source.disabled,
       title: source.title, onclick: () => { dialog.close(); source.click(); } }));
   }
-  body.append(actions);
+  if (!accountsHere) body.append(actions);
   const counts = await Promise.allSettled(['/api/sessions', '/api/agents', '/api/notes'].map(path => api(path, { signal: dialog.signal })));
   if (dialog.signal.aborted) return;
   stats.replaceChildren(workspaceStats(counts.flatMap((result, i) => result.status === 'fulfilled' && Array.isArray(result.value)

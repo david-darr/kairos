@@ -19,6 +19,7 @@ class Element {
     document: { getElementById: () => footer, createElement: () => new Element(), addEventListener() {} },
     api: () => new Promise(resolve => { resolveAuth = resolve; }),
     navigator: { userAgent: 'Desktop' }, ICONS: {}, openSettings() {},
+    refreshSwitcher() {}, addAccount() {}, signOutAll() {}, leaveAccount() {},
   });
   const source = fs.readFileSync(require('node:path').join(__dirname, '../static/js/app.js'), 'utf8');
   const start = source.indexOf('async function buildSidebarFooter()');

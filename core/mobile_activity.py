@@ -262,6 +262,14 @@ def change_device(owner, device_id, preferences=None):
         return cursor.rowcount > 0
 
 
+def rebind(old_binding, new_binding):
+    """A session from before the account switcher got a remembered sign-in (routes/auth_routes.py _device): the
+    device's push enrollment follows it, so notifications keep working without enrolling again."""
+    if old_binding and new_binding and old_binding != new_binding:
+        with database() as db:
+            db.execute("UPDATE devices SET binding=? WHERE binding=?", (new_binding, old_binding))
+
+
 def revoke(*, owner=None, session_binding=None):
     with database() as db:
         field, value = ("owner", owner) if owner is not None else ("binding", session_binding)

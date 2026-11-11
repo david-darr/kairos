@@ -30,6 +30,10 @@ const CALL_MASCOT = { setup: 'idle', preparing: 'thinking', listening: 'listenin
 export const AUDIO_WAIT_MS = 1500;
 const PHONE_SVG = '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z"/></svg>';
 let ongoingCall = null;
+// Whether a call is on, and ending it: the account switcher asks before switching away from a call, then ends it
+// (accountSwitcher.js).
+export function callInProgress() { return !!ongoingCall?.isActive(); }
+export function endOngoingCall() { ongoingCall?.hangup?.(); }
 
 export function agentCall(agent, controller) {
   if (ongoingCall?.isActive()) {
@@ -895,7 +899,7 @@ export function agentCall(agent, controller) {
       }
       firstAudioPending = true; callStartedAt = performance.now(); endWhenQuiet = false;
       if (!room) { typedUndo?.(); typedUndo = registerTyped(controller.sessionId(), async text => { if (!active || !transport.record) return false; const sent = await api(`/api/agent-calls/${transport.record.id}/typed`, { method: 'POST', toast: false, body: JSON.stringify({ text }) }); return sent?.ok === true; }); }
-      showSettings(false); openSheet(false); settingsToggle.textContent = 'End call and change settings'; hold.hidden = holdHint.hidden = isCloud()||inputMode.value !== 'hold'; button.classList.add('is-call-active'); startedAt = lastActivity = Date.now(); ongoingCall = { isActive: () => active, restore }; listen();
+      showSettings(false); openSheet(false); settingsToggle.textContent = 'End call and change settings'; hold.hidden = holdHint.hidden = isCloud()||inputMode.value !== 'hold'; button.classList.add('is-call-active'); startedAt = lastActivity = Date.now(); ongoingCall = { isActive: () => active, restore, hangup }; listen();
       if (ringOpening && callMode.value === 'local') { ringOpening = null; workUpdates.push('ring-opening'); scheduleFlush(); }
       timer = setInterval(() => { const seconds = Math.floor((Date.now() - startedAt) / 1000); clock.textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`; drawRealtimeCost(seconds); if (Date.now() - lastActivity > livePrefs.idle_minutes * 60000 && !voiceBusy && !speechActive) hangup(); }, 1000);
     } catch (problem) {
