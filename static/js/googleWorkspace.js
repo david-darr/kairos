@@ -97,23 +97,30 @@ function signInButton(label, request, changed, done) {
   return control;
 }
 
-function renderConnection(host, status, refresh) {
-  host.replaceChildren();
-  const client = el('input', { type: 'text', value: status.client_id || '',
+// The Google OAuth client fields (client id, secret, Save), the one form that sets up Google for Kairos. Library uses it
+// here; Studio > Content's setup reuses it for "Create your Kairos Google project" (POST /api/google/client, admin only).
+export function googleClientForm(status, onSaved) {
+  const client = el('input', { type: 'text', value: status?.client_id || '',
     placeholder: 'Google OAuth Desktop client ID', 'aria-label': 'Google OAuth Desktop client ID' });
   const secret = el('input', { type: 'password', placeholder: 'Client secret, if provided',
     'aria-label': 'Google OAuth client secret' });
-  const note = el('p', { class: 'meta', text: 'Create a Desktop OAuth client in Google Cloud with Drive, Sheets, Forms, Calendar, and Gmail APIs enabled. Add your Google account as a test user if the consent app is in Testing. Sign in on the computer running Kairos; connected files are then available from other devices.' });
   const save = button('Save client ID', async () => {
     await post('/client', { client_id: client.value.trim(), client_secret: secret.value });
+    secret.value = '';
     toast('Google client saved', 'success');
-    refresh();
+    onSaved();
   }, 'btn primary');
+  return el('div', { class: 'google-field-row' }, [client, secret, save]);
+}
+
+function renderConnection(host, status, refresh) {
+  host.replaceChildren();
+  const note = el('p', { class: 'meta', text: 'Create a Desktop OAuth client in Google Cloud with Drive, Sheets, Forms, Calendar, and Gmail APIs enabled. Add your Google account as a test user if the consent app is in Testing. Sign in on the computer running Kairos; connected files are then available from other devices.' });
   const connect = signInButton('Connect Google account', {}, next => next.connected, refresh);
   host.append(el('div', { class: 'glass card google-connect' }, [
     el('div', { class: 'title', text: status.configured ? 'Connect Google Workspace' : 'Set up Google Workspace' }),
     note,
-    el('div', { class: 'google-field-row' }, [client, secret, save]),
+    googleClientForm(status, refresh),
     el('div', { class: 'google-field-row' }, [
       status.configured ? connect : el('span', { class: 'meta', text: 'Save a client ID to continue.' }),
       !onHost() ? el('span', { class: 'meta', text: 'Open Library on the Kairos host computer to connect.' }) : null,

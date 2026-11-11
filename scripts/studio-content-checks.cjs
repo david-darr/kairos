@@ -36,7 +36,18 @@ const store = { forbidden: false, metrics: {}, niches: [], channels: [], items: 
     notice: 'YouTube may keep uploads from a project that has not passed its API audit private.',
     channels: [{ channel_id: 1, handle: '@cooks', status: 'live', google_account: { id: 'g1', email: 'me@example.com', youtube_only: false }, connected: true, pending: false, needs_reconnect: false, last_sync: null, last_error: null }] } };
 const ytStatus = kind => { const s = kind === 'analytics' ? store.yt : store.ytPost; const live = s.channels.filter(c => c.status === 'live');
-  return Object.assign(s, { google_accounts: store.googleAccounts, connected: live.some(c => c.connected), google_account: (live.find(c => c.connected) || {}).google_account || null }); };
+  return Object.assign(s, { google_accounts: store.googleAccounts, project: { number: '123456789012' }, connected: live.some(c => c.connected), google_account: (live.find(c => c.connected) || {}).google_account || null }); };
+// The Content setup (services/content_studio/setup.py): the team the template made, and the YouTube APIs the mock project has
+// turned off (Check again answers from it, like Google's SERVICE_DISABLED).
+store.setup = { dismissed: false, imported: false, routinesOn: false, cycle: null };
+store.ytDisabled = [];
+const TEAM = [['Producer', 'producer'], ['Researcher', 'researcher'], ['Evaluator', 'evaluator'], ['Script Writer', 'script_writer'], ['Editor', 'editor'], ['Publisher', 'publisher'], ['Executor', 'executor']];
+const setupData = () => ({ dismissed: store.setup.dismissed, team: store.setup.imported
+  ? { imported: true, bots: TEAM.map(([name, role], i) => ({ id: `bot${i + 1}`, name, role, mode: 'ask' })),
+    routines: [['Daily content cycle', 'bot1'], ['Weekly review and report', 'bot1'], ['Daily metrics snapshot', 'bot7']].map(([name, bot_id], i) => ({ id: `r${i + 1}`, name, bot_id, enabled: store.setup.routinesOn, sentence: '', next_run_at: null, last_run: null, running: false })),
+    cycle: store.setup.cycle, producer: 'bot1', budget: { monthly_usd: 50, spent_usd: 3.2 } }
+  : { imported: false, bots: [], routines: [], cycle: null, producer: null, budget: { monthly_usd: 50, spent_usd: 0 } } });
+const API_TEXT = { 'youtube.googleapis.com': 'YouTube Data API v3', 'youtubeanalytics.googleapis.com': 'YouTube Analytics API' };
 // Publishing (Prepare post and the dashboard): a week of posts in every state. Times are this week's, local.
 const monday = (() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate() - (d.getDay() + 6) % 7).getTime() / 1000; })();
 const at = (day, hour, minute = 0) => { const d = new Date(monday * 1000); return new Date(d.getFullYear(), d.getMonth(), d.getDate() + day, hour, minute).getTime() / 1000; };
@@ -113,6 +124,16 @@ function content(method, p, body) {
   if (store.forbidden && method === 'GET') return [403, { detail: 'Forbidden' }];
   const id = Number((/\/(\d+)(?:\/|$)/.exec(p) || [])[1]);
   const channel = store.channels.find(c => c.id === id);
+  if (p === '/setup') { if (method === 'PUT') store.setup.dismissed = body.dismissed; return [200, setupData()]; }
+  if (p === '/setup/run-cycle') { store.setup.cycle = { last_run: { status: 'running' }, running: false }; return [200, { started: true, routine_id: 'r9', channel: '@cooks.tt', setup: setupData() }]; }
+  if (p === '/setup/routines') { store.setup.routinesOn = body.enabled; return [200, { changed: ['Daily content cycle', 'Weekly review and report', 'Daily metrics snapshot'], enabled: body.enabled, setup: setupData() }]; }
+  if (/^\/(analytics|posting)\/youtube\/check$/.test(p)) {
+    const kind = p.split('/')[1], link = ytStatus(kind).channels.find(c => c.channel_id === body.channel_id);
+    const off = store.ytDisabled.filter(s => kind === 'analytics' || s === 'youtube.googleapis.com');
+    Object.assign(link, { checked_at: now, problem: off.length ? { kind: 'api_disabled', services: off, project: '123456789012' } : null,
+      last_error: off.length ? `Turn on the ${off.map(s => API_TEXT[s]).join(' and the ')} in your Kairos Google project.` : null });
+    return [200, { channel: link, status: ytStatus(kind) }];
+  }
   if (p === '/niches') {
     if (method === 'POST') { const n = { id: store.niches.length + 1, name: body.name, status: 'live', slots: 1 }; store.niches.push(n); return [200, n]; }
     return [200, { niches: store.niches, max_live: 5 }];
@@ -195,6 +216,7 @@ function content(method, p, body) {
   return [404, { detail: 'Missing content mock: ' + p }];
 }
 const populate = () => {
+  store.setup.imported = true;
   Object.assign(store, {
     pubItems: [
       pubItem(31, 'Why the sky is blue', 'tiktok', 'waiting_for_you', { prep_id: 7, route: 'browser', routes: ['browser'], scheduled_at: at(0, 18), fill: { stage: 'done', filled: ['file', 'caption', 'ai_label'], missing: [] } }),
@@ -388,6 +410,14 @@ app.whenReady().then(async () => {
     assert.ok(await js("document.querySelector('.sc-empty').textContent.includes('Kairos never creates accounts')"));
     assert.deepEqual(await js("[...document.querySelectorAll('.sc-empty button')].map(b=>b.textContent)"), ['Add the Content Studio team', 'Add a channel']);
     assert.equal(await js("document.querySelectorAll('.sc-empty p').length"), 2, 'Two lines of explanation');
+    // The Content setup starts under it: import the team, then add a channel; the rest waits for those.
+    await wait("!!document.querySelector('.sc-setup')");
+    assert.deepEqual(await js("[...document.querySelectorAll('.sc-step')].map(s=>s.dataset.step+' '+s.dataset.state)"),
+      ['team todo', 'channel todo', 'look blocked', 'approve done', 'youtube optional', 'social optional', 'start blocked', 'post blocked']);
+    assert.ok(await js("document.querySelector('[data-step=approve] [data-step-status]').textContent.includes('Flat science explainer')"), 'the library already has an approved pack');
+    assert.ok(await js("document.querySelector('[data-step=channel]').textContent.includes('Kairos never creates accounts')"));
+    assert.ok(await js("!!document.querySelector('[data-step=team] button[aria-label=\"Import the Content Studio team template\"]')"));
+    assert.equal(await js("!!document.querySelector('.sc-setup button[aria-label=\"Hide the Content setup\"]')"), false, 'Nothing to hide it behind before a channel exists');
     await capture('desktop-empty'); await noOverflow(); await labels();
     win.setContentSize(390, 900); await pause(350); await noOverflow(); await capture('phone-empty');
     win.setContentSize(1440, 1000); await pause(350);
@@ -455,7 +485,8 @@ app.whenReady().then(async () => {
     assert.deepEqual(await js("[...document.querySelectorAll('.sc-tab')].map(t=>t.textContent)"), ['Dashboard', 'Approvals 4', 'Pipeline', 'Calendar', 'Publishing', 'Analytics', 'Report']);
     // The rail: All channels, each channel under its niche with its avatar and platform, Add channel, then the libraries.
     assert.deepEqual(await js("[...document.querySelectorAll('.sc-rail-top > *')].map(n=>n.classList.contains('sc-rail-heading') ? '# '+n.textContent : n.dataset.scope ? n.dataset.scope+' '+n.querySelector('.sc-rail-name').textContent : n.textContent)"),
-      ['all All channels', '# Cooking', '1 @cooks', '2 @cooks.tt', '# Travel', '3 @trips', 'Add channel']);
+      ['all All channels', '# Cooking', '1 @cooks', '2 @cooks.tt', '# Travel', '3 @trips', 'Add channel', 'Set up3']);
+    assert.equal(await js("document.querySelector('[data-rail-setup]').getAttribute('aria-label')"), 'Content setup, 3 steps left');
     assert.deepEqual(await js("[...document.querySelectorAll('.sc-rail-item[data-scope=\"1\"], .sc-rail-item[data-scope=\"3\"]')].map(n=>[n.querySelector('.sc-avatar').textContent, n.querySelector('.sc-rail-sub').textContent, n.getAttribute('aria-label')])"),
       [['COYT', 'YouTube Paused', 'YouTube @cooks, paused, 3 waiting for you'], ['TRIG', 'Instagram Archived', 'Instagram @trips, archived, 2 waiting for you']]);
     // Channels starting with the same letter are told apart: two letters, the platform glyph and a hue of their own.
@@ -1115,6 +1146,115 @@ app.whenReady().then(async () => {
     for (const lib of ['formats', 'characters', 'styles', 'connections']) { await pick('lib:' + lib); await phoneTargets('library-' + lib); }
     win.setContentSize(1440, 1000); await pause(350);
 
+    // 8a. The Content setup (2026-11-11): the checklist on the All channels dashboard with each step's state and its action;
+    // YouTube's APIs turned off in the project (David's case), named by Check again, with the console links for the project's
+    // owner; the same fix in the channel's Settings rows; one cycle now and the daily routines on the person's click; Hide and
+    // Set up; and a person with no Google project yet.
+    const onboardShots = process.env.STUDIO_ONBOARDING_SHOTS;   // also keep these screenshots there (for David)
+    const keepOnboard = async name => { await js("document.getElementById('toast-host')?.replaceChildren(); true"); await capture(name); if (onboardShots) { fs.mkdirSync(onboardShots, { recursive: true }); fs.copyFileSync(path.join(output, name + '.png'), path.join(onboardShots, name + '.png')); } };
+    const stepState = id => js(`document.querySelector('.sc-step[data-step=${id}]')?.dataset.state`);
+    // David's channel: linked through a Google account added for YouTube only, the APIs off since the first sync.
+    const cooksLink = store.yt.channels.find(c => c.channel_id === 1);
+    const before = { ...cooksLink };
+    Object.assign(cooksLink, { google_account: { id: 'g2', email: 'channel@example.com', youtube_only: true }, connected: true, last_sync: null,
+      last_error: 'Turn on the YouTube Data API and the YouTube Analytics API in your Google Cloud project, then sync again.', problem: { kind: 'api_disabled', services: [], project: null } });
+    store.ytDisabled = ['youtube.googleapis.com', 'youtubeanalytics.googleapis.com'];
+    store.setup.dismissed = false; store.setup.routinesOn = false; store.setup.cycle = null;
+    await pause(1100); await openContent();
+    await js("window.__ext = []; window.jarvis = { ...(window.jarvis || {}), browser: { openExternal: async u => { window.__ext.push(u); return { ok: true }; } } }; true");
+    await wait("!!document.querySelector('.sc-setup [data-step=youtube] [data-fix=api_disabled]')");
+    assert.equal(await stepState('youtube'), 'warn');
+    assert.equal(await js("document.querySelector('[data-step=youtube] [data-step-status]').textContent"), '@cooks: Needs the YouTube APIs turned on.');
+    const rolesText = await js("document.querySelector('[data-step=youtube] [data-google-roles]').textContent");
+    for (const part of ['Your Kairos Google project.', '(project 123456789012)', 'Kairos does not know which account that is.', 'This channel\'s Google account.', 'needs no project of its own', 'Test users']) assert.ok(rolesText.includes(part), part);
+    const fixText = () => js("document.querySelector('[data-step=youtube] [data-fix]').textContent");
+    assert.ok((await fixText()).includes('Turn on the YouTube Data API v3 and the YouTube Analytics API'), 'an old sync names both APIs');
+    assert.ok((await fixText()).includes('signed in as the Google account that owns your Kairos Google project, not the channel'));
+    assert.ok((await fixText()).includes('a different Google account owns the project'));
+    assert.deepEqual(await js("[...document.querySelectorAll('[data-step=youtube] [data-fix] [data-href]')].map(b=>b.dataset.href)"),
+      ['https://console.cloud.google.com/apis/library/youtube.googleapis.com?project=123456789012', 'https://console.cloud.google.com/apis/library/youtubeanalytics.googleapis.com?project=123456789012']);
+    assert.equal(await js("[...document.querySelectorAll('.sc-setup [data-href]')].some(b=>b.dataset.href.includes('@'))"), false, 'never an email in a link');
+    // A link opens only on a click, in the system browser.
+    assert.deepEqual(await js('window.__ext'), []);
+    await js("document.querySelector('[data-step=youtube] [data-fix] [data-href*=youtubeanalytics]').click()");
+    await wait("window.__ext.length === 1");
+    assert.equal(await js('window.__ext[0]'), 'https://console.cloud.google.com/apis/library/youtubeanalytics.googleapis.com?project=123456789012');
+    await keepOnboard('setup-apis-off'); await noOverflow(); await labels();
+    // Check again asks once and names what is still off: first both, then (Data API turned on) only Analytics.
+    await click('[data-step=youtube] button', 'Check @cooks again for YouTube analytics');
+    await wait("document.querySelector('[data-step=youtube] [data-fix]')?.textContent.includes('project 123456789012')");
+    assert.deepEqual(last('/analytics/youtube/check').body, { channel_id: 1 });
+    store.ytDisabled = ['youtubeanalytics.googleapis.com'];
+    await click('[data-step=youtube] button', 'Check @cooks again for YouTube analytics');
+    await wait("document.querySelector('[data-step=youtube] .sc-fix-title')?.textContent === 'Turn on the YouTube Analytics API'");
+    assert.equal(await js("document.querySelectorAll('[data-step=youtube] [data-fix] [data-href]').length"), 1, 'only the API still off');
+    await keepOnboard('setup-analytics-api-off');
+    // The channel's Settings rows say it in words, with the same fix, not a bare "Check".
+    await scopeTo(1); await tab('settings');
+    await wait("!!document.querySelector('.sc-yt-conn [data-youtube-kind=analytics] [data-fix=api_disabled]')");
+    assert.equal(await js("document.querySelector('.sc-yt-conn [data-youtube-kind=analytics] .set-row-control .set-pill').textContent"), 'Needs the YouTube APIs turned on');
+    assert.equal(await js("document.querySelector('.sc-yt-conn [data-youtube-kind=posting] .set-pill').textContent"), 'Connected');
+    assert.equal(await js("[...document.querySelectorAll('.sc .set-pill')].some(p=>p.textContent==='Check')"), false, 'no bare Check');
+    assert.ok(await js("document.querySelector('.sc-yt-conn [data-youtube-kind=analytics]').textContent.includes('Uses channel@example.com (added for YouTube only).')"));
+    await js("document.querySelector('.sc-yt-conn [data-youtube-kind=analytics]').scrollIntoView({ block: 'center' })");
+    await keepOnboard('settings-youtube-apis-off'); await noOverflow(); await labels();
+    store.ytDisabled = [];
+    await click('.sc-yt-conn button', 'Check @cooks again for YouTube analytics');
+    await wait("document.querySelector('.sc-yt-conn [data-youtube-kind=analytics] .set-pill')?.textContent === 'Connected' && !document.querySelector('.sc-yt-conn [data-fix]')");
+    await js("document.querySelector('.sc-yt-conn').scrollIntoView({ block: 'center' })");
+    await keepOnboard('settings-youtube-connected');
+    // Back on the dashboard: YouTube is done; one cycle now for a chosen channel, then the daily routines, each after a confirm.
+    await scopeTo('all'); await tab('dashboard');
+    await wait("document.querySelector('.sc-step[data-step=youtube]')?.dataset.state === 'done'");
+    assert.equal(await stepState('start'), 'todo');
+    assert.ok(await js("document.querySelector('[data-step=start] [data-cap]').textContent.includes('$50')"));
+    await fill('Channel for one cycle now', '2');
+    await click('[data-step=start] button', 'Run one cycle now');
+    await wait("!!document.querySelector('.confirm-panel')");
+    assert.ok(await js("document.querySelector('.confirm-panel').textContent.includes('waits for your OK in Approvals; nothing is posted')"));
+    await click('.confirm-panel button', 'Run one cycle');
+    await wait("document.querySelector('[data-step=start] [data-step-status]')?.textContent.includes('Last cycle: running.')");
+    assert.deepEqual(last('/setup/run-cycle').body, { channel_id: 2 });
+    assert.equal(writes.filter(w => w.path.endsWith('/setup/routines')).length, 0, 'running a cycle never turns routines on');
+    await click('[data-step=start] button', 'Turn on the team\'s daily routines');
+    await wait("!!document.querySelector('.confirm-panel')");
+    assert.ok(await js("document.querySelector('.confirm-panel').textContent.includes('Spending stops at the $50 monthly cap')"));
+    await click('.confirm-panel button', 'Cancel');
+    assert.equal(writes.filter(w => w.path.endsWith('/setup/routines')).length, 0, 'Cancel changes nothing');
+    await click('[data-step=start] button', 'Turn on the team\'s daily routines');
+    await wait("!!document.querySelector('.confirm-panel')");
+    await click('.confirm-panel button', 'Turn on routines');
+    await wait("document.querySelector('.sc-step[data-step=start]')?.dataset.state === 'done'");
+    assert.deepEqual(last('/setup/routines').body, { enabled: true });
+    await keepOnboard('setup-checklist'); await noOverflow(); await labels();
+    // Hide puts it away; Set up in the rail brings it back.
+    await click('.sc-setup button', 'Hide the Content setup');
+    await wait("!document.querySelector('.sc-setup')");
+    assert.deepEqual(last('/setup', 'PUT').body, { dismissed: true });
+    await js("document.querySelector('[data-rail-setup]').click()");
+    await wait("!!document.querySelector('.sc-setup') && document.activeElement?.classList.contains('sc-setup-title')");
+    assert.deepEqual(last('/setup', 'PUT').body, { dismissed: false });
+    // No Google project yet: the YouTube step becomes the guided project setup, with Library's own Google form.
+    store.yt.configured = false; store.ytPost.configured = false;
+    await pause(1100); await openContent();
+    await wait("!!document.querySelector('[data-step=youtube] [data-project-guide]') && !!document.querySelector('[data-step=youtube] [aria-label=\"Google OAuth Desktop client ID\"]')");
+    assert.deepEqual(await js("[...document.querySelectorAll('[data-guide-step]')].map(n=>n.dataset.guideStep)"), ['account', 'project', 'apis', 'consent', 'client', 'paste']);
+    assert.ok(await js("document.querySelector('[data-guide-step=consent]').textContent.includes('the project\\'s owner and each channel\\'s Google account')"));
+    assert.ok(await js("document.querySelector('[data-guide-step=client]').textContent.includes('Desktop app')"));
+    assert.equal(await js("document.querySelector('[data-step=youtube] [data-guide-step=apis] [data-href]').dataset.href"), 'https://console.cloud.google.com/apis/library/youtube.googleapis.com', 'no project yet: no project in the link');
+    await js("document.querySelector('[data-step=youtube]').scrollIntoView({ block: 'start' })");
+    await keepOnboard('setup-new-google-project'); await noOverflow(); await labels();
+    win.setContentSize(390, 1000); await pause(350);
+    await noOverflow(); await labels();
+    // The card's top below the phone's floating menu button: scroll its scrolling ancestor 80 px short of it.
+    await js(`(() => { const card = document.querySelector('.sc-setup'); card.scrollIntoView({ block: 'start' });
+      for (let n = card.parentElement; n; n = n.parentElement) if (n.scrollTop > 0) { n.scrollTop -= 80; break; } return true; })()`);
+    await keepOnboard('phone-setup');
+    win.setContentSize(1440, 1000); await pause(350);
+    store.yt.configured = true; store.ytPost.configured = true;
+    Object.assign(cooksLink, before, { problem: null });
+    assert.ok(!(await js("document.querySelector('.sc-setup').textContent")).includes('—'), 'No em-dashes in the setup');
+
     // 9. A 403 reads as a plain sentence, and a signed-out account is told so.
     store.forbidden = true;
     await openContent();
@@ -1123,7 +1263,7 @@ app.whenReady().then(async () => {
     store.forbidden = false;
 
     assert.deepEqual(errors, []); assert.deepEqual(outside, []);
-    console.log(JSON.stringify({ ok: true, output, writes: writes.length, checks: ['empty state and template deep link', 'add channel', 'rail and overview dashboard', 'channel dashboard and tabs', 'channel settings', 'connections library', 'channel pipeline, calendar, approvals, publishing routes, analytics', 'dark base', 'editor from the rail', 'phone channel picker', 'warning shown and resolved', 'archive and restore', 'youtube connections and privacy', 'channel look', 'pipeline board', 'details', 'post to youtube', 'approve', 'edit', 'reject with note', 'redraft', 'batch approval', 'scoreboard needs more data', 'niche proposal', 'team settings', 'decisions confirm and reject', 'publishing dashboard, checklist, prepare, schedule, open upload page, mark posted, week calendar, page-read switches', 'format cards and ports', 'characters and sheet approval', 'style packs: brief, duplicate, edit, import, sample, approval', 'channel style pack', 'report', 'csv mapping and import', '390 phone', '403', 'offline'] }));
+    console.log(JSON.stringify({ ok: true, output, writes: writes.length, checks: ['empty state and template deep link', 'add channel', 'rail and overview dashboard', 'channel dashboard and tabs', 'channel settings', 'connections library', 'channel pipeline, calendar, approvals, publishing routes, analytics', 'dark base', 'editor from the rail', 'phone channel picker', 'warning shown and resolved', 'archive and restore', 'youtube connections and privacy', 'channel look', 'pipeline board', 'details', 'post to youtube', 'approve', 'edit', 'reject with note', 'redraft', 'batch approval', 'scoreboard needs more data', 'niche proposal', 'team settings', 'decisions confirm and reject', 'publishing dashboard, checklist, prepare, schedule, open upload page, mark posted, week calendar, page-read switches', 'format cards and ports', 'characters and sheet approval', 'style packs: brief, duplicate, edit, import, sample, approval', 'channel style pack', 'report', 'csv mapping and import', '390 phone', 'content setup: checklist, YouTube APIs off and Check again, Settings rows, one cycle now, routines, hide and set up, new Google project', '403', 'offline'] }));
   } catch (error) {
     console.error(error.stack);
     if (win && !win.isDestroyed()) fs.writeFileSync(path.join(output, 'failure.png'), (await win.webContents.capturePage()).toPNG());

@@ -66,10 +66,26 @@ class FakeGoogle:
         self.upload_privacy = None       # what YouTube says it set; None echoes the request
         self.upload_channel = "UCalpha0000000000000000"
         self.popular = []                # the most-popular chart
+        self.disabled = set()            # service names turned off in the project: answered as Google does (SERVICE_DISABLED)
+        self.project = "123456789012"
+
+    def disabled_answer(self, service):
+        name = {"youtube.googleapis.com": "YouTube Data API v3", "youtubeanalytics.googleapis.com": "YouTube Analytics API"}[service]
+        return httpx.Response(403, json={"error": {
+            "code": 403, "status": "PERMISSION_DENIED",
+            "message": f"{name} has not been used in project {self.project} before or it is disabled. Enable it by visiting "
+                       f"https://console.developers.google.com/apis/api/{service}/overview?project={self.project} then retry.",
+            "errors": [{"message": "disabled", "domain": "usageLimits", "reason": "accessNotConfigured"}],
+            "details": [{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "SERVICE_DISABLED", "domain": "googleapis.com",
+                         "metadata": {"service": service, "consumer": f"projects/{self.project}"}}]}})
 
     def handle(self, req):
         self.log.append(req)
         host, path = req.url.host, req.url.path
+        service = ("youtubeanalytics.googleapis.com" if host == "youtubeanalytics.googleapis.com"
+                   else "youtube.googleapis.com" if host == "www.googleapis.com" and "/youtube/" in path else None)
+        if service in self.disabled:
+            return self.disabled_answer(service)
         if host == "oauth2.googleapis.com":
             form = parse_qs(req.content.decode())
             if form["grant_type"] == ["refresh_token"]:
@@ -115,6 +131,9 @@ class FakeGoogle:
             if self.quota_failures:
                 status, reason, headers = self.quota_failures.pop(0)
                 return httpx.Response(status, headers=headers, json={"error": {"message": "limit " + reason, "errors": [{"reason": reason}]}})
+            if q.get("ids") == "channel==MINE":   # Check again's probe: one day of views
+                assert q["metrics"] == "views" and q["startDate"] == q["endDate"]
+                return httpx.Response(200, json={"columnHeaders": [{"name": "views"}], "rows": [[0]]})
             assert q["ids"].startswith("channel==UC") and q["dimensions"] == "video" and q["sort"] and int(q["maxResults"]) <= 200
             assert q["metrics"] == "views,averageViewDuration,likes,comments,shares,subscribersGained"
             wanted = q["filters"].removeprefix("video==").split(",")
@@ -857,6 +876,165 @@ class YouTubeAccountChoice(YouTubeAnalytics):
             self.assertEqual(set(youtube._load("posting")["channels"]), {str(alpha), str(beta)})
         # Bea's account never sees David's links.
         self.assertEqual(self.b.get(f"{P}/analytics/youtube/status").json()["channels"], [])
+
+    for _name in [n for n in dir(YouTubeAnalytics) if n.startswith("test_")]:
+        locals()[_name] = None
+    del _name
+
+
+class YouTubeContentSetup(YouTubeAnalytics):
+    # -- the Content setup: what Google's refusal means, and Check again (2026-11-11) -------------------------------
+
+    def test_google_errors_are_classified(self):
+        def err(message, status=403, reason="", info=None):
+            return google.GoogleError(f"Google API: {message}", status, reason, None, info)
+        analytics = {"reason": "SERVICE_DISABLED", "service": "youtubeanalytics.googleapis.com", "consumer": "projects/123456789012"}
+        with patch.object(google, "project_number", lambda client_id=None: "123456789012"):
+            self.assertEqual(youtube.classify(err("YouTube Analytics API has not been used in project 123456789012 before or it is disabled.",
+                                                  reason="accessNotConfigured", info=analytics)),
+                             {"kind": "api_disabled", "services": ["youtubeanalytics.googleapis.com"], "project": "123456789012"})
+            # The old shape (no ErrorInfo): the reason, the service in the message's link, the project from the message.
+            self.assertEqual(youtube.classify(err("Enable it by visiting https://console.developers.google.com/apis/api/youtube.googleapis.com/overview?project=123456789012 then retry.",
+                                                  reason="accessNotConfigured")),
+                             {"kind": "api_disabled", "services": ["youtube.googleapis.com"], "project": "123456789012"})
+            # No service anywhere: the API that was called.
+            self.assertEqual(youtube.classify(err("disabled", reason="accessNotConfigured"), "youtube_analytics")["services"],
+                             ["youtubeanalytics.googleapis.com"])
+            # Turned on in another project than the one the Kairos OAuth client belongs to.
+            other = youtube.classify(err("x", info={**analytics, "consumer": "projects/999999999"}))
+            self.assertEqual((other["kind"], other["project"], other["expected"]), ("wrong_project", "999999999", "123456789012"))
+            self.assertIn("project 123456789012", youtube.problem_text(other))
+        for e in (err("limit", reason="quotaExceeded"), err("limit", 429, "rateLimitExceeded"), err("Daily Limit Exceeded quota", 403)):
+            self.assertEqual(youtube.classify(e), {"kind": "quota"})
+        self.assertEqual(youtube.classify(err("expired", 401)), {"kind": "signed_out"})
+        self.assertEqual(youtube.classify(err("Insufficient Permission", reason="insufficientPermissions")), {"kind": "scopes"})
+        self.assertEqual(youtube.classify(err("nope", reason="forbidden")), {"kind": "forbidden"})
+        self.assertIsNone(youtube.classify(err("boom", 500)))
+        # Several calls make one problem: every disabled API named, in a fixed order; a sign-out wins over everything.
+        merged = youtube.merge_problems([{"kind": "api_disabled", "services": ["youtubeanalytics.googleapis.com"], "project": "1"},
+                                         None, {"kind": "api_disabled", "services": ["youtube.googleapis.com"], "project": "1"}])
+        self.assertEqual(merged["services"], ["youtube.googleapis.com", "youtubeanalytics.googleapis.com"])
+        self.assertIn("YouTube Data API v3 and the YouTube Analytics API", youtube.problem_text(merged))
+        self.assertIn("owner", youtube.problem_text(merged), "it says to turn them on as the project's owner")
+        self.assertEqual(youtube.merge_problems([merged, {"kind": "signed_out"}])["kind"], "signed_out")
+        self.assertIsNone(youtube.merge_problems([None, None]))
+        # The project number is the start of the OAuth client id; any other form gives none.
+        self.assertEqual(google.project_number("123456789012-abc_DEF9.apps.googleusercontent.com"), "123456789012")
+        for bad in ("fixture.apps.googleusercontent.com", "12-a.apps.googleusercontent.com", "123456789012-abc.example.com", ""):
+            self.assertIsNone(google.project_number(bad), bad)
+
+    def test_check_again_names_each_api_that_is_off(self):
+        self.connect(self.d)
+        cid = self.channel(self.d)
+        status = self.d.get(f"{P}/analytics/youtube/status").json()
+        self.assertIsNone(self.channel_link(status, "@alpha")["problem"], "a fresh link has no problem")
+        self.assertIn("project", status)
+        # Reading the status never asks Google; only the person's Check does.
+        self.fake.log.clear()
+        self.d.get(f"{P}/analytics/youtube/status")
+        self.assertEqual(self.fake.log, [])
+        self.fake.disabled = {"youtube.googleapis.com", "youtubeanalytics.googleapis.com"}
+        r = self.d.post(f"{P}/analytics/youtube/check", json={"channel_id": cid})
+        self.assertEqual(r.status_code, 200, r.text)
+        link = r.json()["channel"]
+        self.assertEqual(link["problem"]["kind"], "api_disabled")
+        self.assertEqual(link["problem"]["services"], ["youtube.googleapis.com", "youtubeanalytics.googleapis.com"],
+                         "both APIs are named: the Analytics API is asked even though the Data API is off")
+        self.assertEqual(link["problem"]["project"], "123456789012")
+        self.assertIn("YouTube Data API v3 and the YouTube Analytics API", link["problem_text"])
+        self.assertIsNotNone(link["checked_at"])
+        self.assertEqual(self.channel_link(r.json()["status"], "@alpha")["problem"]["kind"], "api_disabled", "kept on the link")
+        self.assertNotIn("owner@example.com", json.dumps(link["problem"]), "no email in the problem")
+        # The person turns on the Data API only: Check again names the one still off.
+        self.fake.disabled = {"youtubeanalytics.googleapis.com"}
+        link = self.d.post(f"{P}/analytics/youtube/check", json={"channel_id": cid}).json()["channel"]
+        self.assertEqual(link["problem"]["services"], ["youtubeanalytics.googleapis.com"])
+        # Posting needs only the Data API, which is on now.
+        self.connect(self.d, kind="posting", sign_in=False)
+        posting = self.d.post(f"{P}/posting/youtube/check", json={"channel_id": cid})
+        self.assertEqual(posting.status_code, 200, posting.text)
+        self.assertIsNone(posting.json()["channel"]["problem"])
+        # Both on: the problem and its sentence clear.
+        self.fake.disabled = set()
+        link = self.d.post(f"{P}/analytics/youtube/check", json={"channel_id": cid}).json()["channel"]
+        self.assertEqual((link["problem"], link["last_error"], link["problem_text"]), (None, None, ""))
+        # Quota, and a channel the account does not own, are said as such.
+        self.fake.quota_failures = [(403, "quotaExceeded", {})]
+        self.assertEqual(self.d.post(f"{P}/analytics/youtube/check", json={"channel_id": cid}).json()["channel"]["problem"]["kind"], "quota")
+        self.fake.channels = [{"id": "UCbeta00000000000000000", "snippet": {"customUrl": "@beta", "title": "Beta"}}]
+        found = self.d.post(f"{P}/analytics/youtube/check", json={"channel_id": cid}).json()["channel"]["problem"]
+        self.assertEqual(found["kind"], "not_owned")
+        self.assertIn("Brand Account", found["text"])
+        # Check needs a link, a YouTube channel and a user.
+        other = self.channel(self.d, "@nolink")
+        self.assertEqual(self.d.post(f"{P}/analytics/youtube/check", json={"channel_id": other}).status_code, 409)
+        self.assertEqual(self.anon.post(f"{P}/analytics/youtube/check", json={"channel_id": cid}).status_code, 401)
+        self.assertEqual(self.b.post(f"{P}/analytics/youtube/check", json={"channel_id": cid}).status_code, 404, "another account's channel")
+
+    def test_a_sync_records_which_api_is_off_and_old_text_still_reads_as_apis_off(self):
+        ids, now = self.studio_setup(self.david_id)
+        with accounts.as_account(self.david_id):
+            make_posted(studio, ids["@alpha"], "v", "https://youtu.be/aaaaaaaaaaa", now - 2 * DAY)
+        self.fake.videos = {"aaaaaaaaaaa": ("PT20S", "UCalpha0000000000000000")}
+        self.connect(self.d)
+        self.fake.disabled = {"youtubeanalytics.googleapis.com"}
+        result = self.d.post(f"{P}/analytics/youtube/sync").json()["result"]
+        self.assertEqual(result["stopped"], "error")
+        self.assertEqual(self.sleeps, [], "a disabled API is not retried")
+        link = self.channel_link(self.d.get(f"{P}/analytics/youtube/status").json(), "@alpha")
+        self.assertEqual(link["problem"]["services"], ["youtubeanalytics.googleapis.com"])
+        self.assertTrue(link["last_error"].startswith("Turn on the YouTube Analytics API"))
+        # A link from before the classification kept only the old sentence: it still shows as the APIs being off.
+        with accounts.as_account(self.david_id):
+            state = youtube._load()
+            entry = state["channels"][str(ids["@alpha"])]
+            entry.pop("problem")
+            entry["last_error"] = ("Turn on the YouTube Data API and the YouTube Analytics API in your Google Cloud project, "
+                                   "then sync again.")
+            youtube._save(state)
+        link = self.channel_link(self.d.get(f"{P}/analytics/youtube/status").json(), "@alpha")
+        self.assertEqual(link["problem"], {"kind": "api_disabled", "services": [], "project": None})
+        # A signed-out Google account outranks it.
+        with accounts.as_account(self.david_id):
+            data = google._load()
+            for account in data["accounts"].values():
+                account["error"] = "Google sign-in expired or was revoked. Reconnect this account."
+            google._save(data)
+        link = self.channel_link(self.d.get(f"{P}/analytics/youtube/status").json(), "@alpha")
+        self.assertEqual(link["problem"]["kind"], "signed_out")
+        self.assertIn("7 days", link["problem_text"])
+
+    def test_upload_to_a_project_without_the_data_api_says_which_api(self):
+        self.fake.disabled = {"youtube.googleapis.com"}
+        err = google.GoogleError("Google API: off", 403, "accessNotConfigured", None,
+                                 {"reason": "SERVICE_DISABLED", "service": "youtube.googleapis.com", "consumer": "projects/123456789012"})
+        problem = youtube.classify(err, "youtube_upload")
+        self.assertEqual(problem["services"], ["youtube.googleapis.com"])
+        self.assertIn("YouTube Data API v3", youtube.problem_text(problem))
+
+    def test_a_refused_sign_in_points_at_the_test_users_list(self):
+        cid = self.channel(self.d)
+        r = self.d.post(f"{P}/analytics/youtube/connect", json={"channel_id": cid, "new_account": True})
+        query = parse_qs(urlsplit(r.json()["url"]).query)
+        # A Testing consent screen without this account on its Test users list sends the person back with access_denied.
+        answer = self.anon.get(f"{G}/oauth/callback", params={"state": query["state"][0], "error": "access_denied"})
+        self.assertEqual(answer.status_code, 403)
+        self.assertIn("Test users", answer.text)
+        link = self.channel_link(self.d.get(f"{P}/analytics/youtube/status").json(), "@alpha")
+        self.assertEqual(link["problem"]["kind"], "sign_in_refused")
+        self.assertIn("Test users", link["problem_text"])
+        self.assertIsNone(link["google_account"], "nothing was linked")
+        # Bea's screen knows nothing of it.
+        self.assertEqual(self.b.get(f"{P}/analytics/youtube/status").json()["channels"], [])
+        # Connecting after all clears it.
+        self.connect(self.d)
+        link = self.channel_link(self.d.get(f"{P}/analytics/youtube/status").json(), "@alpha")
+        self.assertIsNone(link["problem"])
+
+    def test_the_status_names_the_project_of_the_oauth_client(self):
+        self.assertIsNone(self.d.get(f"{P}/analytics/youtube/status").json()["project"]["number"], "the fixture id has no number")
+        with patch.object(google, "project_number", lambda client_id=None: "123456789012"):
+            self.assertEqual(self.d.get(f"{P}/posting/youtube/status").json()["project"]["number"], "123456789012")
 
     for _name in [n for n in dir(YouTubeAnalytics) if n.startswith("test_")]:
         locals()[_name] = None

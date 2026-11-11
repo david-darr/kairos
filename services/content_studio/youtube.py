@@ -58,7 +58,93 @@ _locks = {}                  # account id -> asyncio.Lock: one sync at a time pe
 
 
 class YouTubeError(StudioError):
-    pass
+    def __init__(self, detail, status=400, problem=None):
+        super().__init__(detail, status)
+        self.problem = problem   # the classified Google problem (classify()), when there is one
+
+
+# -- what Google's refusal means (Content setup, David 2026-11-11: a bare "Check" told him nothing) ----------
+# The two APIs the YouTube features use, by the service name Google's errors carry. Turned on once per Google Cloud
+# project (the project of the OAuth client in Library's Google setup), by that project's owner; never per channel.
+API_NAMES = {"youtube.googleapis.com": "YouTube Data API v3", "youtubeanalytics.googleapis.com": "YouTube Analytics API"}
+API_OF = {"youtube": "youtube.googleapis.com", "youtube_upload": "youtube.googleapis.com",
+          "youtube_analytics": "youtubeanalytics.googleapis.com"}
+_SERVICE = re.compile(r"\b(youtube(?:analytics)?\.googleapis\.com)\b")
+_PROJECT = re.compile(r"\bproject[ =:/s]*(\d{5,20})\b")
+_DISABLED_TEXT = re.compile(r"has not been used in project|it is disabled|API has not been used|SERVICE_DISABLED", re.I)
+SCOPE_REASONS = {"insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT", "insufficientScopes"}
+
+
+def classify(exc, api=None):
+    """What a GoogleError from a YouTube call means, as {"kind", ...}, or None when it is nothing the setup can explain.
+    Kinds: api_disabled (with "services", the API names to turn on, and "project", the project Google named),
+    wrong_project (Google named a project that is not the one the Kairos OAuth client belongs to), quota, signed_out,
+    scopes (the YouTube box was not ticked), forbidden. Reads Google's ErrorInfo (SERVICE_DISABLED with its service),
+    the old reason accessNotConfigured, and the message as a last resort."""
+    info = getattr(exc, "info", None) or {}
+    reason, message = getattr(exc, "reason", "") or "", str(exc)
+    status = getattr(exc, "status", 0)
+    if status == 429 or reason in QUOTA_REASONS or info.get("reason") in ("RATE_LIMIT_EXCEEDED", "RESOURCE_EXHAUSTED") \
+            or (status == 403 and "quota" in message.lower()):
+        return {"kind": "quota"}
+    if reason == "accessNotConfigured" or info.get("reason") == "SERVICE_DISABLED" or _DISABLED_TEXT.search(message):
+        service = info.get("service") or (_SERVICE.search(message) or [None, None])[1] or API_OF.get(api)
+        project = (re.search(r"(\d{5,20})", info.get("consumer") or "") or _PROJECT.search(message) or [None, None])[1]
+        mine = google.project_number()
+        out = {"kind": "api_disabled", "services": [service] if service in API_NAMES else [], "project": project}
+        if project and mine and project != mine:
+            out.update(kind="wrong_project", expected=mine)
+        return out
+    if status == 401:
+        return {"kind": "signed_out"}
+    if status == 403 and (reason in SCOPE_REASONS or info.get("reason") in SCOPE_REASONS):
+        return {"kind": "scopes"}
+    if status == 403:
+        return {"kind": "forbidden"}
+    return None
+
+
+def merge_problems(problems):
+    """One problem for a channel from several calls: the services of every disabled API together, else the most
+    pressing: signed out, wrong project, APIs off, missing permission, quota, refused, then anything else."""
+    found = [p for p in problems if p]
+    if not found:
+        return None
+    order = ["signed_out", "wrong_project", "api_disabled", "scopes", "quota", "forbidden", "not_owned", "sign_in_refused", "other"]
+    first = min(found, key=lambda p: order.index(p["kind"]) if p["kind"] in order else len(order))
+    if first["kind"] in ("api_disabled", "wrong_project"):
+        services = []
+        for p in found:
+            if p["kind"] == first["kind"]:
+                services += [s for s in p.get("services") or [] if s not in services]
+        first = {**first, "services": sorted(services, key=list(API_NAMES).index)}
+    return first
+
+
+def problem_text(problem):
+    """The sentence the sync, the check and the Settings rows use. Never an email: the screen names the account."""
+    kind = (problem or {}).get("kind")
+    names = " and the ".join(API_NAMES[s] for s in (problem or {}).get("services") or []) or \
+        "YouTube Data API v3 and the YouTube Analytics API"
+    if kind == "api_disabled":
+        return (f"Turn on the {names} in your Kairos Google project (the one your Google OAuth client belongs to), "
+                "signed in as that project's owner, then check again.")
+    if kind == "wrong_project":
+        return (f"Google says the {names} is off in project {problem.get('project')}, but your Kairos Google OAuth client "
+                f"belongs to project {problem.get('expected')}. Turn the API on in project {problem.get('expected')}.")
+    if kind == "quota":
+        return "YouTube's daily quota for your Kairos Google project ran out. It resets at midnight Pacific time."
+    if kind == "signed_out":
+        return ("Google signed this account out. Sign in again (Change). While your consent screen is in Testing, Google "
+                "signs test users out after 7 days.")
+    if kind == "scopes":
+        return "Google did not give the YouTube permission. Connect again and leave the YouTube boxes ticked."
+    if kind == "sign_in_refused":
+        return ("Google did not let the sign-in finish. If your consent screen is in Testing, add this channel's Google "
+                "account to its Test users, then connect again.")
+    if kind == "forbidden":
+        return "Google refused YouTube for this sign-in. Connect again with the Google account that owns the channel."
+    return (problem or {}).get("text") or ""
 
 
 class _Quota(Exception):
@@ -130,15 +216,40 @@ def connected_links(kind="analytics", store=None):
     return out
 
 
-def _channel_view(kind, channel, link):
+LEGACY_DISABLED = "Turn on the YouTube Data API and the YouTube Analytics API"   # the first version's sync text
+
+
+def _problem_of(link, info, refused=None):
+    """The one problem a channel's link shows, classified, or None: signed out, then what the last sync or check
+    found (a sync from before the classification only left its sentence: the old APIs text still reads as APIs off),
+    then a sign-in Google refused since."""
+    if info and info.get("error"):
+        return {"kind": "signed_out"}
+    link = link or {}
+    if link.get("problem"):
+        return link["problem"]
+    error = link.get("last_error") or ""
+    if error.startswith(LEGACY_DISABLED):
+        return {"kind": "api_disabled", "services": [], "project": None}
+    if error:
+        return {"kind": "other", "text": error}
+    if refused and not (info and link):
+        return {"kind": "sign_in_refused", "at": refused.get("at")}
+    return None
+
+
+def _channel_view(kind, channel, link, refused=None):
     info = google.account_info(link.get("google_account")) if link else None
     granted = _granted(kind, info)
+    problem = _problem_of(link, info, refused)
     return {"channel_id": channel["id"], "handle": channel["handle"], "status": channel["status"],
             "google_account": {"id": info["id"], "email": info["email"], "youtube_only": info["youtube_only"]} if info else None,
             "connected": bool(link) and granted,
             "pending": bool(link) and not granted, "needs_reconnect": bool(info and info.get("error")),
             "missing": bool(link) and info is None,
-            "last_sync": (link or {}).get("last_sync"), "last_error": (link or {}).get("last_error")}
+            "last_sync": (link or {}).get("last_sync"), "last_error": (link or {}).get("last_error"),
+            "problem": problem, "problem_text": problem_text(problem) if problem else "",
+            "checked_at": (link or {}).get("checked_at")}
 
 
 def link_status(kind, user=None, store=None):
@@ -146,10 +257,14 @@ def link_status(kind, user=None, store=None):
     store = _store(store)
     state = links(kind, store)
     linked = state.get("channels") or {}
-    channels = [_channel_view(kind, c, linked.get(str(c["id"]))) for c in _youtube_channels(store)]
+    refused = state.get("sign_in_refused") or {}
+    channels = [_channel_view(kind, c, linked.get(str(c["id"])), refused.get(str(c["id"]))) for c in _youtube_channels(store)]
     live = [c for c in channels if c["status"] == "live"]
     first = next((c["google_account"] for c in channels if c["connected"]), None)
-    return state, {"configured": google.configured(), "connected": any(c["connected"] for c in live),
+    # The project the OAuth client in Library belongs to (its number starts the client id), for the console links.
+    # Kairos never knows which Google account owns that project.
+    return state, {"configured": google.configured(), "project": {"number": google.project_number()},
+                   "connected": any(c["connected"] for c in live),
                    "pending": any(c["pending"] for c in live) and not any(c["connected"] for c in live),
                    "needs_reconnect": any(c["needs_reconnect"] for c in live),
                    "google_account": first, "channels": channels,
@@ -211,6 +326,7 @@ async def link_channel(kind, channel, ident, user):
     linked = state.setdefault("channels", {})
     old = (linked.get(str(channel["id"])) or {}).get("google_account")
     linked[str(channel["id"])] = {"google_account": ident, "linked_at": time.time(), **({"last_error": note} if note else {})}
+    (state.get("sign_in_refused") or {}).pop(str(channel["id"]), None)
     _save(state, kind)
     if old and old != ident:
         _forget_if_unused(old, user)
@@ -231,6 +347,16 @@ def _after_sign_in(kind, channel_id, user):
     return done
 
 
+def _refused(kind, channel_id):
+    """What runs when Google sends the person back refused (access_denied): a Testing consent screen whose Test users
+    list lacks the account looks exactly like Cancel to Kairos, so the channel's row says both."""
+    def note(error):
+        state = _load(kind)
+        state.setdefault("sign_in_refused", {})[str(channel_id)] = {"at": time.time(), "error": error}
+        _save(state, kind)
+    return note
+
+
 async def connect_channel(kind, redirect_uri, user, channel_id, google_account=None, new_account=False, store=None):
     """Connect one YouTube channel for analytics or posting. `new_account` starts Google's chooser for a Google
     account to add (YouTube permissions and identity only). Otherwise `google_account` (default: the usual Library
@@ -244,14 +370,15 @@ async def connect_channel(kind, redirect_uri, user, channel_id, google_account=N
     try:
         if new_account:
             return {"url": google.start_sign_in(redirect_uri, user, add=True, extra_scopes=scopes, only_extra=True,
-                                                then=_after_sign_in(kind, channel_id, user))}
+                                                then=_after_sign_in(kind, channel_id, user),
+                                                failed=_refused(kind, channel_id))}
         ident = google.resolve_account(user, google_account)
         info = google.account_info(ident)
         if _granted(kind, info) and not info.get("error"):
             await link_channel(kind, channel, ident, user)
             return {"linked": True}
         return {"url": google.start_sign_in(redirect_uri, user, add=True, account_id=ident, extra_scopes=scopes,
-                                            then=_after_sign_in(kind, channel_id, user))}
+                                            then=_after_sign_in(kind, channel_id, user), failed=_refused(kind, channel_id))}
     except google.GoogleError as exc:
         if exc.status == 401:
             raise YouTubeError("Connect a Google account first: choose Use another Google account, or sign in to "
@@ -290,6 +417,69 @@ def disconnect(user=None, channel_id=None, store=None):
     unlink("analytics", user, channel_id, store)
     return status(user, store)
 
+
+# -- Check again (the Content setup and each channel's Settings rows) -----------------------------------
+
+async def _probe(ident, api, path, params):
+    """One read, no backoff: (answer, None) or (None, the classified problem). A Check is the person's click, so it
+    asks Google once and says what Google said."""
+    try:
+        return await google.request(api, "GET", path, params=params, account=ident), None
+    except google.GoogleOffline as exc:
+        raise YouTubeError(str(exc), 503) from exc
+    except google.GoogleError as exc:
+        return None, classify(exc, api) or {"kind": "other", "text": f"YouTube did not answer: {exc}"}
+
+
+async def check(kind, channel_id, user=None, store=None, now=None):
+    """Asks Google, once, whether this channel's link works, and records what it found on the link (the Settings row
+    and the setup read it from there): the Data API (channels.list mine=true, 1 quota unit, also the ownership check)
+    and, for analytics, the Analytics API (one day of views). Each API is asked even when the other is off, so the
+    answer names every API to turn on. Only on the person's click."""
+    store = _store(store)
+    now = time.time() if now is None else now
+    channel = store.get_channel(channel_id)
+    if channel["platform"] != "youtube":
+        raise YouTubeError("Only a YouTube channel connects to YouTube.")
+    state = links(kind, store)
+    link = (state.get("channels") or {}).get(str(channel_id))
+    if not link:
+        raise YouTubeError(f"Connect {channel['handle']} first: choose the Google account that owns it.", 409)
+    ident = link["google_account"]
+    info = google.account_info(ident)
+    problems = []
+    if info is None or info.get("error"):
+        problems.append({"kind": "signed_out"})
+    elif not _granted(kind, info):
+        problems.append({"kind": "scopes"})
+    else:
+        mine, problem = await _probe(ident, "youtube", "/channels", {"part": "id,snippet", "mine": "true", "maxResults": 50})
+        problems.append(problem)
+        if mine is not None:
+            owned = [{"id": item.get("id"), "title": str((item.get("snippet") or {}).get("title") or "")[:100],
+                      "keys": {_handle(item.get("id")), _handle((item.get("snippet") or {}).get("customUrl")),
+                               _handle((item.get("snippet") or {}).get("title"))} - {""}}
+                     for item in (mine.get("items") or []) if item.get("id")]
+            if _owner_of(channel, owned) is None:
+                problems.append({"kind": "not_owned", "text": not_owned_text(info.get("email"), channel["handle"], owned)})
+        if kind == "analytics":
+            day = _day(now)
+            _, problem = await _probe(ident, "youtube_analytics", "/reports",
+                                      {"ids": "channel==MINE", "startDate": day, "endDate": day, "metrics": "views"})
+            problems.append(problem)
+    found = merge_problems(problems)
+    state = links(kind, store)            # read again: a connect made meanwhile is kept
+    link = (state.get("channels") or {}).get(str(channel_id))
+    if link is not None and link.get("google_account") == ident:
+        link["checked_at"] = now
+        if found:
+            link.update(problem=found, last_error=problem_text(found))
+        else:
+            link.pop("problem", None)
+            link.pop("last_error", None)
+        _save(state, kind)
+    refused = (state.get("sign_in_refused") or {}).get(str(channel_id))
+    return _channel_view(kind, channel, link, refused)
 
 # -- reading ids and durations ------------------------------------------------------------------------
 
@@ -339,12 +529,12 @@ async def _call(ident, api, path, params):
         except google.GoogleError as exc:
             limited = exc.status == 429 or (exc.status == 403 and (exc.reason in QUOTA_REASONS or "quota" in str(exc).lower()))
             if not limited:
-                if exc.reason == "accessNotConfigured":
-                    raise YouTubeError("Turn on the YouTube Data API and the YouTube Analytics API in your Google "
-                                       "Cloud project, then sync again.", 409) from exc
+                problem = classify(exc, api)
+                if problem and problem["kind"] in ("api_disabled", "wrong_project", "scopes", "signed_out"):
+                    raise YouTubeError(problem_text(problem), 409, problem) from exc
                 if exc.status in (401, 403):
                     raise YouTubeError("Google would not share YouTube numbers with this sign-in. Connect YouTube "
-                                       "analytics again.", 409) from exc
+                                       "analytics again.", 409, problem) from exc
                 raise YouTubeError(f"YouTube did not answer: {exc}", 502) from exc
             if attempt == ATTEMPTS - 1:
                 raise _Quota() from exc
@@ -464,8 +654,8 @@ async def sync(store=None, now=None):
                     if owner_id is None:
                         result["channels_not_owned"].append(channel["handle"])
                         skip("not_owned", len(items))
-                        outcome[channel["id"]] = not_owned_text((google.account_info(ident) or {}).get("email"),
-                                                                channel["handle"], owned_by[ident])
+                        text = not_owned_text((google.account_info(ident) or {}).get("email"), channel["handle"], owned_by[ident])
+                        outcome[channel["id"]] = (text, {"kind": "not_owned", "text": text})
                         continue
                     details = await _details(ident, [vid for _, vid in items])
                     mine = []
@@ -492,7 +682,7 @@ async def sync(store=None, now=None):
                     outcome[channel["id"]] = None
                 except YouTubeError as exc:
                     result["errors"][channel["handle"]] = exc.detail
-                    outcome[channel["id"]] = exc.detail
+                    outcome[channel["id"]] = (exc.detail, exc.problem)
         except _Quota:
             result["stopped"] = "quota"
             failure = "YouTube's quota ran out. The numbers gathered so far were saved; the rest comes at the next sync."
@@ -510,8 +700,13 @@ async def sync(store=None, now=None):
             if problem is None:
                 link["last_sync"] = now
                 link.pop("last_error", None)
+                link.pop("problem", None)
             else:
-                link["last_error"] = problem
+                link["last_error"], found = problem
+                if found:
+                    link["problem"] = found
+                else:
+                    link.pop("problem", None)
         state.update(last_attempt=now, last_error=failure, last_result=result)
         if not failure:
             state["last_sync"] = now

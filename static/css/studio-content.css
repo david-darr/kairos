@@ -320,3 +320,57 @@
 .sc-rail-icon { flex: 0 0 auto; width: 32px; display: inline-grid; place-items: center; color: var(--text-dim); }
 .sc-rail-icon svg { width: 18px; height: 18px; }
 .sc .sc-rail-add .sc-rail-icon { color: var(--accent); }
+
+/* The Content setup (onboarding, 2026-11-11): a checklist card on the All channels dashboard, each step with its state,
+   a plain line, its live status and the action inline. The fix panels under YouTube rows use the same look. */
+.sc-setup { display: grid; gap: 12px; margin: 0 0 18px; padding: 16px 18px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-panel-solid); }
+.sc-empty + .sc-setup { max-width: 760px; margin: 0 auto 24px; }
+.sc-setup-head { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; }
+.sc-setup-title { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+.sc-setup-title:focus { outline: none; }
+.sc-setup-head p { margin: 0; }
+.sc-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.sc-step { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); }
+.sc-step:first-child { border-top: none; padding-top: 4px; }
+.sc-step-mark { width: 26px; height: 26px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 12px; font-weight: 600;
+  border: 1.5px solid var(--border-strong); color: var(--text-dim); background: var(--bg-panel-solid); font-variant-numeric: tabular-nums; }
+.sc-step-mark svg { width: 15px; height: 15px; }
+.sc-step-mark.is-done { border-color: var(--success); background: var(--success); color: var(--bg-panel-solid); }
+.sc-step-mark.is-todo { border-color: var(--accent); color: var(--accent); }
+.sc-step-mark.is-warn { border-color: var(--warn); color: var(--warn); }
+.sc-step-body { display: grid; gap: 4px; min-width: 0; }
+.sc-step-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.sc-step-title { font-weight: 600; font-size: 14px; }
+.sc-step.is-done .sc-step-title { color: var(--text-dim); }
+.sc-step-why, .sc-step-status { margin: 0; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.sc-step-why { color: var(--text-dim); }
+.sc-step.is-done .sc-step-why { display: none; }
+.sc-step-actions { margin-top: 4px; }
+.sc-step-actions .sc-inline-field { display: inline-flex; gap: 8px; align-items: center; min-width: 0; }
+.sc-step-actions select { max-width: 100%; }
+.sc-step-channel { display: grid; gap: 6px; margin-top: 6px; }
+.sc-step-channel-name { margin: 0; font-weight: 600; font-size: 13px; }
+.sc-roles { display: grid; gap: 6px; margin-top: 6px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); font-size: 12.5px; line-height: 1.5; }
+.sc-roles p { margin: 0; }
+.sc-fix { display: grid; gap: 6px; margin-top: 8px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(var(--warn-rgb), .45); background: rgba(var(--warn-rgb), .07); font-size: 12.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.sc-fix-signed_out { border-color: rgba(var(--danger-rgb), .45); background: rgba(var(--danger-rgb), .07); }
+.sc-project-guide { border-color: var(--border); background: var(--surface-2); }
+.sc-fix-title { margin: 0; font-weight: 600; font-size: 13px; }
+.sc-fix-text, .sc-fix-result { margin: 0; }
+.sc-fix-result:empty { display: none; }
+.sc-fix-actions { margin-top: 2px; }
+.sc .sc-ext::after { content: " \2197"; }
+.sc-guide { margin: 4px 0 0; padding-left: 20px; display: grid; gap: 8px; }
+.sc-guide li { display: grid; gap: 4px; justify-items: start; }
+.sc-client-form { display: grid; gap: 6px; margin-top: 6px; }
+.sc-client-form .google-field-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.sc-client-form .google-field-row input { flex: 1 1 220px; min-width: 0; }
+.sc .sc-rail-setup { position: relative; }
+.sc .sc-rail-setup .sc-rail-count { margin-left: auto; }
+@media (max-width: 768px) {
+  .sc-setup { padding: 14px 12px; }
+  .sc-step { grid-template-columns: 24px minmax(0, 1fr); gap: 10px; }
+  .sc-step-actions .sc-inline-field { display: flex; flex-wrap: wrap; width: 100%; }
+  .kairos-redesign [data-view][data-custom-tab] .sc .sc-setup .btn, .kairos-redesign [data-view][data-custom-tab] .sc .sc-setup select,
+  .kairos-redesign [data-view][data-custom-tab] .sc .sc-setup input, .kairos-redesign [data-view][data-custom-tab] .sc .sc-fix .btn { min-height: 44px; }
+}

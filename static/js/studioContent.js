@@ -50,6 +50,13 @@ async function openSocialSignIn(url) {
   if (window.jarvis?.openSocialSignIn) { if (!await window.jarvis.openSocialSignIn(url)) throw new Error('Could not open the sign-in page.'); return; }
   window.open(url, '_blank', 'noopener');
 }
+// A Google Cloud console page (the Content setup's links): the system browser through the desktop app's existing external
+// path (https only, checked in the main process), else a new tab. Only ever on the person's click.
+async function openOutside(url) {
+  const shell = window.jarvis?.browser;
+  if (shell?.openExternal) { const out = await shell.openExternal(url); if (out && out.ok === false) throw new Error('Could not open the page in your browser.'); return; }
+  window.open(url, '_blank', 'noopener');
+}
 const SOCIAL_NAMES = { tiktok: 'TikTok', instagram: 'Instagram' };
 const say = error => toast(M.loadFailure(error), 'error');
 const longDate = seconds => new Date(seconds * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
@@ -113,7 +120,7 @@ export async function mountContent(host, { signal, openVideos } = {}) {
   const alive = () => !disposed && root.isConnected;
 
   async function loadCore() {
-    const names = ['niches', 'channels', 'pipeline', 'approvals', 'watch', 'settings', 'analytics/youtube/status', 'posting/youtube/status', 'publishing', 'decisions', 'social/status'];
+    const names = ['niches', 'channels', 'pipeline', 'approvals', 'watch', 'settings', 'analytics/youtube/status', 'posting/youtube/status', 'publishing', 'decisions', 'social/status', 'setup'];
     const [results, styles] = await Promise.all([Promise.allSettled(names.map(n => get('/' + n))), api(STYLES).catch(() => null)]);
     if (!alive()) return;
     if (results.every(r => r.status === 'rejected')) {
@@ -128,8 +135,8 @@ export async function mountContent(host, { signal, openVideos } = {}) {
       styles, findings: value('watch', { findings: [] }).findings,
       hasTeam: (value('settings', {}).team_bot_ids || []).length > 0, settings: value('settings', {}),
       yt: value('analytics/youtube/status', null), ytPost: value('posting/youtube/status', null), pub: value('publishing', null),
-      decisions: value('decisions', { decisions: [] }).decisions || [], social: value('social/status', null),
-      failed: names.filter((n, i) => results[i].status === 'rejected' && !n.includes('youtube') && !n.startsWith('social')) };
+      decisions: value('decisions', { decisions: [] }).decisions || [], social: value('social/status', null), setup: value('setup', null),
+      failed: names.filter((n, i) => results[i].status === 'rejected' && !n.includes('youtube') && !n.startsWith('social') && n !== 'setup') };
     numbers = new Map();
     if (typeof scope === 'number' && !data.channels.some(c => c.id === scope)) { scope = 'all'; tab = null; }
     await draw();
@@ -291,8 +298,56 @@ export async function mountContent(host, { signal, openVideos } = {}) {
         controls.push(btn('Connect', () => accountChooser(kind, status, link), 'primary', { 'aria-label': `Connect ${link.handle} to ${what}` }));
       }
     }
+    const problem = link.needs_reconnect && !link.problem ? { kind: 'signed_out' } : link.problem;
     return row({ title, description: M.linkText(link), control: controls, cls: 'sc-yt-link',
-      attrs: { 'data-youtube-channel': link.channel_id, 'data-youtube-kind': kind } });
+      below: problem && status.configured ? youtubeFix(kind, status, link, problem) : null,
+      attrs: { 'data-youtube-channel': link.channel_id, 'data-youtube-kind': kind, ...(problem ? { 'data-problem': problem.kind } : {}) } });
+  }
+
+  // A link's problem, with the fix right there: what Google said in plain words, the console pages that fix it (opened in
+  // the system browser on the person's click) and Check again, which asks Google once and says what it found.
+  function youtubeFix(kind, status, link, problem) {
+    const fix = M.problemFix(problem, { projectNumber: status.project?.number, account: link.google_account?.email });
+    const result = el('p', { class: 'sc-fix-result', role: 'status', 'aria-live': 'polite' });
+    const actions = fix.links.map(([label, url]) => btn(label, () => openOutside(url), 'quiet sc-ext', { 'data-href': url, 'aria-label': `${label} (opens in your browser)` }));
+    if (fix.check && link.google_account) {
+      actions.push(btn('Check again', async () => {
+        result.textContent = 'Asking Google...';
+        let out;
+        try { out = await send(`/${kind}/youtube/check`, { channel_id: link.channel_id }); }
+        catch (error) { result.textContent = M.loadFailure(error); return; }
+        const found = out.channel?.problem;
+        const text = found ? `Google says: ${M.problemFix(found, { projectNumber: status.project?.number }).title}.` : `${link.handle} works: Google answered.`;
+        toast(text, found ? 'error' : undefined);
+        await reload();
+      }, '', { 'aria-label': `Check ${link.handle} again for ${kind === 'analytics' ? 'YouTube analytics' : 'YouTube posting'}`, 'data-check-again': kind }));
+    }
+    return el('div', { class: `sc-fix sc-fix-${problem.kind}`, 'data-fix': problem.kind }, [
+      el('p', { class: 'sc-fix-title', text: fix.title }), el('p', { class: 'sc-fix-text', text: fix.text }),
+      actions.length ? el('div', { class: 'sc-actions sc-fix-actions' }, actions) : null, result]);
+  }
+
+  // The two Google roles, said once where YouTube is being set up.
+  function googleRoles(number) {
+    return el('div', { class: 'sc-roles', 'data-google-roles': '' }, [
+      el('p', {}, [el('strong', { text: 'Your Kairos Google project. ' }), `The project of the Google OAuth client in Library's Google setup${number ? ` (project ${number})` : ''}. The Google account that owns it turns the YouTube APIs on, once, for every channel. Kairos does not know which account that is.`]),
+      el('p', {}, [el('strong', { text: 'This channel\'s Google account. ' }), 'The account that owns the channel on YouTube. It only signs in and needs no project of its own. While the consent screen is in Testing, it must be on the project\'s Test users list.'])]);
+  }
+
+  // No Google setup yet: create the Kairos Google project with the person's own choice of Google account, then paste the
+  // OAuth client into Library's own Google setup form (reused, not copied).
+  function projectGuide() {
+    const host = el('div', { class: 'sc-fix sc-project-guide', 'data-project-guide': '' }, [
+      el('p', { class: 'sc-fix-title', text: 'Create your Kairos Google project' }),
+      el('p', { class: 'sc-fix-text', text: 'One project serves every channel and Library\'s Google features. About ten minutes in Google Cloud; nothing here costs money at this size.' }),
+      el('ol', { class: 'sc-guide' }, M.projectSteps().map(step => el('li', { 'data-guide-step': step.id }, [el('span', { text: step.text }),
+        ...(step.links || (step.link ? [step.link] : [])).map(([label, url]) => btn(label, () => openOutside(url), 'quiet sc-ext', { 'data-href': url, 'aria-label': `${label} (opens in your browser)` }))])))]);
+    const form = el('div', { class: 'sc-client-form' }, [el('p', { class: 'sc-dim', text: 'Loading the Google setup form...' })]);
+    host.append(form);
+    import('./googleWorkspace.js').then(m => form.replaceChildren(m.googleClientForm({}, () => reload()),
+      el('p', { class: 'sc-dim', text: 'Only an admin of this Kairos can save it. Library > Google shows the same form.' })))
+      .catch(() => form.replaceChildren(el('p', { class: 'sc-dim', text: 'Open Library > Google to paste the client ID and secret.' })));
+    return host;
   }
 
   // Which Google account a channel uses: one already connected to Kairos, or Use another Google account (Google's chooser,
@@ -1424,6 +1479,104 @@ export async function mountContent(host, { signal, openVideos } = {}) {
       row({ title: 'CSV file', control: file }), row({ title: 'Or paste it', control: [paste, bring], stack: true }), mapHost, result]);
   }
 
+  // -- the Content setup (onboarding): a checklist on the All channels dashboard -----------------------------------
+  // Each step's real state from the server (services/content_studio/setup.py plus what this screen loads), the action
+  // inline, until every required step is done. Hide puts it away; Set up in the rail brings it back.
+
+  const setupSteps = () => M.setupSteps({ setup: data.setup || {}, channels: data.channels, styles: data.styles, sheets: data.sheets,
+    packsWaiting: data.packsWaiting, yt: data.yt, social: data.social, pubItems: pubItems(), approvals: data.approvals });
+  const setupShown = () => !!data.setup && !data.setup.dismissed && !M.setupDone(setupSteps());
+
+  async function openSetup() {
+    if (data.setup?.dismissed) { try { data.setup = await put('/setup', { dismissed: false }); } catch (error) { say(error); } }
+    scope = 'all'; tab = 'dashboard'; focusSetup = true; await draw();
+  }
+  let focusSetup = false;
+
+  function setupCard() {
+    const steps = setupSteps(), left = M.setupLeft(steps), required = steps.filter(s => s.required).length;
+    const hide = btn('Hide setup', async () => { data.setup = await put('/setup', { dismissed: true }); toast('Setup hidden. Set up in the list on the left brings it back.'); await draw(); },
+      'quiet', { 'aria-label': 'Hide the Content setup' });
+    return el('section', { class: 'sc-setup', 'data-setup': '', 'aria-labelledby': 'sc-setup-title' }, [
+      el('header', { class: 'sc-setup-head' }, [
+        el('div', {}, [el('h3', { id: 'sc-setup-title', class: 'sc-setup-title', tabindex: '-1', text: 'Content setup' }),
+          el('p', { class: 'sc-dim', 'data-setup-left': left.length, text: left.length ? `${required - left.length} of ${required} required steps done. Nothing is posted without your OK, and Kairos never creates accounts.` : 'Every required step is done.' })]),
+        data.channels.length || data.niches.length ? hide : null]),
+      el('ol', { class: 'sc-steps' }, steps.map(setupStep))]);
+  }
+
+  function setupStep(step) {
+    const [label, tone] = M.STEP_STATE_TEXT[step.state] || ['', 'muted'];
+    const mark = el('span', { class: `sc-step-mark is-${step.state}`, 'aria-hidden': 'true', text: step.state === 'done' ? '' : String(step.n) });
+    if (step.state === 'done') mark.innerHTML = ICONS.check || '';
+    return el('li', { class: `sc-step is-${step.state}`, 'data-step': step.id, 'data-state': step.state }, [mark,
+      el('div', { class: 'sc-step-body' }, [
+        el('div', { class: 'sc-step-head' }, [el('span', { class: 'sc-step-title', text: step.title }), pill(step.required ? label : step.state === 'done' ? label : 'Optional', tone)]),
+        el('p', { class: 'sc-step-why', text: step.why }),
+        el('p', { class: 'sc-step-status', 'data-step-status': '', text: step.text }),
+        ...stepActions(step)])]);
+  }
+
+  function stepActions(step) {
+    const row = (...nodes) => { const list = nodes.filter(Boolean); return list.length ? el('div', { class: 'sc-actions sc-step-actions' }, list) : null; };
+    const firstLive = data.channels.find(c => c.status === 'live' && !c.paused);
+    switch (step.id) {
+      case 'team': return [step.state === 'done' ? null : row(btn('Add the Content Studio team', openTeamTemplate, 'primary', { 'aria-label': 'Import the Content Studio team template' }))];
+      case 'channel': return [row(btn(step.state === 'done' ? 'Add another channel' : 'Add a channel', () => addChannelDialog(), step.state === 'done' ? 'quiet' : 'primary', { 'aria-label': step.state === 'done' ? 'Add another channel' : 'Add your first channel' }))];
+      case 'look': {
+        const c = step.channel != null ? channelOf(step.channel) : null;
+        return [c ? row(btn(`Open ${c.handle} settings`, () => go(c.id, 'settings'), 'primary', { 'aria-label': `Choose the look of ${M.channelName(c)}` })) : null];
+      }
+      case 'approve': return [step.state === 'done' ? null : row(step.waiting ? btn('Review in Approvals', () => select('approvals'), 'primary') : null,
+        btn('Open Styles', () => go('lib:styles'), step.waiting ? 'quiet' : 'primary'), btn('Open Characters', () => go('lib:characters'), 'quiet'))];
+      case 'youtube': {
+        if (step.stage === 'none' || step.stage === 'unknown') return [];
+        if (step.stage === 'done') return [row(btn('Open Connections', () => go('lib:connections'), 'quiet', { 'aria-label': 'Open YouTube connections' }))];
+        if (step.stage === 'project') return [googleRoles(null), projectGuide()];
+        const out = [googleRoles(step.project)];
+        if (step.stage === 'account') {
+          const link = data.yt.channels.find(l => l.channel_id === step.channel);
+          if (link) out.push(row(btn(`Choose ${link.handle}'s Google account`, () => accountChooser('analytics', data.yt, link), 'primary', { 'aria-label': `Connect ${link.handle} to YouTube analytics` })));
+        }
+        if (step.stage === 'problem') {
+          for (const link of data.yt.channels.filter(l => (l.problem || l.needs_reconnect) && data.channels.some(c => c.id === l.channel_id && c.status !== 'archived'))) {
+            const problem = link.needs_reconnect && !link.problem ? { kind: 'signed_out' } : link.problem;
+            out.push(el('div', { class: 'sc-step-channel', 'data-step-channel': link.channel_id }, [el('p', { class: 'sc-step-channel-name', text: link.handle }), youtubeFix('analytics', data.yt, link, problem),
+              problem.kind === 'signed_out' || problem.kind === 'sign_in_refused' || problem.kind === 'scopes' || problem.kind === 'not_owned'
+                ? row(btn(link.google_account ? 'Change account' : 'Connect', () => accountChooser('analytics', data.yt, link), 'quiet', { 'aria-label': `Choose the Google account of ${link.handle}` })) : null]));
+          }
+        }
+        return out;
+      }
+      case 'social': return [row(btn('Open Connections', () => go('lib:connections'), 'quiet', { 'aria-label': 'Open TikTok and Instagram connections' })),
+        el('p', { class: 'sc-dim', text: 'To register your own TikTok and Meta apps, follow the "TikTok and Instagram App Registration (Guide)" note in your Kairos notes. Page reads stay as the fallback.' })];
+      case 'start': {
+        if (step.state === 'blocked') return [];
+        const choices = data.channels.filter(c => c.status === 'live' && !c.paused);
+        const pick = choices.length ? selectOf('Channel for one cycle now', choices.map(c => [String(c.id), M.channelName(c)]), String(firstLive?.id ?? choices[0].id)) : null;
+        const cap = step.cap != null ? `$${Math.round(step.cap)}` : null;
+        const run = pick ? btn(step.running ? 'Cycle running' : 'Run one cycle now', async () => {
+          const c = channelOf(Number(pick.value));
+          const ok = await confirmDialog({ title: `Run one cycle for ${c.handle}?`, message: `The Producer runs today's cycle for ${M.channelName(c)} now: a topic, a script, a render and a post draft. The post waits for your OK in Approvals; nothing is posted.${cap ? ` It counts toward the team's ${cap} monthly cap.` : ''}`, confirmLabel: 'Run one cycle', danger: false });
+          if (!ok) return;
+          const out = await send('/setup/run-cycle', { channel_id: c.id });
+          data.setup = out.setup; toast(out.started ? `The Producer started a cycle for ${c.handle}. Its post comes to Approvals.` : 'That cycle is already running.'); await draw();
+        }, 'primary', { 'aria-label': 'Run one cycle now', ...(step.running ? { disabled: '' } : {}) }) : null;
+        const total = step.routinesTotal;
+        const routines = !total ? null : step.routinesOn < total ? btn('Turn on daily routines', async () => {
+          const ok = await confirmDialog({ title: 'Turn on the team\'s daily routines?', message: `The Producer runs the content cycle every day for every live channel, the weekly review on Mondays, and the Executor takes a daily metrics snapshot. Every post still waits for your OK. ${cap ? `Spending stops at the ${cap} monthly cap.` : 'No monthly spend cap is set: set one in Bots > Usage first.'}`, confirmLabel: 'Turn on routines', danger: false });
+          if (!ok) return;
+          const out = await send('/setup/routines', { enabled: true }); data.setup = out.setup; toast(`Routines on: ${out.changed.join(', ') || 'already on'}.`); await draw();
+        }, step.ran ? 'primary' : '', { 'aria-label': 'Turn on the team\'s daily routines' })
+          : btn('Pause routines', async () => { const out = await send('/setup/routines', { enabled: false }); data.setup = out.setup; toast('Routines paused.'); await draw(); }, 'quiet', { 'aria-label': 'Pause the team\'s routines' });
+        return [pick ? row(el('label', { class: 'sc-inline-field' }, [el('span', { class: 'sc-dim', text: 'Channel' }), pick]), run) : null, row(routines),
+          el('p', { class: 'sc-dim', 'data-cap': '', text: cap ? `Monthly spend cap: ${cap}. The team stops when it is reached.` : 'No monthly spend cap is set yet (Bots > Usage).' })];
+      }
+      case 'post': return [row(step.toApprove ? btn('Go to Approvals', () => select('approvals'), 'primary') : null, step.ready ? btn('Open Publishing', () => { pubFilter = 'all'; select('publishing'); }, step.toApprove ? 'quiet' : 'primary') : null)];
+      default: return [];
+    }
+  }
+
   // -- dashboards ----------------------------------------------------------------------------------
 
   // A dashboard card: a title, its body and a way into the tab it sums up.
@@ -1481,7 +1634,7 @@ export async function mountContent(host, { signal, openVideos } = {}) {
       open.addEventListener('click', () => go(c.id));
       return el('li', {}, [open]);
     });
-    return [el('div', { class: 'sc-tiles' }, [
+    return [setupShown() ? setupCard() : null, el('div', { class: 'sc-tiles' }, [
       needsTile(M.needsYou(needsInput())),
       tile('latest', 'Latest posts', latestBody, moreBtn('Open publishing', () => { pubFilter = 'all'; tab = 'publishing'; draw(); })),
       tile('analytics', 'Analytics', analyticsBody, moreBtn('Open analytics', () => { tab = 'analytics'; draw(); })),
@@ -1591,6 +1744,11 @@ export async function mountContent(host, { signal, openVideos } = {}) {
     const withIcon = (node, name) => { node.prepend(icon(name)); return node; };
     const LIB_ICONS = { formats: 'library', styles: 'design', characters: 'agents', connections: 'settings' };
     const add = withIcon(btn('Add channel', () => addChannelDialog(), 'quiet sc-rail-add', { 'aria-label': 'Add a channel', title: 'Add a channel' }), 'plus');
+    // Set up: opens the Content setup again (also after Hide); the count is the required steps still open.
+    const left = data.setup ? M.setupLeft(setupSteps()).length : 0;
+    const setupLabel = left ? `Content setup, ${left} step${left === 1 ? '' : 's'} left` : 'Content setup';
+    const setupItem = data.setup ? withIcon(btn('Set up', openSetup, 'quiet sc-rail-add sc-rail-setup', { 'aria-label': setupLabel, title: setupLabel, 'data-rail-setup': String(left) }), 'check') : null;
+    if (setupItem && left) setupItem.append(el('span', { class: 'sc-rail-count', 'aria-hidden': 'true', text: String(left) }));
     const libs = [
       withIcon(btn('Editor', () => openVideos ? openVideos() : document.querySelector('.studio-sections [data-section=videos]')?.click(), 'quiet sc-rail-lib', { 'aria-label': 'Open the video editor', title: 'Open the video editor', 'data-lib': 'editor' }), 'play'),
       ...M.LIBRARIES.map(([id, label]) => item(`lib:${id}`, label, { icon: icon(LIB_ICONS[id]), attrs: { 'data-lib': id } })),
@@ -1598,7 +1756,7 @@ export async function mountContent(host, { signal, openVideos } = {}) {
       // Each bot's report and the team's (static/js/botsActivityReport.js, 2026-11-11).
       ...(data.hasTeam ? [withIcon(btn('Bot reports', openTeamReport, 'quiet sc-rail-lib', { 'aria-label': 'Open the team\'s bot reports', title: 'Open the team\'s bot reports', 'data-lib': 'reports' }), 'agents')] : [])];
     return el('nav', { class: 'sc-rail', 'aria-label': 'Channels and libraries' }, [
-      el('div', { class: 'sc-rail-top' }, [...nodes, add]),
+      el('div', { class: 'sc-rail-top' }, [...nodes, add, setupItem].filter(Boolean)),
       el('div', { class: 'sc-rail-lower' }, [el('p', { class: 'sc-rail-heading', text: 'Libraries' }), ...libs])]);
   }
 
@@ -1606,7 +1764,8 @@ export async function mountContent(host, { signal, openVideos } = {}) {
   function picker() {
     const choose = selectOf('Channel or library', M.pickerOptions(data.niches, data.channels), String(scope));
     choose.addEventListener('change', () => go(choose.value));
-    return el('div', { class: 'sc-picker' }, [choose, btn('Add channel', () => addChannelDialog(), 'quiet', { 'aria-label': 'Add a channel' })]);
+    return el('div', { class: 'sc-picker' }, [choose, btn('Add channel', () => addChannelDialog(), 'quiet', { 'aria-label': 'Add a channel' }),
+      data.setup ? btn('Set up', openSetup, 'quiet', { 'aria-label': 'Open the Content setup' }) : null]);
   }
 
   function head(channel) {
@@ -1636,7 +1795,8 @@ export async function mountContent(host, { signal, openVideos } = {}) {
 
   async function draw() {
     if (!data) return;
-    if (!data.niches.length && !data.channels.length) { root.replaceChildren(emptyState()); return; }
+    // Before any channel: the team in two lines, then the setup checklist (no rail yet, so it always shows here).
+    if (!data.niches.length && !data.channels.length) { root.replaceChildren(emptyState(), ...(data.setup ? [setupCard()] : [])); return; }
     const channel = typeof scope === 'number' ? channelOf(scope) : null;
     if (typeof scope === 'number' && !channel) scope = 'all';
     const tabs = M.tabsFor(scope);
@@ -1661,7 +1821,8 @@ export async function mountContent(host, { signal, openVideos } = {}) {
     const shown = `${scope}/${tab}`, build = views(channel);
     try {
       const content = await build();
-      if (alive() && `${scope}/${tab}` === shown && panel.isConnected) panel.replaceChildren(...content);
+      if (alive() && `${scope}/${tab}` === shown && panel.isConnected) panel.replaceChildren(...content.filter(Boolean));
+      if (focusSetup && panel.isConnected) { focusSetup = false; const title = root.querySelector('.sc-setup-title'); title?.focus(); title?.scrollIntoView?.({ block: 'start' }); }
     } catch (error) { if (alive() && panel.isConnected) panel.replaceChildren(el('p', { role: 'alert', class: 'sc-error', text: M.loadFailure(error) }), btn('Try again', () => draw())); }
   }
 

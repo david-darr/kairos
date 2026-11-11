@@ -72,6 +72,11 @@ def connect(redirect_uri, user, channel_id, google_account=None, new_account=Fal
     return youtube.connect_channel("posting", redirect_uri, user, channel_id, google_account, new_account, store)
 
 
+def check_link(store, channel_id, user=None):
+    """Check again for posting: the Data API and the channel's ownership (youtube.check)."""
+    return youtube.check("posting", channel_id, user, store)
+
+
 def set_privacy(privacy):
     if privacy not in PRIVACY:
         raise PostingError(f"privacy is one of {', '.join(PRIVACY)}")
@@ -228,6 +233,9 @@ async def publish(store, post_id, by, now=None, guard=None):
                                               params={"part": "snippet,status", "uploadType": "multipart"},
                                               content=content, content_type=kind, account=ident, timeout=UPLOAD_TIMEOUT_S)
             except google.GoogleError as exc:
+                problem = youtube.classify(exc, "youtube_upload")
+                if problem and problem["kind"] in ("api_disabled", "wrong_project"):
+                    raise PostingError("YouTube did not take the upload. " + youtube.problem_text(problem), 409) from exc
                 if exc.status in (401, 403) and exc.reason not in youtube.QUOTA_REASONS:
                     raise PostingError("YouTube refused the upload for this sign-in. Connect YouTube posting again.", 409) from exc
                 if exc.status == 429 or exc.reason in youtube.QUOTA_REASONS:

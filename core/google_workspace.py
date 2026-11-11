@@ -80,11 +80,36 @@ _calendar_generation = 0
 
 
 class GoogleError(Exception):
-    def __init__(self, message: str, status: int = 400, reason: str = "", retry_after: float | None = None):
+    def __init__(self, message: str, status: int = 400, reason: str = "", retry_after: float | None = None,
+                 info: dict | None = None):
         super().__init__(message)
         self.status = status
         self.reason = reason            # Google's error reason, e.g. "quotaExceeded"
         self.retry_after = retry_after  # seconds, from a Retry-After header when Google sent one
+        # Google's ErrorInfo detail when it sent one: {"reason": "SERVICE_DISABLED", "service": "youtube.googleapis.com",
+        # "consumer": "projects/123", "status": "PERMISSION_DENIED"}. Content Studio's setup names the API to turn on from it.
+        self.info = info or {}
+
+
+def error_info(error: dict) -> dict:
+    """The parts of a Google API error body that say which API and project it is about (google.rpc.ErrorInfo), never
+    a token or an email: reason, service, consumer, and the error's status."""
+    out = {"status": str(error.get("status") or "")[:60]}
+    for detail in error.get("details") or []:
+        if isinstance(detail, dict) and str(detail.get("@type", "")).endswith("google.rpc.ErrorInfo"):
+            meta = detail.get("metadata") or {}
+            out.update(reason=str(detail.get("reason") or "")[:60], service=str(meta.get("service") or "")[:80],
+                       consumer=str(meta.get("consumer") or "")[:60])
+            break
+    return {k: v for k, v in out.items() if v}
+
+
+def project_number(client_id: str | None = None) -> str | None:
+    """The Google Cloud project number of an OAuth client id: Google's client ids are '<project number>-<code>.apps.
+    googleusercontent.com'. None when the id is not in that form (Kairos then links to the console without a project)."""
+    value = client_id if client_id is not None else (_state().get("client_id") or "")
+    match = re.fullmatch(r"(\d{5,20})-[A-Za-z0-9_]+\.apps\.googleusercontent\.com", value or "")
+    return match.group(1) if match else None
 
 
 class GoogleOffline(GoogleError):
@@ -374,7 +399,7 @@ def disconnect(account_id: str | None = None, user: str | None = None) -> dict:
 
 def start_sign_in(redirect_uri: str, owner: str | None = None, add: bool = False,
                   account_id: str | None = None, extra_scopes: tuple = (), only_extra: bool = False,
-                  then=None) -> str:
+                  then=None, failed=None) -> str:
     """With `add` the default account stays; otherwise the account signed in
     to becomes the default (the one-account behaviour, and Calendar's
     reconnect). `account_id` reconnects that account, which must be one this
@@ -385,7 +410,10 @@ def start_sign_in(redirect_uri: str, owner: str | None = None, add: bool = False
     never Drive, Gmail or Calendar: whichever Google account the person picks in Google's chooser is added to this
     user (an account they already connected keeps what it had), and an account new to Kairos is marked YouTube-only,
     so it never becomes a Library or Calendar default. `then`, an async callable (account id, email), runs after
-    the account is saved, as the Kairos account that started the sign-in; its GoogleError is the sign-in's answer."""
+    the account is saved, as the Kairos account that started the sign-in; its GoogleError is the sign-in's answer.
+    `failed`, a plain callable (Google's error code), runs when Google sends the person back refused or cancelled, so the
+    feature that asked can say so where the person looks next (Content Studio's setup: a Testing consent screen whose
+    Test users list does not have the account)."""
     if extra_scopes and not set(extra_scopes) <= set(YOUTUBE_SCOPES) | set(YOUTUBE_UPLOAD_SCOPES):
         raise GoogleError("Unknown Google permission requested")
     if only_extra and (not extra_scopes or account_id is not None):
@@ -405,7 +433,8 @@ def start_sign_in(redirect_uri: str, owner: str | None = None, add: bool = False
     from core import accounts
     _pending[state] = {"verifier": verifier, "expires": time.time() + 600, "owner": owner, "add": add,
                        "account": account_id, "client_id": client_id, "extra_scopes": list(extra_scopes),
-                       "only_extra": only_extra, "then": then, "kairos_account": accounts.effective_account()}
+                       "only_extra": only_extra, "then": then, "failed": failed,
+                       "kairos_account": accounts.effective_account()}
     for stale, pending in list(_pending.items()):
         if pending["expires"] < time.time():
             _pending.pop(stale, None)
@@ -424,6 +453,15 @@ async def finish_sign_in(state: str, code: str | None, redirect_uri: str, error:
     if not pending or pending["expires"] < time.time():
         raise GoogleError("This sign-in request expired or was not started here")
     if error or not code:
+        if pending.get("failed"):
+            try:
+                pending["failed"](str(error or "no_code")[:60])
+            except Exception:  # noqa: BLE001 - a note for the screen; the refusal below is the answer
+                pass
+        if pending.get("extra_scopes") and error == "access_denied":
+            raise GoogleError("Google did not let this sign-in finish. If your Kairos Google project's consent screen is in "
+                              "Testing, add this Google account to its Test users (Google Auth Platform, Audience), then "
+                              "connect again. If you pressed Cancel, just connect again.", 403)
         raise GoogleError("Google sign-in was cancelled or denied")
     data = _state()
     body = {"client_id": data["client_id"], "code": code, "code_verifier": pending["verifier"],
@@ -585,18 +623,19 @@ async def request(api: str, method: str, path: str, *, params: dict | None = Non
         if response.is_redirect:
             raise GoogleError("Google API redirects are not allowed", 502)
         if response.status_code >= 400:
-            reason = ""
+            reason, info = "", {}
             try:
                 error = response.json().get("error", {})
                 detail = error.get("message") or response.text[:250]
                 reason = str((error.get("errors") or [{}])[0].get("reason") or "")
+                info = error_info(error)
             except (ValueError, AttributeError, IndexError, TypeError):
                 detail = response.text[:250]
             try:
                 wait = float(response.headers.get("retry-after")) if response.headers.get("retry-after") else None
             except ValueError:
                 wait = None
-            raise GoogleError(f"Google API: {detail}", response.status_code, reason, wait)
+            raise GoogleError(f"Google API: {detail}", response.status_code, reason, wait, info)
         if not raw and response.headers.get("content-type", "").startswith("application/json"):
             return response.json()
         return response.content

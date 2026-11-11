@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from core.middleware import require_user
 from core.middleware import local_api_base
 from services.content_studio import (StudioError, delivery, formats, instagram_api, page_reads, pipeline, prepare, publishing,
-                                     report, review, social, social_auth, studio, tiktok_api, youtube, youtube_publish)
+                                     report, review, setup, social, social_auth, studio, tiktok_api, youtube, youtube_publish)
 
 router = APIRouter(prefix="/api/content-studio", tags=["content-studio"])
 worker_router = APIRouter(tags=["content-studio"])
@@ -428,6 +428,49 @@ def put_settings(body: SettingsBody, user: str = Depends(require_user)):
     return _run(studio.update_settings, **_given(body))
 
 
+# -- the Content setup (onboarding checklist, services/content_studio/setup.py) ----------------------------
+
+class SetupBody(Body):
+    dismissed: bool
+
+
+class RunCycleBody(Body):
+    channel_id: int
+
+
+class RoutinesBody(Body):
+    enabled: bool = True
+
+
+@router.get("/setup")
+def setup_state(user: str = Depends(require_user)):
+    """The team the template made (bots, approval level, routines, the spend cap), whether the checklist is hidden, and
+    the last "run one cycle now". The screen works out each step from this and what it already loads."""
+    return setup.state(studio, user)
+
+
+@router.put("/setup")
+def setup_dismiss(body: SetupBody, user: str = Depends(require_user)):
+    setup.set_dismissed(body.dismissed)
+    return setup.state(studio, user)
+
+
+@router.post("/setup/run-cycle")
+async def setup_run_cycle(body: RunCycleBody, user: str = Depends(require_user)):
+    """Run one cycle now, for one channel, through the Producer's routine. Every post it makes waits in Approvals."""
+    try:
+        return {**await setup.run_cycle(studio, user, body.channel_id), "setup": setup.state(studio, user)}
+    except StudioError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+
+
+@router.post("/setup/routines")
+def setup_routines(body: RoutinesBody = RoutinesBody(), user: str = Depends(require_user)):
+    """The person turns the team's daily routines on (they start paused) or off again."""
+    out = _run(setup.start_routines, studio, user, body.enabled)
+    return {**out, "setup": setup.state(studio, user)}
+
+
 # -- YouTube analytics (read-only) ----------------------------------------------------------------
 
 class YouTubeConnectBody(Body):
@@ -464,6 +507,24 @@ async def youtube_sync(user: str = Depends(require_user)):
         return {"result": await youtube.sync(studio), "status": youtube.status(user, studio)}
     except StudioError as exc:
         raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+
+
+class YouTubeCheckBody(Body):
+    channel_id: int
+
+
+@router.post("/analytics/youtube/check")
+async def youtube_check(body: YouTubeCheckBody, user: str = Depends(require_user)):
+    """Check again (the person's click): asks Google once whether this channel's analytics link works and says exactly
+    what is wrong (which API is off, a sign-in, the quota). Answers the channel's row and the whole status."""
+    link = await _studio_call(youtube.check("analytics", body.channel_id, user, studio))
+    return {"channel": link, "status": youtube.status(user, studio)}
+
+
+@router.post("/posting/youtube/check")
+async def youtube_posting_check(body: YouTubeCheckBody, user: str = Depends(require_user)):
+    link = await _studio_call(youtube_publish.check_link(studio, body.channel_id, user))
+    return {"channel": link, "status": youtube_publish.status(user, studio)}
 
 
 @router.delete("/analytics/youtube")

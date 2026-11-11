@@ -11,7 +11,7 @@ import os
 from core import accounts
 
 from . import (delivery, formats, instagram_api, page_reads, pipeline, platforms, prepare, publishing, report, review, scoring,
-               social, social_auth, team, tiktok_api, youtube, youtube_publish)
+               setup, social, social_auth, team, tiktok_api, youtube, youtube_publish)
 from .store import StudioError, Store
 
 
@@ -30,5 +30,5 @@ def close_all():
 
 
 __all__ = ["studio", "close_all", "StudioError", "Store", "delivery", "formats", "instagram_api", "page_reads", "pipeline",
-           "platforms", "prepare", "publishing", "report", "review", "scoring", "social", "social_auth", "team", "tiktok_api",
+           "platforms", "prepare", "publishing", "report", "review", "scoring", "setup", "social", "social_auth", "team", "tiktok_api",
            "youtube", "youtube_publish"]

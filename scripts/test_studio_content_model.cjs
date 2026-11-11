@@ -119,7 +119,7 @@ const { pathToFileURL } = require('node:url');
   assert.deepEqual(M.linkState(null), ['Not connected', 'muted']);
   assert.deepEqual(M.linkState({ google_account: { email: 'a@b.test' }, connected: true }), ['Connected', 'ok']);
   assert.deepEqual(M.linkState({ google_account: { email: 'a@b.test' }, connected: false }), ['Waiting for Google', 'warn']);
-  assert.deepEqual(M.linkState({ google_account: { email: 'a@b.test' }, connected: true, needs_reconnect: true }), ['Reconnect', 'error']);
+  assert.deepEqual(M.linkState({ google_account: { email: 'a@b.test' }, connected: true, needs_reconnect: true }), ['Needs sign-in', 'error']);
   assert.equal(M.linkText({ google_account: { email: 'a@b.test', youtube_only: true }, connected: true }), 'Uses a@b.test (added for YouTube only).');
   assert.match(M.linkText(null), /Choose the Google account that owns this channel/);
   assert.deepEqual(M.accountChoices({ google_accounts: [{ id: 'g1', email: 'a@b.test' }, { id: 'g2', email: 'c@d.test' }] },
@@ -313,6 +313,94 @@ const { pathToFileURL } = require('node:url');
   assert.deepEqual(M.pickerOptions([{ id: 1, name: 'Sky', status: 'live' }], [{ id: 4, niche_id: 1, platform: 'youtube', handle: '@sky', status: 'archived' }]),
     [['all', 'All channels'], ['4', 'YouTube @sky, Sky, archived'], ['lib:formats', 'Formats'], ['lib:styles', 'Styles'], ['lib:characters', 'Characters'], ['lib:connections', 'Connections']]);
   for (const text of [...needs.map(r => r.text), ...week]) assert.ok(!text.includes('—'), 'no em-dashes');
+
+  // -- the Content setup (2026-11-11) ---------------------------------------------------------------------------------
+  // A YouTube row says what is wrong in words, never a bare "Check".
+  const acct = { email: 'chan@b.test' };
+  const disabled = { kind: 'api_disabled', services: ['youtubeanalytics.googleapis.com'], project: '123456789012' };
+  assert.deepEqual(M.linkState({ google_account: acct, connected: true, problem: disabled }), ['Needs the YouTube APIs turned on', 'warn']);
+  assert.deepEqual(M.linkState({ google_account: acct, connected: true, problem: { kind: 'quota' } }), ['Quota used up for today', 'warn']);
+  assert.deepEqual(M.linkState({ google_account: acct, connected: true, problem: { kind: 'signed_out' } }), ['Needs sign-in', 'error']);
+  assert.deepEqual(M.linkState({ google_account: null, problem: { kind: 'sign_in_refused' } }), ['Google refused the sign-in', 'warn']);
+  assert.deepEqual(M.linkState({ google_account: acct, connected: true, last_error: 'odd' }), ['Problem', 'warn']);
+  for (const kind of Object.keys(M.PROBLEM_LABELS)) assert.notEqual(M.PROBLEM_LABELS[kind][0], 'Check');
+  // The console links: the project number goes in ?project=; without one, no project and the text says to pick it.
+  const links = M.consoleLinks('123456789012');
+  assert.equal(links['youtube.googleapis.com'], 'https://console.cloud.google.com/apis/library/youtube.googleapis.com?project=123456789012');
+  assert.equal(links['youtubeanalytics.googleapis.com'], 'https://console.cloud.google.com/apis/library/youtubeanalytics.googleapis.com?project=123456789012');
+  assert.equal(links.audience, 'https://console.cloud.google.com/auth/audience?project=123456789012');
+  assert.equal(M.consoleLinks(null)['youtube.googleapis.com'], 'https://console.cloud.google.com/apis/library/youtube.googleapis.com');
+  assert.equal(M.consoleLinks('12; evil')['youtube.googleapis.com'].includes('?'), false, 'only a number goes into a link');
+  // The fix for each problem: only the APIs Google named, as the project owner, with Check again.
+  const fix = M.problemFix(disabled, { projectNumber: '123456789012', account: 'chan@b.test' });
+  assert.equal(fix.title, 'Turn on the YouTube Analytics API');
+  assert.deepEqual(fix.links, [['Open YouTube Analytics API', links['youtubeanalytics.googleapis.com']]]);
+  assert.ok(fix.check && fix.text.includes('owns your Kairos Google project') && fix.text.includes('not the channel'));
+  assert.ok(fix.text.includes('a different Google account owns the project'), 'no access means another account owns it');
+  const both = M.problemFix({ kind: 'api_disabled', services: [], project: null }, {});
+  assert.equal(both.title, 'Turn on the YouTube Data API v3 and the YouTube Analytics API', 'unknown services: both');
+  assert.equal(both.links.length, 2);
+  assert.ok(both.text.includes('Pick your Kairos Google project'), 'no number: pick the project in the console');
+  const wrong = M.problemFix({ kind: 'wrong_project', services: ['youtube.googleapis.com'], project: '999999', expected: '123456789012' }, { projectNumber: '123456789012' });
+  assert.ok(wrong.text.includes('project 999999') && wrong.text.includes('project 123456789012'));
+  const refused = M.problemFix({ kind: 'sign_in_refused' }, { projectNumber: '123456789012', account: 'chan@b.test' });
+  assert.ok(refused.text.includes('Test users') && refused.text.includes('chan@b.test') && !refused.check);
+  assert.ok(refused.links.every(([, url]) => !url.includes('@')), 'never an email in a link');
+  assert.ok(M.problemFix({ kind: 'signed_out' }).text.includes('7 days'));
+  assert.ok(M.problemFix({ kind: 'quota' }).check);
+  assert.equal(M.problemFix(null), null);
+  // Create your Kairos Google project: account, project, APIs, consent with test users, a Desktop client, paste.
+  const guide = M.projectSteps();
+  assert.deepEqual(guide.map(s => s.id), ['account', 'project', 'apis', 'consent', 'client', 'paste']);
+  assert.ok(guide.find(s => s.id === 'consent').text.includes('Test users') && guide.find(s => s.id === 'consent').text.includes('each channel'));
+  assert.ok(guide.find(s => s.id === 'client').text.includes('Desktop app'));
+  // The steps, from nothing to done.
+  const steps0 = M.setupSteps({});
+  assert.deepEqual(steps0.map(s => [s.n, s.id, s.state]), [[1, 'team', 'todo'], [2, 'channel', 'todo'], [3, 'look', 'blocked'], [4, 'approve', 'todo'],
+    [5, 'youtube', 'optional'], [6, 'social', 'optional'], [7, 'start', 'blocked'], [8, 'post', 'blocked']]);
+  assert.equal(steps0.find(s => s.id === 'youtube').required, false, 'YouTube is required only with a YouTube channel');
+  assert.equal(steps0.find(s => s.id === 'social').required, false);
+  assert.ok(steps0.find(s => s.id === 'channel').why.includes('Kairos never creates accounts'));
+  assert.equal(M.setupDone(steps0), false);
+  const teamFacts = { imported: true, bots: Array.from({ length: 7 }, (_, i) => ({ id: `b${i}`, mode: 'ask' })),
+    routines: [{ enabled: false }, { enabled: false }, { enabled: false }], cycle: null, budget: { monthly_usd: 50 } };
+  const tube = { id: 1, platform: 'youtube', handle: '@cooks', status: 'live', paused: 0 };
+  const base = { setup: { team: teamFacts }, channels: [tube], yt: { configured: false, channels: [] }, pubItems: [], approvals: [] };
+  let steps = M.setupSteps(base);
+  const get = id => steps.find(s => s.id === id);
+  assert.equal(get('team').text, '7 bots, all at Ask; routines paused.');
+  assert.deepEqual([get('look').state, get('look').channel], ['todo', 1]);
+  assert.equal(get('approve').state, 'done', 'Motion type (the default) needs no approval');
+  assert.deepEqual([get('youtube').state, get('youtube').stage, get('youtube').required], ['todo', 'project', true]);
+  assert.deepEqual([get('start').state, get('start').cap, get('start').routinesTotal], ['todo', 50, 3]);
+  // Google set up, the channel not linked yet: choose its account.
+  steps = M.setupSteps({ ...base, yt: { configured: true, project: { number: '123456789012' }, channels: [{ channel_id: 1, handle: '@cooks', google_account: null }] } });
+  assert.deepEqual([get('youtube').stage, get('youtube').channel, get('youtube').project], ['account', 1, '123456789012']);
+  // Linked, but Google says the APIs are off: the step needs a fix and names it.
+  steps = M.setupSteps({ ...base, yt: { configured: true, channels: [{ channel_id: 1, handle: '@cooks', google_account: acct, connected: true, problem: disabled }] } });
+  assert.deepEqual([get('youtube').state, get('youtube').stage], ['warn', 'problem']);
+  assert.equal(get('youtube').text, '@cooks: Needs the YouTube APIs turned on.');
+  // A pack of the channel's own: approved, or waiting for the person.
+  const packChannel = { ...tube, style_pack: 'aaaaaaaaaaaa' };
+  steps = M.setupSteps({ ...base, channels: [packChannel], styles: { packs: [{ name: 'Flat', approved_version: null }] } });
+  assert.deepEqual([get('look').state, get('approve').state], ['done', 'todo']);
+  steps = M.setupSteps({ ...base, channels: [packChannel], styles: { packs: [{ name: 'Flat', approved_version: 1 }] }, sheets: [{}] });
+  assert.deepEqual([get('approve').state, get('approve').text], ['todo', '1 item waiting for your OK in Approvals.']);
+  // Everything done: the checklist goes away.
+  steps = M.setupSteps({ setup: { team: { ...teamFacts, routines: [{ enabled: true }, { enabled: true }, { enabled: false }], cycle: { last_run: { status: 'success' } } } },
+    channels: [packChannel], styles: { packs: [{ name: 'Flat', approved_version: 1 }] },
+    yt: { configured: true, channels: [{ channel_id: 1, handle: '@cooks', google_account: acct, connected: true, problem: null }] },
+    pubItems: [{ state: 'posted' }], approvals: [] });
+  assert.deepEqual(steps.map(s => s.state), ['done', 'done', 'done', 'done', 'done', 'optional', 'done', 'done']);
+  assert.equal(get('start').text, 'Last cycle: success. 2 of 3 routines on.');
+  assert.ok(M.setupDone(steps));
+  assert.deepEqual(M.setupLeft(M.setupSteps(base)).map(s => s.id), ['channel', 'look', 'youtube', 'start', 'post'].filter(id => id !== 'channel'));
+  // TikTok and Instagram stay optional, and an archived channel counts for nothing.
+  steps = M.setupSteps({ ...base, channels: [{ id: 2, platform: 'tiktok', handle: '@t', status: 'live' }, { ...tube, status: 'archived' }],
+    social: { connections: [{ channel_id: 2, connected: true }] } });
+  assert.deepEqual([get('social').state, get('social').required, get('youtube').required], ['done', false, false]);
+  for (const s of M.setupSteps(base)) for (const t of [s.why, s.text, s.title]) assert.ok(!t.includes('—'), 'no em-dashes in the setup');
+  for (const f of [fix, both, wrong, refused, ...['signed_out', 'quota', 'scopes', 'not_owned', 'other'].map(kind => M.problemFix({ kind }))]) assert.ok(!f.text.includes('—') && !f.title.includes('—'));
 
   console.log('studio content model ok');
 })().catch(error => { console.error(error); process.exit(1); });

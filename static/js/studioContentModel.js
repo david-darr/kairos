@@ -212,12 +212,162 @@ export function analyticsText(status) {
 }
 
 // One YouTube channel's link for analytics or posting (status.channels[n]): [pill label, tone], then the sentence.
+// The server classifies what Google said (services/content_studio/youtube.py `classify`) into link.problem; the pill
+// says it in words (David, 2026-11-11: a bare "Check" told him nothing).
+export const PROBLEM_LABELS = {
+  api_disabled: ['Needs the YouTube APIs turned on', 'warn'], wrong_project: ['APIs on in another project', 'warn'],
+  signed_out: ['Needs sign-in', 'error'], scopes: ['Needs the YouTube permission', 'warn'], quota: ['Quota used up for today', 'warn'],
+  not_owned: ['Wrong Google account', 'warn'], sign_in_refused: ['Google refused the sign-in', 'warn'], forbidden: ['Google refused it', 'warn'],
+  other: ['Problem', 'warn'] };
 export function linkState(link) {
+  if (link?.problem?.kind === 'sign_in_refused' && !link?.google_account) return PROBLEM_LABELS.sign_in_refused;
   if (!link?.google_account) return ['Not connected', 'muted'];
-  if (link.needs_reconnect) return ['Reconnect', 'error'];
-  if (link.connected) return link.last_error ? ['Check', 'warn'] : ['Connected', 'ok'];
+  if (link.needs_reconnect || link.problem?.kind === 'signed_out') return PROBLEM_LABELS.signed_out;
+  if (link.problem) return PROBLEM_LABELS[link.problem.kind] || PROBLEM_LABELS.other;
+  if (link.connected) return link.last_error ? PROBLEM_LABELS.other : ['Connected', 'ok'];
   return ['Waiting for Google', 'warn'];
 }
+
+// -- Google: the two roles, the console links, what each problem asks of the person -----------------------------
+// Two Google accounts can be involved and often are: the one that owns "Your Kairos Google project" (the Cloud project of
+// the OAuth client in Library's Google setup; it turns the APIs on, once, for every channel) and "this channel's Google
+// account" (it only signs in, needs no project of its own, and must be on the project's Test users list while the consent
+// screen is in Testing). Kairos does not know which email owns the project, so links never carry an email.
+export const API_NAMES = { 'youtube.googleapis.com': 'YouTube Data API v3', 'youtubeanalytics.googleapis.com': 'YouTube Analytics API' };
+const PROJECT = /^\d{5,20}$/;
+// Console pages for the project. The project query takes the project number (Google's own SERVICE_DISABLED errors link
+// with ?project=<number>). Without a number the links open the console and the person picks the project there.
+export function consoleLinks(projectNumber) {
+  const q = PROJECT.test(String(projectNumber || '')) ? `?project=${projectNumber}` : '';
+  const base = 'https://console.cloud.google.com';
+  return { 'youtube.googleapis.com': `${base}/apis/library/youtube.googleapis.com${q}`,
+    'youtubeanalytics.googleapis.com': `${base}/apis/library/youtubeanalytics.googleapis.com${q}`,
+    audience: `${base}/auth/audience${q}`, clients: `${base}/auth/clients${q}`, newProject: `${base}/projectcreate`,
+    dashboard: `${base}/apis/dashboard${q}`, picked: !!q };
+}
+// What to do about a link's problem: a headline, the plain sentence, which console links to show, and whether Check again helps.
+export function problemFix(problem, { projectNumber = null, account = '' } = {}) {
+  if (!problem) return null;
+  const links = consoleLinks(projectNumber);
+  const services = problem.services?.length ? problem.services : Object.keys(API_NAMES);
+  const names = services.map(s => API_NAMES[s] || s);
+  const owner = 'Open these signed in as the Google account that owns your Kairos Google project, not the channel\'s account. If Google says you have no access, a different Google account owns the project: sign in as that one.';
+  const where = links.picked ? '' : ' Pick your Kairos Google project at the top of the page first.';
+  const who = account || 'this channel\'s Google account';
+  switch (problem.kind) {
+    case 'api_disabled': return { title: `Turn on the ${names.join(' and the ')}`, check: true,
+      text: `Google says ${names.length > 1 ? 'these APIs are' : 'this API is'} off in your Kairos Google project${problem.project ? ` (project ${problem.project})` : ''}. Turning ${names.length > 1 ? 'them' : 'it'} on is once per project and covers every channel. ${owner}${where}`,
+      links: services.map(s => [`Open ${API_NAMES[s] || s}`, links[s]]).filter(l => l[1]) };
+    case 'wrong_project': return { title: 'The APIs are on in a different project', check: true,
+      text: `Google says the ${names.join(' and the ')} ${names.length > 1 ? 'are' : 'is'} off in project ${problem.project}, but your Kairos Google OAuth client belongs to project ${problem.expected}. Turn ${names.length > 1 ? 'them' : 'it'} on in project ${problem.expected}. ${owner}`,
+      links: services.map(s => [`Open ${API_NAMES[s] || s}`, links[s]]) };
+    case 'sign_in_refused': return { title: 'Add the channel\'s account to Test users', check: false,
+      text: `Google did not let the sign-in finish. While your consent screen is in Testing, only the Google accounts on its Test users list can sign in: add ${who} there (as the project's owner), then choose Connect again. If you pressed Cancel, just connect again.`,
+      links: [['Open Test users (Audience)', links.audience]] };
+    case 'signed_out': return { title: 'Sign in again', check: false,
+      text: `Google signed ${who} out. Choose Change and sign in again. While your consent screen is in Testing, Google signs test users out after 7 days; publishing the app (Audience, In production) stops that.`,
+      links: [['Open Audience', links.audience]] };
+    case 'scopes': return { title: 'Allow YouTube', check: false,
+      text: 'Google did not give the YouTube permission. Choose Change, then leave the YouTube boxes ticked on Google\'s page.', links: [] };
+    case 'quota': return { title: 'YouTube\'s quota is used up for today', check: true,
+      text: 'Your Kairos Google project used its YouTube quota for the day. It resets at midnight Pacific time; check again after that.', links: [['Open API usage', links.dashboard]] };
+    case 'not_owned': return { title: 'Wrong Google account for this channel', check: true, text: problem.text || 'That Google account does not own this channel. Choose Change and pick the one that does.', links: [] };
+    default: return { title: 'Google said no', check: true, text: problem.text || 'Google refused. Check again, or choose Change.', links: [] };
+  }
+}
+
+// "Create your Kairos Google project": the steps for someone with no Google setup yet (often a brand-new Google
+// account). One source of truth for these steps: the setup shows them, the vault spec points here. The Library's own
+// Google setup form (googleWorkspace.js `googleClientForm`) takes the client id and secret.
+export function projectSteps() {
+  const links = consoleLinks(null);
+  return [
+    { id: 'account', text: 'Choose the Google account that will own your Kairos Google project. It can be any of yours, and it does not have to be a channel\'s account. Sign in to Google Cloud with it.', link: ['Open Google Cloud', 'https://console.cloud.google.com/'] },
+    { id: 'project', text: 'Create a project, for example "Kairos". Keep it selected at the top of every page that follows.', link: ['Create a project', links.newProject] },
+    { id: 'apis', text: 'Turn on the YouTube Data API v3 and the YouTube Analytics API (Enable on each page). For Library\'s Drive, Sheets, Forms, Calendar and Gmail, turn those APIs on too.', links: [['YouTube Data API v3', links['youtube.googleapis.com']], ['YouTube Analytics API', links['youtubeanalytics.googleapis.com']]] },
+    { id: 'consent', text: 'Set up the OAuth consent screen (Google Auth Platform): audience External, publishing status Testing. Under Audience, add Test users: the project\'s owner and each channel\'s Google account.', link: ['Open Audience', links.audience] },
+    { id: 'client', text: 'Create an OAuth client: application type Desktop app. A Desktop client needs no redirect URI; Google sends you back to Kairos on this computer.', link: ['Open Clients', links.clients] },
+    { id: 'paste', text: 'Paste the client ID and client secret below and save. Kairos seals the secret and never shows it again.' }];
+}
+
+// -- the Content setup checklist (services/content_studio/setup.py gives the team facts) -------------------------------
+export const SETUP_STEPS = [['team', 'Import the Content Studio team'], ['channel', 'Add your first channel'], ['look', 'Choose the channel\'s look'],
+  ['approve', 'Approve a style pack and a sample'], ['youtube', 'Connect YouTube'], ['social', 'TikTok and Instagram'], ['start', 'Start the team'],
+  ['post', 'Approve and publish your first post']];
+const live = channels => (channels || []).filter(c => c.status !== 'archived');
+const hasLook = c => !!(c.style_pack || c.look || c.aspect || c.voice || c.notes);
+const yes = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
+
+// Each step: { id, title, required, state: done | todo | blocked | warn | optional, text (its live status), why (one plain
+// line), ... facts the screen's actions need }. `input` is what Studio > Content loaded: setup (team facts), channels,
+// styles (packs), sheets and packsWaiting (approvals), yt and ytPost (YouTube status), social, pubItems, approvals.
+export function setupSteps(input = {}) {
+  const { setup = {}, channels = [], styles = null, sheets = [], packsWaiting = [], yt = null, social = null, pubItems = [], approvals = [] } = input;
+  const team = setup.team || {}, bots = team.bots || [], routines = team.routines || [];
+  const out = [];
+  // 1. The team.
+  const asking = bots.filter(b => b.mode === 'ask').length, on = routines.filter(r => r.enabled).length;
+  out.push({ id: 'team', required: true, state: team.imported ? 'done' : 'todo',
+    why: 'Seven bots that find topics, write, render and prepare posts. Kairos adds them from the Content Studio template.',
+    text: team.imported ? `${yes(bots.length, 'bot')}, ${asking === bots.length ? 'all at Ask' : `${asking} at Ask`}; ${routines.length ? (on ? `${on} of ${routines.length} routines on` : 'routines paused') : 'no routines'}.` : 'Not imported yet.' });
+  // 2. A channel.
+  const mine = live(channels);
+  out.push({ id: 'channel', required: true, state: mine.length ? 'done' : 'todo',
+    why: 'Create the channel on the platform yourself, then add it here. Kairos never creates accounts.',
+    text: mine.length ? `${yes(mine.length, 'channel')}: ${mine.map(c => c.handle).join(', ')}.` : 'No channel yet.' });
+  // 3. Its look.
+  const bare = mine.filter(c => !hasLook(c));
+  out.push({ id: 'look', required: true, state: !mine.length ? 'blocked' : bare.length ? 'todo' : 'done', channel: bare[0]?.id ?? null,
+    why: 'The style pack, narrator voice and aspect the Editor makes this channel\'s videos in.',
+    text: !mine.length ? 'Add a channel first.' : bare.length ? `Not set for ${bare.map(c => c.handle).join(', ')}.` : 'Every channel has its look.' });
+  // 4. A style pack and its characters approved, with a sample (a pack is approved from its sample). Channels on the
+  // built-in Motion type need nothing approved.
+  const packs = styles?.packs || [], approved = packs.filter(p => p.approved_version);
+  const builtIn = mine.length > 0 && mine.every(c => !c.style_pack || c.style_pack === 'motion-type');
+  const waiting = sheets.length + packsWaiting.length;
+  const approveState = waiting ? 'todo' : approved.length || builtIn ? 'done' : 'todo';
+  out.push({ id: 'approve', required: true, state: approveState, waiting,
+    why: 'You approve a pack from its sample video, and each character from its sheet, before any channel uses them.',
+    text: waiting ? `${yes(waiting, 'item')} waiting for your OK in Approvals.` : approved.length ? `${yes(approved.length, 'pack')} approved: ${approved.map(p => p.name).join(', ')}.`
+      : builtIn ? 'Your channels use the built-in Motion type, which needs no approval.' : 'No pack approved yet.' });
+  // 5. YouTube: Google setup, each channel's Google account, the two APIs.
+  const tubes = mine.filter(c => c.platform === 'youtube');
+  const links = (yt?.channels || []).filter(l => tubes.some(c => c.id === l.channel_id));
+  const broken = links.filter(l => l.problem || l.needs_reconnect);
+  const unlinked = tubes.filter(c => !links.some(l => l.channel_id === c.id && l.google_account));
+  let ytState = 'done', ytText = 'Every YouTube channel reads its numbers.', stage = 'done';
+  if (!tubes.length) { ytState = 'optional'; ytText = 'No YouTube channel yet.'; stage = 'none'; }
+  else if (!yt) { ytState = 'warn'; ytText = 'The YouTube status did not load.'; stage = 'unknown'; }
+  else if (!yt.configured) { ytState = 'todo'; ytText = 'Kairos has no Google project yet.'; stage = 'project'; }
+  else if (broken.length) { ytState = 'warn'; stage = 'problem'; ytText = broken.map(l => `${l.handle}: ${(PROBLEM_LABELS[l.needs_reconnect ? 'signed_out' : l.problem.kind] || PROBLEM_LABELS.other)[0]}.`).join(' '); }
+  else if (unlinked.length) { ytState = 'todo'; stage = 'account'; ytText = `Choose the Google account of ${unlinked.map(c => c.handle).join(', ')}.`; }
+  out.push({ id: 'youtube', required: tubes.length > 0, state: ytState, stage, text: ytText,
+    channel: (broken[0]?.channel_id ?? unlinked[0]?.id) ?? null, project: yt?.project?.number || null,
+    why: 'Your Kairos Google project (once, for every channel) and each channel\'s own Google account, which only signs in.' });
+  // 6. TikTok and Instagram, optional.
+  const socials = mine.filter(c => c.platform === 'tiktok' || c.platform === 'instagram');
+  const connected = (social?.connections || []).filter(c => c.connected && socials.some(s => s.id === c.channel_id)).length;
+  out.push({ id: 'social', required: false, state: !socials.length ? 'optional' : connected === socials.length ? 'done' : 'optional',
+    why: 'Optional. Your own TikTok or Meta app lets Kairos post and read numbers; without one, Prepare post fills the upload page and page reads bring the numbers.',
+    text: !socials.length ? 'No TikTok or Instagram channel.' : `${connected} of ${yes(socials.length, 'channel')} connected through an official app.` });
+  // 7. The team at work: one cycle now, then the daily routines (the person's clicks only).
+  const cycle = team.cycle;
+  out.push({ id: 'start', required: true, state: !team.imported || !mine.length ? 'blocked' : on ? 'done' : 'todo', ran: !!cycle?.last_run, running: !!cycle?.running,
+    routinesOn: on, routinesTotal: routines.length, cap: team.budget?.monthly_usd ?? null,
+    why: 'Run one cycle now to see the team work, then turn on the daily routines. They start paused; nothing posts without your OK.',
+    text: !team.imported ? 'Import the team first.' : !mine.length ? 'Add a channel first.'
+      : `${cycle?.running ? 'A cycle is running now.' : cycle?.last_run ? `Last cycle: ${cycle.last_run.status || 'started'}.` : 'No cycle run yet.'} ${on ? `${on} of ${routines.length} routines on.` : 'Daily routines paused.'}` });
+  // 8. The first post: approved by the person, then published (Private first on YouTube).
+  const posted = pubItems.filter(i => i.state === 'posted').length, ready = pubItems.filter(i => ['approved', 'prepared', 'waiting_for_you'].includes(i.state)).length;
+  out.push({ id: 'post', required: true, state: posted ? 'done' : approvals.length || ready ? 'todo' : 'blocked', toApprove: approvals.length, ready,
+    why: 'Every post waits for your OK. On YouTube, post the first one as Private and check it in YouTube Studio.',
+    text: posted ? `${yes(posted, 'post')} published.` : approvals.length ? `${yes(approvals.length, 'post')} waiting for your approval.` : ready ? `${yes(ready, 'approved post')} ready to publish.` : 'No post yet: the team brings one after its first cycle.' });
+  const titles = Object.fromEntries(SETUP_STEPS);
+  return out.map((s, i) => ({ ...s, n: i + 1, title: titles[s.id] }));
+}
+export const setupLeft = steps => steps.filter(s => s.required && s.state !== 'done');
+export const setupDone = steps => setupLeft(steps).length === 0;
+export const STEP_STATE_TEXT = { done: ['Done', 'ok'], todo: ['To do', 'accent'], blocked: ['Waiting', 'muted'], warn: ['Needs a fix', 'warn'], optional: ['Optional', 'muted'] };
 
 export function linkText(link) {
   const account = link?.google_account;
@@ -225,7 +375,8 @@ export function linkText(link) {
   const who = `${account.email || 'A Google account'}${account.youtube_only ? ' (added for YouTube only)' : ''}`;
   if (link.needs_reconnect) return `${who} needs signing in again. Choose Change and pick it again.`;
   if (!link.connected) return `${who} has not granted the YouTube permission yet. Choose Change and allow it in Google's window.`;
-  return [`Uses ${who}.`, link.last_sync ? `Last synced ${shortDate(link.last_sync)}.` : '', link.last_error || ''].filter(Boolean).join(' ');
+  // A classified problem gets its fix panel under the row, so the row keeps to who and when.
+  return [`Uses ${who}.`, link.last_sync ? `Last synced ${shortDate(link.last_sync)}.` : '', link.problem && link.problem.kind !== 'other' ? '' : link.last_error || ''].filter(Boolean).join(' ');
 }
 
 // The account chooser: each connected Google account (the one in use first marked), then a fresh Google sign-in.
