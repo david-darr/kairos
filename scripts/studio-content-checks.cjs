@@ -313,7 +313,10 @@ app.whenReady().then(async () => {
     const capture = async name => { await pause(150); fs.writeFileSync(path.join(output, name + '.png'), (await win.webContents.capturePage()).toPNG()); };
     const noOverflow = async () => assert.equal(await js("document.documentElement.scrollWidth > innerWidth + 2 || [...document.querySelectorAll('.studio-view,.sc')].some(n=>n.scrollWidth>n.clientWidth+2)"), false, 'No sideways scroll');
     const labels = async () => assert.deepEqual(await js(`[...document.querySelectorAll('.sc button,.sc input,.sc textarea,.sc select')].filter(n=>!(n.getAttribute('aria-label')||n.textContent.trim()||n.labels?.length)).map(n=>n.outerHTML)`), [], 'Every control has a label');
-    const tab = async name => { await js(`[...document.querySelectorAll('.sc-tab')].find(n=>n.dataset.tab===${T(name)}).click()`); await pause(150); };
+    // Wait for the tab first: right after Content opens (or a reload) the tab bar is still being drawn, and clicking at
+    // once threw on a missing tab about 1 run in 3 (release gate, 2.3.0-beta.3).
+    const tab = async name => { await wait(`!!document.querySelector('.sc-tab[data-tab=${T(name)}]')`);
+      await js(`document.querySelector('.sc-tab[data-tab=${T(name)}]').click()`); await pause(150); };
     let loads = 0;
     const openContent = async () => { await win.loadURL(base + '/?load=' + (++loads) + '#/studio'); await wait("!!document.querySelector('.studio-sections')");
       await js("document.getElementById('onboarding-overlay')?.classList.add('hidden')"); await click('.studio-sections button', 'Content'); };
