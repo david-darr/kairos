@@ -49,8 +49,8 @@ def wants_blender(project) -> bool:
 def effective(project) -> str:
     """The renderer this video's stage beats will use now: blender only when it was picked and is installed."""
     if not any(b["kind"] == "stage" for b in project["beats"]):
-        # Pack C's voxel shots draw with three.js only (static/motion/voxel3d.js), with or without Blender.
-        return "threejs" if any(b["kind"] == "voxel" for b in project["beats"]) else "2d-engine"
+        # Pack C's voxel shots and the classic Story Short draw with three.js (static/motion/voxel3d.js, classic3d.js).
+        return "threejs" if any(b["kind"] in ("voxel", "story") for b in project["beats"]) else "2d-engine"
     return "blender" if wants_blender(project) and blender_tools.find() else "threejs"
 
 

@@ -2,6 +2,8 @@ import { clamp, expoOut, pop, inOut, hash, seededRandom, zoomAbout, scrim, card,
 import { drawScene, sceneBoxes, groundLine, packCard, drawCardSky, drawCardWorld } from './scene.js';
 import { stageModel, stagePose, labelsAt, actorBoxes } from './stage.js';
 import { voxelModel, voxelPose, asStage } from './voxel.js';
+import { storyModel, storyPose, voxelAsStory, classicBoxes, classicLabels, poseAt, avatarCamera, wordStarts, timeOf } from './classic.js';
+import { LAYOUT as STORY, captionAt as storyWordAt, drawFrameParts, drawCaption as drawStoryCaption, edgeFlash, SPEAKER_COLOURS, CAPTION_FONT } from './story.js';
 import { normalizeTracks, stateAt, drawOverlay, overlayBoxes, frameIndex } from './overlay.js';
 import { isWord, normalizeProject, dimensions, safeArea, captionBand, captionAt, fitText, frameTime, beatAt, transitionAt, beatLayout, cameraAt, beatElapsed, transitionTransform, visibleBox, compositionAt, revealElapsed, listMarker } from './layout.js';
 
@@ -81,28 +83,63 @@ export function mount(canvas, input, options = {}) {
   const cardStyle = packLook ? { ...style, bg: packLook.bg, backdrop: packLook.backdrop, text: packLook.text, dim: packLook.dim, accent: packLook.accent,
     second: packLook.second, surface: packLook.surface, onAccent: packLook.onAccent, rule: packLook.rule, pattern: 'flat', reportBg: packLook.worstBg,
     palette: [packLook.text, packLook.dim, packLook.accent] } : style;
-  const styleOf = beat => beat.kind === 'scene' || beat.kind === 'stage' || beat.kind === 'voxel' ? style : cardStyle;
+  const styleOf = beat => beat.kind === 'scene' || beat.kind === 'stage' || beat.kind === 'voxel' || beat.kind === 'story' ? style : cardStyle;
   // Pack B (stage.js): 3D studio shots. three.js draws them here; with the Blender renderer this page is the overlay
   // pass instead (options.layer 'overlay'): stage shots stay transparent, everything else draws as usual, transitions
   // into and out of a stage shot are cuts, and the 3D pose of every frame is reported for Blender (kdPose).
   const overlay = options.layer === 'overlay', hasStage = project.beats.some(b => b.kind === 'stage');
   // Pack C (voxel.js): blocky voxel world shots, drawn by three.js here. Pack C has no Blender path (a video with voxel
   // beats never renders with Blender, core/video_store.py), so the overlay pass leaves them transparent like stage shots.
-  const hasVoxel = project.beats.some(b => b.kind === 'voxel');
+  // Pack C classic (classic.js, classic3d.js): the classic block world for story beats (the Story Short format, story.js)
+  // and for voxel beats in the classic look. The pastel voxel look keeps voxel3d.js.
+  const classicOf = beat => beat.kind === 'story' || (beat.kind === 'voxel' && beat.voxel.look === 'classic');
+  const hasVoxel = project.beats.some(b => b.kind === 'voxel' && b.voxel.look !== 'classic');
+  const hasClassic = project.beats.some(classicOf), hasStory = project.beats.some(b => b.kind === 'story');
+  const storyRect = hasStory ? STORY.scene : { x: 0, y: 0, w, h };
+  const storied = new Map();
+  const asStory = beat => { if (beat.kind === 'story') return beat; if (!storied.has(beat.id)) storied.set(beat.id, voxelAsStory(beat)); return storied.get(beat.id); };
   const models = new Map(), poses = new Map();
-  let stage3d = null, voxel3d = null;
+  let stage3d = null, voxel3d = null, classic3d = null;
+  // A blast's blocks stay gone in later story beats at the same place: each classic model sees the blasts before it.
+  const blastsBefore = beat => {
+    const out = [], here = asStory(beat).story;
+    for (const b of project.beats) {
+      if (b === beat) break;
+      if (b.kind !== 'story' || b.story.place !== here.place || b.story.seed !== here.seed) continue;
+      out.push(...modelOf(b).blasts);
+    }
+    return out;
+  };
   const modelOf = beat => {
-    if (!models.has(beat.id)) models.set(beat.id, beat.kind === 'voxel' ? voxelModel(beat, project.characters) : stageModel(beat, project.characters));
+    if (!models.has(beat.id)) models.set(beat.id, classicOf(beat) ? storyModel(asStory(beat), project.characters, blastsBefore(beat))
+      : beat.kind === 'voxel' ? voxelModel(beat, project.characters) : stageModel(beat, project.characters));
     return models.get(beat.id);
   };
   const poseOf = (beat, seconds) => {
     const key = `${beat.id}:${seconds.toFixed(5)}`;
     if (!poses.has(key)) {
       if (poses.size > 64) poses.clear();
-      poses.set(key, (beat.kind === 'voxel' ? voxelPose : stagePose)(modelOf(beat), beat, seconds, w, h, project.captioned));
+      poses.set(key, classicOf(beat) ? storyPose(modelOf(beat), asStory(beat), seconds, storyRect.w, storyRect.h)
+        : (beat.kind === 'voxel' ? voxelPose : stagePose)(modelOf(beat), beat, seconds, w, h, project.captioned));
     }
     return poses.get(key);
   };
+  // The Story Short's talking avatar: whoever speaks the beat (the last speaker on a beat without a line), with a small
+  // pop when the speaker changes; flashback runs for the grade and the edge flashes.
+  const speakers = [], runs = [];
+  {
+    let last = '', changed = 0;
+    project.beats.forEach((b, i) => {
+      const who = b.kind === 'story' && b.speaker ? b.speaker : last;
+      if (who !== last) changed = b.start;
+      speakers[i] = { id: who, since: changed };
+      last = who;
+      const prev = runs.at(-1);
+      if (b.kind === 'story' && b.flashback) { if (prev && prev.open && Math.abs(prev.end - b.start) < 1e-6) prev.end = b.end; else runs.push({ start: b.start, end: b.end, open: true }); }
+      else if (prev) prev.open = false;
+    });
+  }
+  const colourOf = id => project.characters[id]?.spec?.colour || SPEAKER_COLOURS[Math.max(0, Object.keys(project.characters).indexOf(id)) % SPEAKER_COLOURS.length];
   // Labels and figure boxes read a voxel beat in the stage's shape (its `voxel` as `stage`).
   const shaped = beat => beat.kind === 'voxel' ? asStage(beat) : beat;
   const measureCtx = buffer(doc, 1, 1).getContext('2d');
@@ -191,9 +228,15 @@ export function mount(canvas, input, options = {}) {
     if (hasVoxel && !overlay) {
       const { VoxelRenderer } = await import('./voxel3d.js');
       voxel3d = new VoxelRenderer(w, h, { ss: options.ss || 2 });
-      for (const beat of project.beats) if (beat.kind === 'voxel') voxel3d.build(modelOf(beat));
+      for (const beat of project.beats) if (beat.kind === 'voxel' && !classicOf(beat)) voxel3d.build(modelOf(beat));
     }
-    if (disposed) { stage3d?.dispose(); stage3d = null; voxel3d?.dispose(); voxel3d = null; throw new Error('This preview was replaced before it was ready.'); }
+    if (hasClassic && !overlay) {
+      const { ClassicRenderer } = await import('./classic3d.js');
+      classic3d = new ClassicRenderer(w, h, { ss: options.ss || 2 });
+      for (const beat of project.beats) if (classicOf(beat)) classic3d.build(modelOf(beat));
+    }
+    if (hasStory) await doc.fonts.load(`96px ${CAPTION_FONT}`).catch(() => {});
+    if (disposed) { stage3d?.dispose(); stage3d = null; voxel3d?.dispose(); voxel3d = null; classic3d?.dispose(); classic3d = null; throw new Error('This preview was replaced before it was ready.'); }
     for (const beat of project.beats) plan(beat);
     await prepare(0).catch(error => { if (strict) throw error; });
     loaded = true; drawFrame(0);
@@ -206,6 +249,8 @@ export function mount(canvas, input, options = {}) {
       if (!overlay) g.drawImage(stage3d.render(modelOf(beat), poseOf(beat, seconds)), 0, 0);
       return;
     }
+    if (beat.kind === 'story') { storyBackground(g, beat, seconds); return; }
+    if (classicOf(beat)) { if (!overlay) g.drawImage(classic3d.render(modelOf(beat), poseOf(beat, seconds)), 0, 0); return; }
     if (beat.kind === 'voxel') { if (!overlay) g.drawImage(voxel3d.render(modelOf(beat), poseOf(beat, seconds)), 0, 0); return; }
     g.fillStyle = style.bg; g.fillRect(0, 0, w, h);
     // A Pack A scene draws its own layered setting, props and cast (scene.js); the look keeps the type.
@@ -287,6 +332,47 @@ export function mount(canvas, input, options = {}) {
     }
     g.restore();
   }
+  // A Story Short frame: the avatar strip and the block scene from three.js, then the border, divider and grade in 2D.
+  function avatarState(beat, seconds) {
+    const index = project.beats.indexOf(beat), who = speakers[index], spec = project.characters[who.id]?.spec;
+    if (!spec?.outfit) return null;
+    const speaking = beat.speaker === who.id && seconds < beat.speechEnd;
+    const open = speaking && 'AEOF'.includes(beat.mouth[Math.floor(seconds * 30 + 1e-6)] || 'X');
+    const member = beat.story.cast.find(m => m.character === who.id);
+    let mood = member?.mood || 'neutral';
+    for (const c of member?.changes || []) if (c.mood && seconds >= timeOf(beat, c.at)) mood = c.mood;
+    if (mood === 'splat') mood = 'sad';
+    const t = beat.start + seconds;
+    return { rect: STORY.avatar, colour: colourOf(who.id), outfit: spec.outfit, id: who.id, mood, open, blink: !open && Math.floor(t * 30) % 97 < 3,
+      camera: avatarCamera(t, t - who.since), pose: poseAt('idle', t, { talking: speaking }) };
+  }
+  function storyBackground(g, beat, seconds) {
+    if (overlay) return;
+    const picture = classic3d.render(modelOf(beat), poseOf(beat, seconds), STORY.scene, avatarState(beat, seconds));
+    const t = beat.start + seconds, run = beat.flashback ? runs.find(r => t >= r.start - 1e-6 && t < r.end + 1e-6) : null;
+    // The flash marks a flashback's start and end, and the cut back to now.
+    const after = !beat.flashback ? runs.find(r => Math.abs(r.end - beat.start) < 1e-6) : null;
+    const flash = run ? edgeFlash(t - run.start, run.end - t) : after ? edgeFlash(t - after.end, -1) : 0;
+    const index = project.beats.indexOf(beat);
+    drawFrameParts(g, picture, { colour: colourOf(speakers[index].id), flashback: !!run, flash, tagPop: run && t - run.start < .12 ? 1.15 : 1 });
+  }
+  function storyCaption(beat, t) {
+    if (!beat.say) return null;
+    const seconds = t - beat.start, word = storyWordAt(beat, seconds, wordStarts(beat));
+    return word && { ...word, colour: colourOf(beat.speaker) };
+  }
+  function drawClassicLabels(g, beat, seconds) {
+    const pose = poseOf(beat, seconds);
+    for (const l of classicLabels(modelOf(beat), beat.voxel.labels, pose, seconds, w, h)) {
+      const big = Math.round(Math.min(w, h) * .062), small = Math.round(Math.min(w, h) * .03), pad = big * .32;
+      const bw = Math.max(measure(l.text, big, 'title'), l.sub ? measure(l.sub, small, 'body') : 0) + pad * 2, bh = big * 1.05 + (l.sub ? small * 1.3 : 0) + pad * 1.4;
+      const x = clamp(l.x - bw / 2, safe.x, safe.x + safe.w - bw), y = clamp(l.y - bh, safe.y, (project.captioned ? band.y : h) - 12 - bh);
+      g.save(); g.globalAlpha = clamp(l.k * 1.4); card(g, x, y, bw, bh, labelCard, Math.min(28, bh / 3), 'rgba(35, 27, 46, .35)');
+      g.fillStyle = labelInk; g.textAlign = 'center'; g.font = font(style, big, 'title'); g.fillText(l.text, x + bw / 2, y + pad * .7 + big * .88);
+      if (l.sub) { g.font = font(style, small, 'body'); g.fillText(l.sub, x + bw / 2, y + pad * .7 + big * 1.05 + small * 1.05); }
+      g.restore();
+    }
+  }
   function textState(box, beat, t) {
     const local = revealElapsed(beat, t, beat === project.beats[0]), quarter = 60 / project.bpm;
     const words = box.lines.flatMap(line => line.split(' ')), span = Math.min((beat.end - beat.start) * .48, project.bar * .75);
@@ -331,7 +417,13 @@ export function mount(canvas, input, options = {}) {
   }
   function foreground(g, beat, t) {
     const style = styleOf(beat);
-    if (beat.kind === 'stage' || beat.kind === 'voxel') drawLabels(g, beat, beatElapsed(beat, t));
+    if (beat.kind === 'story') {
+      const c = storyCaption(beat, t);
+      if (c) drawStoryCaption(g, c, c.colour, (text, size) => { measureCtx.font = `400 ${size}px ${CAPTION_FONT}`; return measureCtx.measureText(text).width; });
+      return;
+    }
+    if (beat.kind === 'stage' || (beat.kind === 'voxel' && !classicOf(beat))) drawLabels(g, beat, beatElapsed(beat, t));
+    else if (beat.kind === 'voxel') drawClassicLabels(g, beat, beatElapsed(beat, t));
     if (beat.kind === 'image') {
       g.fillStyle = style.bg; g.fillRect(safe.x, safe.y + safe.h * .50, safe.w, safe.h * .50);
     }
@@ -402,8 +494,10 @@ export function mount(canvas, input, options = {}) {
     // The end-card hold also suppresses any incoming or outgoing transition.
     if (beat.kind === 'end' && t >= Math.max(beat.start, beat.end - 1.5)) return { t, beat, transition: null };
     const tr = transitionAt(project, t);
-    // In the Blender overlay pass a stage shot's picture comes from Blender underneath, so its transitions are cuts.
-    if (tr && overlay && (project.beats[tr.from].kind === 'stage' || project.beats[tr.to].kind === 'stage')) return { t, beat, transition: null };
+    // In the Blender overlay pass a 3D shot's picture comes from Blender underneath, so its transitions are cuts.
+    if (tr && overlay && [tr.from, tr.to].some(i => project.beats[i].kind === 'stage' || classicOf(project.beats[i]))) return { t, beat, transition: null };
+    // A Story Short cuts on its words: no transition into or out of a story beat.
+    if (tr && (project.beats[tr.from].kind === 'story' || project.beats[tr.to].kind === 'story')) return { t, beat, transition: null };
     return { t, beat, transition: tr };
   }
   function composite(layer, tr, incoming, foregroundOnly = false) {
@@ -472,6 +566,7 @@ export function mount(canvas, input, options = {}) {
     return null;
   }
   function drawCaption(t) {
+    if (beatAt(project, frameTime(project, t)).kind === 'story') return;     // a story beat draws its own word captions
     const c = caption(t);
     if (!c) return;
     ctx.save(); ctx.globalAlpha = .9; card(ctx, c.x, c.y, c.w, c.h, style.bg, Math.min(style.radius, 24), style.bg); ctx.globalAlpha = 1;
@@ -549,8 +644,39 @@ export function mount(canvas, input, options = {}) {
         }
         result.push(publicBox);
       }
+      // A Story Short shot or a classic voxel shot: the cast as projected boxes (not in a flashback, whose grade changes
+      // every colour), the caption word, the frame's parts, and labels.
+      if (classicOf(b) && !tr) {
+        const seconds = beatElapsed(b, t), pose = poseOf(b, seconds), model = modelOf(b), story = b.kind === 'story';
+        if (!(story && b.flashback)) for (const box of classicBoxes(model, pose, storyRect.w, storyRect.h, storyRect.y)) {
+          const member = asStory(b).story.cast[Number(box.key.slice(1))];
+          result.push({ beat: b.id, kind: 'character', stage: true, classic: true, story, character: box.character, shot: story ? 'story' : 'classic',
+            // Only the shot's subject is colour-checked, on its shirt: others may sit behind the cliff edge or in the dark, and
+            // the skin is too pale a colour for a hue check under the sky's blue fill.
+            x: box.x, y: box.y, w: box.w, h: box.h, height: box.height, short: Math.min(w, h),
+            body: box.facing && Number(box.key.slice(1)) === pose.camera.subject && !['flail', 'cry', 'despair'].includes(box.pose) ? box.body : null, head: null,
+            pose: box.pose, mood: member?.mood });
+        }
+        if (story) {
+          const c = storyCaption(b, t);
+          if (c) {
+            measureCtx.font = `400 ${STORY.caption.size}px ${CAPTION_FONT}`;
+            const full = measureCtx.measureText(c.text).width, fit = Math.min(1, STORY.caption.max / Math.max(1, full)), size = STORY.caption.size * fit, width = full * fit;
+            result.push({ beat: b.id, kind: 'text', role: 'caption', story: true, text: c.word, word: c.index, key: c.key, fontSize: size,
+              x: w / 2 - width / 2 - STORY.caption.outline, y: STORY.caption.y - size * .82 - STORY.caption.outline, w: width + STORY.caption.outline * 2,
+              h: size * 1.05 + STORY.caption.outline * 2, color: c.key ? c.colour : '#ffffff', bg: '#000000', captionStyle: 'word' });
+          }
+          const who = speakers[project.beats.indexOf(b)];
+          result.push({ beat: b.id, kind: 'story', speaker: who.id, colour: colourOf(who.id), flashback: b.flashback, shot: pose.camera.shot, shotIndex: pose.camera.index,
+            avatar: STORY.avatar, scene: STORY.scene, divider: STORY.divider, border: STORY.border });
+        } else for (const l of classicLabels(model, b.voxel.labels, pose, seconds, w, h)) {
+          if (l.k < .05) continue;
+          result.push({ beat: b.id, kind: 'text', role: 'label', text: [l.text, l.sub].filter(Boolean).join(' '), fontSize: Math.round(Math.min(w, h) * .062),
+            x: clamp(l.x - 80, safe.x, safe.x + safe.w - 160), y: Math.max(safe.y, l.y - 120), w: 160, h: 100, color: labelInk, bg: labelCard });
+        }
+      }
       // A stage shot's cast, projected from the 3D pose, and its floating labels as text.
-      if ((b.kind === 'stage' || b.kind === 'voxel') && !tr) {
+      if ((b.kind === 'stage' || (b.kind === 'voxel' && !classicOf(b))) && !tr) {
         const seconds = beatElapsed(b, t), pose = poseOf(b, seconds), model = modelOf(b), sb = shaped(b);
         for (const box of actorBoxes(model, sb, pose, w, h)) {
           if (box.kind !== 'character') continue;
@@ -572,7 +698,7 @@ export function mount(canvas, input, options = {}) {
       }
     }
     result.push(...overlayBoxes(overlays, t, w, h, measure, style));
-    const c = caption(t);
+    const c = beatAt(project, frameTime(project, t)).kind === 'story' ? null : caption(t);
     if (c) {
       const word = project.captionStyle !== 'line' ? currentWord(c, t) : null;
       result.push({ beat: c.part.beat, kind: 'text', role: 'caption', text: c.part.text, fontSize: c.fit.size, x: c.x, y: c.y, w: c.w, h: c.h,
@@ -590,7 +716,7 @@ export function mount(canvas, input, options = {}) {
   }
   const stageModels = () => Object.fromEntries(project.beats.filter(b => b.kind === 'stage').map(b => [b.id, modelOf(b)]));
   // Studio's editor remounts its preview on every edit: free the 3D renderer's GPU context with the old mount.
-  const dispose = () => { disposed = true; stage3d?.dispose(); stage3d = null; voxel3d?.dispose(); voxel3d = null; loaded = false; };
+  const dispose = () => { disposed = true; stage3d?.dispose(); stage3d = null; voxel3d?.dispose(); voxel3d = null; classic3d?.dispose(); classic3d = null; loaded = false; };
   // The editor's live canvas edits: new overlay tracks (and media list) drawn at once, without a new mount.
   function setTracks(tracks, nextMedia = media) {
     media = nextMedia && typeof nextMedia === 'object' ? nextMedia : {};
@@ -598,9 +724,10 @@ export function mount(canvas, input, options = {}) {
     const missing = [...new Set(overlays.map(c => c.image).filter(name => name && !images.has(name)))];
     return Promise.all(missing.map(loadImage)).catch(() => {});
   }
-  return { ready, duration: project.duration, drawFrame, drawWhenReady, layout, pose, stageModels, dispose, prepare, setTracks, stageInfo: () => (stage3d || voxel3d) && { ...(stage3d || voxel3d).info, lost: (stage3d?.lost || 0) + (voxel3d?.lost || 0) },
-    info: { duration: project.duration, fps: project.fps, width: w, height: h, aspect, layer: overlay ? 'overlay' : 'full', captionStyle: project.captionStyle,
-      renderer: hasStage ? (overlay ? 'blender' : 'threejs') : hasVoxel ? 'threejs' : '2d-engine', beats: project.beats.map(({ id, start, end }) => ({ id, start, end })),
+  const three = () => stage3d || voxel3d || classic3d;
+  return { ready, duration: project.duration, drawFrame, drawWhenReady, layout, pose, stageModels, dispose, prepare, setTracks, stageInfo: () => three() && { ...three().info, lost: (stage3d?.lost || 0) + (voxel3d?.lost || 0) + (classic3d?.lost || 0) },
+    info: { duration: project.duration, fps: project.fps, width: w, height: h, aspect, layer: overlay ? 'overlay' : 'full', captionStyle: project.captionStyle, format: hasStory ? 'story-short' : 'beats',
+      renderer: hasStage ? (overlay ? 'blender' : 'threejs') : hasVoxel || hasClassic ? 'threejs' : '2d-engine', beats: project.beats.map(({ id, start, end }) => ({ id, start, end })),
       clips: overlays.map(({ id, track, start, end, kind }) => ({ id, track, start, end, kind })) } };
 }
 

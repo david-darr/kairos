@@ -187,7 +187,7 @@ class Beats(unittest.TestCase):
         self.assertIn("three.js only", str(caught.exception))
 
     def test_mouth_shapes_come_from_the_lines_own_audio_for_voxel_and_stage_beats(self):
-        self.assertEqual(video_narration.TALKING, ("scene", "stage", "voxel"))
+        self.assertEqual(video_narration.TALKING, ("scene", "stage", "voxel", "story"))
         project = video_store.create("Mouths", look="nordic", owner="test", beats=[self.voxel()], cast=[{"character": self.pip, "version": 1}],
                                      narration={"voice": "af_heart", "captions": True})
         rate = video_narration.RATE

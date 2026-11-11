@@ -62,8 +62,20 @@ def voxel_plan(spec):
     return {"zh": h - head / 2, "hh": head / 2, "face": h - head * .13, "zb": leg + body / 2, "br": width / 2, "top": top}
 
 
+BLOCK_HEIGHT = 2.0       # a classic block character is 32 P tall: two blocks (static/motion/classic.js HEIGHT)
+
+
+def block_plan(spec):
+    """Pack C classic's block body plan (static/motion/classic.js blockPlan, in blocks from the feet): the shirt is sampled
+    low on the torso (under any chest detail, above the belt), the head on the skin between the eyes and the mouth; the
+    body's width at that row is the torso and both sleeves (16 P). A test keeps these equal to the JavaScript ones."""
+    P = 1 / 16
+    return {"H": BLOCK_HEIGHT, "zh": 28 * P, "hh": 4 * P, "face": 27.75 * P, "zb": 14.5 * P, "br": 8 * P, "top": BLOCK_HEIGHT}
+
+
 def plan_for(spec):
-    return voxel_plan(spec) if spec.get("form") == "voxel" else stage_plan(spec)
+    form = spec.get("form")
+    return block_plan(spec) if form == "block" else voxel_plan(spec) if form == "voxel" else stage_plan(spec)
 
 
 def _hsv(rgb):
@@ -106,7 +118,8 @@ def stage_sheet_metrics(png: bytes, spec: dict, layout: dict) -> dict:
     pixels = _array(png)
     plan, problems = plan_for(spec), []
     key = layout["key"]
-    px = key["height"] / STAGE_HEIGHT                     # pixels per metre in the key and the front view
+    tall = plan.get("H", STAGE_HEIGHT)                    # a block character is two blocks tall, every other 1.5 m
+    px = key["height"] / tall                             # pixels per metre (or block) in the key and the front view
     x0, y0, x1, y1 = key["x"] + 14, key["y"] + 60, key["x"] + key["w"] - 14, key["y"] + key["h"] - 14
     region = pixels[y0:y1, x0:x1]
     figure = ~_near(region, _rgb(layout["background"]), 12)
@@ -118,12 +131,17 @@ def stage_sheet_metrics(png: bytes, spec: dict, layout: dict) -> dict:
     silhouette = (ys.max() - ys.min() + 1) / px
     metrics = {"ok": True, "form": spec.get("form", "3d"), "height_px": key["height"], "silhouette_m": round(silhouette, 3),
                "shares": {k: round(v, 4) for k, v in found.items()}}
-    if not .97 * STAGE_HEIGHT <= silhouette <= plan["top"] + .06:
-        problems.append(f"The colour key's figure is {silhouette:.2f} m tall; the spec builds {STAGE_HEIGHT:.2f} m to {plan['top']:.2f} m.")
+    if not .97 * tall <= silhouette <= plan["top"] + .06:
+        problems.append(f"The colour key's figure is {silhouette:.2f} m tall; the spec builds {tall:.2f} m to {plan['top']:.2f} m.")
     # The body's width at its centre: the run of body colours either side of the centre column, on the centre row.
     row = int(round(key["feet"] - plan["zb"] * px))
     cx = int(round(key["x"] + key["w"] / 2))
-    line = _body_mask(pixels[row:row + 1, key["x"]:key["x"] + key["w"]], spec["palette"])[0] |         _near(pixels[row, key["x"]:key["x"] + key["w"]], _rgb(spec["palette"]["head"]) * .55 + _rgb(spec["palette"]["body"]) * .45, TOL)
+    if spec.get("form") == "block":
+        # A block character's key is flat shirt colour over the torso and both sleeves; its detail colour is light and can sit
+        # near the sheet's background, so only the shirt counts.
+        line = _near(pixels[row, key["x"]:key["x"] + key["w"]], _rgb(spec["palette"]["body"]), TOL)
+    else:
+        line = _body_mask(pixels[row:row + 1, key["x"]:key["x"] + key["w"]], spec["palette"])[0] |         _near(pixels[row, key["x"]:key["x"] + key["w"]], _rgb(spec["palette"]["head"]) * .55 + _rgb(spec["palette"]["body"]) * .45, TOL)
     centre = cx - key["x"]
     if 0 <= centre < len(line) and line[centre]:
         left, right = centre, centre

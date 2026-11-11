@@ -1,5 +1,5 @@
 // A real narrated video render through the app's own render path. Run via run-electron-test.cjs:
-//   node scripts/run-electron-test.cjs video-render-smoke [--sample | --pack-a | --style-pack | --long-form | --pack-b | --pack-c] [--tracks] [--models <kokoro folder>] [--keep <folder>] [--name <stem>]
+//   node scripts/run-electron-test.cjs video-render-smoke [--sample | --pack-a | --style-pack | --long-form | --pack-b | --pack-c | --story] [--tracks] [--models <kokoro folder>] [--keep <folder>] [--name <stem>]
 // --tracks (Content Studio Editor step 3) puts an overlay track, a shape track and an audio clip over the beats and checks
 // they reach the encoded video and the soundtrack.
 // --long-form renders a 3 to 5 minute chaptered video in the starter pack, stops it in its second chapter and resumes it (up to an hour).
@@ -57,6 +57,7 @@ app.whenReady().then(async () => {
   if (args.includes('--long-form')) py.push('--long-form');
   if (args.includes('--pack-b')) py.push('--pack-b');
   if (args.includes('--pack-c')) py.push('--pack-c');
+  if (args.includes('--story')) py.push('--story');
   if (args.includes('--preview')) py.push('--preview');
   if (args.includes('--tracks')) py.push('--tracks');
   for (const name of ['--motion', '--fps60', '--exports']) if (args.includes(name)) py.push(name);

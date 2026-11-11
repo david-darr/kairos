@@ -277,7 +277,9 @@ async def _render(project, aspect, job_id):
         out = folder / f"{slug}-v{n}.mp4"
         temp = out.with_name(out.stem + ".partial.mp4")
         fps = video_store.fps(project)
-        encoder = ffmpeg_tools.Encoder(temp, wav, fps=fps)
+        lufs = video_audio.STORY_LUFS if video_audio.is_story(project) else -16
+        loud = {"lufs": lufs} if lufs != -16 else {}      # only a Story Short changes the target
+        encoder = ffmpeg_tools.Encoder(temp, wav, fps=fps, **loud)
         total = video_store.frame_count(project)
         indices = {round(i * (total - 1) / 11) for i in range(12)}
         sheet_indices = set(indices)
@@ -315,7 +317,7 @@ async def _render(project, aspect, job_id):
         state["status"] = "encoding"
         await asyncio.to_thread(encoder.finish)
         encoder = None
-        measured = await _thread_done(ffmpeg_tools.loudness, temp)
+        measured = await _thread_done(ffmpeg_tools.loudness, temp, *loud.values())
         frames_kept, times_kept = [f for _, f in samples], [i / fps for i, _ in samples]
         notes = video_checks.check(project, aspect, layouts, frames_kept, measured, voice or None)
         notes += character_notes(project, layouts, frames_kept, times_kept)
@@ -351,7 +353,7 @@ async def _render(project, aspect, job_id):
 
 def _stage_info(project):
     return {"renderer": video_blender.effective(project), "picked": project.get("renderer", "threejs")} \
-        if any(b["kind"] in ("stage", "voxel") for b in project["beats"]) else None
+        if any(b["kind"] in ("stage", "voxel", "story") for b in project["beats"]) else None
 
 
 async def preview(video_id, aspect, times=None):

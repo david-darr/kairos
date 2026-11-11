@@ -745,7 +745,7 @@ class FormatCards(unittest.TestCase):
         self.assertEqual((rows["Strong format"]["kind"], rows["Strong format"]["eligible"], rows["list"]["kind"]), ("card", True, "label"))
         self.assertGreater(rows["Strong format"]["score"], rows["Weak format"]["score"])
         # Packs that are built (Pack 0, Pack A since unit 3, Pack B since unit 5, Pack C since unit 6) are listed.
-        self.assertEqual([p["id"] for p in board["style_packs"]], ["motion-type", "flat-2d", "glossy-3d", "voxel-3d"])
+        self.assertEqual([p["id"] for p in board["style_packs"]], ["motion-type", "flat-2d", "glossy-3d", "voxel-3d", "block-classic"])
         self.assertEqual(board["style_packs"][0]["posts_scored"], 31)
         first = review.run_review(s, NOW1, dry_run=False)
         self.assertFalse(any(p["subject_type"] == "format" for p in first["proposals"]), "behind once is not enough")
@@ -923,11 +923,13 @@ class Api(unittest.TestCase):
         got = d.get(f"{P}/formats").json()
         self.assertIn("Api card", [f["name"] for f in got["formats"]])
         self.assertIn(port["id"], [p["id"] for p in got["ports"]])
-        self.assertEqual([p["id"] for p in got["style_packs"]], ["motion-type", "flat-2d", "glossy-3d", "voxel-3d"])
+        self.assertEqual([p["id"] for p in got["style_packs"]], ["motion-type", "flat-2d", "glossy-3d", "voxel-3d", "block-classic"])
         one = d.get(f"{P}/formats/{saved['id']}").json()
         self.assertEqual((one["name"], [p["id"] for p in one["ports"]], one["posts"]), ("Api card", [port["id"]], []))
-        self.assertEqual(b.get(f"{P}/formats").json()["formats"], [], "bea has her own store")
-        self.assertEqual(b.get(f"{P}/formats/{saved['id']}").status_code, 404)
+        # Kairos's shipped cards (the Story Short) join every store; bea's own store has none of ann's cards.
+        self.assertEqual([c for c in b.get(f"{P}/formats").json()["formats"] if c["created_by"] != "Kairos (shipped card)"], [], "bea has her own store")
+        theirs = b.get(f"{P}/formats/{saved['id']}")      # the same number in bea's store is at most her own shipped card
+        self.assertTrue(theirs.status_code == 404 or theirs.json().get("name") != saved["name"])
 
     def test_delivery_routes_reach_the_inbox_only_for_the_accounts_own_producer(self):
         d, b = self.clients["cy"], self.clients["bea"]

@@ -76,8 +76,38 @@ def _names(raw, what, most=30):
     return out
 
 
-def clean_evidence(raw):
+# Format cards Kairos ships (Pack C classic, David 2026-11-10): the story shape of the block-story Shorts reference David
+# shared, written as our own card. It carries no evidence rows (no channel's numbers were checked for it); a port of it still
+# needs its own dated audience evidence, and every policy check applies to its posts. Added to a team's store the first
+# time a bot reads the formats (store.ensure_shipped_formats); a retired one stays retired.
+SHIPPED_BY = "Kairos (shipped card)"
+SHIPPED = {
+    "story-short": {
+        "name": "Story Short",
+        "premise": "The one who wronged everyone hangs in cartoon danger and begs; each friend he wronged remembers it in a flashback and walks away.",
+        "beats": ["Cold open: the mean one in cartoon danger calls for help",
+                  "Helper 1 arrives (low angle) and hints at what he did",
+                  "Sepia flashback in a new place: the wrong, with a big physical payoff",
+                  "The flashback ends on the friend upset",
+                  "Back to now: he begs; helper 1 says one cold line, waves, leaves",
+                  "Helper 2 arrives; a different wrong in a second flashback",
+                  "He begs again; helper 2 refuses and leaves",
+                  "The danger lands: his hand slips (a top-down shot) and he falls",
+                  "Falling, his last line asks for a like and a subscribe"],
+        "length_min_s": 25, "length_max_s": 60,
+        "audience": {"age_band": "8-14", "interests": "block-world games, animated stories, slapstick, fairness",
+                     "platform": "youtube", "why": "Short, fast stories where the mean one gets what he deserves, in a world they know."},
+        "source_niche": "block-world story Shorts",
+        "do_not_use": ["Maizen", "JJ", "Mikey", "Minecraft", "Mojang", "Steve", "Alex", "Creeper"],
+        "evidence": [],
+    },
+}
+
+
+def clean_evidence(raw, shipped=False):
     """Source channel and video links, views and age when seen, and the date checked. Each number keeps its source."""
+    if shipped and raw == []:
+        return []
     if not isinstance(raw, list) or not raw or len(raw) > 20:
         raise StudioError("a format card needs 1 to 20 evidence rows, each with its link and the date it was checked")
     out = []
@@ -111,8 +141,9 @@ def clean_audience(raw):
             "platform": platform, "why": _text(raw.get("why"), "audience.why (why they watch)", 300)}
 
 
-def clean_format(data):
-    """A format card's fields from the Researcher's input, or a StudioError naming what is missing."""
+def clean_format(data, shipped=False):
+    """A format card's fields from the Researcher's input, or a StudioError naming what is missing. `shipped`: one of
+    Kairos's own cards (SHIPPED), which carries no evidence rows."""
     if not isinstance(data, dict):
         raise StudioError("a format card is an object")
     beats = data.get("beats")
@@ -124,7 +155,7 @@ def clean_format(data):
             raise StudioError(f"{what} is the typical length in seconds, 5 to 10800")
     if low > high:
         raise StudioError("length_min_s is more than length_max_s")
-    evidence = clean_evidence(data.get("evidence"))
+    evidence = clean_evidence(data.get("evidence"), shipped)
     names = _names(data.get("do_not_use"), "do_not_use")
     for row in evidence:      # the source channels' own names are never ours to use
         if row["channel"].lower() not in (x.lower() for x in names):

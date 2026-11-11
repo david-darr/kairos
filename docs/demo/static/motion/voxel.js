@@ -66,6 +66,9 @@ export function normalizeVoxel(input) {
   const people = s.people && typeof s.people === 'object' ? s.people : {};
   return {
     world: one(s.world, WORLDS, 'meadow'), time: one(s.time, TIMES, 'day'), shot: one(s.shot, SHOTS, 'medium'),
+    // The look (Pack C classic, 2026-11-10): `pastel` is this module's soft toy world; `classic` draws the beat with the
+    // classic block world and characters (classic.js, classic3d.js).
+    look: s.look === 'classic' ? 'classic' : 'pastel',
     seed: Math.round(num(s.seed, 0, 999, 0)), cast,
     people: { count: Math.round(num(people.count, 0, LIMITS.people, 0)), seed: Math.round(num(people.seed, 0, 999, 0)) },
     props: (Array.isArray(s.props) ? s.props : []).slice(0, LIMITS.props).filter(p => p && PROPS.includes(p.kind)).map((p, i) => ({

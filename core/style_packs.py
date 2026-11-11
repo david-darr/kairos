@@ -14,6 +14,14 @@ tools read them from here.
   renderers (David, 2026-11-10: "just add both as options"): three.js, built in and the default (static/motion/stage3d.js
   in the render window), and Blender, only when the person has it installed (core/blender_tools.py finds it; Kairos
   never bundles or downloads it) and picked it for the pack or the channel (core/video_blender.py runs it).
+- `block-classic` (Pack C classic, David 2026-11-10: "much closer to the block-game reference he shared", knowing the
+  resemblance risk): the classic block world with hard 16 x 16 pixel textures drawn in code (grass, dirt, stone, logs,
+  leaves, planks, water, ore specks, flowers), box clouds and a warm sun, and our own classic block characters (form block:
+  the classic box proportions, per-face pixel skins drawn from their outfit, faces with the full mood set) whose every key
+  is constant. Its own format is the Story Short (a 1080 x 1920 split screen with the talking avatar over the scene, pure
+  dialogue with each character's own voice, word-by-word captions, sepia flashbacks; static/motion/story.js); its voxel
+  beats can also take `look: classic` in any aspect. three.js draws it (static/motion/classic3d.js). The distance rules hold:
+  no other game's textures, skins, sounds or names, and the Evaluator's brand rule covers it like voxel-3d.
 - `voxel-3d` (Pack C, build unit 6): a generic blocky world on our own palette (meadow, cave, village, sky island, ocean;
   day, dusk and night), soft bevelled blocks drawn instanced, and blocky original characters built from boxes from their
   character spec (form voxel) with pixel faces drawn in code. three.js only (static/motion/voxel.js, voxel3d.js): Pack C
@@ -46,9 +54,14 @@ RENDER_SPEED = {
     # Capture through the render worker (2x supersampling, 4x MSAA, soft shadows, ambient occlusion, about 9,000 instanced
     # blocks a shot): 38.2 fps; the whole 25.2 s sample took 29.4 s including Kokoro narration. One run.
     "threejs-voxel": {"fps": 38.0, "measured": "2026-11-10, the 25 s Pack C sample (five worlds) in three.js, RTX 4090"},
+    # Pack C classic: two pictures a frame in a Story Short (the avatar room and the block scene), pixel textures, sharp sun shadows.
+    # Measured capture through the render worker: 41.4 and 41.0 frames a second (2x supersampling, the avatar room and the
+    # block scene each frame, sharp sun shadows); the whole 35.5 s Story Short took 187 to 196 s, most of it 17 Kokoro lines and
+    # their whisper.cpp alignment. Two runs, on this RTX 4090 only.
+    "threejs-classic": {"fps": 41.0, "measured": "2026-11-11, the 35.5 s Story Short sample (two pictures a frame) in three.js, RTX 4090"},
 }
 # Which measured speed a pack's renderer uses: Pack C draws a whole world, so it has its own number.
-SPEED_KEYS = {("voxel-3d", "threejs"): "threejs-voxel"}
+SPEED_KEYS = {("voxel-3d", "threejs"): "threejs-voxel", ("block-classic", "threejs"): "threejs-classic"}
 
 
 def speed_key(base: str, renderer: str) -> str:
@@ -79,6 +92,13 @@ BUILT_IN = {
                          "our own blocky characters and their pixel faces. Rendered with three.js only (built in; no Blender path). "
                          "This look draws children: say on the channel and each post whether it is made for kids. Characters are "
                          "approved from their sheet before a video can use them. Up to 8 minutes, or 20 in chapters."},
+    "block-classic": {"name": "Classic block", "available": True, "renderer": "threejs", "renderers": ["threejs"],
+                      "units_per_minute": 1.6, "max_seconds": 480, "characters": True, "formats": ["story-short"],
+                      "note": "The classic block world (pixel textures drawn in code, box clouds, a warm sun) with our own classic block "
+                              "characters, every key constant. Its format is the Story Short: 1080 x 1920, the speaker's avatar over the "
+                              "scene, pure dialogue with each character's own voice, word captions, sepia flashbacks. Rendered with three.js "
+                              "(built in). This look draws children: say on the channel and each post whether it is made for kids. "
+                              "Characters are approved from their sheet before a video can use them."},
 }
 
 # Pack A's scene palettes: one per channel keeps the series consistent. Each is a short list of flat colours; the
@@ -106,6 +126,19 @@ VOXEL_WORLDS = ("meadow", "cave", "village", "sky-island", "ocean")
 VOXEL_TIMES = ("day", "dusk", "night")
 VOXEL_PROPS = ("gem", "lantern", "crate", "flag", "ball", "star")
 VOXEL_MAX_PEOPLE = 6
+VOXEL_LOOKS = ("pastel", "classic")
+# Pack C classic and its Story Short (static/motion/classic.js, story.js): places, poses, moods, shots, effects, props and
+# the sounds Kairos synthesizes for them (core/video_audio.py).
+STORY_PLACES = ("meadow", "cliff", "village", "party", "cave", "beach", "sky-island")
+STORY_TIMES = ("day", "dusk")
+STORY_POSES = ("idle", "walk", "run", "hips", "despair", "flail", "hang", "wave", "shove", "nod", "point", "cheer", "cry", "laugh",
+               "shrug", "think", "sit")
+STORY_MOODS = ("neutral", "happy", "smug", "angry", "scared", "sad", "crying", "shocked", "laughing", "splat")
+STORY_SHOTS = ("close", "medium", "wide", "low", "top", "orbit")
+STORY_FX = ("fuse", "blast", "splat", "fall", "pop")
+STORY_PROPS = ("crate", "cake", "lantern", "balloon", "table")
+STORY_SFX = ("boom", "splat", "sting", "riser", "pop", "whoosh", "impact", "steps", "gasp")
+STORY_MAX_CAST, STORY_MAX_SHOTS = 4, 3
 SHOTS = ("wide", "medium", "close")
 PROPS = ("sun", "moon", "star", "cloud", "lightbulb", "heart", "book", "planet", "drop", "leaf", "gear", "arrow",
          "question", "coin", "clock", "rocket", "tree", "house", "magnifier", "atom")

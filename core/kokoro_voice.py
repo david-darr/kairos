@@ -126,20 +126,20 @@ def _get_engine():
         raise KokoroUnavailable("Kokoro could not load.")
 
 
-def _create(engine, provider, text, voice):
+def _create(engine, provider, text, voice, speed=1.0):
     if provider == onnx_providers.DML:
         with _run_lock:
-            return engine.create(text, voice=voice, speed=1.0, lang=kokoro_g2p.lang_for_voice(voice))
-    return engine.create(text, voice=voice, speed=1.0, lang=kokoro_g2p.lang_for_voice(voice))
+            return engine.create(text, voice=voice, speed=speed, lang=kokoro_g2p.lang_for_voice(voice))
+    return engine.create(text, voice=voice, speed=speed, lang=kokoro_g2p.lang_for_voice(voice))
 
 
-def _render(text: str, voice: str):
+def _render(text: str, voice: str, speed: float = 1.0):
     """(samples, rate) on the chosen provider; a graphics-provider failure retries the same text on the processor."""
     global _engine, _provider
     engine = _get_engine()
     provider = _provider
     try:
-        return _create(engine, provider, text, voice)
+        return _create(engine, provider, text, voice, speed)
     except Exception as e:
         # Only the runtime's own errors count against the provider; a bad voice id or text is not the card's fault.
         runtime_error = type(e).__module__.startswith("onnxruntime")
@@ -150,7 +150,7 @@ def _render(text: str, voice: str):
             if _engine is engine:
                 _engine, _provider = None, None
         engine = _get_engine()
-        return _create(engine, _provider, text, voice)
+        return _create(engine, _provider, text, voice, speed)
 
 
 def voices() -> list[dict]:
@@ -184,8 +184,9 @@ def warm() -> bool:
         return False
 
 
-def synthesize(text: str, voice: str) -> bytes:
-    """One sentence -> 24 kHz mono PCM16 bytes. Blocking; call from a worker thread."""
+def synthesize(text: str, voice: str, speed: float = 1.0) -> bytes:
+    """One sentence -> 24 kHz mono PCM16 bytes. Blocking; call from a worker thread. `speed` is Kokoro's own speaking
+    rate (1 is its normal pace; the Story Short's characters speak at 1.08 to 1.14)."""
     ok, reason = ready()
     if not ok:
         raise KokoroUnavailable(reason)
@@ -194,7 +195,7 @@ def synthesize(text: str, voice: str) -> bytes:
     import numpy as np
     try:
         wanted = voice if voice and voice != "default" else DEFAULT_VOICE
-        samples, rate = _render(text, wanted)
+        samples, rate = _render(text, wanted, max(.5, min(2., float(speed))))
     except Exception as e:
         logger.exception("kokoro: synthesis failed")
         raise KokoroUnavailable("Kokoro could not speak. Check its download and the selected voice.") from e

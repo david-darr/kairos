@@ -592,6 +592,19 @@ class Store:
                 self._update("formats", format_id, **fields, updated_at=now)
         return self.get_format(format_id)
 
+    def ensure_shipped_formats(self, now=None):
+        """Kairos's shipped format cards (formats.SHIPPED) in this store, once each: added when missing, never brought back
+        after the team retired one, never changed under the team."""
+        from .formats import SHIPPED, SHIPPED_BY, clean_format
+        now = time.time() if now is None else now
+        added = []
+        with self.lock:
+            for card in SHIPPED.values():
+                if self._row("SELECT id FROM formats WHERE lower(name) = lower(?)", (card["name"],)):
+                    continue
+                added.append(self._insert("formats", **clean_format(card, shipped=True), created_by=SHIPPED_BY, created_at=now, updated_at=now))
+        return added
+
     def get_format(self, format_id):
         row = self._row("SELECT * FROM formats WHERE id = ?", (format_id,))
         if not row:

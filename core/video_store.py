@@ -34,7 +34,7 @@ def videos_dir() -> str:
 
 
 ASPECTS = {"16:9": (1920, 1080), "9:16": (1080, 1920), "1:1": (1080, 1080)}
-KINDS = ("title", "statement", "big-number", "list", "image", "quote", "split", "logo", "end", "scene", "stage", "voxel")
+KINDS = ("title", "statement", "big-number", "list", "image", "quote", "split", "logo", "end", "scene", "stage", "voxel", "story")
 CAMERAS = ("still", "push", "pull", "pan", "shake")
 TRANSITIONS = ("cut", "whip", "zoom", "flip", "dither", "mosaic", "wipe")
 MOODS = ("energetic", "calm", "warm", "dark", "playful")
@@ -62,6 +62,11 @@ CHAPTER_MAX_SECONDS = 480       # one part is one render worker job (at most 14,
 MIN_CHAPTERS, MAX_CHAPTERS = 2, 30
 CHAPTER_TITLE_LIMIT = 80
 LEAD, TAIL = .25, .45           # seconds of picture before a line starts and after it ends
+# The Story Short (Pack C classic, David 2026-11-10): pure dialogue, each line spoken by its character's own voice, trimmed,
+# with a gap after it set by the action (0.2 to 0.45 s, longer where the action needs room); a cut lands 0.06 s before
+# the word it hangs on, so a line starts 0.06 s into its shot. A shot without a line holds for `hold` seconds.
+STORY_LEAD, STORY_GAP, STORY_TAIL = .06, .3, .9
+STORY_GAP_RANGE, STORY_HOLD_RANGE = (.1, 1.6), (.4, 4.0)
 # Frame rates (Content Studio Editor step 6): 30, or 60 for smoother motion at about twice the render time and frames.
 FPS_CHOICES = (30, 60)
 # Caption styles (step 7): the whole line, or the line with the word being said lit (highlight) or on a box (box). The
@@ -130,7 +135,7 @@ def validate(project: dict) -> dict:
         _error("beats", f"give 1 to {most} beats.")
     ids = set()
     allowed = {"id", "kind", "bars", "text", "sub", "number", "items", "image", "camera", "transition", "treatment",
-               "say", "spoken", "seconds", "scene", "stage", "voxel"}
+               "say", "spoken", "seconds", "scene", "stage", "voxel", "story", "speaker", "flashback", "gap", "hold"}
     for i, b in enumerate(beats):
         path = f"beats[{i}]"
         if not isinstance(b, dict):
@@ -153,6 +158,8 @@ def validate(project: dict) -> dict:
         if "say" in b:
             _say(b["say"], path + ".say")
             b.setdefault("bars", 1)   # a narrated beat lasts as long as its line; bars only matter without one
+        elif b.get("kind") == "story":
+            b.setdefault("bars", 1)   # a story shot without a line lasts its hold
         _number(b.get("bars"), path + ".bars", .5, 8)
         if b["bars"] * 2 != int(b["bars"] * 2):
             _error(path + ".bars", "use half-bar steps (0.5, 1, 1.5...).")
@@ -186,6 +193,20 @@ def validate(project: dict) -> dict:
             _voxel(b.get("voxel"), path + ".voxel")
         elif "voxel" in b:
             _error(path + ".voxel", "only a voxel beat (Pack C, blocky world) has a voxel; set kind to voxel or remove it.")
+        if b["kind"] == "story":
+            _story_beat(b, path)
+        else:
+            for key in ("story", "speaker", "flashback", "gap", "hold"):
+                if key in b:
+                    _error(f"{path}.{key}", "only a story beat (the Story Short format, Pack C classic) has this; set kind to story or remove it.")
+    if any(b["kind"] == "story" for b in beats):
+        # The Story Short is its own format: every shot a story beat, 1080 x 1920 only.
+        if not all(b["kind"] == "story" for b in beats):
+            _error("beats", "a Story Short is all story beats; make the other beats story beats or put them in another video.")
+        if p["aspects"] != ["9:16"]:
+            _error("aspects", "a Story Short is 9:16 only (1080 x 1920, the avatar strip over the block scene).")
+        if p.get("chapters"):
+            _error("chapters", "a Story Short is a Short (25 to 60 seconds); it has no chapters.")
     _cast(p, beats)
     _style_pack(p)
     if "renderer" in p:
@@ -193,8 +214,10 @@ def validate(project: dict) -> dict:
             p.pop("renderer")
         elif p["renderer"] not in RENDERERS_3D:
             _error("renderer", "choose threejs (built in) or blender (only when Blender is installed); it draws the 3D stage beats.")
-        elif p["renderer"] == "blender" and any(b["kind"] == "voxel" for b in beats):
-            _error("renderer", "a video with blocky world (voxel) beats renders with three.js only; Pack C has no Blender path.")
+        elif p["renderer"] == "blender" and any(b["kind"] in ("voxel", "story") for b in beats):
+            _error("renderer", "a video with blocky world beats (voxel, pastel or classic) or a Story Short renders with three.js only: "
+                               "Blender is not built for Pack C (its pixel faces change every frame, and a Story Short draws two pictures "
+                               "a frame and grades its flashbacks). Leave renderer out or use threejs.")
     # Tracks and clips over the beats (core/video_tracks.py); a video without them is unchanged.
     from core import video_tracks
     from core import video_media
@@ -202,7 +225,7 @@ def validate(project: dict) -> dict:
     if is_narrated or "narration" in p:
         p["narration"] = _narration(p.get("narration"))
     for i, b in enumerate(beats):
-        _timing(b, p.get("narration"), f"beats[{i}]")
+        _timing(b, p.get("narration"), f"beats[{i}]", beat_voice(p, b))
     if has_chapters:
         if not is_narrated:
             _error("chapters", "chapters are for narrated long videos; give the beats say lines, or remove chapters.")
@@ -416,12 +439,17 @@ def _shot_labels(value, path):
 
 def _voxel(value, path):
     """A Pack C voxel shot: the world (meadow, cave, village, sky island, ocean), the time of day, a shot size, a seed that
-    varies the world, up to three blocky characters, stand-in people, props and floating labels (static/motion/voxel.js)."""
+    varies the world, up to three blocky characters, stand-in people, props and floating labels (static/motion/voxel.js).
+    `look` pastel (the default, our soft toy blocks) or classic (the classic block world, static/motion/classic.js)."""
     from core import style_packs
     if not isinstance(value, dict):
         _error(path, "give world, time, shot, seed, cast, people, props and labels.")
-    for key in value.keys() - {"world", "time", "shot", "seed", "cast", "people", "props", "labels"}:
-        _error(f"{path}.{key}", "unknown voxel field; use world, time, shot, seed, cast, people, props or labels.")
+    for key in value.keys() - {"world", "time", "shot", "seed", "cast", "people", "props", "labels", "look"}:
+        _error(f"{path}.{key}", "unknown voxel field; use world, time, shot, seed, cast, people, props, labels or look.")
+    if value.get("look", "pastel") not in style_packs.VOXEL_LOOKS:
+        _error(path + ".look", "choose " + ", ".join(style_packs.VOXEL_LOOKS) + ".")
+    if value.get("look") == "pastel":
+        value.pop("look")      # the default is not stored, so older videos stay as they were
     value.setdefault("world", "meadow")
     value.setdefault("time", "day")
     value.setdefault("shot", "medium")
@@ -452,6 +480,179 @@ def _voxel(value, path):
         _number(prop["x"], where + ".x", -1, 1)
         _number(prop["depth"], where + ".depth", 0, 1)
     _shot_labels(value, path)
+
+
+def _ref(value, path, say, most=60):
+    """A moment in a story shot: {word: n} (the n-th word of its line) or {t: seconds into the shot}."""
+    if not isinstance(value, dict) or not value or not value.keys() <= {"word", "t", "after"} or ("word" in value) == ("t" in value)             or ("after" in value and "word" not in value):
+        _error(path, "give {word: n} (the n-th word of the line, from 0; after: seconds later, up to 3) or {t: seconds into the shot}.")
+    if "after" in value:
+        _number(value["after"], path + ".after", 0, 3)
+    if "word" in value:
+        n = len(clause_words(say)) if say else 0
+        if isinstance(value["word"], bool) or not isinstance(value["word"], int) or not 0 <= value["word"] < max(1, n) or not n:
+            _error(path + ".word", f"give a word number from 0 to {max(0, n - 1)} of this shot's line" if n else
+                   "this shot has no line; give {t: seconds} instead.")
+    else:
+        _number(value["t"], path + ".t", 0, most)
+
+
+def clause_words(say):
+    """The words of a line as the captions show them (one a frame of the word captions)."""
+    return [w for w in str(say).split() if re.search(r"\w", w)]
+
+
+def _story_beat(b, path):
+    """A Story Short shot (Pack C classic, static/motion/classic.js and story.js): who speaks its line (the dialogue has no
+    narrator), whether it is in a flashback, the gap after the line (or how long a shot without a line holds), and the
+    scene: the place, the cast with their poses, moods and moves, up to three shots cut on words, effects, props and the
+    sounds that hang on words."""
+    from core import style_packs
+    say = b.get("say")
+    if "say" in b:
+        if not isinstance(b.get("speaker"), str) or not re.fullmatch(r"[a-f0-9]{12}", b["speaker"]):
+            _error(path + ".speaker", "a story beat's line is spoken by a character: give its id (from the project's cast).")
+        if "hold" in b:
+            _error(path + ".hold", "a shot with a line lasts as long as the line and its gap; use gap, not hold.")
+        b.setdefault("gap", STORY_GAP)
+        _number(b["gap"], path + ".gap", *STORY_GAP_RANGE)
+    else:
+        if "speaker" in b or "gap" in b:
+            _error(path + ".say", "a shot without a line has no speaker or gap; give hold (seconds) instead, or add the line.")
+        b.setdefault("hold", 1.2)
+        _number(b["hold"], path + ".hold", *STORY_HOLD_RANGE)
+    b.setdefault("flashback", False)
+    if not isinstance(b["flashback"], bool):
+        _error(path + ".flashback", "use true or false.")
+    v = b.get("story")
+    where = path + ".story"
+    if not isinstance(v, dict):
+        _error(where, "give place, cast and shots (and fx, props, sfx, keys as needed).")
+    for key in v.keys() - {"place", "seed", "time", "cast", "shots", "fx", "props", "sfx", "keys"}:
+        _error(f"{where}.{key}", "unknown story field; use place, seed, time, cast, shots, fx, props, sfx or keys.")
+    v.setdefault("place", "meadow")
+    v.setdefault("seed", 0)
+    v.setdefault("time", "day")
+    for key, choices in (("place", style_packs.STORY_PLACES), ("time", style_packs.STORY_TIMES)):
+        if v[key] not in choices:
+            _error(f"{where}.{key}", "choose " + ", ".join(choices) + ".")
+    if isinstance(v["seed"], bool) or not isinstance(v["seed"], int) or not 0 <= v["seed"] <= 999:
+        _error(where + ".seed", "give a whole number from 0 to 999.")
+    cast = v.setdefault("cast", [])
+    if not isinstance(cast, list) or len(cast) > style_packs.STORY_MAX_CAST:
+        _error(where + ".cast", f"give at most {style_packs.STORY_MAX_CAST} characters on screen.")
+    seen = set()
+    for i, m in enumerate(cast):
+        w = f"{where}.cast[{i}]"
+        if not isinstance(m, dict):
+            _error(w, "give {character, x, y, pose, mood, face, changes, move, leave}.")
+        for key in m.keys() - {"character", "x", "y", "pose", "mood", "face", "changes", "move", "leave"}:
+            _error(f"{w}.{key}", "unknown cast field; use character, x, y, pose, mood, face, changes, move or leave.")
+        if not isinstance(m.get("character"), str) or not re.fullmatch(r"[a-f0-9]{12}", m["character"]) or m["character"] in seen:
+            _error(w + ".character", "a character id from the project's cast, once per shot.")
+        seen.add(m["character"])
+        m.setdefault("x", 0 if len(cast) == 1 else round(-1.6 + 3.2 * i / (len(cast) - 1), 3))
+        m.setdefault("y", 0)
+        _number(m["x"], w + ".x", -12, 12)
+        _number(m["y"], w + ".y", -6, 12)
+        for key, choices, default in (("pose", style_packs.STORY_POSES, "idle"), ("mood", style_packs.STORY_MOODS, "neutral")):
+            m.setdefault(key, default)
+            if m[key] not in choices:
+                _error(f"{w}.{key}", "choose " + ", ".join(choices) + ".")
+        m.setdefault("face", "camera")
+        _face(m["face"], w + ".face", len(cast))
+        changes = m.setdefault("changes", [])
+        if not isinstance(changes, list) or len(changes) > 6:
+            _error(w + ".changes", "give at most 6 changes, each {at, pose, mood, face}.")
+        for j, c in enumerate(changes):
+            cw = f"{w}.changes[{j}]"
+            if not isinstance(c, dict) or c.keys() - {"at", "pose", "mood", "face"} or "at" not in c or len(c) < 2:
+                _error(cw, "give {at, pose, mood or face}: when (a word or a time) and what changes.")
+            _ref(c["at"], cw + ".at", say)
+            if "pose" in c and c["pose"] not in style_packs.STORY_POSES:
+                _error(cw + ".pose", "choose " + ", ".join(style_packs.STORY_POSES) + ".")
+            if "mood" in c and c["mood"] not in style_packs.STORY_MOODS:
+                _error(cw + ".mood", "choose " + ", ".join(style_packs.STORY_MOODS) + ".")
+            if "face" in c:
+                _face(c["face"], cw + ".face", len(cast))
+        if "move" in m:
+            mv = m["move"]
+            if not isinstance(mv, dict) or mv.keys() - {"to", "at", "run"} or not isinstance(mv.get("to"), list) or len(mv["to"]) != 2:
+                _error(w + ".move", "give {to: [x, y], at, run}: where it walks to, when it starts, and run true to run.")
+            _number(mv["to"][0], w + ".move.to[0]", -14, 14)
+            _number(mv["to"][1], w + ".move.to[1]", -8, 14)
+            mv.setdefault("at", {"t": 0})
+            _ref(mv["at"], w + ".move.at", say)
+            mv.setdefault("run", False)
+            if not isinstance(mv["run"], bool):
+                _error(w + ".move.run", "use true or false.")
+        if "leave" in m:
+            if not isinstance(m["leave"], dict) or set(m["leave"]) != {"at"}:
+                _error(w + ".leave", "give {at}: when it turns and walks away (a word or a time).")
+            _ref(m["leave"]["at"], w + ".leave.at", say)
+    if "say" in b and b["speaker"] not in seen and cast:
+        pass      # an off-screen speaker is allowed (the avatar strip still shows who talks)
+    shots = v.setdefault("shots", [{"shot": "medium", "on": 0}])
+    if not isinstance(shots, list) or not 1 <= len(shots) <= style_packs.STORY_MAX_SHOTS:
+        _error(where + ".shots", f"give 1 to {style_packs.STORY_MAX_SHOTS} shots; a cut lands just before the word it hangs on.")
+    for j, s in enumerate(shots):
+        sw = f"{where}.shots[{j}]"
+        if not isinstance(s, dict) or s.keys() - {"shot", "on", "with", "at", "push", "shake", "side"}:
+            _error(sw, "give {shot, on, with, at, push, shake, side}.")
+        s.setdefault("shot", "medium")
+        if s["shot"] not in style_packs.STORY_SHOTS:
+            _error(sw + ".shot", "choose " + ", ".join(style_packs.STORY_SHOTS) + ".")
+        s.setdefault("on", 0)
+        for key in ("on", "with"):
+            if key in s and (isinstance(s[key], bool) or not isinstance(s[key], int) or not 0 <= s[key] < max(1, len(cast))):
+                _error(f"{sw}.{key}", f"give the cast member's number on this shot (0 to {max(0, len(cast) - 1)}).")
+        if j == 0 and "at" in s:
+            _error(sw + ".at", "the first shot starts the beat; only later shots give at.")
+        if j > 0:
+            if "at" not in s:
+                _error(sw + ".at", "a later shot cuts at a word or a time: give at.")
+            _ref(s["at"], sw + ".at", say)
+        s.setdefault("push", .3)
+        _number(s["push"], sw + ".push", 0, .6)
+        s.setdefault("shake", False)
+        if not isinstance(s["shake"], bool):
+            _error(sw + ".shake", "use true or false.")
+        if "side" in s and s["side"] not in ("left", "right"):
+            _error(sw + ".side", "choose left or right.")
+    for key, most, fields, choices in (("fx", 4, {"kind", "at", "on", "x", "y", "radius", "seconds"}, style_packs.STORY_FX),
+                                       ("props", 6, {"kind", "x", "y", "colour"}, style_packs.STORY_PROPS),
+                                       ("sfx", 6, {"kind", "at"}, style_packs.STORY_SFX)):
+        items = v.setdefault(key, [])
+        if not isinstance(items, list) or len(items) > most:
+            _error(f"{where}.{key}", f"give at most {most}.")
+        for j, item in enumerate(items):
+            iw = f"{where}.{key}[{j}]"
+            if not isinstance(item, dict) or item.keys() - fields:
+                _error(iw, "give " + ", ".join(sorted(fields)) + ".")
+            if item.get("kind") not in choices:
+                _error(iw + ".kind", "choose " + ", ".join(choices) + ".")
+            if "at" in fields:
+                item.setdefault("at", {"t": 0})
+                _ref(item["at"], iw + ".at", say)
+            if "on" in item and (isinstance(item["on"], bool) or not isinstance(item["on"], int) or not 0 <= item["on"] < max(1, len(cast))):
+                _error(iw + ".on", "give the cast member's number on this shot.")
+            if key == "fx" and item["kind"] in ("fall", "splat") and "on" not in item:
+                _error(iw + ".on", f"a {item['kind']} happens to a cast member: give on.")
+            for field, lo, hi in (("x", -14, 14), ("y", -8, 16), ("radius", 1, 5), ("seconds", .3, 4)):
+                if field in item:
+                    _number(item[field], f"{iw}.{field}", lo, hi)
+            if "colour" in item and (not isinstance(item["colour"], str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", item["colour"])):
+                _error(iw + ".colour", "a colour like #e8434e.")
+    keys = v.setdefault("keys", [])
+    if not isinstance(keys, list) or len(keys) > 8 or any(not isinstance(k, str) or not 0 < len(k) <= 24 for k in keys):
+        _error(where + ".keys", "give at most 8 key words (shown in the speaker's colour).")
+
+
+def _face(value, path, count):
+    ok = value in ("camera", "left", "right", "away") or (isinstance(value, str) and re.fullmatch(r"c[0-3]", value) and int(value[1]) < count) \
+        or (not isinstance(value, bool) and isinstance(value, (int, float)) and -180 <= value <= 180)
+    if not ok:
+        _error(path, "choose camera, left, right, away, a cast member (c0, c1...) to face, or an angle in degrees.")
 
 
 def _cast(p, beats):
@@ -497,8 +698,20 @@ def _cast(p, beats):
         for j, member in enumerate(b["voxel"]["cast"] if b["kind"] == "voxel" else []):
             if member["character"] not in pinned:
                 _error(f"beats[{i}].voxel.cast[{j}].character", "add this character to the project's cast with its version first.")
-            if forms.get(member["character"]) != "voxel":
-                _error(f"beats[{i}].voxel.cast[{j}].character", "a voxel beat casts blocky characters (make one with form voxel, such as Pip Block).")
+            classic = b["voxel"].get("look") == "classic"
+            if forms.get(member["character"]) != ("block" if classic else "voxel"):
+                _error(f"beats[{i}].voxel.cast[{j}].character", "a classic-look voxel beat casts classic block characters (form block, such as Rook)."
+                       if classic else "a voxel beat casts blocky characters (make one with form voxel, such as Pip Block).")
+        for j, member in enumerate(b["story"]["cast"] if b["kind"] == "story" else []):
+            if member["character"] not in pinned:
+                _error(f"beats[{i}].story.cast[{j}].character", "add this character to the project's cast with its version first.")
+            if forms.get(member["character"]) != "block":
+                _error(f"beats[{i}].story.cast[{j}].character", "a story beat casts classic block characters (form block, such as Rook, Fenn or Juno).")
+        if b["kind"] == "story" and "speaker" in b:
+            if b["speaker"] not in pinned:
+                _error(f"beats[{i}].speaker", "the speaker is a character in the project's cast.")
+            if forms.get(b["speaker"]) != "block":
+                _error(f"beats[{i}].speaker", "a Story Short's speakers are classic block characters (form block).")
     if cast:
         p["cast"] = cast
     else:
@@ -643,6 +856,33 @@ def word_captions(project) -> bool:
     return (project.get("narration") or {}).get("caption_style", "line") != "line"
 
 
+def voice_key(voice: dict) -> str:
+    """A voice as the cache key carries it: the Kokoro id, then its speed and pitch when they are not the plain voice."""
+    speed, pitch = float(voice.get("speed", 1)), float(voice.get("pitch", 0))
+    return voice["id"] if (speed, pitch) == (1., 0.) else f"{voice['id']}@{speed:g}{pitch:+g}"
+
+
+def beat_voice(project, beat) -> dict:
+    """The voice that speaks a beat's line: a story beat's speaker's own voice (their character spec's voice, else the
+    video's narrator voice), every other beat the video's narrator."""
+    narrator = (project.get("narration") or {}).get("voice", DEFAULT_VOICE)
+    if beat.get("kind") == "story" and beat.get("speaker"):
+        from core import character_store
+        version = next((c["version"] for c in project.get("cast") or [] if c["character"] == beat["speaker"]), None)
+        try:
+            spec = character_store.spec(beat["speaker"], version) if version else None
+        except LookupError:
+            spec = None
+        voice = (spec or {}).get("voice")
+        if voice:
+            return {"id": voice["id"], "speed": voice.get("speed", 1.), "pitch": voice.get("pitch", 0.)}
+    return {"id": narrator, "speed": 1., "pitch": 0.}
+
+
+def lead_of(beat) -> float:
+    return STORY_LEAD if beat.get("kind") == "story" else LEAD
+
+
 def speech_key(voice, say):
     """The cache key of a spoken line: the voice, the text, and the account's Pronunciations entries for words in it
     (core/pronunciations.signature), so a pronunciation edit re-speaks only the lines it changes. A line with no
@@ -653,12 +893,15 @@ def speech_key(voice, say):
     return hashlib.sha256(f"kokoro|{voice}|{line}{'|' + said if said else ''}".encode("utf-8")).hexdigest()[:16]
 
 
-def _timing(b, narration, path):
+def _timing(b, narration, path, voice=None):
     """Derive the beat's seconds; keep `spoken` only while it still measures this line in this voice."""
     b.pop("seconds", None)
     if "say" not in b:
         b.pop("spoken", None)
+        if b["kind"] == "story":
+            b["seconds"] = math.ceil(b["hold"] * 30 - 1e-6) / 30
         return
+    LEAD = lead_of(b)
     spoken = b.get("spoken")
     if spoken is not None:
         ok = (isinstance(spoken, dict) and set(spoken) - {"mouth", "words", "align"} == {"key", "seconds", "parts"} and isinstance(spoken["key"], str)
@@ -689,9 +932,12 @@ def _timing(b, narration, path):
                   and ("note" not in al or isinstance(al["note"], str)))
         if not ok:
             _error(path + ".spoken", "leave spoken to the narration step (video_narrate); it is measured, not written.")
-        if spoken["key"] != speech_key(narration["voice"], b["say"]):
+        if spoken["key"] != speech_key(voice_key(voice) if voice else narration["voice"], b["say"]):
             b.pop("spoken")       # the line or the voice changed: the next narration pass measures it again
     speech = b["spoken"]["seconds"] if "spoken" in b else estimate(b["say"])
+    if b["kind"] == "story":
+        b["seconds"] = math.ceil((LEAD + speech + b["gap"]) * 30 - 1e-6) / 30
+        return
     b["seconds"] = math.ceil((LEAD + speech + TAIL) * 30 - 1e-6) / 30
 
 

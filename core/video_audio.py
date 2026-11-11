@@ -7,6 +7,12 @@ A narrated video (core/video_narration.py) puts the voice on top: the voice is l
 ducks a further DUCK_DB while a line is spoken (the duck opens slightly before each line, since the whole timeline is
 known), and the mix keeps headroom below -1 dBFS with no clipping. The encoder's loudness pass then brings the file to
 -16 LUFS (core/ffmpeg_tools.LOUDNORM).
+
+A Story Short (Pack C classic, David 2026-11-10) mixes differently, at the reference's levels: the dialogue at a median
+of STORY_VOICE_DB while speaking, a soft piano bed synthesized here at STORY_BED_DB (dipped a further STORY_DIP_DB in
+flashbacks; music volume 0 turns it off), and one sound effect per event from the beats' `sfx` (boom, splat, sting, riser,
+pop, whoosh, impact, steps, gasp), every one synthesized in code here: nothing is downloaded. A soft clip keeps the peaks;
+the encoder then brings the file to -14 LUFS (STORY_LUFS) instead of -16.
 """
 from pathlib import Path
 import wave
@@ -20,9 +26,22 @@ DUCK_DB = -12.0           # further down while a line is spoken
 MIX_PEAK = 10 ** (-1.5 / 20)
 
 
+STORY_VOICE_DB = -15.0    # the dialogue's median level while speaking (a Story Short)
+STORY_BED_DB = -29.0      # its piano bed
+STORY_DIP_DB = -6.0       # the bed further down in a flashback
+STORY_SFX_DB = -17.0      # a sound effect's level (RMS over its loud part)
+STORY_LUFS = -14.0
+
+
+def is_story(project) -> bool:
+    return any(b["kind"] == "story" for b in project["beats"])
+
+
 def synthesize(project, report=None):
     """Stereo float32 at 48 kHz. `report`, when given, is filled with the narration levels for the checks."""
     p = validate(project)
+    if is_story(p):
+        return _sounds(p, _story(p, report), report)
     music = _music(p)
     if narrated(p):
         from core import video_narration
@@ -217,6 +236,176 @@ def _music(p):
     peak = float(np.max(np.abs(mix)))
     if peak:
         mix *= (10 ** (-1.5 / 20) / peak) * p["music"]["volume"]
+    return mix.astype(np.float32)
+
+
+# -- the Story Short's soundtrack ---------------------------------------------------------------------------------------
+
+def _starts(p):
+    out, at = [], 0.
+    for b in p["beats"]:
+        out.append(at)
+        at += beat_seconds(b, p["bpm"])
+    return out
+
+
+def event_time(beat, start, ref):
+    """When a story beat's {word: n} or {t: seconds} happens on the timeline (a word at its aligned start)."""
+    if "t" in ref:
+        return start + float(ref["t"])
+    words = (beat.get("spoken") or {}).get("words")
+    if words and ref["word"] < len(words):
+        return start + words[ref["word"]][0] + ref.get("after", 0)
+    # Before alignment: the words share the line by letters.
+    from core.video_store import STORY_LEAD, clause_words
+    said = clause_words(beat.get("say", ""))
+    speech = (beat.get("spoken") or {}).get("seconds") or len(said) / 2.6
+    total = sum(len(w) + 1 for w in said) or 1
+    return start + STORY_LEAD + speech * sum(len(w) + 1 for w in said[:ref["word"]]) / total + ref.get("after", 0)
+
+
+def piano(seconds, rng_seed=11):
+    """A soft piano bed: plucked notes (a few decaying harmonics, a hammer click), a slow four-chord loop at 84 bpm."""
+    count = round(seconds * SR)
+    out = np.zeros(count, dtype=np.float64)
+    beat = 60 / 84
+    chords = [[57, 60, 64, 69], [53, 57, 60, 65], [48, 52, 55, 60], [55, 59, 62, 67]]
+    mtof = lambda n: 440 * 2 ** ((n - 69) / 12)
+
+    def note(at, freq, gain):
+        start = round(at * SR)
+        length = min(count - start, round(2.6 * SR))
+        if length <= 0:
+            return
+        t = np.arange(length) / SR
+        tone = sum(np.sin(2 * np.pi * freq * k * t) * (.6 / k ** 1.4) * np.exp(-t * (1.6 + .9 * k)) for k in range(1, 6))
+        tone += np.exp(-t * 90) * np.sin(2 * np.pi * freq * 7.1 * t) * .05
+        out[start:start + length] += tone * np.minimum(1, t / .004) * gain
+    for n in range(int(seconds / beat) + 1):
+        chord = chords[(n // 4) % 4]
+        at = n * beat
+        if n % 4 == 0:
+            note(at, mtof(chord[0] - 12), .55)
+        note(at + (beat / 2 if n % 2 else 0), mtof(chord[(n * 3 + 1) % 4] + (12 if n % 8 > 4 else 0)), .3)
+    return out.astype(np.float32)
+
+
+def sfx(kind, rng):
+    """One sound effect, synthesized (mono float32 at SR): every one is made here from noise and tones."""
+    def noise(sec):
+        return rng.uniform(-1, 1, round(sec * SR)).astype(np.float64)
+
+    def low(x, k):
+        return np.convolve(x, np.ones(k) / k, mode="same")
+    t = lambda sec: np.arange(round(sec * SR)) / SR
+    if kind == "boom":
+        x = t(1.6)
+        body = np.sin(2 * np.pi * np.cumsum(40 + 90 * np.exp(-x * 8)) / SR) * np.exp(-x * 2.6)
+        crack = low(noise(1.6), 6) * np.exp(-x * 5) * .9 + low(noise(1.6), 40) * np.exp(-x * 1.4) * .8
+        return (body * 1.1 + crack) * np.minimum(1, x / .003)
+    if kind == "splat":
+        x = t(.5)
+        return low(noise(.5), 10) * np.exp(-x * 14) * 1.2 + np.sin(2 * np.pi * np.cumsum(180 - 120 * x) / SR) * np.exp(-x * 18) * .7
+    if kind == "sting":
+        x = t(1.4)
+        return sum(np.sin(2 * np.pi * f * x) for f in (220, 261.6, 311.1, 370)) * np.exp(-x * 2.2) * .35 * np.minimum(1, x / .01)
+    if kind == "riser":
+        x = t(1.2)
+        n = noise(1.2)
+        return (n - low(n, 6 + (x[::-1] * 30).astype(int).clip(1).max())) * (x / 1.2) ** 2 * .9 + np.sin(2 * np.pi * np.cumsum(200 + 600 * x) / SR) * (x / 1.2) ** 3 * .3
+    if kind == "pop":
+        x = t(.18)
+        return np.sin(2 * np.pi * np.cumsum(900 - 2600 * x) / SR) * np.exp(-x * 30)
+    if kind == "whoosh":
+        x = t(.7)
+        return low(noise(.7), 14) * np.sin(np.pi * x / .7) ** 2 * 1.4
+    if kind == "impact":
+        x = t(.5)
+        return np.sin(2 * np.pi * np.cumsum(70 + 60 * np.exp(-x * 30)) / SR) * np.exp(-x * 9) + low(noise(.5), 4) * np.exp(-x * 40) * .5
+    if kind == "steps":
+        out = np.zeros(round(1.3 * SR))
+        for k in range(4):
+            at, x = round(k * .3 * SR), t(.08)
+            out[at:at + len(x)] += low(rng.uniform(-1, 1, len(x)), 5) * np.exp(-x * 60) * (1 if k % 2 else .8)
+        return out
+    if kind == "gasp":
+        x = t(.55)
+        n = noise(.55)
+        breath = n - low(n, 3)
+        return breath * np.sin(np.pi * np.clip(x / .55, 0, 1)) ** .7 * np.exp(-x * 2) * .9
+    raise ValueError(f"No sound effect {kind}.")
+
+
+def _rms_db(x):
+    loud = x[np.abs(x) > np.abs(x).max() * .05] if len(x) and np.abs(x).max() > 0 else x
+    return 20 * np.log10(float(np.sqrt(np.mean(loud ** 2))) + 1e-12) if len(loud) else -120.
+
+
+def _story(p, report=None):
+    """The Story Short's mix: dialogue at its median level, the piano bed under it (dipped in flashbacks), the effects."""
+    from core import video_narration
+    seconds = duration(p)
+    count = round(seconds * SR)
+    voice, stats = video_narration.track(p, SR)
+    voice = np.pad(voice[:count], (0, max(0, count - len(voice))))
+    starts = _starts(p)
+    # The dialogue's median speaking level, from each line's own RMS.
+    levels = []
+    for b, at in zip(p["beats"], starts):
+        if "say" in b and "spoken" in b:
+            a = round((at + .06) * SR)
+            piece = voice[a:a + round(b["spoken"]["seconds"] * SR)]
+            if len(piece):
+                levels.append(_rms_db(piece))
+    gain = 10 ** ((STORY_VOICE_DB - float(np.median(levels))) / 20) if levels else 1.
+    if stats["peak"] * gain > 10 ** (-1 / 20):
+        gain = 10 ** (-1 / 20) / stats["peak"]
+    voice = voice * gain
+    mix = np.repeat(voice[:, None], 2, axis=1)
+    volume = p["music"]["volume"]
+    bed_level = None
+    if volume > 0:
+        bed = piano(seconds)
+        bed *= 10 ** ((STORY_BED_DB + 20 * np.log10(volume / .7 if volume else 1) - _rms_db(bed)) / 20)
+        dip = np.ones(count, dtype=np.float32)
+        for b, at in zip(p["beats"], starts):
+            if b.get("flashback"):
+                a, z = round(at * SR), round((at + beat_seconds(b, p["bpm"])) * SR)
+                dip[a:z] = 10 ** (STORY_DIP_DB / 20)
+        k = int(.15 * SR)
+        dip = np.convolve(np.pad(dip, (k, k), mode="edge"), np.ones(2 * k + 1) / (2 * k + 1), mode="same")[k:-k].astype(np.float32)
+        tail = min(count, int(1.2 * SR))
+        dip[count - tail:] *= np.linspace(1, 0, tail, dtype=np.float32)
+        mix += (bed[:count] * dip[:len(bed[:count])])[:, None]
+        bed_level = round(_rms_db(bed), 1)
+    placed = []
+    rng = np.random.default_rng(23)
+    for b, at in zip(p["beats"], starts):
+        for e in (b.get("story") or {}).get("sfx", []):
+            sound = sfx(e["kind"], rng)
+            sound *= 10 ** ((STORY_SFX_DB - _rms_db(sound)) / 20)
+            when = event_time(b, at, e["at"]) - (1.1 if e["kind"] == "riser" else 0)
+            a = max(0, round(when * SR))
+            n = min(len(sound), count - a)
+            if n > 0:
+                pan = .15 if e["kind"] in ("steps", "whoosh") else 0
+                mix[a:a + n, 0] += sound[:n] * (1 - pan)
+                mix[a:a + n, 1] += sound[:n] * (1 + pan)
+                placed.append(e["kind"])
+    # A soft clip above -3 dBFS, then headroom under -1.5 dBFS.
+    knee = 10 ** (-3 / 20)
+    over = np.abs(mix) > knee
+    mix[over] = np.sign(mix[over]) * (knee + (1 - knee) * np.tanh((np.abs(mix[over]) - knee) / (1 - knee)))
+    peak = float(np.max(np.abs(mix))) if count else 0.
+    if peak > MIX_PEAK:
+        mix *= MIX_PEAK / peak
+    if report is not None:
+        speaking = np.abs(voice) > 1e-4
+        report.update({"lines": stats["lines"], "voice_clipped_samples": stats["clipped_samples"], "format": "story-short",
+                       "voice_median_db": round(STORY_VOICE_DB if levels else -120., 1), "bed_db": bed_level, "sfx": placed,
+                       "voice_peak_dbfs": round(float(20 * np.log10(max(stats["peak"] * gain, 1e-9))), 1),
+                       "mix_peak_dbfs": round(float(20 * np.log10(max(float(np.max(np.abs(mix))) if count else 0., 1e-9))), 1),
+                       "voice_over_music_db": round(STORY_VOICE_DB - bed_level, 1) if bed_level is not None and speaking.any() else None})
     return mix.astype(np.float32)
 
 

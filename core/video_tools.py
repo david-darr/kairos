@@ -33,7 +33,19 @@ SCENES = ("Pack A (flat 2D with characters): cast approved characters (character
           "action, speaking, facing, react}; people {count 0-6, seed}; props: up to 6 of {kind gem|lantern|crate|flag|ball|star, x -1 to 1, "
           "depth 0-1}; labels as in Pack B}. Our own blocky world: never use another company's block game's name, blocks, skins, "
           "creatures or logos, in the video or in titles, tags and thumbnails. This look draws children: the channel or post must say "
-          "honestly whether it is made for kids. ")
+          "honestly whether it is made for kids. A voxel beat can take look classic (voxel.look) to draw it in the classic block world "
+          "with classic block characters (form block). "
+          "Pack C classic, the Story Short (aspects [\"9:16\"] only, story beats only, pure dialogue with no narrator): each beat is kind "
+          "story with say (the line), speaker (a cast character id of form block, such as Rook, Fenn or Juno; each speaks in its own "
+          "voice), flashback true|false (sepia, a FLASHBACK tag), gap (seconds after the line, 0.1 to 1.6) or hold (a shot without a line, "
+          "0.4 to 4 s), and story={place: meadow, cliff, village, party, cave, beach or sky-island; seed; time day|dusk; cast: up to 4 of "
+          "{character, x, y (blocks), pose idle|walk|run|hips|despair|flail|hang|wave|shove|nod|point|cheer|cry|laugh|shrug|think|sit, mood "
+          "neutral|happy|smug|angry|scared|sad|crying|shocked|laughing|splat, face camera|left|right|away|c0..c3|degrees, changes [{at, pose, "
+          "mood, face}], move {to [x, y], at, run}, leave {at}}; shots: 1 to 3 of {shot close|medium|wide|low|top|orbit, on (cast number), "
+          "with, at (later shots: the word they cut on), push 0-0.6, shake, side}; fx: up to 4 of {kind fuse|blast|splat|fall|pop, at, on, x, "
+          "y, radius, seconds}; props: up to 6 of {kind crate|cake|lantern|balloon|table, x, y, colour}; sfx: up to 6 of {kind boom|splat|"
+          "sting|riser|pop|whoosh|impact|steps|gasp, at}; keys: words shown in the speaker's colour}. A time `at` is {word: n} (the n-th "
+          "word of the line, after: seconds later) or {t: seconds}. Keep shots under 2.5 s; cut on words. ")
 FLOW = ("Workflow: creative_direction(type=video) -> video_create with a beat sheet (one idea per beat, "
         "3 to 8 words on screen, 1 to 2 bars each, end card last; vary the kinds: at most half statements, a big-number "
         "for a figure, a list, a quote, and an image or split beat with a photo from image_search) -> video_preview -> "
@@ -179,7 +191,7 @@ async def _create(args, ctx):
         meta, version, data = style_pack_store.usable(pack_id)
         defaults = style_pack_store.video_defaults(data)
         beats_in = args.get("beats") or [b for c in args.get("chapters") or [] if isinstance(c, dict) for b in c.get("beats") or []]
-        if not any(isinstance(b, dict) and b.get("kind") in ("scene", "stage", "voxel") for b in beats_in):
+        if not any(isinstance(b, dict) and b.get("kind") in ("scene", "stage", "voxel", "story") for b in beats_in):
             defaults.pop("cast", None)
             defaults.pop("renderer", None)
         for key, value in defaults.items():
@@ -234,7 +246,8 @@ def edit(project, ops, agent=False):
                 raise ValueError(f"ops[{n}].field: project edits title, look, bpm, fps, aspects, music, narration, cast, palette, style_pack, chapters or renderer with value.")
             draft[op["field"]] = op["value"]
         elif kind == "set":
-            if op.get("field") not in ("kind", "bars", "text", "sub", "number", "items", "image", "camera", "transition", "treatment", "say", "scene", "stage", "voxel") or "value" not in op:
+            if op.get("field") not in ("kind", "bars", "text", "sub", "number", "items", "image", "camera", "transition", "treatment", "say", "scene", "stage", "voxel",
+                                       "story", "speaker", "flashback", "gap", "hold") or "value" not in op:
                 raise ValueError(f"ops[{n}].field: choose a beat field from video_outline and give value.")
             if op["field"] == "say" and op["value"] in (None, ""):
                 draft["beats"][index(op.get("id"))].pop("say", None)   # an empty line takes the narration off that beat
@@ -444,7 +457,7 @@ def _character_line(meta):
         form = character_store.form_of(character_store.spec(meta["id"], meta["versions"][-1]["version"]))
     except LookupError:
         form = "2d"
-    kind = {"3d": "3D, for stage beats", "voxel": "blocky, for voxel beats"}.get(form, "2D, for scene beats")
+    kind = {"3d": "3D, for stage beats", "voxel": "blocky, for voxel beats", "block": "classic block, for story beats and classic voxel beats"}.get(form, "2D, for scene beats")
     return f"- {meta['name']} ({meta['family']}, {kind}), id {meta['id']}: {versions}"
 
 
@@ -460,7 +473,9 @@ async def _characters(args, ctx):
               "Views: " + ", ".join(character_store.VIEWS), "Expressions: " + ", ".join(character_store.EXPRESSIONS),
               "Pack B stage sets: " + ", ".join(style_packs.STAGE_SETS), "Pack B props: " + ", ".join(style_packs.STAGE_PROPS),
               "Pack C worlds: " + ", ".join(style_packs.VOXEL_WORLDS) + "; times: " + ", ".join(style_packs.VOXEL_TIMES)
-              + "; props: " + ", ".join(style_packs.VOXEL_PROPS)]
+              + "; props: " + ", ".join(style_packs.VOXEL_PROPS),
+              "Pack C classic (Story Short) places: " + ", ".join(style_packs.STORY_PLACES) + "; poses: " + ", ".join(style_packs.STORY_POSES)
+              + "; moods: " + ", ".join(style_packs.STORY_MOODS) + "; shots: " + ", ".join(style_packs.STORY_SHOTS)]
     return _safe(ctx, "\n".join(lines))
 
 
@@ -480,13 +495,17 @@ def _taken_names():
           "(glossy, built in 3D from the same numbers, approved on its own 3D sheet; the 3D starting designs are Pip 3D, Bo 3D and Tilly 3D). "
           "form voxel makes a Pack C blocky character (built from rounded boxes with a big head and a pixel face; starting designs Pip "
           "Block, Bo Block and Tilly Block). "
+          "form block makes a Pack C classic block character (classic box proportions, per-face pixel skins drawn from its outfit: skin, "
+          "hair, hair_style short|long|tuft|bald, shirt, detail, detail_style none|zip|stripe|heart|star|pocket, pants, shoes, eyes; a "
+          "speaker colour; a voice {id, speed 0.8-1.35, pitch -4 to 6 semitones}; starting designs Rook (square), Fenn (round) and Juno "
+          "(triangle)). Never a look-alike of another game's default skins or another channel's characters. "
           "Change: character_id and changes. "
           "Never copy another channel's or brand's character; names on a format card's do-not-use list are refused. "
           "Then character_sheet sends the sheet to the person; only they approve it.",
           _object({"character_id": _str("A character to change; leave out to make a new one"),
                    "family": {"type": "string", "enum": list(character_store.FAMILIES)}, "name": _str("The character's name"),
-                   "form": {"type": "string", "enum": list(character_store.FORMS), "description": "2d (Pack A, default), 3d (Pack B) or voxel (Pack C)"},
-                   "changes": {"type": "object", "description": "palette, proportions, outline, accessory or name"},
+                   "form": {"type": "string", "enum": list(character_store.FORMS), "description": "2d (Pack A, default), 3d (Pack B), voxel (Pack C) or block (Pack C classic)"},
+                   "changes": {"type": "object", "description": "palette, proportions, outline, accessory or name; for form block also outfit, colour and voice"},
                    "note": _str("What changed and why")}), surfaces=ALL, effect=WRITE)
 @_guard
 async def _design(args, ctx):

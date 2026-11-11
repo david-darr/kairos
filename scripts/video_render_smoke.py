@@ -32,6 +32,11 @@ Block, renders its blocky sheet through the worker and checks it, test-approves 
 pack's sample (why the sea is salty, across the five worlds and three times of day) with core/style_pack_sample.make,
 three.js only. --preview works for it too.
 
+Pack C classic (David, 2026-11-10): --story adds the shipped starter pack (Classic block story) with Rook, Fenn and Juno,
+renders and checks their classic block sheets through the worker, test-approves them in the temporary store, and makes the
+pack's sample, a 9:16 Story Short (pure dialogue in each character's own voice, word captions, two sepia flashbacks), with
+core/style_pack_sample.make, three.js. --preview works for it too.
+
 Content Studio Editor steps 5 to 7: --motion puts keyframed overlays (a title that slides in, a badge that pops and
 turns, an arrow that blinks), a video clip from a file "uploaded" through the store (a sky gradient FFmpeg makes here,
 standing in for the person's own file) and word captions (the box style; word times aligned from the narration with
@@ -435,28 +440,30 @@ async def main(args):
         else:
             raise RuntimeError("Electron's render worker did not connect.")
         spec = PACK_A if args.pack_a else SAMPLE if args.sample else SMOKE
-        pack3d = args.pack_b or args.pack_c
+        pack3d = args.pack_b or args.pack_c or args.story
         if args.style_pack or args.long_form or pack3d:
-            spec = {"aspects": [style_pack_sample.ASPECT], "characters": [], "beats": []}
+            spec = {"aspects": [style_pack_sample.ASPECT_STORY if args.story else style_pack_sample.ASPECT], "characters": [], "beats": []}
+        starter_id = style_pack_store.STARTER_CLASSIC_ID if args.story else style_pack_store.STARTER_VOXEL_ID if args.pack_c else style_pack_store.STARTER_3D_ID
+        title_3d = style_pack_sample.TITLE_STORY if args.story else style_pack_sample.TITLE_VOXEL if args.pack_c else style_pack_sample.TITLE_3D
         # Characters: made from the starting family, sheet rendered by the worker and checked, then approved here.
         cast, sheets = [], []
         pack = None
         if pack3d:
-            pack = style_pack_store.install_starter(style_pack_store.STARTER_VOXEL_ID if args.pack_c else style_pack_store.STARTER_3D_ID, by="smoke")
+            pack = style_pack_store.install_starter(starter_id, by="smoke")
             if args.renderer == "blender" and args.pack_b:
                 pack = style_pack_store.new_version(pack["id"], {"renderer": "blender"}, by="smoke", note="Render with Blender.")
         pack_version = pack["versions"][-1]["version"] if pack else 1
         if pack3d and args.preview:
             data = style_pack_store.spec(pack["id"], pack_version)
             # The preview casts the pack's characters before the person approved them, which preview allows (render does not).
-            project = video_store.create(style_pack_sample.TITLE_VOXEL if args.pack_c else style_pack_sample.TITLE_3D, owner="smoke",
+            project = video_store.create(title_3d, owner="smoke",
                                          beats=style_pack_sample.beats(data),
                                          **{k: v for k, v in style_pack_sample.project_options(data, pack["id"], pack_version).items() if k != "style_pack"})
             project = await asyncio.to_thread(video_narration.prepare, project["id"])
             outline = video_render.outline(project)
             times = [b["start"] + (b["end"] - b["start"]) * f for b in outline[:-1] for f in (.3, .8)][:12]
             began = time.time()
-            frames = await video_render.preview(project["id"], "16:9", times)
+            frames = await video_render.preview(project["id"], project["aspects"][0], times)
             keep = Path(args.keep or tempfile.mkdtemp(prefix="pack-3d-preview-"))
             keep.mkdir(parents=True, exist_ok=True)
             for t, raw in zip(times, frames):
@@ -700,6 +707,7 @@ if __name__ == "__main__":
     parser.add_argument("--long-form", action="store_true", dest="long_form")
     parser.add_argument("--pack-b", action="store_true", dest="pack_b")
     parser.add_argument("--pack-c", action="store_true", dest="pack_c")
+    parser.add_argument("--story", action="store_true")
     parser.add_argument("--renderer", choices=("threejs", "blender"), default="threejs")
     parser.add_argument("--preview", action="store_true")
     parser.add_argument("--tracks", action="store_true")

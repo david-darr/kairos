@@ -307,7 +307,11 @@ def port_findings(store, port, today=None):
 BRAND = re.compile(r"(?<![a-z0-9])(?:m+[i1y]+n+[e3]+ ?[ck]+r+[a4]+f+t+|m+[o0]+ ?j+[a4]+n+g+)")
 # Its best-known creatures and characters: refused where they can only mean that game (title, tags, thumbnail).
 BRAND_NAMES = re.compile(r"(?<![a-z])(creepers?|endermen|enderman|ender ?dragon|herobrine|nether ?portal|steve and alex)(?![a-z])")
-VOXEL_BASES = ("voxel-3d",)
+# Pack C classic (David, 2026-11-10) sits closer to that game's look, so the same rule covers it, and the YouTube channel
+# whose block stories the Story Short format resembles is refused by name with its two best-known characters: our posts
+# never borrow their names (no look-alikes of them either; that is the design rule in core/character_store.py).
+CHANNEL_NAMES = re.compile(r"(?<![a-z])(maizen|jj and mikey|mikey and jj)(?![a-z])")
+VOXEL_BASES = ("voxel-3d", "block-classic")
 
 
 def _letters(text):
@@ -333,7 +337,14 @@ def brand_findings(fields):
                           "reason": f"The {label} names another company's block game or its maker. Pack C videos are our own "
                                     "blocky world: never use that game's name in a title, tag, caption or thumbnail."})
             continue
-        hit = BRAND_NAMES.search(" ".join((text or "").lower().replace("-", " ").split()))
+        words = " ".join((text or "").lower().replace("-", " ").split())
+        channel = CHANNEL_NAMES.search(words)
+        if channel:
+            found.append({"check": "brand", "result": "reject", "field": label, "quote": channel.group(1),
+                          "reason": f"The {label} names another channel or its characters (\"{channel.group(1)}\"). Pack C posts use our "
+                                    "own characters and never borrow another channel's names."})
+            continue
+        hit = BRAND_NAMES.search(words)
         if hit and label in ("title", "tags", "thumbnail", "example title"):
             found.append({"check": "brand", "result": "reject", "field": label, "quote": hit.group(1),
                           "reason": f"The {label} uses \"{hit.group(1)}\", a creature or character of another company's block game. "

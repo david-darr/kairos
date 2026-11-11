@@ -37,6 +37,19 @@ const project = { id: 'motion-check', title: 'Spring season', bpm: 120, fps: 30,
 ], palette: 'mint', characters: { abcdefabcdef: { version: 1, spec: { name: 'Pip', family: 'round', accessory: 'leaf', outline: 7,
   proportions: { head: .42, body_width: .62, limb_length: .26, limb_width: .055, eye_size: .036 },
   palette: { body: '#f4a259', body_shade: '#e0843d', head: '#f7c08a', limb: '#5b4a6b', eye: '#231b2e', mouth: '#8c3b4a', outline: '#2e2438', accent: '#7cc6a4', cheek: '#f08a8a' } } } } };
+// Pack C classic's Story Short (static/motion/story.js, classic.js, classic3d.js): two speakers, a shot now and a flashback.
+const outfit = (shirt, hair) => ({ skin: '#f0c8a8', hair, hair_style: 'short', shirt, detail: '#f2f2f2', detail_style: 'zip', pants: '#2a2833', shoes: '#ececec', eyes: '#2d2140' });
+const story = { id: 'story-check', title: 'Story', bpm: 120, fps: 30, aspects: ['9:16'], look: 'brutalist', narration: { voice: 'af_heart', captions: true },
+  characters: { a00000000001: { version: 1, spec: { form: 'block', colour: '#b05aff', outfit: outfit('#5e2b8c', '#1d1a22') } },
+    a00000000002: { version: 1, spec: { form: 'block', colour: '#ffa028', outfit: outfit('#e2592c', '#16110e') } } },
+  beats: [
+    { id: 'now', kind: 'story', say: 'Help me please!', speaker: 'a00000000001', seconds: 2, gap: .3,
+      spoken: { key: 'k', seconds: 1.6, parts: [[.06, 1.66, 'Help me please!']], mouth: 'XXAAAAEEXXOOAAAAEEXX', words: [[.06, .4], [.5, .8], [.9, 1.5]] },
+      story: { place: 'cliff', seed: 2, cast: [{ character: 'a00000000001', pose: 'hang', mood: 'scared' }, { character: 'a00000000002', x: .7, y: .9, face: 'c0' }],
+        shots: [{ shot: 'close', on: 0, shake: true }, { shot: 'low', on: 1, at: { word: 2 } }], keys: ['please'] } },
+    { id: 'then', kind: 'story', say: 'My house!', speaker: 'a00000000002', flashback: true, seconds: 2, gap: .4,
+      spoken: { key: 'k2', seconds: 1.2, parts: [[.06, 1.26, 'My house!']], mouth: 'XXAAEEAAOOXX', words: [[.06, .5], [.6, 1.2]] },
+      story: { place: 'village', seed: 1, cast: [{ character: 'a00000000002', x: 9, y: 5.2, pose: 'cry', mood: 'crying' }], shots: [{ shot: 'close', on: 0 }] } }] };
 const looks = {
   dark: { '--ds-bg': '#101418', '--ds-surface': '#1b2129', '--ds-text': '#ffffff', '--ds-text-dim': '#b4bdc8', '--ds-accent': '#c6ff3d', '--ds-accent-2': '#ff5a1f', '--ds-on-accent': '#101418', '--ds-font-display': 'Impact, sans-serif', '--ds-font-sans': 'Arial, sans-serif', '--ds-radius-m': '4px', '--ds-label-case': 'upper', '--ds-display-weight': '400', '--ds-pattern': 'stripes' },
   light: { '--ds-bg': '#fbf3f6', '--ds-surface': '#ffffff', '--ds-text': '#3b2a3f', '--ds-text-dim': '#6e5a72', '--ds-accent': '#a54a7c', '--ds-accent-2': '#8fb9a8', '--ds-on-accent': '#ffffff', '--ds-font-display': 'Georgia, serif', '--ds-font-sans': 'Arial, sans-serif', '--ds-radius-m': '20px', '--ds-label-case': 'none', '--ds-display-weight': '500', '--ds-display-style': 'italic', '--ds-pattern': 'dots' }
@@ -67,8 +80,22 @@ function serve(req, res) {
     res.writeHead(image ? 200 : 404, { 'Content-Type': 'image/svg+xml' }); res.end(image || ''); return;
   }
   const name = path.posix.basename(url.pathname);
-  if (url.pathname === `/static/motion/${name}` && ['engine.js', 'kit.js', 'layout.js', 'rig.js', 'scene.js', 'stage.js', 'overlay.js', 'voxel.js'].includes(name)) {
+  if (url.pathname === `/static/motion/${name}` && ['engine.js', 'kit.js', 'layout.js', 'rig.js', 'scene.js', 'stage.js', 'overlay.js', 'voxel.js',
+    'blocks.js', 'classic.js', 'classic3d.js', 'story.js'].includes(name)) {
     res.setHeader('Content-Type', 'text/javascript'); res.end(fs.readFileSync(path.join(root, 'static/motion', name))); return;
+  }
+  // Pack C classic's Story Short: the vendored three.js (its two module files) and the bundled caption font.
+  if (['/static/vendor/three/three.module.js', '/static/vendor/three/three.core.js'].includes(url.pathname)) {
+    res.setHeader('Content-Type', 'text/javascript'); res.end(fs.readFileSync(path.join(root, url.pathname.slice(1)))); return;
+  }
+  if (url.pathname === '/static/fonts/looks/archivoblack/ArchivoBlack-Regular.ttf') {
+    res.setHeader('Content-Type', 'font/ttf'); res.end(fs.readFileSync(path.join(root, url.pathname.slice(1)))); return;
+  }
+  if (url.pathname === '/api/videos/story/player') {
+    res.setHeader('Content-Type', 'text/html');
+    res.end(template.replace('<!--KD-TOKENS-->', `<style>:root{${Object.entries(looks.dark).map(([k, v]) => `${k}:${v}`).join(';')}}
+      @font-face { font-family: "Kairos Story Caption"; src: url("/static/fonts/looks/archivoblack/ArchivoBlack-Regular.ttf"); }</style>`)
+      .replace('<!--KD-PROJECT-->', `<script type="application/json" id="kd-project">${JSON.stringify(story)}</script>`)); return;
   }
   res.writeHead(404); res.end();
 }
@@ -332,6 +359,44 @@ app.whenReady().then(async () => {
   fs.writeFileSync(path.join(output, 'motion-keyframes.png'), Buffer.from(later.keyFrame, 'base64'));
   fs.writeFileSync(path.join(output, 'motion-word-caption.png'), Buffer.from(later.wordFrame, 'base64'));
   console.log('PASS keyframes, video frames by number, 60 fps info, word captions; frames: motion-keyframes.png, motion-word-caption.png');
-  console.log('Motion engine Electron checks passed (two looks, three aspects, all beats, cameras, transitions, image treatments, overlay tracks, keyframes, video clips and word captions).');
+  // The Story Short frame (Pack C classic): the split screen with the speaker's border and the divider, one outlined word,
+  // the scene below; a flashback graded sepia with its tag; the same pixels every time.
+  await win.loadURL(`${base}/api/videos/story/player?aspect=9%3A16&rt=fixture-token`);
+  for (let i = 0; i < 100 && !await js('!!window.kdReady'); i++) await pause(50);
+  await js('Promise.race([window.kdReady, new Promise((_, reject) => setTimeout(() => reject(Error("kdReady timeout")), 30000))]).then(() => true)');
+  const shortInfo = await js(`(async () => {
+    const canvas = document.getElementById('kd-canvas'), g = canvas.getContext('2d');
+    const px = (x, y) => Array.from(g.getImageData(x, y, 1, 1).data.slice(0, 3));
+    const region = (x0, y0, w, h) => { const d = g.getImageData(x0, y0, w, h).data; let r = 0, gg = 0, b = 0, ordered = 0, n = 0;
+      for (let i = 0; i < d.length; i += 16) { r += d[i]; gg += d[i + 1]; b += d[i + 2]; if (d[i] >= d[i + 1] - 2 && d[i + 1] >= d[i + 2] - 2) ordered++; n++; } return { r: r / n, g: gg / n, b: b / n, ordered: ordered / n }; };
+    const hash = async t => { kdDrawFrame(t); const digest = await crypto.subtle.digest('SHA-256', g.getImageData(0, 0, 1080, 1920).data); return [...new Uint8Array(digest)].map(v => v.toString(16).padStart(2, '0')).join(''); };
+    const out = { info: kdInfo };
+    kdDrawFrame(.7);
+    out.border = px(6, 320); out.divider = px(540, 640); out.layout = kdLayout(.7); out.now = region(0, 700, 1080, 1200);
+    out.frameNow = canvas.toDataURL('image/png').split(',')[1];
+    kdDrawFrame(2.9);
+    out.borderThen = px(6, 320); out.then = region(0, 700, 1080, 1200); out.layoutThen = kdLayout(2.9);
+    out.frameThen = canvas.toDataURL('image/png').split(',')[1];
+    out.same = (await hash(1.1)) === (await hash(1.1));
+    return out;
+  })()`);
+  const close = (a, b, tol, msg) => assert.ok(a.every((v, i) => Math.abs(v - b[i]) <= tol), msg + ': ' + a + ' vs ' + b);
+  assert.equal(shortInfo.info.format, 'story-short');
+  assert.deepEqual([shortInfo.info.width, shortInfo.info.height], [1080, 1920]);
+  close(shortInfo.border, [176, 90, 255], 12, 'The avatar strip\'s border is the speaker\'s colour');
+  close(shortInfo.borderThen, [255, 160, 40], 12, 'and changes with the speaker');
+  close(shortInfo.divider, [12, 10, 18], 10, 'An 8 px dark divider on the seam');
+  const word = shortInfo.layout.find(e => e.role === 'caption');
+  assert.ok(word && word.story && word.text.split(' ').length === 1 && word.y > 640, 'One caption word under the divider: ' + JSON.stringify(word));
+  assert.equal(shortInfo.layout.find(e => e.kind === 'story').shot, 'close');
+  assert.ok(shortInfo.layout.some(e => e.kind === 'character' && e.classic && e.y + e.h > 640), 'The cast is reported in the scene below the strip');
+  assert.ok(shortInfo.then.ordered > .9 && shortInfo.then.r > shortInfo.then.b + 20, 'The flashback is graded sepia: ' + JSON.stringify(shortInfo.then));
+  assert.ok(shortInfo.now.ordered < .9 || shortInfo.now.b > shortInfo.now.r, 'Now is not sepia: ' + JSON.stringify(shortInfo.now));
+  assert.ok(!shortInfo.layoutThen.some(e => e.kind === 'character'), 'Flashback frames are not colour-checked against the sheets');
+  assert.ok(shortInfo.same, 'A story frame draws the same pixels every time');
+  fs.writeFileSync(path.join(output, 'motion-story-now.png'), Buffer.from(shortInfo.frameNow, 'base64'));
+  fs.writeFileSync(path.join(output, 'motion-story-flashback.png'), Buffer.from(shortInfo.frameThen, 'base64'));
+  console.log('PASS Story Short: split screen, speaker border and divider, one-word captions, sepia flashback, deterministic; frames: motion-story-now.png, motion-story-flashback.png');
+  console.log('Motion engine Electron checks passed (two looks, three aspects, all beats, cameras, transitions, image treatments, overlay tracks, keyframes, video clips, word captions and the Story Short).');
   cleanup(); app.exit(0);
 }).catch(error => { console.error(error); cleanup(); app.exit(1); });

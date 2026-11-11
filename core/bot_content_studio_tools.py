@@ -227,6 +227,15 @@ def _pick(args, ctx, bot, role):
                  "blocky characters) for " + (", ".join(castable) if castable else "a blocky character the Editor makes and the person "
                  "approves first") + ". Never use another company's block game's name in the title, tags, caption or thumbnail (the "
                  "Evaluator refuses it), and the channel or post must say whether the video is made for kids.")
+    if _base(post["style_pack"]) == "block-classic":
+        castable = [c["name"] for c in _characters() if c["castable_version"] and c.get("form") == "block"]
+        tail += (" It is a Classic block post, a Story Short (9:16, the speaker's avatar over the block scene, pure dialogue): the "
+                 "Script Writer writes story beats in the format's story shape (content_studio_formats shows the shipped card "
+                 "\"Story Short\"), each line with its speaker, cuts on words, flashbacks with flashback true, for "
+                 + (", ".join(castable) if castable else "classic block characters (form block) the Editor makes and the person approves first")
+                 + ". A new wrong, new places and a new payoff every episode. Never use another company's block game's name, its "
+                 "creatures or another channel's characters in the title, tags, caption or thumbnail (the Evaluator refuses them), and "
+                 "the channel or post must say whether the video is made for kids.")
     if _base(post["style_pack"]) == "flat-2d":
         castable = [c["name"] for c in _characters() if c["castable_version"]]
         tail += (" It is a Flat 2D post: the Script Writer writes scene beats for " + ", ".join(castable) + "." if castable else
@@ -318,7 +327,7 @@ def _pack_matches(post, render_ref):
     """A flat-2d post's video is made of scene beats with approved characters (the render itself refuses others); a post
     in a user-made pack is made in that pack's approved version."""
     user_pack = post["style_pack"] not in formats.STYLE_PACKS
-    if _base(post["style_pack"]) not in ("flat-2d", "glossy-3d", "voxel-3d") and not user_pack:
+    if _base(post["style_pack"]) not in ("flat-2d", "glossy-3d", "voxel-3d", "block-classic") and not user_pack:
         return
     match = _STUDIO_RENDER.match((render_ref or "").strip())
     if not match:
@@ -341,6 +350,9 @@ def _pack_matches(post, render_ref):
     elif _base(post["style_pack"]) == "voxel-3d":
         if not any(b["kind"] == "voxel" for b in project["beats"]) or not project.get("cast"):
             raise StudioError("a Blocky world post needs voxel beats with a cast blocky character; this video has none")
+    elif _base(post["style_pack"]) == "block-classic":
+        if not any(b["kind"] in ("story", "voxel") for b in project["beats"]) or not project.get("cast"):
+            raise StudioError("a Classic block post needs story beats (or classic voxel beats) with cast block characters; this video has none")
     elif _base(post["style_pack"]) != "flat-2d":
         return
     elif not any(b["kind"] == "scene" for b in project["beats"]) or not project.get("cast"):
@@ -516,6 +528,7 @@ def _add_topic(args, ctx, bot, role):
 
 
 def _formats(args, ctx, bot, role):
+    studio.ensure_shipped_formats()          # Kairos's own cards (the Story Short, Pack C classic) join the team's list once
     status = None if args.get("include_retired") else "active"
     cards = studio.list_formats(status)
     ports = [p for p in studio.list_ports() if args.get("include_retired") or p["status"] in ("proposed", "accepted")]

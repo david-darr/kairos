@@ -50,7 +50,7 @@ SCOPE = "sheet:{version}"
 
 
 def layout_for(spec) -> dict:
-    return LAYOUT_3D if character_store.form_of(spec) in ("3d", "voxel") else LAYOUT
+    return LAYOUT_3D if character_store.form_of(spec) in ("3d", "voxel", "block") else LAYOUT
 
 
 class Unavailable(RuntimeError):
@@ -62,7 +62,7 @@ def page(character_id, version) -> str:
     spec = character_store.spec(character_id, version)
     meta = character_store.get(character_id)
     status = character_store.version_of(meta, version)["status"].replace("_", " ")
-    three_d = character_store.form_of(spec) in ("3d", "voxel")     # Pack C's blocky sheet is drawn by sheet3d.js too
+    three_d = character_store.form_of(spec) in ("3d", "voxel", "block")     # Pack C's blocky sheets are drawn by sheet3d.js too
     html = (Path(STATIC_DIR) / "motion" / ("sheet3d.html" if three_d else "sheet.html")).read_text(encoding="utf-8")
     data = json.dumps({"spec": spec, "layout": layout_for(spec), "version": version, "status": status}, ensure_ascii=False).replace("</", "<\\/")
     return html.replace("<!--KD-SHEET-->", '<script type="application/json" id="kd-sheet-data">' + data + "</script>")
@@ -100,7 +100,7 @@ async def submit(character_id, version, png: bytes | None = None) -> dict:
         raise character_store.ApprovalError(f"Version {version} of {meta['name']} is already approved.")
     png = png if png is not None else await render(character_id, version)
     spec = character_store.spec(character_id, version)
-    if character_store.form_of(spec) in ("3d", "voxel"):
+    if character_store.form_of(spec) in ("3d", "voxel", "block"):
         metrics = character_checks.stage_sheet_metrics(png, spec, LAYOUT_3D)
     else:
         metrics = character_checks.sheet_metrics(png, spec, LAYOUT)

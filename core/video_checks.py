@@ -79,7 +79,9 @@ def narration_notes(project, voice=None):
         if voice.get("mix_peak_dbfs") is not None and voice["mix_peak_dbfs"] > -1:
             notes.append("The narration mix peaks above -1 dBFS; it may clip after encoding.")
         margin = voice.get("voice_over_music_db")
-        if margin is not None and margin < 15:
+        # A Story Short mixes at the reference's levels (dialogue -15 dB, piano bed -29 dB: 14 dB apart) under a quieter bed.
+        least = 12 if voice.get("format") == "story-short" else 15
+        if margin is not None and margin < least:
             notes.append(f"The voice is only {margin:g} dB over the music; lower the music volume.")
     return notes
 
@@ -169,17 +171,40 @@ def caption_clear_notes(layouts):
     return list(dict.fromkeys(notes))
 
 
+STORY_SHOT_MAX = 2.5     # the reference: no shot over 2.5 s
+
+
+def story_notes(project, layouts=None):
+    """The Story Short's own checks: no shot over 2.5 s (a beat's shots, cut on their words), a speaker on every line, the
+    caption on screen is one word of the line being said, and the avatar strip's colour is its speaker's."""
+    from core.video_store import beat_seconds as seconds_of
+    notes = []
+    for b in project["beats"]:
+        if b["kind"] != "story":
+            continue
+        length = seconds_of(b, project["bpm"])
+        cuts = len((b.get("story") or {}).get("shots", [])) or 1
+        if length / cuts > STORY_SHOT_MAX + .3 and cuts == 1:
+            notes.append(f"Beat {b['id']} holds one shot for {length:.1f} s; the format keeps shots under {STORY_SHOT_MAX:g} s, so add a cut on a word.")
+    for sample in layouts or []:
+        for box in sample.get("elements", []):
+            if box.get("role") == "caption" and box.get("story") and len(str(box.get("text", "")).split()) != 1:
+                notes.append(f"Beat {box.get('beat', '?')}'s caption shows more than one word; the format shows one word at a time.")
+    return list(dict.fromkeys(notes))
+
+
 def check(project, aspect="16:9", layouts=None, frames=None, loudness=None, voice=None):
     """Accept samples as {time, elements: kdLayout(t)}; deduplicate repeated notes."""
     w, h = ASPECTS[aspect]
     left, right = w * .05, w * .95
     top, bottom = h * (.08 if aspect == "9:16" else .05), h * (.88 if aspect == "9:16" else .95)
     notes = []
+    story = any(b["kind"] == "story" for b in project["beats"])
     for b in project["beats"]:
         seconds = beat_seconds(b, project["bpm"])
         words = len(" ".join([str(b.get(k, "")) for k in ("text", "sub", "number")] + b.get("items", [])).split())
-        if seconds < 1:
-            notes.append(f"Beat {b['id']} is under 1 second; give it more time.")
+        if seconds < (.5 if b["kind"] == "story" else 1):
+            notes.append(f"Beat {b['id']} is under {'half a second' if b['kind'] == 'story' else '1 second'}; give it more time.")
         if words / seconds > 3.5:
             notes.append(f"Beat {b['id']} reads faster than 3.5 words/s; shorten the copy or add bars.")
     if project["beats"][-1]["kind"] == "end" and beat_seconds(project["beats"][-1], project["bpm"]) < 1.5:
@@ -203,7 +228,8 @@ def check(project, aspect="16:9", layouts=None, frames=None, loudness=None, voic
             fg, bg = _luminance(box.get("color")), _luminance(box.get("bg"))
             if fg is not None and bg is not None and (max(fg, bg) + .05) / (min(fg, bg) + .05) < 4.5:
                 notes.append(f"Beat {label} has text contrast under 4.5:1; strengthen the text or background color.")
-    notes += caption_clear_notes(layouts)
+    notes += caption_clear_notes([{**s, "elements": [e for e in s.get("elements", []) if not e.get("story")]} for s in layouts or []])
+    notes += story_notes(project, layouts)
     notes += card_narration_notes(project, layouts)
     # Use the worker's actual visible text too, since layout can reveal extra text.
     lengths = {b["id"]: beat_seconds(b, project["bpm"]) for b in project["beats"]}
@@ -227,8 +253,9 @@ def check(project, aspect="16:9", layouts=None, frames=None, loudness=None, voic
                 notes.append(f"Sample frame {index + 1} is near-blank; check that content is visible.")
     if loudness:
         i, tp = loudness.get("input_i"), loudness.get("input_tp")
-        if i is None or not math.isfinite(i) or abs(i + 16) > 1.5:
-            notes.append("Soundtrack loudness is off target; aim for -16 LUFS integrated.")
+        target = -14 if story else -16
+        if i is None or not math.isfinite(i) or abs(i - target) > 1.5:
+            notes.append(f"Soundtrack loudness is off target; aim for {target} LUFS integrated.")
         if tp is None or not math.isfinite(tp) or tp > -1:
             notes.append("Soundtrack true peak is above -1 dBTP; lower the transient peaks.")
     return list(dict.fromkeys(notes))

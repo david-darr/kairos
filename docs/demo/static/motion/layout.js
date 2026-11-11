@@ -1,9 +1,10 @@
 import { clamp, range, inOut, hash } from './kit.js';
 import { normalizeStage } from './stage.js';
 import { normalizeVoxel } from './voxel.js';
+import { normalizeStory } from './classic.js';
 
 export const SIZES = { '16:9': [1920, 1080], '9:16': [1080, 1920], '1:1': [1080, 1080] };
-export const KINDS = ['title', 'statement', 'big-number', 'list', 'image', 'quote', 'split', 'logo', 'end', 'scene', 'stage', 'voxel'];
+export const KINDS = ['title', 'statement', 'big-number', 'list', 'image', 'quote', 'split', 'logo', 'end', 'scene', 'stage', 'voxel', 'story'];
 export const CAMERAS = ['still', 'push', 'pull', 'pan', 'shake'];
 export const TRANSITIONS = ['cut', 'whip', 'zoom', 'flip', 'dither', 'mosaic', 'wipe'];
 export const LIMITS = { beats: 100, text: 180, sub: 160, number: 24, item: 100, items: 5, minBpm: 40, maxBpm: 240, minBars: .25, maxBars: 16 };
@@ -64,6 +65,17 @@ export function normalizeProject(input = {}) {
       else if (kind === 'stage') result.stage = normalizeStage(b.stage);   // Pack B: a 3D studio shot (stage.js)
       else result.voxel = normalizeVoxel(b.voxel);   // Pack C: a blocky voxel world shot (voxel.js)
       result.mouth = typeof b.spoken?.mouth === 'string' && /^[XAEOMF]{1,2000}$/.test(b.spoken.mouth) ? b.spoken.mouth : '';
+    }
+    // A Story Short shot (Pack C classic, static/motion/classic.js and story.js): its scene, who speaks the line, the
+    // line's words with their aligned times (always word by word in this format), the flashback flag and the mouth.
+    if (kind === 'story') {
+      result.story = normalizeStory(b.story);
+      result.say = str(b.say, 400); result.speaker = str(b.speaker, 12); result.flashback = b.flashback === true;
+      result.mouth = typeof b.spoken?.mouth === 'string' && /^[XAEOMF]{1,2000}$/.test(b.spoken.mouth) ? b.spoken.mouth : '';
+      result.lead = Number.isFinite(b.spoken?.lead) ? b.spoken.lead : .06;
+      result.speech = Number.isFinite(b.spoken?.seconds) ? b.spoken.seconds : 0;
+      result.speechEnd = result.lead + result.speech;
+      result.words = Array.isArray(b.spoken?.words) ? b.spoken.words.filter(w => Array.isArray(w) && Number.isFinite(w[0])).map(([a, z]) => ({ start: start + a, end: start + z })) : [];
     }
     start = end; return result;
   });
@@ -234,7 +246,7 @@ export function listMarker(box) {
 export const TYPE = {
   title: [210, 270], statement: [150, 195], 'big-number': [525, 750],
   list: [135, 165], quote: [135, 180], end: [180, 240],
-  image: [135, 180], split: [135, 180], logo: [150, 195], scene: [56, 104], stage: [56, 104], voxel: [56, 104]
+  image: [135, 180], split: [135, 180], logo: [150, 195], scene: [56, 104], stage: [56, 104], voxel: [56, 104], story: [56, 104]
 };
 export function compositionAt(beats, index) {
   let previous = -1;
@@ -324,6 +336,7 @@ export function beatLayout(beat, aspect, measure, style = {}) {
     case 'scene':
     case 'stage':
     case 'voxel':
+    case 'story':
       // The scene carries the shot; its words are a short label across the top, clear of the cast.
       add(beat.text, .03, 0, .94, portrait ? .1 : .15, 'title', 0, TYPE.scene);
       for (const box of boxes) Object.assign(box, { align: 'center', composition: 'center' });

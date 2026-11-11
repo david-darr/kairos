@@ -38,11 +38,25 @@ PROPORTIONS = {"head": (.30, .55), "body_width": (.35, .80), "limb_length": (.18
                "eye_size": (.02, .06)}
 OUTLINE = (4, 14)          # outline weight in thousandths of the character's height
 STATES = ("draft", "awaiting_approval", "approved", "rejected")
-SPEC_FIELDS = {"name", "family", "proportions", "palette", "outline", "accessory", "parts", "views", "expressions", "mouths", "form"}
+SPEC_FIELDS = {"name", "family", "proportions", "palette", "outline", "accessory", "parts", "views", "expressions", "mouths", "form",
+               "outfit", "colour", "voice"}
 # A character is drawn flat by the 2D rig (Pack A), built in 3D by static/motion/stage.js (Pack B), or built from boxes by
-# static/motion/voxel.js (Pack C, `voxel`). The form is part of the spec, so each form is its own approved sheet:
-# approving the flat Pip does not approve a 3D or a blocky Pip. A spec without `form` is 2D (every spec before Pack B).
-FORMS = ("2d", "3d", "voxel")
+# static/motion/voxel.js (Pack C, `voxel`, the pastel look) or static/motion/classic.js (Pack C classic, `block`: the
+# classic box proportions, per-face pixel textures drawn in code from its `outfit`). The form is part of the spec, so each
+# form is its own approved sheet: approving the flat Pip does not approve a 3D or a blocky Pip. A spec without `form` is
+# 2D (every spec before Pack B).
+FORMS = ("2d", "3d", "voxel", "block")
+# Pack C classic (David, 2026-11-10): a block character's outfit, drawn as pixel textures on every box face
+# (static/motion/blocks.js): skin, hair and its style, shirt and its front detail, pants, shoes and eye colour. Its palette
+# is derived from the outfit (body = shirt, body_shade = detail, head = skin, limb = pants, eye = eyes, outline = hair,
+# accent = its speaker colour, cheek = shoes), so the sheet and frame checks read the same colours.
+OUTFIT_COLOURS = ("skin", "hair", "shirt", "detail", "pants", "shoes", "eyes")
+HAIR_STYLES = ("short", "long", "tuft", "bald")
+DETAIL_STYLES = ("none", "zip", "stripe", "heart", "star", "pocket")
+MOUTH_COLOUR = "#481e1c"
+# A character's own voice (any form; the Story Short gives each speaker one): a Kokoro voice id, a speed for Kokoro and a
+# pitch shift in semitones (a rate change, then the tempo back, so the speed holds; core/video_narration.py).
+VOICE_SPEED, VOICE_PITCH = (.8, 1.35), (-4.0, 6.0)
 HEX = re.compile(r"#[0-9a-f]{6}")
 NAME = re.compile(r"[A-Za-z][A-Za-z0-9 '-]{0,39}")
 MAX_VERSIONS = 50
@@ -108,9 +122,24 @@ def validate(spec: dict) -> dict:
         _error("family", "choose " + ", ".join(FAMILIES) + ".")
     form = s.pop("form", "2d")
     if form not in FORMS:
-        _error("form", "choose 2d (the flat rig), 3d (the glossy 3D studio) or voxel (the blocky world).")
-    if form in ("3d", "voxel"):
+        _error("form", "choose 2d (the flat rig), 3d (the glossy 3D studio), voxel (the pastel blocky world) or block (the classic block world).")
+    if form in ("3d", "voxel", "block"):
         s["form"] = form
+    if form == "block":
+        s["outfit"] = _outfit(s.get("outfit"))
+        o = s["outfit"]
+        s.setdefault("colour", "#b05aff")
+        if not isinstance(s["colour"], str) or not HEX.fullmatch(s["colour"].lower()):
+            _error("colour", "the speaker colour, a hex like #b05aff (the avatar's border, headset and LEDs, and key caption words).")
+        s["colour"] = s["colour"].lower()
+        s["palette"] = {"body": o["shirt"], "body_shade": o["detail"], "head": o["skin"], "limb": o["pants"], "eye": o["eyes"],
+                        "mouth": MOUTH_COLOUR, "outline": o["hair"], "accent": s["colour"], "cheek": o["shoes"]}
+    else:
+        for key in ("outfit", "colour"):
+            if key in s:
+                _error(key, "only a block character (form block, Pack C classic) has an outfit and a speaker colour.")
+    if "voice" in s:
+        s["voice"] = _voice(s["voice"])
     if s["accessory"] not in ACCESSORIES:
         _error("accessory", "choose " + ", ".join(ACCESSORIES) + ".")
     props = s.get("proportions")
@@ -133,6 +162,39 @@ def validate(spec: dict) -> dict:
         if s[key] != list(allowed):
             _error(key, "the rig draws exactly " + ", ".join(allowed) + "; keep this list as it is.")
     return s
+
+
+def _outfit(value) -> dict:
+    if not isinstance(value, dict):
+        _error("outfit", "give skin, hair, hair_style, shirt, detail, detail_style, pants, shoes and eyes.")
+    for key in value.keys() - set(OUTFIT_COLOURS) - {"hair_style", "detail_style"}:
+        _error(f"outfit.{key}", "unknown outfit field; use skin, hair, hair_style, shirt, detail, detail_style, pants, shoes or eyes.")
+    out = {}
+    for key in OUTFIT_COLOURS:
+        colour = value.get(key)
+        if not isinstance(colour, str) or not HEX.fullmatch(colour.lower()):
+            _error(f"outfit.{key}", "a colour like #5e2b8c.")
+        out[key] = colour.lower()
+    for key, choices, default in (("hair_style", HAIR_STYLES, "short"), ("detail_style", DETAIL_STYLES, "none")):
+        out[key] = value.get(key, default)
+        if out[key] not in choices:
+            _error(f"outfit.{key}", "choose " + ", ".join(choices) + ".")
+    return out
+
+
+def _voice(value) -> dict:
+    if not isinstance(value, dict) or value.keys() - {"id", "speed", "pitch"} or not isinstance(value.get("id"), str) \
+            or not re.fullmatch(r"[a-z]{2}_[a-z0-9]{1,30}", value["id"]):
+        _error("voice", "give {id, speed, pitch}: a Kokoro voice id such as af_heart, a speed of 0.8 to 1.35 and a pitch shift of -4 to 6 semitones.")
+    out = {"id": value["id"], "speed": value.get("speed", 1.0), "pitch": value.get("pitch", 0.0)}
+    _number(out["speed"], "voice.speed", *VOICE_SPEED)
+    _number(out["pitch"], "voice.pitch", *VOICE_PITCH)
+    out["speed"], out["pitch"] = round(float(out["speed"]), 3), round(float(out["pitch"]), 2)
+    return out
+
+
+def voice_of(spec) -> dict | None:
+    return spec.get("voice")
 
 
 def starter(family: str, **changes) -> dict:
@@ -167,13 +229,45 @@ def starter_voxel(family: str, **changes) -> dict:
     return merged(STARTERS_VOXEL[family], changes)
 
 
+# Pack C classic's own cast (David, 2026-11-10): three original block characters for the Story Short, each with an outfit,
+# a speaker colour and a voice (the reference's voices and colours). Their looks are our own: no default skin of any game
+# (no cyan shirt over blue pants, no green shirt with orange hair), nothing of any channel's characters (no blue hoodie,
+# no green turtle shell). Their family only places them in a pack's families (Rook square, Fenn round, Juno triangle).
+STARTERS_BLOCK = {
+    "square": {"name": "Rook", "family": "square", "accessory": "none", "outline": 7, "form": "block",
+               "proportions": {"head": .32, "body_width": .5, "limb_length": .38, "limb_width": .06, "eye_size": .03},
+               "palette": STARTERS["square"]["palette"], "colour": "#b05aff",
+               "outfit": {"skin": "#f0c8a8", "hair": "#1d1a22", "hair_style": "tuft", "shirt": "#5e2b8c", "detail": "#e8e3f0",
+                          "detail_style": "zip", "pants": "#2a2833", "shoes": "#ececec", "eyes": "#2d2140"},
+               "voice": {"id": "af_heart", "speed": 1.14, "pitch": 1.5}},
+    "round": {"name": "Fenn", "family": "round", "accessory": "none", "outline": 7, "form": "block",
+              "proportions": {"head": .32, "body_width": .5, "limb_length": .38, "limb_width": .06, "eye_size": .03},
+              "palette": STARTERS["round"]["palette"], "colour": "#ffa028",
+              "outfit": {"skin": "#7a4b2e", "hair": "#16110e", "hair_style": "short", "shirt": "#e2592c", "detail": "#f6c945",
+                         "detail_style": "stripe", "pants": "#b39b6a", "shoes": "#4a3322", "eyes": "#1b130e"},
+              "voice": {"id": "am_echo", "speed": 1.08, "pitch": 3.0}},
+    "triangle": {"name": "Juno", "family": "triangle", "accessory": "none", "outline": 7, "form": "block",
+                 "proportions": {"head": .32, "body_width": .5, "limb_length": .38, "limb_width": .06, "eye_size": .03},
+                 "palette": STARTERS["triangle"]["palette"], "colour": "#ff64aa",
+                 "outfit": {"skin": "#f3cfb3", "hair": "#1c1420", "hair_style": "long", "shirt": "#f5d35c", "detail": "#ff4f8b",
+                            "detail_style": "heart", "pants": "#6b3d78", "shoes": "#f0f0f0", "eyes": "#3b2a50"},
+                 "voice": {"id": "af_bella", "speed": 1.1, "pitch": 2.5}},
+}
+
+
+def starter_block(family: str, **changes) -> dict:
+    if family not in STARTERS_BLOCK:
+        _error("family", "choose " + ", ".join(FAMILIES) + ".")
+    return merged(STARTERS_BLOCK[family], changes)
+
+
 def starter_for(form: str, family: str, **changes) -> dict:
-    """Kairos's starting design of a family in a form (2d, 3d or voxel)."""
-    return {"3d": starter_3d, "voxel": starter_voxel}.get(form, starter)(family, **changes)
+    """Kairos's starting design of a family in a form (2d, 3d, voxel or block)."""
+    return {"3d": starter_3d, "voxel": starter_voxel, "block": starter_block}.get(form, starter)(family, **changes)
 
 
 def form_of(spec: dict) -> str:
-    return spec.get("form") if spec.get("form") in ("3d", "voxel") else "2d"
+    return spec.get("form") if spec.get("form") in ("3d", "voxel", "block") else "2d"
 
 
 def merged(base: dict, changes: dict) -> dict:
@@ -182,7 +276,7 @@ def merged(base: dict, changes: dict) -> dict:
         _error("changes", "give an object.")
     out = copy.deepcopy(base)
     for key, value in changes.items():
-        if key in ("proportions", "palette") and isinstance(value, dict) and isinstance(out.get(key), dict):
+        if key in ("proportions", "palette", "outfit", "voice") and isinstance(value, dict) and isinstance(out.get(key), dict):
             out[key] = {**out[key], **value}
         else:
             out[key] = copy.deepcopy(value)

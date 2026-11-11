@@ -21,6 +21,8 @@ const JOB_PATH = /^\/api\/designs\/([a-f0-9]{12})\/boards\/([a-z0-9][a-z0-9-]{0,
 const VIDEO_PATH = /^\/api\/videos\/([a-f0-9]{12})\/player\?aspect=(16%3A9|9%3A16|1%3A1)&rt=[0-9]{10}\.[A-Za-z0-9_-]{24}\.[a-z0-9]{1,32}\.[A-Za-z0-9_-]{24}&v=[1-9][0-9]*(&layer=overlay)?$/;
 // Pack B's 3D stage (static/motion/stage3d.js) loads three.js and only these example files from static/vendor/three
 // (each listed with its hash in static/vendor/three/VENDORED.txt).
+// The Story Short's caption face, served by the design-font route from the bundled Brutalist look (core/video_routes.py).
+const STORY_FONT = '/api/design-fonts/brutalist/archivoblack-0.ttf';
 const THREE_PATH = /^\/static\/vendor\/three\/(three\.module|three\.core|examples\/jsm\/(environments\/RoomEnvironment|lights\/RectAreaLight(UniformsLib|TexturesLib)|postprocessing\/(EffectComposer|RenderPass|ShaderPass|MaskPass|Pass|GTAOPass|OutputPass)|shaders\/(CopyShader|GTAOShader|PoissonDenoiseShader|OutputShader|HorizontalBlurShader|VerticalBlurShader)|math\/SimplexNoise))\.js$/;
 // A character's reference sheet (core/character_sheet.py): a PNG job on its own signed page.
 const SHEET_PATH = /^\/api\/characters\/([a-f0-9]{12})\/sheet\?v=[1-9][0-9]{0,2}&rt=[0-9]{10}\.[A-Za-z0-9_-]{24}\.[a-z0-9]{1,32}\.[A-Za-z0-9_-]{24}$/;
@@ -87,13 +89,15 @@ function allowedRequest(raw, origin, designId, videoId = '', playerPath = '', lo
   try {
     const url = new URL(raw);
     if (url.origin !== origin || url.username || url.password) return false;
-    if (characterId) return url.pathname + url.search === playerPath || /^\/static\/motion\/(kit|layout|rig|sheet|sheet3d|stage|stage3d|voxel|voxel3d)\.js$/.test(url.pathname) || THREE_PATH.test(url.pathname);
+    if (characterId) return url.pathname + url.search === playerPath || /^\/static\/motion\/(kit|layout|rig|sheet|sheet3d|stage|stage3d|voxel|voxel3d|blocks|classic|classic3d)\.js$/.test(url.pathname) || THREE_PATH.test(url.pathname);
     if (videoId) {
       return (url.pathname + url.search === playerPath) ||
         (url.pathname.startsWith(`/api/videos/${videoId}/assets/`) && /^\/api\/videos\/[a-f0-9]{12}\/assets\/[a-f0-9]{64}\.(png|jpg|gif|webp)$/.test(url.pathname)) ||
         // A video clip's decoded frames (core/video_media.py), by number.
         (url.pathname.startsWith(`/api/videos/${videoId}/assets/media/`) && /^\/api\/videos\/[a-f0-9]{12}\/assets\/media\/[a-f0-9]{64}\/\d{1,6}\.jpg$/.test(url.pathname)) ||
-        /^\/static\/motion\/(engine|kit|layout|rig|scene|stage|stage3d|overlay|voxel|voxel3d)\.js$/.test(url.pathname) || THREE_PATH.test(url.pathname) ||
+        /^\/static\/motion\/(engine|kit|layout|rig|scene|stage|stage3d|overlay|voxel|voxel3d|blocks|classic|classic3d|story)\.js$/.test(url.pathname) || THREE_PATH.test(url.pathname) ||
+        // The Story Short's caption font (Pack C classic): Archivo Black, bundled under the OFL, whatever the video's look.
+        url.pathname === STORY_FONT ||
         (url.pathname.startsWith(`/api/design-fonts/${look}/`) && /^\/api\/design-fonts\/[a-z0-9_-]+\/[A-Za-z0-9_.-]+\.(woff2?|ttf|otf)$/.test(url.pathname));
     }
     return url.pathname.startsWith(`/api/designs/${designId}/`) || url.pathname.startsWith('/api/design-fonts/');

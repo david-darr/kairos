@@ -121,6 +121,22 @@ LONG_FORM_EVALUATOR = (
     "the channel has room in its long videos a week (content_studio_pipeline shows it; the pick is refused over it). Choose a topic "
     "with enough depth for several chapters and sourced facts for each. Every other pick is a Short.")
 
+# Pack C classic (David, 2026-11-10): the Story Short format and its shipped format card.
+STORY_WRITER = (
+    "Story Shorts (style pack block-classic, or a pack based on it) are pure dialogue: no narrator. The shipped format card \"Story Short\" "
+    "(content_studio_formats) is the shape: the one who did wrong starts in cartoon danger and calls for help, two friends each remember "
+    "a wrong in a sepia flashback with a big physical payoff, each says one cold line and leaves, the danger lands, and falling he asks for "
+    "a like and a subscribe. About 13 lines and 18 shots in 25 to 40 seconds, at least three places. Write each story beat as: the line "
+    "(say, short, spoken by its speaker, a classic block character from content_studio_pipeline), whether it is a flashback, the place "
+    "(meadow, cliff, village, party, cave, beach, sky-island), who is on screen with their pose and mood, up to three shots that cut on a "
+    "word ({word: n}), and any effect (fuse, blast, splat, fall, pop) or sound (boom, splat, sting, riser, pop, whoosh, impact, steps, gasp) "
+    "on its word. The cold open is cartoon slapstick danger for the one who did wrong (hanging off a ledge, stuck in a hole): never a real "
+    "person, an animal or a child in distress, and never a rescue appeal. Each episode its own wrong, places and payoff.")
+STORY_EDITOR = (
+    "A Story Short is built with video_create in 9:16 with story beats only: each with say and speaker, flashback, gap (the pause after the "
+    "line, 0.2 to 0.45 s, up to 1.2 s where the action needs room) or hold (a shot without a line), and its story. Cast the classic block "
+    "characters' approved versions; each speaks in its own voice (its character spec's voice), and the captions show one word at a time. "
+    "Read video_render's notes: a shot over 2.5 s is named.")
 LONG_FORM_WRITER = (
     "Long videos (a post marked long_form): write it in chapters, three to eight, each a clear part of the story with its own short "
     "title (YouTube shows them in the chapter list; plain words, no < or >). Each chapter has its own beats with say lines, at "
@@ -203,7 +219,7 @@ BOTS = [
          "Keep claims true and sourced. Write for the platform's length and pace. Leave no text that pretends to be a real person's experience.\n"
          "Videos are narrated. Write the script beat by beat: what is on screen (3 to 8 words) and the narration line the voice says over it (say), one or two short spoken sentences, no clause over 100 characters without a comma. "
          "The spoken lines set the video's timing, so a 30 to 60 second Short is about 70 to 150 words of narration. Open on the idea, never on a distress or rescue hook, and never present the narrator as a doctor, lawyer, financial adviser or political expert. "
-         "Give the timestamped shot plan (each shot's time, what is on screen and the line said) and the sources behind every fact ({url, supports, date}) to content_studio_save_script with the script. " + STRATEGIES["writer"] + "\n" + CHARACTERS_WRITER + "\n" + LONG_FORM_WRITER)},
+         "Give the timestamped shot plan (each shot's time, what is on screen and the line said) and the sources behind every fact ({url, supports, date}) to content_studio_save_script with the script. " + STRATEGIES["writer"] + "\n" + CHARACTERS_WRITER + "\n" + LONG_FORM_WRITER + "\n" + STORY_WRITER)},
     {"key": "bot-5", "name": "Editor", "color": "#cdbfd9",
      "role": "Builds each video in Studio and prepares every platform's post",
      "blurb": "Turns a script into a finished video and a ready-to-review post, with the AI label set.",
@@ -217,7 +233,7 @@ BOTS = [
          "Then video_preview, fix with video_edit, and video_render; read its notes (captions match the script, no clipping, voice clear over the music, no blank frames) and fix anything they name before recording the render. "
          "Record each render with content_studio_record_render: status ok with the link video_render returned, plus the tags, the final caption and what the thumbnail shows, or status failed. "
          "For an episode of a format card, the post names its style pack; the title, thumbnail and look are our own, never the source channel's. "
-         "When a post is rendered, put it in the approval queue with content_studio_submit_post. You make the post; you do not post it. The Publisher does, after the person approves.\n" + CHARACTERS_EDITOR + "\n" + LONG_FORM_EDITOR + "\n" + STYLE_PACKS_TEAM)},
+         "When a post is rendered, put it in the approval queue with content_studio_submit_post. You make the post; you do not post it. The Publisher does, after the person approves.\n" + CHARACTERS_EDITOR + "\n" + LONG_FORM_EDITOR + "\n" + STORY_EDITOR + "\n" + STYLE_PACKS_TEAM)},
     {"key": "bot-6", "name": "Publisher", "color": "#b9d2e3",
      "role": "Hands each approved post to its platform and records the link",
      "blurb": "Only ever posts what the person has approved, exactly as approved.",

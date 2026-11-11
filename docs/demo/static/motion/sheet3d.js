@@ -6,6 +6,8 @@ import { stageModel, normalizeStage, memberPose, characterModel, HEIGHT } from '
 import { StageRenderer } from './stage3d.js';
 import { voxelModel, normalizeVoxel, voxelMemberPose, voxelPlan } from './voxel.js';
 import { VoxelRenderer } from './voxel3d.js';
+import { blockCharacter, HEIGHT as BLOCK_HEIGHT, P } from './classic.js';
+import { ClassicRenderer } from './classic3d.js';
 
 const LABEL = '#3a3340', DIM = '#7a7280', FONT = 'Arial, Helvetica, sans-serif';
 const NAMES = { three_quarter: 'three-quarter', MBP: 'M B P', FV: 'F V', key: 'colour key (flat, unlit)' };
@@ -55,7 +57,54 @@ function poseFor(model, beat, { expression = 'neutral', mouth = 'rest' }) {
   return { groups };
 }
 
+// Pack C classic (form block): the classic box figure with its per-face pixel skin, drawn by classic3d.js, no world.
+// The five expression cells show five of its moods and the six mouth cells closed and open mouths (each mood has both).
+const BLOCK_MOODS = { neutral: 'neutral', happy: 'happy', surprised: 'shocked', worried: 'scared', thinking: 'smug' };
+const BLOCK_MOUTHS = { rest: ['neutral', false, 'line'], A: ['neutral', true, 'open'], E: ['laughing', true, 'laugh'], O: ['shocked', false, 'o'],
+  MBP: ['smug', false, 'smirk'], FV: ['crying', true, 'wail'] };
+async function drawBlockSheet(g, data) {
+  const { spec, layout: L, version, status } = data;
+  g.fillStyle = L.background; g.fillRect(0, 0, L.w, L.h);
+  label(g, spec.name, 60, 84, 64, LABEL, 'left', 700);
+  const v = spec.voice ? ` Voice: ${spec.voice.id}, speed ${spec.voice.speed}, pitch ${spec.voice.pitch > 0 ? '+' : ''}${spec.voice.pitch} semitones.` : '';
+  label(g, `Classic block character sheet, version ${version}${status ? ` (${status})` : ''}. Skin, hair, shirt, pants and shoes are pixel textures drawn in code.${v}`, 60, 124, 26, DIM, 'left', 500);
+  const model = blockCharacter('sheet', spec.outfit);
+  const big = Math.max(...[...L.views, L.key, ...L.expressions, ...L.mouths].flatMap(c => [c.w, c.h])) * SS;
+  const r = new ClassicRenderer(big, big, { ss: 1 });
+  const rest = { body: [0, 0, 0], head: [0, 0, 0], arm_l: [0, 0, 0], arm_r: [0, 0, 0], leg_l: [0, 0, 0], leg_r: [0, 0, 0] };
+  const draw = (cell, { yaw = 0, flat = false, mood = 'neutral', open = false, head = false }) => {
+    const m = BLOCK_HEIGHT / cell.height, viewHeight = cell.h * m;
+    const cz = head ? 28 * P + .02 : (cell.feet - (cell.y + cell.h / 2)) * m;
+    const image = r.renderCell(model, rest, { mood, open }, { width: cell.w * SS, height: cell.h * SS, center: [0, 0, cz], viewHeight, yaw, flat, colours: spec.palette });
+    g.drawImage(image, cell.x, cell.y, cell.w, cell.h);
+  };
+  for (const cell of L.views) draw(cell, { yaw: YAW[cell.view] });
+  draw(L.key, { flat: true });
+  for (const cell of L.expressions) draw(cell, { mood: BLOCK_MOODS[cell.expression] });
+  for (const cell of L.mouths) { const [mood, open] = BLOCK_MOUTHS[cell.mouth]; draw(cell, { mood, open, head: true }); }
+  g.strokeStyle = '#ddd5ca'; g.lineWidth = 2;
+  for (const cell of [...L.views, L.key, ...L.expressions, ...L.mouths]) g.strokeRect(cell.x + 8, cell.y + 8, cell.w - 16, cell.h - 16);
+  for (const cell of L.views) label(g, NAMES[cell.view] || cell.view, cell.x + cell.w / 2, cell.y + 46);
+  label(g, NAMES.key, L.key.x + L.key.w / 2, L.key.y + 46);
+  for (const cell of L.expressions) label(g, BLOCK_MOODS[cell.expression], cell.x + cell.w / 2, cell.y + 46);
+  for (const cell of L.mouths) label(g, BLOCK_MOUTHS[cell.mouth][2] + (BLOCK_MOUTHS[cell.mouth][1] ? ' (open)' : ''), cell.x + cell.w / 2, cell.y + 44, 22);
+  const Pal = L.palette;
+  label(g, 'Palette (from the outfit)', Pal.x, Pal.y + 30, 26, LABEL, 'left');
+  Pal.keys.forEach((key, i) => {
+    const col = i % 3, row = Math.floor(i / 3), x = Pal.x + col * Pal.cw, y = Pal.y + 48 + row * Pal.ch;
+    g.fillStyle = spec.palette[key]; g.beginPath(); g.roundRect(x, y, 64, Pal.ch - 18, 10); g.fill();
+    g.strokeStyle = '#ddd5ca'; g.lineWidth = 2; g.stroke();
+    label(g, { body: 'shirt', body_shade: 'detail', head: 'skin', limb: 'pants', eye: 'eyes', outline: 'hair', accent: 'speaker', cheek: 'shoes' }[key] || key.replace('_', ' '), x + 78, y + 26, 22, LABEL, 'left');
+    label(g, spec.palette[key], x + 78, y + 52, 20, DIM, 'left', 500);
+  });
+  label(g, `Classic proportions: head 8 P, torso 8 x 4 x 12 P, arms and legs 4 x 4 x 12 P (P is a sixteenth of a block). Hair ${spec.outfit.hair_style}, shirt detail ${spec.outfit.detail_style}.`,
+    Pal.x, L.h - 22, 20, DIM, 'left', 500);
+  const info = r.info; r.dispose();
+  return info;
+}
+
 export async function drawSheet(g, data) {
+  if (data.spec.form === 'block') return drawBlockSheet(g, data);
   const { spec, layout, version, status } = data, L = layout;
   g.fillStyle = L.background; g.fillRect(0, 0, L.w, L.h);
   label(g, spec.name, 60, 84, 64, LABEL, 'left', 700);

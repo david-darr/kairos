@@ -286,7 +286,7 @@ class Packs(unittest.TestCase):
         self.assertGreater(blender["units"], 10 * three["units"])
         self.assertEqual(three["render_minutes"], round(1800 / style_packs.RENDER_SPEED["threejs"]["fps"] * 5 / 60, 1))
         for renderer, speed in style_packs.RENDER_SPEED.items():
-            self.assertRegex(speed["measured"], r"2026-11-10")
+            self.assertRegex(speed["measured"], r"2026-11-\d\d")
 
 
 class BlenderRunner(unittest.TestCase):

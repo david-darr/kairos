@@ -127,6 +127,8 @@ class ValidationTests(unittest.TestCase):
     def test_every_vocabulary_and_boundaries(self):
         for kind in video_store.KINDS:
             for camera in video_store.CAMERAS:
+                if kind == "story":
+                    continue      # a Story Short is its own format (9:16, story beats only): scripts/test_pack_c_classic.py
                 p = project()
                 p["beats"][0].update(kind=kind, camera=camera, items=["x" * 60] * 5, text="x" * 140,
                                       sub="x" * 100, number="42%", image="assets/" + "a" * 64 + ".png")

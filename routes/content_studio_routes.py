@@ -243,6 +243,7 @@ def add_strategy(body: StrategyBody, user: str = Depends(require_user)):
 @router.get("/formats")
 def format_cards(include_retired: bool = False, user: str = Depends(require_user)):
     """The account's format cards, their port proposals with the checks, and the style packs."""
+    studio.ensure_shipped_formats()      # Kairos's own cards (the Story Short) show from the start
     cards = studio.list_formats(None if include_retired else "active")
     ports = [p for p in studio.list_ports() if include_retired or p["status"] in ("proposed", "accepted")]
     return {"formats": cards, "ports": ports, "style_packs": formats.packs()}

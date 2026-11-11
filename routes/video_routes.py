@@ -176,6 +176,11 @@ def player_page(project):
             raise HTTPException(422, "style_pack: " + str(error).strip("'")) from None
     data_json = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     css = design_systems.tokens_css(system["tokens"]) + design_systems.font_faces(system["id"], "/api/design-fonts")
+    if any(b.get("kind") == "story" for b in project["beats"]):
+        # The Story Short's word captions (Pack C classic): Archivo Black (SIL Open Font License, bundled in
+        # static/fonts/looks/archivoblack), served by the design-font route through the Brutalist look that ships it.
+        css += ('\n@font-face { font-family: "Kairos Story Caption"; src: url("/api/design-fonts/brutalist/archivoblack-0.ttf"); '
+                'font-weight: 400; font-style: normal; font-display: block; }')
     page = page.replace("<!--KD-PROJECT-->", '<script type="application/json" id="kd-project">' + data_json + '</script>')
     page = page.replace("<!--KD-TOKENS-->", '<style>' + css.replace("</", "<\\/") + '</style>')
     # Image paths stay assets/<hash> as the shared schema requires. Module URLs

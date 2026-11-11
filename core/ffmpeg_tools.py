@@ -63,10 +63,16 @@ VIDEO_ARGS = ["-vf", "scale=out_range=tv:out_color_matrix=bt709",
 AUDIO_ARGS = ["-c:a", "aac", "-b:a", "192k", "-af", LOUDNORM, "-ar", "48000"]
 
 
+def audio_args(lufs=-16):
+    """The audio settings with the loudness target (-16 LUFS for every video; -14 for a Story Short, Pack C classic)."""
+    # At -14 LUFS the AAC encode overshot -1 dBTP with TP=-1.5 (measured -0.84 on the Story Short sample), so it aims lower.
+    return AUDIO_ARGS if lufs == -16 else ["-c:a", "aac", "-b:a", "192k", "-af", f"loudnorm=I={lufs:g}:TP=-2.5:LRA=11", "-ar", "48000"]
+
+
 class Encoder:
     """A pipe whose stderr goes to disk so verbose FFmpeg cannot deadlock it. Without a soundtrack it writes a
     picture-only part (a long video's chapter); the whole video's sound is added when the parts are joined."""
-    def __init__(self, out, soundtrack, *, executable=None, timeout=180, fps=30):
+    def __init__(self, out, soundtrack, *, executable=None, timeout=180, fps=30, lufs=-16):
         self.path = Path(out)
         self.timeout = timeout
         exe = executable or find()
@@ -76,7 +82,7 @@ class Encoder:
         # JPEG frames are full range; players expect TV range BT.709, or the colours wash out.
         self.argv = ([exe, "-y", "-f", "image2pipe", "-framerate", str(int(fps)), "-c:v", "mjpeg", "-i", "-"]
                      + (["-i", str(soundtrack)] if soundtrack is not None else []) + VIDEO_ARGS
-                     + (AUDIO_ARGS + ["-shortest"] if soundtrack is not None else ["-an"])
+                     + (audio_args(lufs) + ["-shortest"] if soundtrack is not None else ["-an"])
                      + ["-movflags", "+faststart", str(out)])
         try:
             self.process = subprocess.Popen(self.argv, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
@@ -143,7 +149,7 @@ def _run(argv, timeout, what):
     return text
 
 
-def join(parts, soundtrack, out, timeout=1800):
+def join(parts, soundtrack, out, timeout=1800, lufs=-16):
     """A long video from its chapter parts: the pictures are copied as they are (FFmpeg's concat demuxer; the parts share
     one encoder setting, so nothing is encoded twice) and the whole video's soundtrack is added with one loudness pass
     over all of it, so the music runs on across chapter joins and the level is the same everywhere."""
@@ -160,7 +166,7 @@ def join(parts, soundtrack, out, timeout=1800):
               "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy",
               # The copied stream keeps BT.709 TV range; these tag the container so players read it that way.
               "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709"]
-             + AUDIO_ARGS + ["-shortest", "-movflags", "+faststart", str(out)],
+             + audio_args(lufs) + ["-shortest", "-movflags", "+faststart", str(out)],
              timeout, "join the chapters")
     finally:
         listing.unlink(missing_ok=True)
@@ -180,11 +186,11 @@ def count_frames(path, timeout=600):
     return int(found[-1])
 
 
-def loudness(path):
+def loudness(path, lufs=-16):
     exe = find()
     if not exe:
         raise RuntimeError(MISSING)
-    result = subprocess.run([exe, "-i", str(path), "-af", LOUDNORM + ":print_format=json", "-f", "null", "-"],
+    result = subprocess.run([exe, "-i", str(path), "-af", audio_args(lufs)[5] + ":print_format=json", "-f", "null", "-"],
                             capture_output=True, timeout=180,
                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     stderr = result.stderr.decode("utf-8", "replace")

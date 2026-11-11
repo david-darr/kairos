@@ -49,6 +49,7 @@ export function beatLabel(b) {
   if (b.kind === 'scene') return b.scene?.setting ? `${b.scene.setting}, ${b.scene.shot || 'medium'} shot` : 'Scene';
   if (b.kind === 'stage') return b.stage?.set ? `3D ${b.stage.set} set, ${b.stage.shot || 'medium'} shot` : '3D stage';
   if (b.kind === 'voxel') return b.voxel?.world ? `Blocky ${b.voxel.world.replace('-', ' ')}, ${b.voxel.time || 'day'}, ${b.voxel.shot || 'medium'} shot` : 'Blocky world';
+  if (b.kind === 'story') return b.say ? `${b.flashback ? 'Flashback: ' : ''}${b.say}` : `Story shot, ${b.story?.place || 'meadow'}`;
   return 'No text';
 }
 // Chapters (long-form) as markers at the start of their beat.

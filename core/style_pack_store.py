@@ -52,7 +52,7 @@ RENDERERS = ("2d-engine", "blender", "threejs")
 # The built-in pack each renderer's user packs are drawn by (the last is the default). Pack B (glossy-3d) runs on three.js,
 # built in, or on Blender when it is installed (core/blender_tools.py); a Blender pack still renders, with three.js and a
 # plain note, on a machine without Blender.
-BASES = {"2d-engine": ("motion-type", "flat-2d"), "blender": ("glossy-3d",), "threejs": ("voxel-3d", "glossy-3d")}
+BASES = {"2d-engine": ("motion-type", "flat-2d"), "blender": ("glossy-3d",), "threejs": ("block-classic", "voxel-3d", "glossy-3d")}
 SETTINGS = ("meadow", "city", "space", "room", "ocean", "lab")
 SHOTS = ("wide", "medium", "close")
 PROPS = ("sun", "moon", "star", "cloud", "lightbulb", "heart", "book", "planet", "drop", "leaf", "gear", "arrow",
@@ -65,6 +65,8 @@ STAGE_PROPS = ("ball", "block", "pillar", "ring", "coin")
 VOXEL_WORLDS = ("meadow", "cave", "village", "sky-island", "ocean")
 VOXEL_PROPS = ("gem", "lantern", "crate", "flag", "ball", "star")
 VOXEL_TIMES = ("day", "dusk", "night")
+# Pack C classic (static/motion/classic.js): its places, props, times and the Story Short's shots.
+from core.style_packs import STORY_PLACES, STORY_PROPS, STORY_TIMES, STORY_SHOTS   # noqa: E402
 TRANSITIONS = ("cut", "whip", "zoom", "flip", "dither", "mosaic", "wipe")
 MOODS = ("energetic", "calm", "warm", "dark", "playful")
 LIGHTING = ("flat", "soft", "glow")
@@ -210,13 +212,14 @@ def validate(spec: dict) -> dict:
         _error("characters", "the motion-type base has no characters; use the flat-2d base for a character set.")
     scenes = s.setdefault("scenes", {})
     _fields(scenes, "scenes", SCENE_FIELDS)
-    voxel = s["base"] == "voxel-3d"
-    settings, props = (VOXEL_WORLDS, VOXEL_PROPS) if voxel else (STAGE_SETS, STAGE_PROPS) if s["base"] == "glossy-3d" else (SETTINGS, PROPS)
-    rules = [("settings", settings), ("shots", SHOTS), ("props", props), ("cameras", CAMERAS), ("transitions", TRANSITIONS)]
-    if voxel:
-        rules.append(("times", VOXEL_TIMES))
+    voxel, classic = s["base"] == "voxel-3d", s["base"] == "block-classic"
+    settings, props = (VOXEL_WORLDS, VOXEL_PROPS) if voxel else (STORY_PLACES, STORY_PROPS) if classic else \
+        (STAGE_SETS, STAGE_PROPS) if s["base"] == "glossy-3d" else (SETTINGS, PROPS)
+    rules = [("settings", settings), ("shots", STORY_SHOTS if classic else SHOTS), ("props", props), ("cameras", CAMERAS), ("transitions", TRANSITIONS)]
+    if voxel or classic:
+        rules.append(("times", STORY_TIMES if classic else VOXEL_TIMES))
     elif "times" in scenes:
-        _error("scenes.times", "only a voxel-3d (blocky world) pack has times of day.")
+        _error("scenes.times", "only a blocky world pack (voxel-3d or block-classic) has times of day.")
     for key, allowed in rules:
         scenes[key] = _subset(scenes.get(key, list(allowed)), f"scenes.{key}", allowed, 0 if key == "props" else 1)
     pacing = s.setdefault("pacing", {})
@@ -257,9 +260,9 @@ def validate(spec: dict) -> dict:
 
 
 # Which character form each base casts, and the plain names used in messages.
-FORM_OF_BASE = {"flat-2d": "2d", "glossy-3d": "3d", "voxel-3d": "voxel"}
-FORM_NAMES = {"2d": "flat (2D)", "3d": "glossy 3D", "voxel": "blocky"}
-BASE_NAMES = {"flat-2d": "flat 2D", "glossy-3d": "glossy 3D", "voxel-3d": "blocky world"}
+FORM_OF_BASE = {"flat-2d": "2d", "glossy-3d": "3d", "voxel-3d": "voxel", "block-classic": "block"}
+FORM_NAMES = {"2d": "flat (2D)", "3d": "glossy 3D", "voxel": "blocky", "block": "classic block"}
+BASE_NAMES = {"flat-2d": "flat 2D", "glossy-3d": "glossy 3D", "voxel-3d": "blocky world", "block-classic": "classic block"}
 
 
 def check_characters(spec) -> list[str]:
@@ -525,15 +528,16 @@ def rule_notes(project, data) -> list[str]:
             notes.append(f"{label} uses the {b.get('camera')} camera, which the {data['name']} pack does not use.")
         if i < len(project["beats"]) - 1 and b.get("transition", "cut") not in scenes["transitions"]:
             notes.append(f"{label} uses the {b.get('transition')} transition, which the {data['name']} pack does not use.")
-        if b["kind"] in ("scene", "stage", "voxel"):
+        if b["kind"] in ("scene", "stage", "voxel", "story"):
             scene = b.get(b["kind"]) or {}
-            place = {"scene": scene.get("setting"), "stage": scene.get("set"), "voxel": scene.get("world")}[b["kind"]]
+            place = {"scene": scene.get("setting"), "stage": scene.get("set"), "voxel": scene.get("world"), "story": scene.get("place")}[b["kind"]]
             if place not in scenes["settings"]:
                 notes.append(f"{label} is set in {place}, outside the {data['name']} pack's settings.")
-            if b["kind"] == "voxel" and scene.get("time") not in scenes.get("times", VOXEL_TIMES):
+            if b["kind"] in ("voxel", "story") and scene.get("time") not in scenes.get("times", VOXEL_TIMES):
                 notes.append(f"{label} is set at {scene.get('time')}, outside the {data['name']} pack's times of day.")
-            if scene.get("shot") not in scenes["shots"]:
-                notes.append(f"{label} is a {scene.get('shot')} shot, outside the {data['name']} pack's shots.")
+            for shot in [s.get("shot") for s in scene.get("shots", [])] if b["kind"] == "story" else [scene.get("shot")]:
+                if shot not in scenes["shots"]:
+                    notes.append(f"{label} is a {shot} shot, outside the {data['name']} pack's shots.")
             for prop in scene.get("props", []):
                 thing = prop.get("icon") or prop.get("shape") or prop.get("kind")
                 if thing not in scenes["props"]:
@@ -669,9 +673,45 @@ STARTER_VOXEL = {
     "voice": {"voice": "af_heart"},
     "director_brief": STARTER_VOXEL_BRIEF,
 }
+# Pack C classic's starter (David, 2026-11-10): the classic block world and the Story Short, with Kairos's own three block
+# characters (Rook, Fenn, Juno), each with an outfit, a speaker colour and a voice. Generic name; no game's name anywhere.
+STARTER_CLASSIC_ID = "classic-block-story"
+STARTER_CLASSIC_BRIEF = (
+    "Classic block story. Short dialogue stories in a classic block world, told by our own block characters, made in the "
+    "Story Short format: 1080 x 1920, the speaker's avatar on top (a dark gaming room, a headset, LEDs in their colour) over "
+    "the block scene, no narrator, one word of the line at a time in a heavy outlined caption.\n\n"
+    "Story shape: the one who did wrong starts in cartoon danger (hanging off a cliff, trapped, sinking) and calls for help; "
+    "a friend comes, hints at what he did, and a sepia flashback in another place shows it with a big physical payoff "
+    "(something blows apart, smashes or splats), ending on the friend upset; back to now, he begs, the friend says one cold "
+    "line, waves and leaves; a second friend the same with a different wrong; the danger lands and, falling, he asks for a "
+    "like and a subscribe. About 13 lines and 18 shots in 25 seconds, cuts every 0.7 to 2.3 seconds, at least three places.\n\n"
+    "Each episode its own wrong, places and payoff: never the same setup twice (YouTube's inauthentic content rule). Keep it "
+    "slapstick: nobody is really hurt, and no line opens on an animal or a child in distress.\n\n"
+    "Look: hard pixel blocks drawn in code (grass, dirt, stone, logs, leaves, planks, water, flowers), box clouds, a warm "
+    "sun, every pose snapping on held keys, no motion blur or soft focus. Never another game's textures, skins, sounds, "
+    "mobs or name, nothing that looks like another channel's characters, and never that game's name in a title, tag, "
+    "caption or thumbnail.\n\n"
+    "Audience: this look draws children. Say honestly on the channel and every post whether it is made for kids, keep calls "
+    "to action free of personal data, and keep every post's AI label on.")
+STARTER_CLASSIC = {
+    "name": "Classic block story",
+    "summary": "Story Shorts in a classic block world: our own block characters, each with a voice and a colour, flashbacks and payoffs.",
+    "renderer": "threejs", "base": "block-classic",
+    "look": {"design_look": "brutalist", "families": ["square", "round", "triangle"], "outline": 7, "lighting": "flat",
+             "palette": {"sky": ["#60a0f5", "#b2d6ff"], "far": "#62a03a", "mid": "#86603f", "near": "#7e7e80",
+                         "ground": "#3e7a28", "prop": "#96784c", "ink": "#101418", "glow": "#ffffff"}},
+    "scenes": {"settings": list(STORY_PLACES), "shots": list(STORY_SHOTS), "props": list(STORY_PROPS), "cameras": ["still"],
+               "transitions": ["cut"], "times": ["day", "dusk"]},
+    "pacing": {"words_per_second": 3.2, "shot_seconds": [1, 4], "hook_seconds": 2.5},
+    "captions": {"on": True, "case": "upper"},
+    "music": {"mood": "calm", "volume": .7},
+    "voice": {"voice": "af_heart"},
+    "director_brief": STARTER_CLASSIC_BRIEF,
+}
 STARTERS = {STARTER_ID: {"spec": STARTER, "characters": STARTER_CHARACTERS},
             STARTER_3D_ID: {"spec": STARTER_3D, "characters": ("round",), "form": "3d"},
-            STARTER_VOXEL_ID: {"spec": STARTER_VOXEL, "characters": ("round",), "form": "voxel"}}
+            STARTER_VOXEL_ID: {"spec": STARTER_VOXEL, "characters": ("round",), "form": "voxel"},
+            STARTER_CLASSIC_ID: {"spec": STARTER_CLASSIC, "characters": ("square", "round", "triangle"), "form": "block"}}
 
 
 def _character_for(data: dict, by: str) -> dict:

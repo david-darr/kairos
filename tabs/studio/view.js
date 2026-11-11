@@ -12,12 +12,14 @@ const LAYOUT_URL = '/static/motion/layout.js';  // read only: the copy safe area
 
 const BASE = '/api/tab-studio';
 const ASPECTS = ['16:9', '9:16', '1:1'];
-const KINDS = ['title', 'statement', 'big-number', 'list', 'image', 'quote', 'split', 'logo', 'end', 'scene', 'stage', 'voxel'];
+const KINDS = ['title', 'statement', 'big-number', 'list', 'image', 'quote', 'split', 'logo', 'end', 'scene', 'stage', 'voxel', 'story'];
 const NEW_SCENE = { setting: 'meadow', shot: 'medium', cast: [], props: [] };
 // Pack B: a 3D studio shot (static/motion/stage.js): set tone, shot, 3D cast, stand-in people, glossy props, labels over heads.
 const NEW_STAGE = { set: 'lavender', shot: 'medium', cast: [], people: { count: 0 }, props: [], labels: [] };
 // Pack C: a blocky voxel world shot (static/motion/voxel.js): world, time of day, shot, seed, blocky cast, people, props, labels.
 const NEW_VOXEL = { world: 'meadow', time: 'day', shot: 'medium', seed: 0, cast: [], people: { count: 0 }, props: [], labels: [] };
+// A Story Short shot (Pack C classic): its scene, edited as JSON like the blocky world.
+const NEW_STORY = { place: 'meadow', seed: 0, time: 'day', cast: [], shots: [{ shot: 'medium', on: 0 }], fx: [], props: [], sfx: [], keys: [] };
 // A Pack A video's cast: each character's spec at the version the project pins (routes/character_routes.py).
 const castCache = new Map();
 async function castSpecs(p) {
@@ -122,9 +124,9 @@ async function preview(canvas, p, aspect, extra = {}) {
     player?.dispose?.();
     // A computer whose browser cannot draw WebGL (no GPU, a blocked context) still previews everything else: its 3D
     // shots show as stand-in cards of the same length. Renders are unchanged.
-    if (!p.beats.some(b => b.kind === 'stage' || b.kind === 'voxel') || /replaced before it was ready/.test(error.message)) throw error;
-    const flat = { ...p, characters, beats: p.beats.map(b => b.kind !== 'stage' && b.kind !== 'voxel' ? b
-      : { ...b, kind: 'statement', stage: undefined, voxel: undefined, text: b.text || '3D shot', sub: '3D shot, drawn in the render' }) };
+    if (!p.beats.some(b => b.kind === 'stage' || b.kind === 'voxel' || b.kind === 'story') || /replaced before it was ready/.test(error.message)) throw error;
+    const flat = { ...p, characters, beats: p.beats.map(b => b.kind !== 'stage' && b.kind !== 'voxel' && b.kind !== 'story' ? b
+      : { ...b, kind: 'statement', stage: undefined, voxel: undefined, story: undefined, text: b.text || '3D shot', sub: '3D shot, drawn in the render' }) };
     delete flat.renderer;
     const stand = mount(canvas, flat, options);
     await stand.ready;
@@ -1215,6 +1217,7 @@ async function editor(host, id, looks, back, parentDisposed) {
         if (v === 'scene') b.scene ||= structuredClone(NEW_SCENE); else delete b.scene;
         if (v === 'stage') b.stage ||= structuredClone(NEW_STAGE); else delete b.stage;
         if (v === 'voxel') b.voxel ||= structuredClone(NEW_VOXEL); else delete b.voxel;
+        if (v === 'story') b.story ||= structuredClone(NEW_STORY); else for (const k of ['story', 'speaker', 'flashback', 'gap', 'hold']) delete b[k];
       }); drawInspector(); drawProject();
     }), path + '.kind'),
     textField('Text', 'text', 140, true), only(textField('Supporting text', 'sub', 100), !['big-number', 'list'].includes(kind)),
@@ -1232,6 +1235,22 @@ async function editor(host, id, looks, back, parentDisposed) {
         catch { voxelField.querySelector('.meta').textContent = 'Not valid JSON yet; nothing saved.'; }
       });
       inspector.append(group('Blocky world', [voxelField], { 'data-group': 'voxel' }));
+    }
+    if (kind === 'story') {
+      // A Story Short shot (Pack C classic), edited as JSON: who speaks, the flashback flag and the scene.
+      const storyText = el('textarea', { rows: 12, 'aria-label': 'Story shot as JSON', spellcheck: 'false' });
+      const pick = b => ({ speaker: b.speaker, flashback: b.flashback, gap: b.gap, hold: b.hold, story: b.story || NEW_STORY });
+      storyText.value = JSON.stringify(pick(beat), null, 1);
+      const storyField = field('Story shot (speaker, flashback, gap or hold, story: place, cast, shots, fx, props, sfx, keys)', storyText, path + '.story',
+        'Places: meadow, cliff, village, party, cave, beach, sky-island. Shots cut on words ({word: n}). Cast classic block characters (form block).');
+      storyText.addEventListener('input', () => {
+        try {
+          const value = JSON.parse(storyText.value);
+          changed(p => { const b = p.beats[selected]; for (const k of ['speaker', 'flashback', 'gap', 'hold', 'story']) { if (value[k] === undefined) delete b[k]; else b[k] = value[k]; } });
+          storyField.querySelector('.meta').textContent = 'Saved.';
+        } catch { storyField.querySelector('.meta').textContent = 'Not valid JSON yet; nothing saved.'; }
+      });
+      inspector.append(group('Story shot', [storyField], { 'data-group': 'story' }));
     }
     // Pictures.
     const upload = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/gif,image/webp', 'aria-label': 'Upload an image' });
@@ -1353,7 +1372,8 @@ async function editor(host, id, looks, back, parentDisposed) {
   function castGroup() {
     const box = group('Cast', [], { 'data-group': 'cast' });
     const cast = state.p.cast || [];
-    const used = new Set(state.p.beats.flatMap(b => b.kind === 'scene' ? (b.scene?.cast || []).map(m => m.character) : b.kind === 'stage' ? (b.stage?.cast || []).map(m => m.character) : b.kind === 'voxel' ? (b.voxel?.cast || []).map(m => m.character) : []));
+    const used = new Set(state.p.beats.flatMap(b => b.kind === 'scene' ? (b.scene?.cast || []).map(m => m.character) : b.kind === 'stage' ? (b.stage?.cast || []).map(m => m.character)
+      : b.kind === 'voxel' ? (b.voxel?.cast || []).map(m => m.character) : b.kind === 'story' ? [...(b.story?.cast || []).map(m => m.character), ...(b.speaker ? [b.speaker] : [])] : []));
     if (state.p.beats.some(b => b.kind === 'scene') || cast.length) box.append(field('Scene palette', select('Scene palette', PALETTES, state.p.palette || 'dawn', v => changed(p => { p.palette = v; })), 'palette'));
     cast.forEach((entry, i) => {
       const known = accountCharacters?.find(c => c.id === entry.character), name = names[entry.character] || known?.name || 'Character';

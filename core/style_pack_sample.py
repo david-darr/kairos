@@ -19,6 +19,13 @@ people and their numbers are made up, on purpose; the script states no real figu
 A blocky world pack (Pack C) gets a short explainer across its worlds and times of day: why the sea is salty (rain wears
 salt out of rock, rivers carry it to the sea, the sun lifts fresh water and leaves the salt; seawater is about 3.5% salt).
 Standard science from memory, not checked against a source in this module. three.js only.
+
+A classic block pack (Pack C classic, David 2026-11-10) gets a Story Short in its own format (9:16, the avatar strip
+over the scene, pure dialogue): an original story with Kairos's own three block characters in the reference's shape.
+Rook hangs off a cliff and calls for help; Fenn comes, and a sepia flashback shows Rook blowing up Fenn's house, ending on
+Fenn crying; Fenn says one cold line, waves and leaves; Juno comes, and a flashback shows Rook pushing her birthday cake
+into her face; she leaves too; Rook's hand slips and, falling, he asks for a like and a subscribe. Cartoon slapstick: no
+one is hurt on screen, and no line names an animal or a child in danger (the Evaluator's distress-hook rule).
 """
 from __future__ import annotations
 
@@ -154,9 +161,89 @@ def beats_voxel(data) -> list[dict]:
     ]
 
 
+TITLE_STORY = "Rook Hangs On"
+ASPECT_STORY = "9:16"
+
+
+def beats_story(data) -> list[dict]:
+    """The classic pack's sample: a Story Short of 17 shots and 19 cuts, about 30 seconds, three places (the cliff now, the
+    village and the party in two sepia flashbacks). Every line is spoken by its character's own voice."""
+    cast = [e["character"] for e in data["characters"]]
+    rook, fenn, juno = (cast + cast[:1] * 3)[:3]
+    hang = lambda **more: {"character": rook, "x": 0, "y": 0, "pose": "hang", "mood": "scared", **more}         # noqa: E731
+    on_edge = lambda who, x, **more: {"character": who, "x": x, "y": .9, "face": "c0", **more}                 # noqa: E731
+    cliff = lambda *people, shots, **more: {"place": "cliff", "seed": 2, "cast": [hang(), *people], "shots": shots, **more}   # noqa: E731
+    return [
+        {"id": "help", "kind": "story", "speaker": rook, "say": "Help! Somebody help me!", "gap": .25,
+         "story": cliff(shots=[{"shot": "close", "on": 0, "shake": True, "push": .4}, {"shot": "wide", "on": 0, "at": {"word": 1}, "push": .5}],
+                        sfx=[{"kind": "gasp", "at": {"t": 0}}], keys=["help"])},
+        {"id": "fenn-comes", "kind": "story", "speaker": fenn, "say": "Rook? What happened to you?", "gap": .3,
+         "story": cliff({"character": fenn, "x": 3.5, "y": .9, "pose": "walk", "face": "c0", "move": {"to": [.7, .9], "at": {"t": 0}}},
+                        shots=[{"shot": "low", "on": 1, "push": .3}], sfx=[{"kind": "steps", "at": {"t": 0}}])},
+        {"id": "pull", "kind": "story", "speaker": rook, "say": "Fenn! Please, pull me up!", "gap": .25,
+         "story": cliff(on_edge(fenn, .7, pose="idle", mood="neutral"), shots=[{"shot": "close", "on": 0, "shake": True, "push": .35}],
+                        keys=["please"])},
+        {"id": "house", "kind": "story", "speaker": fenn, "say": "Like you pulled my house apart?", "gap": .35,
+         "story": cliff(on_edge(fenn, .7, pose="hips", mood="angry"), shots=[{"shot": "low", "on": 1, "push": .3}],
+                        sfx=[{"kind": "sting", "at": {"word": 4}}], keys=["house"])},
+        {"id": "crate", "kind": "story", "speaker": rook, "say": "One little crate. Boom!", "gap": .9, "flashback": True,
+         "story": {"place": "village", "seed": 1, "cast": [{"character": rook, "x": 6.5, "y": 5.6, "pose": "laugh", "mood": "smug", "face": 20}],
+                   "fx": [{"kind": "fuse", "x": 10.5, "y": 8.4, "at": {"t": 0}}, {"kind": "blast", "x": 10.5, "y": 8.4, "radius": 3.2, "at": {"word": 3}}],
+                   "shots": [{"shot": "medium", "on": 0, "push": .3}, {"shot": "wide", "on": 0, "at": {"word": 3}, "push": .2}],
+                   "sfx": [{"kind": "riser", "at": {"word": 3}}, {"kind": "boom", "at": {"word": 3}}], "keys": ["boom"]}},
+        {"id": "crying", "kind": "story", "speaker": fenn, "say": "My house! I built that!", "gap": .45, "flashback": True,
+         "story": {"place": "village", "seed": 1, "cast": [{"character": fenn, "x": 9, "y": 5.2, "pose": "cry", "mood": "crying"},
+                                                           {"character": rook, "x": 5.6, "y": 4.4, "pose": "laugh", "mood": "laughing", "face": "c0"}],
+                   "shots": [{"shot": "close", "on": 0, "push": .3}, {"shot": "medium", "on": 0, "with": 1, "at": {"word": 2}, "push": .2}],
+                   "keys": ["house"]}},
+        {"id": "joke", "kind": "story", "speaker": rook, "say": "It was a joke! I'm sorry!", "gap": .25,
+         "story": cliff(on_edge(fenn, .7, pose="hips", mood="angry"), shots=[{"shot": "close", "on": 0, "shake": True, "push": .35}],
+                        sfx=[{"kind": "whoosh", "at": {"t": 0}}], keys=["sorry"])},
+        {"id": "fenn-bye", "kind": "story", "speaker": fenn, "say": "Enjoy the view. Bye.", "gap": .8,
+         "story": cliff(on_edge(fenn, .7, pose="idle", mood="smug", changes=[{"at": {"word": 3}, "pose": "wave"}], leave={"at": {"word": 3, "after": .55}}),
+                        shots=[{"shot": "low", "on": 1, "push": .25}, {"shot": "medium", "on": 1, "at": {"word": 3}, "push": .3}], keys=["bye"])},
+        {"id": "juno-comes", "kind": "story", "speaker": juno, "say": "Rook? Is that you down there?", "gap": .3,
+         "story": cliff({"character": juno, "x": -3.6, "y": .9, "pose": "walk", "face": "c0", "move": {"to": [-.7, .9], "at": {"t": 0}}},
+                        shots=[{"shot": "low", "on": 1, "push": .3}], sfx=[{"kind": "steps", "at": {"t": 0}}])},
+        {"id": "grab", "kind": "story", "speaker": rook, "say": "Juno! Grab my hand, please!", "gap": .25,
+         "story": cliff(on_edge(juno, -.7, pose="idle"), shots=[{"shot": "close", "on": 0, "shake": True, "push": .35}], keys=["please"])},
+        {"id": "cake", "kind": "story", "speaker": juno, "say": "Like you grabbed my birthday cake?", "gap": .35,
+         "story": cliff(on_edge(juno, -.7, pose="hips", mood="angry"), shots=[{"shot": "low", "on": 1, "push": .3}],
+                        sfx=[{"kind": "sting", "at": {"word": 4}}], keys=["cake"])},
+        {"id": "party", "kind": "story", "speaker": rook, "say": "Happy birthday, Juno!", "gap": .7, "flashback": True,
+         "story": {"place": "party", "seed": 3,
+                   "cast": [{"character": rook, "x": 2.3, "y": 1.2, "pose": "idle", "mood": "smug", "face": "c1",
+                             "changes": [{"at": {"word": 2}, "pose": "shove", "mood": "laughing"}]},
+                            {"character": juno, "x": 3.6, "y": .8, "pose": "idle", "mood": "happy", "face": "camera"}],
+                   "props": [{"kind": "cake", "x": 3.5, "y": 2.5}, {"kind": "balloon", "x": 1.2, "y": 3.4, "colour": "#e8434e"},
+                             {"kind": "balloon", "x": 6.4, "y": 3.2, "colour": "#3ec7ff"}, {"kind": "balloon", "x": 5.6, "y": 3.9, "colour": "#ffd23f"}],
+                   "fx": [{"kind": "splat", "on": 1, "at": {"word": 2}}],
+                   "shots": [{"shot": "medium", "on": 0, "with": 1, "push": .25}, {"shot": "close", "on": 1, "at": {"word": 2}, "push": .3}],
+                   "sfx": [{"kind": "splat", "at": {"word": 2}}]}},
+        {"id": "my-cake", "kind": "story", "speaker": juno, "say": "My cake...", "gap": .45, "flashback": True,
+         "story": {"place": "party", "seed": 3, "cast": [{"character": juno, "x": 3.6, "y": .8, "pose": "cry", "mood": "crying"}],
+                   "props": [{"kind": "balloon", "x": 1.2, "y": 3.4, "colour": "#e8434e"}],
+                   "shots": [{"shot": "close", "on": 0, "push": .3}], "keys": ["cake"]}},
+        {"id": "just-cake", "kind": "story", "speaker": rook, "say": "It was just cake!", "gap": .25,
+         "story": cliff(on_edge(juno, -.7, pose="hips", mood="angry"), shots=[{"shot": "close", "on": 0, "shake": True, "push": .35}],
+                        sfx=[{"kind": "whoosh", "at": {"t": 0}}])},
+        {"id": "juno-bye", "kind": "story", "speaker": juno, "say": "Then hang in there. Bye!", "gap": .8,
+         "story": cliff(on_edge(juno, -.7, pose="idle", mood="smug", changes=[{"at": {"word": 4}, "pose": "wave"}], leave={"at": {"word": 4, "after": .55}}),
+                        shots=[{"shot": "low", "on": 1, "push": .25}, {"shot": "medium", "on": 1, "at": {"word": 4}, "push": .3}], keys=["bye"])},
+        {"id": "slip", "kind": "story", "speaker": rook, "say": "No, no, no, no!", "gap": .3,
+         "story": cliff(shots=[{"shot": "close", "on": 0, "shake": True, "push": .3}, {"shot": "top", "on": 0, "at": {"word": 2}, "push": .4}],
+                        sfx=[{"kind": "gasp", "at": {"word": 3}}], keys=["no"])},
+        {"id": "fall", "kind": "story", "speaker": rook, "say": "Hit like and subscribe!", "gap": .9,
+         "story": cliff(fx=[{"kind": "fall", "on": 0, "at": {"t": 0}}], shots=[{"shot": "orbit", "on": 0}],
+                        sfx=[{"kind": "whoosh", "at": {"t": 0}}], keys=["like", "subscribe"])},
+    ]
+
+
 def beats(data) -> list[dict]:
     """The sample's beats in the pack's own rules."""
     scenes = data["scenes"]
+    if data["base"] == "block-classic" and data["characters"]:
+        return beats_story(data)
     if data["base"] == "glossy-3d" and data["characters"]:
         return beats_3d(data)
     if data["base"] == "voxel-3d" and data["characters"]:
@@ -215,10 +302,15 @@ def project_options(data, pack_id, version) -> dict:
     options = style_pack_store.video_defaults(data)
     if data["base"] == "flat-2d" and data["characters"]:
         options["palette"] = data["look"]["palette"] if isinstance(data["look"]["palette"], str) else "dawn"
-    elif data["base"] not in ("glossy-3d", "voxel-3d") or not data["characters"]:
+    elif data["base"] not in ("glossy-3d", "voxel-3d", "block-classic") or not data["characters"]:
         options.pop("cast", None)
-    options.update(aspects=[ASPECT], style_pack={"id": pack_id, "version": version})
+    options.update(aspects=[aspect_of(data)], style_pack={"id": pack_id, "version": version})
     return options
+
+
+def aspect_of(data) -> str:
+    """A classic block pack's sample is a Story Short (9:16); every other pack's is 16:9."""
+    return ASPECT_STORY if data["base"] == "block-classic" and data["characters"] else ASPECT
 
 
 def waiting_characters(data) -> list[dict]:
@@ -263,15 +355,16 @@ async def make(pack_id, version, owner: str, by: str = "") -> dict:
         return {**meta, "step": "sheets"}
     style_pack_store.set_sample_status(pack_id, version, "rendering")
     try:
-        title = {"glossy-3d": TITLE_3D, "voxel-3d": TITLE_VOXEL}.get(data["base"], TITLE) if data["characters"] else TITLE
+        title = {"glossy-3d": TITLE_3D, "voxel-3d": TITLE_VOXEL, "block-classic": TITLE_STORY}.get(data["base"], TITLE) if data["characters"] else TITLE
         project = video_store.create(title, owner=owner, beats=copy.deepcopy(beats(data)), **project_options(data, pack_id, version))
-        job = await video_render.render(project["id"], ASPECT, sample_of=(pack_id, version))
+        aspect = aspect_of(data)
+        job = await video_render.render(project["id"], aspect, sample_of=(pack_id, version))
         if job["status"] != "ready":
             raise RuntimeError(job["status"])
         renders = video_store._folder(project["id"]) / "renders"
         shutil.copy2(job["path"], style_pack_store.sample_path(pack_id, version, "mp4"))
-        shutil.copy2(renders / f"sheet-{ASPECT.replace(':', '-')}.png", style_pack_store.sample_path(pack_id, version, "sheet"))
-        shutil.copy2(renders / f"thumb-{ASPECT.replace(':', '-')}.png", style_pack_store.sample_path(pack_id, version, "thumb"))
+        shutil.copy2(renders / f"sheet-{aspect.replace(':', '-')}.png", style_pack_store.sample_path(pack_id, version, "sheet"))
+        shutil.copy2(renders / f"thumb-{aspect.replace(':', '-')}.png", style_pack_store.sample_path(pack_id, version, "thumb"))
     except Exception as error:
         style_pack_store.set_sample_status(pack_id, version, "failed: " + str(error)[:500])
         raise
