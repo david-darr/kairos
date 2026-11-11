@@ -672,5 +672,53 @@ class SixthReview(TeamCase):
         bot_spend._held.clear()
 
 
+class SeventhReview(TeamCase):
+    """Codex's seventh review of 2026-11-11: a Google change is risky unless it is a listed safe edit."""
+
+    def test_google_changes_are_risky_unless_listed_safe(self):
+        from core import google_workspace as google
+        D, O = bot_policy.DESTRUCTIVE, bot_policy.OUTBOUND
+        risky = [("sheets", "POST", "/spreadsheets/s/values/A1:B2:clear", {}, None, D),
+                 ("sheets", "POST", "/spreadsheets/s/values:batchClear", {"ranges": ["A1"]}, None, D),
+                 ("drive", "POST", "/files/f/permissions", {"type": "user", "role": "reader"}, {"sendNotificationEmail": "true"}, O),
+                 ("drive", "PATCH", "/files/f/permissions/p1", {"role": "writer"}, None, O),
+                 ("drive", "DELETE", "/files/f/permissions/p1", None, None, D),
+                 ("drive", "POST", "/files/f/watch", {}, None, O),                      # an endpoint not on the list
+                 ("someapi", "PUT", "/anything", {}, None, O),
+                 ("calendar", "POST", "/calendars/primary/events", {"summary": "x", "attendees": [{"email": "a@b.c"}]}, None, O),
+                 ("calendar", "PATCH", "/calendars/primary/events/e1", {"summary": "y"}, {"sendUpdates": "all"}, O),
+                 ("drive", "PATCH", "/files/f", {"name": "x", "copyRequiresWriterPermission": True}, None, O)]
+        safe = [("drive", "PATCH", "/files/f", {"name": "Renamed"}, None),
+                ("drive", "PATCH", "/files/f", {}, {"addParents": "p2", "removeParents": "p1"}),
+                ("drive", "PATCH", "/files/f", {"trashed": False}, None),
+                ("drive", "POST", "/files/f/copy", {"name": "Copy"}, None),
+                ("sheets", "PUT", "/spreadsheets/s/values/A1:B2", {"values": [[1]]}, {"valueInputOption": "USER_ENTERED"}),
+                ("sheets", "POST", "/spreadsheets/s/values/A1:append", {"values": [[1]]}, None),
+                ("sheets", "POST", "/spreadsheets/s:batchUpdate", {"requests": [{"addSheet": {}}]}, None),
+                ("forms", "POST", "/forms/f:batchUpdate", {"requests": [{"createItem": {}}]}, None),
+                ("calendar", "POST", "/calendars/primary/events", {"summary": "Focus time"}, None),
+                ("calendar", "PATCH", "/calendars/primary/events/e1", {"summary": "Moved"}, {"sendUpdates": "none"})]
+        for api, method, path, body, params, expected in risky:
+            self.assertEqual(google.request_kind(api, method, path, body, params), expected, (api, method, path))
+        for api, method, path, body, params in safe:
+            self.assertIsNone(google.request_kind(api, method, path, body, params), (api, method, path))
+
+    async def test_a_capped_bot_cannot_share_or_clear_at_the_last_check(self):
+        from unittest.mock import AsyncMock
+        import httpx
+        from core import google_workspace as google
+        from services import bot_spend
+        bot = make_bot("Sharer")
+        bot_spend._held.clear()
+        sent = AsyncMock(side_effect=AssertionError("sent at the cap"))
+        with patch.object(bot_spend, "budget", return_value={"capped": True}), patch.object(google, "_token", AsyncMock(return_value="t")), \
+                patch.object(httpx.AsyncClient, "request", sent), bot_policy.bot_call(bot):
+            for api, path, body in (("drive", "/files/abc/permissions", {"type": "user", "role": "reader"}),
+                                    ("sheets", "/spreadsheets/s/values/A1:B2:clear", {})):
+                with self.assertRaises(google.GoogleError):
+                    await google.request(api, "POST", path, body=body, account="a")
+        bot_spend._held.clear()
+
+
 if __name__ == "__main__":
     unittest.main()

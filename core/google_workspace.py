@@ -613,7 +613,7 @@ async def request(api: str, method: str, path: str, *, params: dict | None = Non
     url = HOSTS[api] + path
     if before is None and method.upper() != "GET":
         # A bot's send, delete or change re-checks pause right before it goes; a send or a deletion also spend.
-        kind = request_kind(api, method, path, body)
+        kind = request_kind(api, method, path, body, params)
         before = lambda: _bot_still_allowed(kind)  # noqa: E731
     for retry in range(2):
         token = await _token(account, force=bool(retry))
@@ -650,21 +650,56 @@ async def request(api: str, method: str, path: str, *, params: dict | None = Non
     raise GoogleError("Google authorization expired; reconnect the account", 401)
 
 
-def request_kind(api: str, method: str, path: str, body) -> str | None:
-    """What a Google change is, for the last check's spend rule (sixth review, 2026-11-11): a DELETE, a Drive trash, or
-    a batch with any delete request is a deletion; a Gmail send or a Forms publish is a send; anything else None."""
+_DRIVE_FILE = re.compile(r"^/files/[^/:]+$")
+_SAFE_DRIVE_FIELDS = {"name", "starred", "description"}
+_SHEET_VALUES = re.compile(r"^/spreadsheets/[^/:]+/values/[^/]+(:append)?$")
+_EVENTS = re.compile(r"^/calendars/[^/]+/events(/[^/:]+)?$")
+
+
+def request_kind(api: str, method: str, path: str, body, params=None) -> str | None:
+    """What a bot's Google change is, for the last check's spend rule (seventh review, 2026-11-11). The rule is
+    inverted: every change is risky (a deletion, else a send) unless it is on this explicit list of safe edits inside
+    the person's own files and calendar. Unknown endpoints are risky.
+
+    Safe (None): Drive create, copy, upload, rename, star or unstar, describe, move, restore from trash; Sheets create, values update and
+    append, a batchUpdate with no delete request; Forms create, a batchUpdate with no delete request; Calendar event
+    create or edit with no attendees and no updates sent to anyone.
+    Deletions: any DELETE, a Drive trash, a Sheets values clear or batchClear, a batch with a delete request.
+    Everything else is a send: Gmail send, Drive sharing (permissions, which can email people), Forms publish,
+    YouTube uploads, Calendar events with attendees or sendUpdates, and any endpoint not listed."""
     from core import bot_policy
-    method, body = method.upper(), body if isinstance(body, dict) else {}
+    method = method.upper()
+    body = body if isinstance(body, dict) else {}
+    params = params if isinstance(params, dict) else {}
+    tail = path.rstrip("/")
     if method == "DELETE":
         return bot_policy.DESTRUCTIVE
-    if api == "drive" and body.get("trashed") is True:
+    if (api == "drive" and body.get("trashed") is True) or bot_policy._batch_deletes(body):
         return bot_policy.DESTRUCTIVE
-    if bot_policy._batch_deletes(body):
+    if api == "sheets" and (tail.endswith(":clear") or tail.endswith(":batchClear")
+                            or tail.endswith(":batchClearByDataFilter")):
         return bot_policy.DESTRUCTIVE
-    tail = path.rstrip("/")
-    if tail.endswith("/send") or tail.endswith(":setPublishSettings"):
-        return bot_policy.OUTBOUND
-    return None
+    if api == "drive":
+        if method == "POST" and (tail == "/files" or (tail.endswith("/copy") and _DRIVE_FILE.match(tail[:-5]))):
+            return None
+        if method == "PATCH" and _DRIVE_FILE.match(tail) and (set(body) <= _SAFE_DRIVE_FIELDS or body == {"trashed": False}):
+            return None   # rename, star, describe; a move is an empty body with addParents/removeParents
+    if api == "upload" and method == "POST" and tail == "/files":
+        return None
+    if api == "sheets":
+        if method == "POST" and tail == "/spreadsheets":
+            return None
+        if method in ("PUT", "POST") and _SHEET_VALUES.match(tail):
+            return None
+        if method == "POST" and tail.endswith(":batchUpdate"):
+            return None   # no delete request (checked above)
+    if api == "forms" and method == "POST" and (tail == "/forms" or tail.endswith(":batchUpdate")):
+        return None
+    if api == "calendar" and method in ("POST", "PATCH", "PUT") and _EVENTS.match(tail):
+        quiet = str(params.get("sendUpdates") or "none") == "none" and not body.get("attendees")
+        if quiet:
+            return None
+    return bot_policy.OUTBOUND
 
 
 def _bot_still_allowed(kind=None):
