@@ -1,6 +1,7 @@
 import { clamp, expoOut, pop, inOut, hash, seededRandom, zoomAbout, scrim, card, windowReveal, BAYER, contrast, readable, luminance, rgb } from './kit.js';
 import { drawScene, sceneBoxes, groundLine, packCard, drawCardSky, drawCardWorld } from './scene.js';
 import { stageModel, stagePose, labelsAt, actorBoxes } from './stage.js';
+import { voxelModel, voxelPose, asStage } from './voxel.js';
 import { normalizeTracks, stateAt, drawOverlay, overlayBoxes, frameIndex } from './overlay.js';
 import { isWord, normalizeProject, dimensions, safeArea, captionBand, captionAt, fitText, frameTime, beatAt, transitionAt, beatLayout, cameraAt, beatElapsed, transitionTransform, visibleBox, compositionAt, revealElapsed, listMarker } from './layout.js';
 
@@ -80,19 +81,30 @@ export function mount(canvas, input, options = {}) {
   const cardStyle = packLook ? { ...style, bg: packLook.bg, backdrop: packLook.backdrop, text: packLook.text, dim: packLook.dim, accent: packLook.accent,
     second: packLook.second, surface: packLook.surface, onAccent: packLook.onAccent, rule: packLook.rule, pattern: 'flat', reportBg: packLook.worstBg,
     palette: [packLook.text, packLook.dim, packLook.accent] } : style;
-  const styleOf = beat => beat.kind === 'scene' || beat.kind === 'stage' ? style : cardStyle;
+  const styleOf = beat => beat.kind === 'scene' || beat.kind === 'stage' || beat.kind === 'voxel' ? style : cardStyle;
   // Pack B (stage.js): 3D studio shots. three.js draws them here; with the Blender renderer this page is the overlay
   // pass instead (options.layer 'overlay'): stage shots stay transparent, everything else draws as usual, transitions
   // into and out of a stage shot are cuts, and the 3D pose of every frame is reported for Blender (kdPose).
   const overlay = options.layer === 'overlay', hasStage = project.beats.some(b => b.kind === 'stage');
+  // Pack C (voxel.js): blocky voxel world shots, drawn by three.js here. Pack C has no Blender path (a video with voxel
+  // beats never renders with Blender, core/video_store.py), so the overlay pass leaves them transparent like stage shots.
+  const hasVoxel = project.beats.some(b => b.kind === 'voxel');
   const models = new Map(), poses = new Map();
-  let stage3d = null;
-  const modelOf = beat => { if (!models.has(beat.id)) models.set(beat.id, stageModel(beat, project.characters)); return models.get(beat.id); };
+  let stage3d = null, voxel3d = null;
+  const modelOf = beat => {
+    if (!models.has(beat.id)) models.set(beat.id, beat.kind === 'voxel' ? voxelModel(beat, project.characters) : stageModel(beat, project.characters));
+    return models.get(beat.id);
+  };
   const poseOf = (beat, seconds) => {
     const key = `${beat.id}:${seconds.toFixed(5)}`;
-    if (!poses.has(key)) { if (poses.size > 64) poses.clear(); poses.set(key, stagePose(modelOf(beat), beat, seconds, w, h, project.captioned)); }
+    if (!poses.has(key)) {
+      if (poses.size > 64) poses.clear();
+      poses.set(key, (beat.kind === 'voxel' ? voxelPose : stagePose)(modelOf(beat), beat, seconds, w, h, project.captioned));
+    }
     return poses.get(key);
   };
+  // Labels and figure boxes read a voxel beat in the stage's shape (its `voxel` as `stage`).
+  const shaped = beat => beat.kind === 'voxel' ? asStage(beat) : beat;
   const measureCtx = buffer(doc, 1, 1).getContext('2d');
   const measure = (text, size, role) => { measureCtx.font = font(style, size, role); return measureCtx.measureText(text).width; };
   const images = new Map(), samples = new Map(), plans = new Map();
@@ -176,7 +188,12 @@ export function mount(canvas, input, options = {}) {
       stage3d = new StageRenderer(w, h, { ss: options.ss || 2 });
       for (const beat of project.beats) if (beat.kind === 'stage') stage3d.build(modelOf(beat));
     }
-    if (disposed) { stage3d?.dispose(); stage3d = null; throw new Error('This preview was replaced before it was ready.'); }
+    if (hasVoxel && !overlay) {
+      const { VoxelRenderer } = await import('./voxel3d.js');
+      voxel3d = new VoxelRenderer(w, h, { ss: options.ss || 2 });
+      for (const beat of project.beats) if (beat.kind === 'voxel') voxel3d.build(modelOf(beat));
+    }
+    if (disposed) { stage3d?.dispose(); stage3d = null; voxel3d?.dispose(); voxel3d = null; throw new Error('This preview was replaced before it was ready.'); }
     for (const beat of project.beats) plan(beat);
     await prepare(0).catch(error => { if (strict) throw error; });
     loaded = true; drawFrame(0);
@@ -189,6 +206,7 @@ export function mount(canvas, input, options = {}) {
       if (!overlay) g.drawImage(stage3d.render(modelOf(beat), poseOf(beat, seconds)), 0, 0);
       return;
     }
+    if (beat.kind === 'voxel') { if (!overlay) g.drawImage(voxel3d.render(modelOf(beat), poseOf(beat, seconds)), 0, 0); return; }
     g.fillStyle = style.bg; g.fillRect(0, 0, w, h);
     // A Pack A scene draws its own layered setting, props and cast (scene.js); the look keeps the type.
     if (beat.kind === 'scene') { drawScene(g, beat, project, w, h, groundLine(h, band, project.captioned), seconds, p); return; }
@@ -281,7 +299,7 @@ export function mount(canvas, input, options = {}) {
   const labelInk = '#231b2e', labelCard = '#ffffff';
   function stageLabels(beat, seconds) {
     const pose = poseOf(beat, seconds), out = [];
-    for (const label of labelsAt(modelOf(beat), beat, pose, seconds, w, h)) {
+    for (const label of labelsAt(modelOf(beat), shaped(beat), pose, seconds, w, h)) {
       const big = Math.round(Math.min(w, h) * .062), small = Math.round(Math.min(w, h) * .03), pad = big * .32;
       const width = Math.max(measure(label.text, big, 'title'), label.sub ? measure(label.sub, small, 'body') : 0) + pad * 2;
       const height = big * 1.05 + (label.sub ? small * 1.3 : 0) + pad * 1.4;
@@ -313,7 +331,7 @@ export function mount(canvas, input, options = {}) {
   }
   function foreground(g, beat, t) {
     const style = styleOf(beat);
-    if (beat.kind === 'stage') drawLabels(g, beat, beatElapsed(beat, t));
+    if (beat.kind === 'stage' || beat.kind === 'voxel') drawLabels(g, beat, beatElapsed(beat, t));
     if (beat.kind === 'image') {
       g.fillStyle = style.bg; g.fillRect(safe.x, safe.y + safe.h * .50, safe.w, safe.h * .50);
     }
@@ -327,7 +345,7 @@ export function mount(canvas, input, options = {}) {
     for (const box of plan(beat).filter(b => b.kind === 'text')) {
       const state = textState(box, beat, t);
       if (state.local < state.delay) continue;
-      if (beat.kind === 'scene' || beat.kind === 'stage') {
+      if (beat.kind === 'scene' || beat.kind === 'stage' || beat.kind === 'voxel') {
         // A scene's label sits on a card in the look's background, so it reads over any sky.
         const lineW = Math.max(...box.lines.map(line => measure(line, box.size, box.role)));
         const k = expoOut(state.local / state.length), pad = box.size * .28;
@@ -356,7 +374,7 @@ export function mount(canvas, input, options = {}) {
         }
       });
       g.restore();
-      if (box.role !== 'body' && beat.kind !== 'scene' && beat.kind !== 'stage') {
+      if (box.role !== 'body' && beat.kind !== 'scene' && beat.kind !== 'stage' && beat.kind !== 'voxel') {
         g.fillStyle = style.rule || style.accent;   // the rule is decoration: a pack's prop colour even where it would not read as text
         const k = expoOut(state.local / state.length);
         g.fillRect(box.x, Math.min(safe.y + safe.h - 8, box.y + box.h + 8), Math.min(box.w * .24, 240) * k, 6);
@@ -532,12 +550,13 @@ export function mount(canvas, input, options = {}) {
         result.push(publicBox);
       }
       // A stage shot's cast, projected from the 3D pose, and its floating labels as text.
-      if (b.kind === 'stage' && !tr) {
-        const seconds = beatElapsed(b, t), pose = poseOf(b, seconds), model = modelOf(b);
-        for (const box of actorBoxes(model, b, pose, w, h)) {
+      if ((b.kind === 'stage' || b.kind === 'voxel') && !tr) {
+        const seconds = beatElapsed(b, t), pose = poseOf(b, seconds), model = modelOf(b), sb = shaped(b);
+        for (const box of actorBoxes(model, sb, pose, w, h)) {
           if (box.kind !== 'character') continue;
-          const member = b.stage.cast[Number(box.key.slice(1))];
-          result.push({ beat: b.id, kind: 'character', stage: true, character: box.character, shot: b.stage.shot, x: box.x, y: box.y, w: box.w, h: box.h,
+          const member = sb.stage.cast[Number(box.key.slice(1))];
+          result.push({ beat: b.id, kind: 'character', stage: true, ...(b.kind === 'voxel' ? { voxel: true } : {}), character: box.character, shot: sb.stage.shot,
+            x: box.x, y: box.y, w: box.w, h: box.h,
             height: box.height, short: Math.min(w, h), body: box.body, head: box.head, expression: member?.expression, action: member?.action });
         }
         for (const l of stageLabels(b, seconds)) {
@@ -571,7 +590,7 @@ export function mount(canvas, input, options = {}) {
   }
   const stageModels = () => Object.fromEntries(project.beats.filter(b => b.kind === 'stage').map(b => [b.id, modelOf(b)]));
   // Studio's editor remounts its preview on every edit: free the 3D renderer's GPU context with the old mount.
-  const dispose = () => { disposed = true; stage3d?.dispose(); stage3d = null; loaded = false; };
+  const dispose = () => { disposed = true; stage3d?.dispose(); stage3d = null; voxel3d?.dispose(); voxel3d = null; loaded = false; };
   // The editor's live canvas edits: new overlay tracks (and media list) drawn at once, without a new mount.
   function setTracks(tracks, nextMedia = media) {
     media = nextMedia && typeof nextMedia === 'object' ? nextMedia : {};
@@ -579,9 +598,9 @@ export function mount(canvas, input, options = {}) {
     const missing = [...new Set(overlays.map(c => c.image).filter(name => name && !images.has(name)))];
     return Promise.all(missing.map(loadImage)).catch(() => {});
   }
-  return { ready, duration: project.duration, drawFrame, drawWhenReady, layout, pose, stageModels, dispose, prepare, setTracks, stageInfo: () => stage3d && { ...stage3d.info, lost: stage3d.lost },
+  return { ready, duration: project.duration, drawFrame, drawWhenReady, layout, pose, stageModels, dispose, prepare, setTracks, stageInfo: () => (stage3d || voxel3d) && { ...(stage3d || voxel3d).info, lost: (stage3d?.lost || 0) + (voxel3d?.lost || 0) },
     info: { duration: project.duration, fps: project.fps, width: w, height: h, aspect, layer: overlay ? 'overlay' : 'full', captionStyle: project.captionStyle,
-      renderer: hasStage ? (overlay ? 'blender' : 'threejs') : '2d-engine', beats: project.beats.map(({ id, start, end }) => ({ id, start, end })),
+      renderer: hasStage ? (overlay ? 'blender' : 'threejs') : hasVoxel ? 'threejs' : '2d-engine', beats: project.beats.map(({ id, start, end }) => ({ id, start, end })),
       clips: overlays.map(({ id, track, start, end, kind }) => ({ id, track, start, end, kind })) } };
 }
 
