@@ -48,7 +48,10 @@ BOT_COOLDOWN_SECONDS = 90
 USER_COOLDOWN_SECONDS = 20
 LEAD_SECONDS = phone_bridge.LEAD_SECONDS
 BARGE_VOICED_MS = phone_bridge.BARGE_VOICED_MS
-CANT_HEAR_PACKETS = 50         # this many of the person's frames in a row that cannot be opened (a second of talking)
+CANT_HEAR_PACKETS = 250        # this many of the person's frames in a row that are bad (five seconds of talking)
+DAVE_SETUP_SECONDS = 10.0      # their audio arrives but the encryption keys for it never come: give up after this long
+SPEAK_READY_SECONDS = 10.0     # the greeting waits this long for the connection to be able to encrypt the bot's voice
+SPEAK_READY_STEP = 0.05
 RECEIVE_CHECK_SECONDS = 1.0    # how often the connection is asked whether it is still receiving
 CANT_HEAR_LINE = "I can't hear you on Discord right now, so Kairos will message you instead."
 CANT_HEAR_DM = "I couldn't hear you in #{channel}, so I left the call. Message me here and I'll pick it up."
@@ -94,7 +97,8 @@ class VoiceBridge(phone_bridge.TurnBridge):
                  clock: Callable[[], float] = time.monotonic, sleep: Callable = asyncio.sleep,
                  idle_seconds: float = IDLE_SECONDS, join_wait_seconds: float = JOIN_WAIT_SECONDS,
                  max_seconds: float = MAX_SECONDS, unwrap: Optional[Callable] = None,
-                 receiving: Optional[Callable] = None, on_begin: Optional[Callable] = None):
+                 receiving: Optional[Callable] = None, on_begin: Optional[Callable] = None,
+                 ready_to_speak: Optional[Callable] = None):
         self._init_turns(pipeline, opening=opening, smart_turn=smart_turn, pace=pace, clock=clock, sleep=sleep)
         self.linked_user, self.send, self.clear, self.codec = str(linked_user), send, clear, codec
         self.present = present
@@ -102,6 +106,7 @@ class VoiceBridge(phone_bridge.TurnBridge):
         # The connection's own steps (services/discord_voice_transport): open a received frame (DAVE), say whether it
         # is still receiving, and hear that the person arrived. None: frames are plain Opus, receiving never stops.
         self.unwrap, self.receiving, self.on_begin = unwrap, receiving, on_begin
+        self.ready_to_speak = ready_to_speak    # can the person hear the bot yet (DAVE keys in place)? None: always
         self.inbound = audio.DiscordToSpeech()
         self.decoder = None
         self.begun = False
@@ -112,6 +117,8 @@ class VoiceBridge(phone_bridge.TurnBridge):
         self.cant_hear: Optional[str] = None   # why the bot cannot hear them (it says so and leaves)
         self.checked_receiving = 0.0
         self.opening_render: Optional[asyncio.Task] = None
+        self.pending_frames = 0                # frames that came before the keys to open them (not counted as bad)
+        self.pending_since: Optional[float] = None
         self.started = clock()
         self.last_activity = self.started
         self.fed_until = self.started
@@ -247,6 +254,9 @@ class VoiceBridge(phone_bridge.TurnBridge):
                 raise
             except Exception:
                 logger.warning("discord voice: the greeting could not be rendered ahead; saying it now", exc_info=True)
+        if not await self._wait_until_heard():
+            self._cannot_hear("the bot's voice could not be encrypted for the call", speak=False)
+            return
         if not rendered:
             await super()._speak_opening()
             return
@@ -259,12 +269,31 @@ class VoiceBridge(phone_bridge.TurnBridge):
         if self.pace:
             await self.sleep(max(0.0, self.play_end - self.clock()))
 
+    async def _wait_until_heard(self) -> bool:
+        """Wait (up to SPEAK_READY_SECONDS) until the connection can encrypt the bot's voice; True when it can. With
+        DAVE, audio sent before that is dropped by the person's app (David's re-test, 2026-11-11)."""
+        if self.ready_to_speak is None:
+            return True
+        for step in range(int(SPEAK_READY_SECONDS / SPEAK_READY_STEP) + 1):
+            try:
+                if self.ready_to_speak():
+                    if step:
+                        logger.info("discord voice: the connection could encrypt after %.1f s", step * SPEAK_READY_STEP)
+                    return True
+            except Exception:
+                logger.exception("discord voice: could not check whether the voice can be heard")
+                return True
+            await asyncio.sleep(SPEAK_READY_STEP)
+        return False
+
     # -- not hearing them --------------------------------------------------------------------------
 
     def _decode(self, frame: bytes) -> Optional[bytes]:
         """One of the person's received frames -> 48 kHz stereo PCM, or None when it cannot be opened or decoded. A bad
         frame is dropped and the decoder reset, so it never stops what follows (2026-11-11: one undecodable frame used
-        to end all receiving). A second of nothing but bad frames means the bot cannot hear them: it says so."""
+        to end all receiving). A frame whose key has not arrived yet (DAVE still being set up for them) is only
+        waited out, for up to DAVE_SETUP_SECONDS. Five seconds of nothing but bad frames means the bot cannot hear
+        them: it says so."""
         try:
             opus = self.unwrap(self.linked_user, frame) if self.unwrap is not None else frame
             if not opus:
@@ -272,35 +301,56 @@ class VoiceBridge(phone_bridge.TurnBridge):
             if self.decoder is None:
                 self.decoder = self.codec.new_decoder()
             pcm = self.decoder.decode(opus)
-        except Exception as error:
-            self.bad_packets += 1
-            self.bad_run += 1
-            self.decoder = None
-            if self.bad_packets == 1:
-                encrypted = " (end-to-end encrypted)" if audio.is_dave_frame(frame) else ""
-                logger.warning("discord voice: a received frame could not be decoded%s: %s: %s; dropped, decoder reset "
-                               "(later ones are logged only as a count)", encrypted, type(error).__name__, error)
-            if self.bad_run >= CANT_HEAR_PACKETS and self.cant_hear is None:
-                self._cannot_hear(f"{self.bad_run} frames in a row could not be decoded ({type(error).__name__}: {error})")
+        except audio.Undecryptable as error:
+            if not getattr(error, "pending", False):
+                return self._bad_frame(frame, error)
+            self.pending_frames += 1
+            now = self.clock()
+            if self.pending_since is None:
+                self.pending_since = now
+                logger.info("discord voice: their audio is encrypted and its key has not arrived yet (%s); waiting", error)
+            elif now - self.pending_since > DAVE_SETUP_SECONDS and self.cant_hear is None:
+                self._cannot_hear(f"the keys to their encrypted audio never arrived ({now - self.pending_since:.0f} s, "
+                                  f"{self.pending_frames} frames: {error})")
             return None
+        except Exception as error:
+            return self._bad_frame(frame, error)
         self.bad_run = 0
+        self.pending_since = None
         self.decoded += 1
         return pcm
 
-    def _cannot_hear(self, why: str) -> None:
-        """Say plainly that the bot cannot hear them, then leave; the session DMs them to carry on in text."""
-        self.cant_hear = why
-        logger.warning("discord voice: cannot hear the person (%s; %d decoded, %d bad); saying so and leaving",
-                       why, self.decoded, self.bad_packets)
-        previous, self.turn = self.turn, None
-        self.turn = asyncio.ensure_future(self._say_cannot_hear(previous))
+    def _bad_frame(self, frame: bytes, error: Exception) -> None:
+        """A frame that will not open or decode: dropped, the decoder reset; a long run of them ends the call."""
+        self.bad_packets += 1
+        self.bad_run += 1
+        self.decoder = None
+        if self.bad_packets == 1:
+            encrypted = " (end-to-end encrypted)" if audio.is_dave_frame(frame) else ""
+            logger.warning("discord voice: a received frame could not be decoded%s: %s: %s; dropped, decoder reset "
+                           "(later ones are logged only as a count)", encrypted, type(error).__name__, error)
+        if self.bad_run >= CANT_HEAR_PACKETS and self.cant_hear is None:
+            self._cannot_hear(f"{self.bad_run} frames in a row could not be decoded ({type(error).__name__}: {error})")
+        return None
 
-    async def _say_cannot_hear(self, previous) -> None:
+    def _cannot_hear(self, why: str, speak: bool = True) -> None:
+        """Say plainly that the bot cannot hear them (when they can hear it), then leave; the session DMs them to carry
+        on in text."""
+        self.cant_hear = why
+        logger.warning("discord voice: cannot hear the person (%s; %d decoded, %d bad, %d waiting for keys); leaving",
+                       why, self.decoded, self.bad_packets, self.pending_frames)
+        previous, self.turn = self.turn, None
+        self.turn = asyncio.ensure_future(self._say_cannot_hear(previous, speak))
+
+    async def _say_cannot_hear(self, previous, speak: bool = True) -> None:
         try:
             if previous is not None and not previous.done():
                 await asyncio.gather(previous, return_exceptions=True)     # let the greeting finish first
-            self.phase = "speaking"
-            await self._say(self._once(CANT_HEAR_LINE))
+            if speak and self.ready_to_speak is not None and not self.ready_to_speak():
+                speak = False                    # they could not hear it anyway; the DM says it
+            if speak:
+                self.phase = "speaking"
+                await self._say(self._once(CANT_HEAR_LINE))
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -555,6 +605,7 @@ async def join(account: str, bot: dict, agent: dict, reason: str = "", *, user_s
                                          unwrap=getattr(transport, "decrypt", None),
                                          receiving=getattr(transport, "receiving", None),
                                          on_begin=getattr(transport, "joined", None),
+                                         ready_to_speak=getattr(transport, "ready_to_speak", None),
                                          **({"join_wait_seconds": RING_WAIT_SECONDS} if ring else {}))
             session.task = asyncio.create_task(_run(session))
         _sessions[bot_id] = session

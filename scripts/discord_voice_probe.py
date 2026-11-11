@@ -2,7 +2,9 @@
 
 Joins the voice channel set for one of your Kairos Discord bots (Settings > Channels), plays two short beeps, then
 listens for a while and reports, for your audio only: how many frames arrived, how many were end-to-end encrypted
-(DAVE), how many were opened, how many decoded as Opus, and the first error of each kind. It goes through the same
+(DAVE), how many came before their key (waiting), how many were opened, how many decoded as Opus, and the first error
+of each kind. It prints every DAVE key-change event as it happens, and waits for the bot's voice to be encryptable
+before the beeps. It goes through the same
 connection code a real call uses (services/discord_voice_transport.RealTransport), and nothing is transcribed, stored
 or sent anywhere. Uses the bot's saved token from the profile (never printed). Run it yourself, while no Discord voice
 call with that bot is live (a bot has one voice connection per server):
@@ -52,8 +54,9 @@ class Tally:
         try:
             opus = self.transport.decrypt(self.transport.linked_user, payload)
         except Exception as error:
-            self.counts["could_not_open"] += 1
-            self.errors.setdefault("open", f"{type(error).__name__}: {error}")
+            kind = "waiting_for_key" if getattr(error, "pending", False) else "could_not_open"
+            self.counts[kind] += 1
+            self.errors.setdefault(kind, f"{type(error).__name__}: {error}")
             return
         self.counts["opened"] += 1
         try:
@@ -68,7 +71,8 @@ class Tally:
             self.counts["decoded_with_sound"] += 1
 
     def report(self) -> str:
-        keys = ("frames", "dave_encrypted", "opened", "could_not_open", "decoded", "opus_failed", "decoded_with_sound")
+        keys = ("frames", "dave_encrypted", "waiting_for_key", "opened", "could_not_open", "decoded", "opus_failed",
+                "decoded_with_sound")
         lines = [f"  {key.replace('_', ' ')}: {self.counts[key]}" for key in keys]
         lines += [f"  first {kind} error: {text}" for kind, text in self.errors.items()]
         return "\n".join(lines)
@@ -109,8 +113,15 @@ async def probe(bot: dict, token: str, seconds: float) -> int:
             while loop.time() - started < seconds:
                 if not beeped and str(bot["allowed_user_id"]) in transport.members():
                     beeped = True
-                    await asyncio.sleep(1.0)
-                    print("You are in the channel: playing two beeps now (did you hear them?).")
+                    print("You are in the channel. Waiting (up to 10 s) until the bot's voice can be encrypted...")
+                    for _ in range(200):
+                        if transport.ready_to_speak():
+                            break
+                        await asyncio.sleep(0.05)
+                    print(f"Connection now: {transport.status()}")
+                    if not transport.ready_to_speak():
+                        print("The bot's voice could not be encrypted: you will not hear the beeps.")
+                    print("Playing two beeps now (did you hear them?).")
                     for _ in range(2):
                         for packet in beep_frames(codec, audio):
                             transport.send(packet)
@@ -156,7 +167,7 @@ def main() -> int:
         print("Set JARVIS_DATA_DIR to the profile's data folder first (see the top of this file).")
         return 2
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
-    logging.getLogger("services.discord_voice_transport").setLevel(logging.INFO)
+    logging.getLogger("services.discord_voice_transport").setLevel(logging.INFO)   # with every DAVE event (.dave)
     from core import discord_bots_store, discord_voice_audio as audio
     missing = audio.missing_requirements()
     if missing:

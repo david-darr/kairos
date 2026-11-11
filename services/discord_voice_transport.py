@@ -21,6 +21,7 @@ for DAVE itself); `clear()` drops what is queued (barge-in).
 import asyncio
 import collections
 import logging
+import struct
 import threading
 
 from core import discord_voice_audio as audio
@@ -29,6 +30,137 @@ logger = logging.getLogger(__name__)
 
 CONNECT_TIMEOUT = 20.0
 RESTARTS = 3                   # times receiving is restarted after it stopped by itself, per call
+
+# -- DAVE key changes (David's re-test, 2026-11-11 17:28) ------------------------------------------------------
+# discord.py 2.7.1 was written against davey 0.1 (its requirement is "davey>=0.1.0"), where processing an MLS commit or
+# welcome switched the keys at once. davey 0.2.0, the version installed, added prepare_transition / execute_transition
+# and only "starts using the new keys" once they are called; discord.py never calls them (its own _execute_transition
+# says "in the future, the session should be signaled too"). So the session never became ready: the bot could not
+# open the person's audio (NoDecryptorForUser) and could not encrypt its own (can_encrypt False), so neither side
+# heard the other. discord-ext-voice-recv is not the cause: its gateway hook runs after discord.py has handled each
+# JSON message, and binary (MLS) frames never reach it.
+# The fix, below: the same voice websocket and connection state, with the two davey 0.2 calls added where the DAVE
+# protocol puts them (prepare after a commit, welcome or prepare-transition; execute on execute-transition, or at once
+# for transition 0). With davey 0.1 (no such methods) they are skipped, and discord.py behaves exactly as before.
+OP_PREPARE_TRANSITION, OP_EXECUTE_TRANSITION, OP_PREPARE_EPOCH = 21, 22, 24
+OP_EXTERNAL_SENDER, OP_PROPOSALS, OP_COMMIT_TRANSITION, OP_WELCOME = 25, 27, 29, 30
+DAVE_OP_NAMES = {21: "prepare transition", 22: "execute transition", 24: "prepare epoch", 25: "external sender",
+                 27: "proposals", 29: "commit", 30: "welcome"}
+dave_logger = logging.getLogger(__name__ + ".dave")
+
+
+def _status(session) -> str:
+    if session is None:
+        return "no session"
+    status = getattr(getattr(session, "status", None), "name", getattr(session, "status", "?"))
+    return f"status={status} ready={bool(getattr(session, 'ready', False))} can_encrypt={bool(getattr(session, 'can_encrypt', False))}"
+
+
+def dave_prepare(state, transition_id: int, protocol_version: int) -> None:
+    """davey 0.2: get ready to switch to the keys of `transition_id` (once per transition)."""
+    session = getattr(state, "dave_session", None)
+    prepare = getattr(session, "prepare_transition", None)
+    prepared = state.__dict__.setdefault("kairos_prepared", set())
+    if prepare is None or transition_id in prepared:
+        return
+    try:
+        prepare(int(transition_id), int(protocol_version))
+        prepared.add(transition_id)
+    except Exception as error:
+        dave_logger.warning("discord voice DAVE: prepare transition %s failed: %s: %s", transition_id, type(error).__name__, error)
+
+
+def dave_execute(state, transition_id: int) -> None:
+    """davey 0.2: switch to the keys of `transition_id`."""
+    session = getattr(state, "dave_session", None)
+    execute = getattr(session, "execute_transition", None)
+    state.__dict__.setdefault("kairos_prepared", set()).discard(transition_id)
+    if execute is None:
+        return
+    try:
+        executed = execute(int(transition_id))
+        dave_logger.info("discord voice DAVE: transition %s executed (%s); %s", transition_id, executed, _status(session))
+    except Exception as error:
+        dave_logger.warning("discord voice DAVE: execute transition %s failed: %s: %s", transition_id, type(error).__name__, error)
+
+
+def dave_classes():
+    """The voice client class to connect with: discord-ext-voice-recv's, on a websocket and connection state that
+    finish DAVE key changes with davey 0.2 (see above). Built lazily: discord.py and the extension may be missing."""
+    from discord.gateway import DiscordVoiceWebSocket
+    from discord.voice_state import VoiceConnectionState
+    from discord.ext import voice_recv
+    from discord.ext.voice_recv.gateway import hook as recv_hook
+
+    class KairosVoiceWebSocket(DiscordVoiceWebSocket):
+        async def received_message(self, msg) -> None:
+            op, data = msg.get("op"), msg.get("d") or {}
+            state = self._connection
+            if op in DAVE_OP_NAMES:
+                dave_logger.info("discord voice DAVE: %s %s", DAVE_OP_NAMES[op], data)
+            if op == OP_PREPARE_TRANSITION and getattr(state, "dave_session", None) is not None:
+                # Before discord.py's own handling, which executes transition 0 at once.
+                dave_prepare(state, data.get("transition_id", 0), data.get("protocol_version", 0))
+            await super().received_message(msg)
+
+        async def received_binary_message(self, msg: bytes) -> None:
+            op = msg[2] if len(msg) > 2 else None
+            state = self._connection
+            session = getattr(state, "dave_session", None)
+            if op in DAVE_OP_NAMES:
+                dave_logger.info("discord voice DAVE: %s (%d bytes)", DAVE_OP_NAMES[op], len(msg))
+            if session is None or op not in (OP_COMMIT_TRANSITION, OP_WELCOME):
+                await super().received_binary_message(msg)
+                return
+            # discord.py's own handling of a commit or welcome (gateway.py, 2.7.1), plus davey 0.2's prepare/execute.
+            self.seq_ack = struct.unpack_from(">H", msg, 0)[0]
+            transition_id = struct.unpack_from(">H", msg, 3)[0]
+            try:
+                if op == OP_COMMIT_TRANSITION:
+                    should_prepare = session.process_commit(msg[5:])
+                else:
+                    should_prepare = session.process_welcome(msg[5:])
+            except Exception as error:
+                dave_logger.warning("discord voice DAVE: %s for transition %s was refused (%s: %s); rejoining",
+                                    DAVE_OP_NAMES[op], transition_id, type(error).__name__, error)
+                await state._recover_from_invalid_commit(transition_id)
+                return
+            if should_prepare is not False:
+                dave_prepare(state, transition_id, state.dave_protocol_version)
+            if transition_id != 0:
+                state.dave_pending_transitions[transition_id] = state.dave_protocol_version
+                await self.send_transition_ready(transition_id)
+            else:
+                dave_execute(state, 0)
+            dave_logger.info("discord voice DAVE: %s processed for transition %s; %s", DAVE_OP_NAMES[op],
+                             transition_id, _status(session))
+
+    class KairosConnectionState(VoiceConnectionState):
+        async def _connect_websocket(self, resume: bool):
+            # discord.py's own (voice_state.py, 2.7.1), with the websocket above.
+            from discord.voice_state import ConnectionFlowState
+            seq_ack = getattr(self.ws, "seq_ack", -1)
+            ws = await KairosVoiceWebSocket.from_connection_state(self, resume=resume, hook=self.hook, seq_ack=seq_ack)
+            self.state = ConnectionFlowState.websocket_connected
+            return ws
+
+        async def reinit_dave_session(self) -> None:
+            self.__dict__.setdefault("kairos_prepared", set()).clear()
+            await super().reinit_dave_session()
+            dave_logger.info("discord voice DAVE: session (re)started, protocol %s; %s", self.dave_protocol_version,
+                             _status(self.dave_session))
+
+        async def _execute_transition(self, transition_id: int) -> None:
+            known = transition_id in self.dave_pending_transitions
+            await super()._execute_transition(transition_id)
+            if known and self.dave_session is not None:
+                dave_execute(self, transition_id)
+
+    class KairosVoiceClient(voice_recv.VoiceRecvClient):
+        def create_connection_state(self):
+            return KairosConnectionState(self, hook=recv_hook)
+
+    return KairosVoiceWebSocket, KairosConnectionState, KairosVoiceClient
 
 
 def _queue_source(queue: collections.deque, lock: threading.Lock):
@@ -64,9 +196,8 @@ class RealTransport:
         self.sink_errors = 0
 
     async def connect(self, on_event) -> None:
-        from discord.ext import voice_recv
         self.on_event = on_event
-        self.vc = await self.channel.connect(cls=voice_recv.VoiceRecvClient, timeout=CONNECT_TIMEOUT, reconnect=False)
+        self.vc = await self.channel.connect(cls=dave_classes()[2], timeout=CONNECT_TIMEOUT, reconnect=False)
         self.vc.listen(self.SINK(self._on_voice))
         self.vc.play(_queue_source(self._queue, self._lock))
 
@@ -118,10 +249,24 @@ class RealTransport:
             except Exception as error:
                 if not encrypted:
                     return frame
-                raise audio.Undecryptable(f"DAVE could not open it ({type(error).__name__}: {error})") from None
+                # No key for them yet (the session is not ready, or they joined and the key change has not finished):
+                # "not ready yet", which the call waits out, rather than a frame that is bad.
+                pending = not getattr(session, "ready", False) or "NoDecryptor" in str(error)
+                raise audio.Undecryptable(f"DAVE could not open it ({type(error).__name__}: {error})",
+                                          pending=pending) from None
         if encrypted:
-            raise audio.Undecryptable("it is end-to-end encrypted (DAVE) and there is no DAVE session")
+            raise audio.Undecryptable("it is end-to-end encrypted (DAVE) and there is no DAVE session", pending=True)
         return frame
+
+    def ready_to_speak(self) -> bool:
+        """Can the person hear the bot yet? With DAVE on, only once discord.py can encrypt (a frame sent before that
+        goes out unencrypted and the person's app drops it: David's re-test, 2026-11-11)."""
+        state = getattr(self.vc, "_connection", None)
+        if state is None:
+            return False
+        if not getattr(state, "dave_protocol_version", 0):
+            return True
+        return bool(getattr(state, "can_encrypt", False))
 
     def receiving(self) -> bool:
         """Is audio still being received? When the extension stopped listening by itself, restart it (RESTARTS times)."""
@@ -151,7 +296,7 @@ class RealTransport:
         except Exception:
             listening = False
         return {"dave_version": getattr(state, "dave_protocol_version", 0), "dave_session": session is not None,
-                "dave_ready": bool(getattr(session, "ready", False)),
+                "dave_ready": bool(getattr(session, "ready", False)), "dave": _status(session),
                 "can_encrypt": bool(getattr(state, "can_encrypt", False)), "listening": listening,
                 "restarts": self.restarts}
 

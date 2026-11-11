@@ -11,6 +11,7 @@ import asyncio
 import importlib.util
 import logging
 import os
+import struct
 import sys
 import tempfile
 import unittest
@@ -985,7 +986,7 @@ class Receiving(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rig.bridge.bad_packets, 0)
         self.assertEqual(opened, [OWNER] * 10)
 
-    async def test_a_second_of_frames_it_cannot_open_says_so_and_leaves(self):
+    async def test_a_run_of_bad_frames_says_so_and_leaves(self):
         def unwrap(user, frame):
             raise audio.Undecryptable("no DAVE session")
         rig = self.rig(unwrap=unwrap)
@@ -1185,6 +1186,239 @@ class LifecycleReceiving(Lifecycle):
 
 for _name in [name for name in vars(Lifecycle) if name.startswith("test_")]:
     setattr(LifecycleReceiving, _name, None)       # Lifecycle's own tests run once, in Lifecycle
+
+
+# -- DAVE key changes (David's re-test, 2026-11-11 17:28: the session never became ready, so neither side heard) -------
+
+class RecordingDave:
+    """A davey 0.2 session stand-in that records what discord.py and the Kairos websocket ask of it."""
+    def __init__(self, legacy=False, refuse=False):
+        self.calls, self.refuse, self.ready, self.can_encrypt = [], refuse, False, False
+        if not legacy:
+            self.prepare_transition = lambda tid, version: self.calls.append(("prepare", tid, version))
+            self.execute_transition = self._execute
+
+    def _execute(self, tid):
+        self.calls.append(("execute", tid))
+        self.ready = self.can_encrypt = True
+        return True
+
+    def set_external_sender(self, data):
+        self.calls.append(("external sender", data))
+
+    def process_proposals(self, optype, data):
+        self.calls.append(("proposals", data))
+        return None
+
+    def process_commit(self, data):
+        if self.refuse:
+            raise ValueError("bad commit")
+        self.calls.append(("commit", data))
+        return True
+
+    def process_welcome(self, data):
+        if self.refuse:
+            raise ValueError("bad welcome")
+        self.calls.append(("welcome", data))
+
+
+class FakeSocket:
+    def __init__(self):
+        self.text, self.binary = [], []
+
+    async def send_str(self, text):
+        import json
+        self.text.append(json.loads(text))
+
+    async def send_bytes(self, data):
+        self.binary.append(data)
+
+
+class DaveTransitions(unittest.IsolatedAsyncioTestCase):
+    """The voice websocket Kairos connects with forwards every DAVE message to discord.py's own handling and adds
+    davey 0.2's prepare/execute steps (skipped against the real classes when discord.py is not installed)."""
+
+    def setUp(self):
+        if importlib.util.find_spec("discord.ext.voice_recv") is None:
+            self.skipTest("discord-ext-voice-recv is not installed")
+        self.ws_class, self.state_class, self.client_class = discord_voice_transport.dave_classes()
+
+    def make(self, session):
+        state = self.state_class.__new__(self.state_class)      # no voice client, no socket thread
+        state.dave_session, state.dave_protocol_version = session, 1
+        state.dave_pending_transitions, state.dave_downgraded = {}, False
+        self.recovered = []
+
+        async def recover(tid):
+            self.recovered.append(tid)
+        state._recover_from_invalid_commit = recover
+        socket = FakeSocket()
+        ws = self.ws_class(socket, asyncio.get_running_loop())
+        ws._connection = state
+        return ws, state, socket
+
+    @staticmethod
+    def binary(op, payload, seq=9, tid=None):
+        head = struct.pack(">H", seq) + bytes([op])
+        return head + (struct.pack(">H", tid) if tid is not None else b"") + payload
+
+    def test_the_client_is_voice_recvs_with_its_hook(self):
+        from discord.ext import voice_recv
+        self.assertTrue(issubclass(self.client_class, voice_recv.VoiceRecvClient), "receiving still works")
+        self.assertIn("create_connection_state", vars(self.client_class))
+
+    async def test_mls_frames_reach_discord_pys_own_handling(self):
+        dave = RecordingDave()
+        ws, state, _ = self.make(dave)
+        await ws.received_binary_message(self.binary(25, b"sender"))
+        await ws.received_binary_message(self.binary(27, b"\x00props", seq=10))
+        self.assertEqual(dave.calls, [("external sender", b"sender"), ("proposals", b"props")])
+        self.assertEqual(ws.seq_ack, 10)
+
+    async def test_a_commit_prepares_the_keys_and_execute_switches_to_them(self):
+        dave = RecordingDave()
+        ws, state, socket = self.make(dave)
+        await ws.received_binary_message(self.binary(29, b"commit", tid=7))
+        self.assertEqual(dave.calls, [("commit", b"commit"), ("prepare", 7, 1)])
+        self.assertEqual(socket.text, [{"op": 23, "d": {"transition_id": 7}}], "discord.py's transition-ready is sent")
+        self.assertEqual(state.dave_pending_transitions, {7: 1})
+        self.assertFalse(dave.ready)
+        await ws.received_message({"op": 22, "d": {"transition_id": 7}, "seq": 11})
+        self.assertEqual(dave.calls[-1], ("execute", 7))
+        self.assertEqual(state.dave_pending_transitions, {}, "discord.py's own bookkeeping ran too")
+        self.assertTrue(dave.ready and state.can_encrypt, "the session is ready: both sides can be heard")
+
+    async def test_a_welcome_for_transition_zero_switches_at_once(self):
+        dave = RecordingDave()
+        ws, state, socket = self.make(dave)
+        await ws.received_binary_message(self.binary(30, b"welcome", tid=0))
+        self.assertEqual(dave.calls, [("welcome", b"welcome"), ("prepare", 0, 1), ("execute", 0)])
+        self.assertEqual(socket.text, [])
+        self.assertTrue(dave.ready)
+
+    async def test_a_refused_commit_rejoins_and_prepares_nothing(self):
+        dave = RecordingDave(refuse=True)
+        ws, state, _ = self.make(dave)
+        await ws.received_binary_message(self.binary(29, b"commit", tid=4))
+        self.assertEqual(self.recovered, [4])
+        self.assertEqual(dave.calls, [])
+
+    async def test_a_protocol_transition_is_prepared_then_executed(self):
+        dave = RecordingDave()
+        ws, state, socket = self.make(dave)
+        await ws.received_message({"op": 21, "d": {"transition_id": 3, "protocol_version": 1}})
+        self.assertEqual(dave.calls, [("prepare", 3, 1)])
+        self.assertEqual(socket.text, [{"op": 23, "d": {"transition_id": 3}}])
+        await ws.received_message({"op": 22, "d": {"transition_id": 3}})
+        self.assertEqual(dave.calls[-1], ("execute", 3))
+        await ws.received_message({"op": 21, "d": {"transition_id": 0, "protocol_version": 1}})
+        self.assertEqual(dave.calls[-2:], [("prepare", 0, 1), ("execute", 0)], "transition 0 runs at once")
+
+    async def test_davey_0_1_without_the_new_steps_behaves_as_before(self):
+        dave = RecordingDave(legacy=True)
+        ws, state, socket = self.make(dave)
+        await ws.received_binary_message(self.binary(29, b"commit", tid=5))
+        await ws.received_message({"op": 22, "d": {"transition_id": 5}})
+        self.assertEqual(dave.calls, [("commit", b"commit")])
+        self.assertEqual(state.dave_pending_transitions, {})
+
+    async def test_an_unknown_execute_changes_nothing(self):
+        dave = RecordingDave()
+        ws, state, _ = self.make(dave)
+        await ws.received_message({"op": 22, "d": {"transition_id": 99}})
+        self.assertEqual(dave.calls, [])
+
+
+class WaitingForDave(unittest.IsolatedAsyncioTestCase):
+    def rig(self, **options):
+        rig = Rig(**options)
+        rig.codec = rig.bridge.codec = BreakableCodec()
+        return rig
+
+    async def test_the_greeting_waits_until_the_bot_can_be_heard(self):
+        ready = [False]
+        rig = self.rig(opening="This is Kip, an AI assistant from Kairos.", ready_to_speak=lambda: ready[0])
+        await rig.begin()
+        await asyncio.sleep(0.3)
+        self.assertEqual(rig.sent, [], "nothing is sent before the voice can be encrypted")
+        ready[0] = True
+        await asyncio.sleep(0.2)
+        await settle()
+        self.assertTrue(rig.sent, "then the greeting plays")
+        self.assertIsNone(rig.bridge.ended)
+
+    async def test_a_voice_that_never_can_be_encrypted_leaves_without_talking_into_the_void(self):
+        with patch.object(dv, "SPEAK_READY_SECONDS", 0.2):
+            rig = self.rig(opening="This is Kip.", ready_to_speak=lambda: False)
+            await rig.begin()
+            await asyncio.sleep(0.5)
+            await settle()
+        self.assertEqual(rig.sent, [])
+        self.assertEqual(rig.bridge.ended, "cannot hear")
+        self.assertNotIn(dv.CANT_HEAR_LINE, rig.pipeline.spoken, "it does not say it when they could not hear it")
+
+    async def test_frames_before_their_key_arrives_are_waited_out_not_counted(self):
+        keyed = [False]
+
+        def unwrap(user, frame):
+            if not keyed[0]:
+                raise audio.Undecryptable("DAVE could not open it (ValueError: Failed to decrypt: NoDecryptorForUser)",
+                                          pending=True)
+            return frame[:-12]
+        rig = self.rig(unwrap=unwrap)
+        await rig.begin()
+        for index in range(dv.CANT_HEAR_PACKETS + 50):           # 6 s of talking while the key change finishes
+            rig.clock.t += 0.02
+            await rig.bridge.handle(("opus", OWNER, dave_wrapped(opus_of(index))))
+        self.assertIsNone(rig.bridge.cant_hear)
+        self.assertEqual((rig.bridge.bad_packets, rig.bridge.bad_run), (0, 0))
+        self.assertEqual(rig.bridge.pending_frames, dv.CANT_HEAR_PACKETS + 50)
+        keyed[0] = True
+        for index in range(10):
+            rig.clock.t += 0.02
+            await rig.bridge.handle(("opus", OWNER, dave_wrapped(opus_of(index))))
+        self.assertEqual(rig.bridge.decoded, 10)
+        self.assertIsNone(rig.bridge.pending_since)
+
+    async def test_keys_that_never_arrive_end_the_call_after_the_setup_time(self):
+        def unwrap(user, frame):
+            raise audio.Undecryptable("NoDecryptorForUser", pending=True)
+        rig = self.rig(unwrap=unwrap)
+        await rig.begin()
+        steps = int(dv.DAVE_SETUP_SECONDS / 0.02) + 5
+        for index in range(steps):
+            rig.clock.t += 0.02
+            await rig.bridge.handle(("opus", OWNER, dave_wrapped(opus_of(index))))
+        await settle()
+        self.assertIn("keys to their encrypted audio never arrived", rig.bridge.cant_hear)
+        self.assertEqual(rig.bridge.ended, "cannot hear")
+
+    async def test_the_transport_says_which_failures_are_only_waiting(self):
+        transport = discord_voice_transport.RealTransport(SimpleNamespace(members=[]), OWNER, asyncio.get_running_loop())
+        dave = FakeDave(fail=True)
+        state = SimpleNamespace(dave_session=dave, dave_protocol_version=1, can_encrypt=False)
+        transport.vc = SimpleNamespace(_connection=state)
+        dave.ready = False
+        with self.assertRaises(audio.Undecryptable) as caught:
+            transport.decrypt(OWNER, dave_wrapped(b"opus"))
+        self.assertTrue(caught.exception.pending, "a session that is not ready yet")
+        dave.ready = True
+        with self.assertRaises(audio.Undecryptable) as caught:
+            transport.decrypt(OWNER, dave_wrapped(b"opus"))
+        self.assertFalse(caught.exception.pending, "ready, and the key is there, but the frame will not open: bad")
+
+        def no_key(*args):
+            raise ValueError("Failed to decrypt: NoDecryptorForUser")
+        dave.decrypt = no_key
+        with self.assertRaises(audio.Undecryptable) as caught:
+            transport.decrypt(OWNER, dave_wrapped(b"opus"))
+        self.assertTrue(caught.exception.pending, "no key for them yet: they just joined")
+        self.assertFalse(transport.ready_to_speak())
+        state.can_encrypt = True
+        self.assertTrue(transport.ready_to_speak())
+        state.dave_protocol_version = 0
+        state.can_encrypt = False
+        self.assertTrue(transport.ready_to_speak(), "a channel without DAVE")
 
 
 if __name__ == "__main__":

@@ -29,7 +29,12 @@ DAVE_MIN_SUPPLEMENTAL = 11                 # 8-byte tag, a nonce of 1+ bytes, th
 
 
 class Undecryptable(Exception):
-    """A received frame is end-to-end encrypted (DAVE) and could not be opened."""
+    """A received frame is end-to-end encrypted (DAVE) and could not be opened. `pending`: the key for it is not there
+    yet (the encryption is still being set up for this person), as opposed to a frame that is bad."""
+
+    def __init__(self, message: str, pending: bool = False):
+        super().__init__(message)
+        self.pending = pending
 
 
 def is_dave_frame(payload: bytes) -> bool:
