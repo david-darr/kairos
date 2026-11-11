@@ -130,7 +130,7 @@
 .agent-call-error { margin: 0; max-width: 380px; font-size: 13px; text-align: center; color: var(--call-error); overflow-wrap: anywhere; }
 .agent-call-error:empty { display: none; }
 /* The three keys: Speaker, Mute, Hang up. A pressed key (speaker on, microphone muted) is the light disc. */
-.agent-call-controls { flex: none; display: flex; justify-content: space-evenly; align-items: flex-start; gap: 12px; padding: 10px 0 0; }
+.agent-call-controls { flex: none; margin-top: auto; display: flex; justify-content: space-evenly; align-items: flex-start; gap: 12px; padding: 10px 0 0; }
 .agent-call-key { display: grid; justify-items: center; gap: 8px; min-width: 76px; padding: 0; border: 0; background: none; color: var(--call-ink-dim); font: 500 12px/1.2 var(--k-font-sans); cursor: pointer; }
 .agent-call-key-disc { width: 68px; height: 68px; display: grid; place-items: center; border-radius: 50%; background: var(--call-key-quiet); color: var(--call-key-quiet-ink); transition: transform .12s ease-out, background-color .15s; }
 .agent-call-key[aria-pressed=true] .agent-call-key-disc { background: var(--call-key); color: var(--call-key-ink); }
@@ -161,10 +161,12 @@
 .agent-call-work > div, .agent-call-summary > div { display: flex; gap: 12px; justify-content: space-between; align-items: center; }
 .agent-call-work .btn, .agent-call-summary .btn { min-height: 44px; flex: none; }
 .agent-call[data-sheet=open] .agent-call-avatar { width: 92px; margin-bottom: 2px; }
-.agent-call[data-sheet=open] .agent-call-scene { flex: 0 1 auto; gap: 4px; }
+.agent-call[data-sheet=open] .agent-call-scene { flex: none; gap: 4px; overflow: visible; }
+.agent-call[data-sheet=open] .agent-call-sheet { flex: 0 1 auto; max-height: none; }
 .agent-call[data-sheet=open] .agent-call-scene h1 { font-size: 24px; }
 .agent-call[data-settings=open] .agent-call-sheet { max-height: none; flex: 1 1 auto; }
 .agent-call[data-settings=open] .agent-call-avatar { width: 64px; }
+.agent-call[data-settings=open] :is(.agent-call-meter, .agent-call-clock) { display: none; }
 /* Call settings: the app's own form card inside the sheet. */
 .agent-call-setup { flex: none; display: grid; gap: 12px; width: 100%; padding: 16px; box-sizing: border-box; border: 1px solid var(--ui-line); border-radius: 18px; background: var(--ui-surface); color: var(--text); }
 .agent-call-setup p { font-size: 13px; margin: 0; line-height: 1.5; }
