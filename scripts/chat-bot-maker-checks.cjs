@@ -130,7 +130,7 @@ app.whenReady().then(async () => {
     const kipThread = listed.main_id ? { id: listed.main_id } : listed.threads?.[0];
     if (kipThread) {
       await api('/api/sessions/' + kipThread.id + '/model', { model_endpoint_id: endpoint.id, model_override: null }).catch(() => null);
-      await api('/api/chat/live', { session_id: kipThread.id, message: 'makebot Scout | Finds venues', attachment_ids: [], references: [], request_id: require('node:crypto').randomUUID() });
+      await api('/api/chat/live', { session_id: kipThread.id, message: 'makebot Scout | Venue bot', attachment_ids: [], references: [], request_id: require('node:crypto').randomUUID() });
       for (const until = Date.now() + 30000; Date.now() < until;) {
         const run = (await api('/api/chat/live/snapshot')).runs?.[kipThread.id];
         if (run && run.status !== 'processing') break;

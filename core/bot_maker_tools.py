@@ -12,11 +12,16 @@ Safety the model cannot raise:
 - The bot belongs to the account of this conversation only (services/agent_service.py is per account), and
   update_bot touches only a bot this same conversation made.
 - At most CAP_PER_HOUR bots an hour per account, counted from the creation log (bot_chat_creations.json beside the
-  account's agents.json), which a deleted bot still counts in, so a loop cannot make hundreds. Every creation is in
-  that log, the permission audit (core/tool_registry.py) and the server log.
-- Only in a live conversation the person is in: not in a routine, a watch run, a handed-on assignment, another bot's
-  conversation (Kip excepted), or a turn that read outside content (a prompt injected into a page or an email cannot
-  make a bot). guard() runs before the approval gate, so a refusal never shows an approval card first.
+  account's agents.json), which a deleted bot still counts in, so a loop cannot make hundreds. The slot is written
+  before the bot is made (no log, no bot) and given back if making fails. Every creation is in that log, the
+  permission audit (core/tool_registry.py) and the server log.
+- Only in a live conversation the person is in: not in a routine or any run that is not a chat turn (judged by the
+  run's own kind, not by assignment_run_id, which core/tool_access.py sets for every Codex turn), a watch run, a
+  handed-on chat, another bot's conversation (Kip excepted), a turn that read outside content, or a conversation marked
+  as carrying it. And the person's own latest message must ask for a bot (for update_bot: name it or say "bot"):
+  a turn's taint resets each message while earlier tool results stay in the model's context, so text from a page
+  read on one turn cannot make or rewrite a bot after "continue". guard() runs before the approval gate, so a
+  refusal never shows an approval card first.
 
 Creating does not ask for approval: it is the person's own request inside their own account
 (core/bot_policy.py PERSON_REQUESTED_TOOLS). The conversation shows a card (message type "bot_created") with the
@@ -24,6 +29,7 @@ bot's picture, name and job, and Open bot, Edit and Undo (static/js/botCreatedCa
 """
 import logging
 import os
+import re
 import threading
 import time
 import uuid
@@ -61,13 +67,16 @@ def guard(name: str, ctx) -> Optional[str]:
     if ctx.turn_taint is not None and ctx.turn_taint.tainted:
         return (f"Not {verb}: this turn read outside content, so a bot is only {verb} when the person asks again "
                 "in a new message.")
-    if ctx.helper or ctx.read_only or ctx.assignment_run_id or not ctx.session_id:
+    # Not ctx.assignment_run_id: core/tool_access.py fills it with the run id of every turn, the person's own Codex
+    # chat turns included. What kind of run this is comes from the run itself.
+    if ctx.helper or ctx.read_only or ctx.source_card_id or not ctx.session_id:
         return f"Not {verb}: a bot is only {verb} in a conversation the person is in."
-    from core import task_scope
+    from core import runs, task_scope
     from core.session_manager import session_manager
     scope = task_scope._current.get()
-    if scope and scope.get("active"):
-        return f"Not {verb}: a routine cannot make or change bots."
+    run = runs.current_for(ctx.session_id)
+    if (scope and scope.get("active")) or (run is not None and run.surface != "chat"):
+        return f"Not {verb}: a routine or a bot's work run cannot make or change bots."
     session = session_manager.get_session(ctx.session_id)
     if not session:
         return f"Not {verb}: this conversation was not found."
@@ -81,7 +90,32 @@ def guard(name: str, ctx) -> Optional[str]:
         agent = agent_service.get(ctx.agent_id)
         if not agent or agent.get("builtin") != "front_desk":
             return f"Not {verb}: only Kairos and Kip make bots. Ask the person to use the Bots tab."
+    if session.get("untrusted_context"):
+        return f"Not {verb}: this conversation carries outside content, so bots are made in the Bots tab here."
+    # A turn's taint resets with each message while earlier tool results stay in the model's context (a page or an
+    # email read one turn could steer the next after "continue"). So the person's own latest message must ask.
+    if name == "create_bot" and not asks_for_a_bot(latest_user_text(session)):
+        return ("Not made: the person's latest message does not ask for a bot. Make one only when they ask for it "
+                "in their own words; if you suggested one, ask them to say so.")
     return None
+
+
+BOT_WORDS = re.compile(r"\b(bots?|agents?|assistants?|helpers?)\b", re.I)
+
+
+def latest_user_text(session: dict) -> str:
+    for message in reversed(session.get("messages") or []):
+        if message.get("role") == "user":
+            content = message.get("content")
+            return content if isinstance(content, str) else ""
+    return ""
+
+
+def asks_for_a_bot(text: str, name: str = "") -> bool:
+    """Whether the person's own words are about a bot (or, for a change, name the bot)."""
+    if BOT_WORDS.search(text or ""):
+        return True
+    return bool(name) and re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", text or "", re.I) is not None
 
 
 def offered_to(bot_id: Optional[str]) -> bool:
@@ -109,9 +143,26 @@ def made_in_last_hour(now: Optional[float] = None) -> int:
     return sum(1 for row in _log() if now - float(row.get("at") or 0) < 3600)
 
 
-def _record(row: dict) -> None:
-    rows = _log() + [row]
+def _write(rows: list) -> None:
     write_json_atomic(log_file(), rows[-LOG_KEEP:])
+
+
+def _reserve(row: dict) -> str:
+    """Take one of the hour's slots before anything is made (under _LOCK). A failed write raises: nothing is made."""
+    ident = uuid.uuid4().hex[:12]
+    _write(_log() + [{**row, "slot": ident}])
+    return ident
+
+
+def _settle(ident: str, drop: bool = False, **fields) -> None:
+    """Fill the slot in (the bot made) or give it back (drop: nothing was made). Best effort: a slot that cannot be
+    updated keeps counting, which only ever errs toward the cap."""
+    rows = _log()
+    rows = [r for r in rows if r.get("slot") != ident] if drop else [{**r, **fields} if r.get("slot") == ident else r for r in rows]
+    try:
+        _write(rows)
+    except Exception:
+        logger.exception("the bot creation log could not be updated for slot %s", ident)
 
 
 def made_here(bot_id: str, session_id: str) -> bool:
@@ -255,18 +306,28 @@ def make(args: dict, ctx) -> dict:
                    "origin": {"kind": "blank"}}
         session = session_manager.get_session(ctx.session_id) or {}
         owner = session.get("owner_user") or ctx.owner_user
+        by = "Kip" if ctx.agent_id else "Kairos"
+        try:
+            slot = _reserve({"at": time.time(), "bot_id": None, "name": name, "session_id": ctx.session_id,
+                             "by": by, "owner_user": owner})
+        except Exception as error:
+            logger.exception("the bot creation log could not be written")
+            raise Refused("the creation log could not be written, so nothing was made.") from error
         try:
             result = bot_record.create_configured(payload, owner_user=owner, enable_routines=False)
         except bot_record.ConfiguredFailure as failure:
+            _settle(slot, drop=True)
             raise Refused(failure.detail) from failure
+        except Exception:
+            _settle(slot, drop=True)
+            raise
         agent = result["agent"]
         if agent.get("approval_mode") != "ask" or any(r.get("enabled") for r in result["routines"] if isinstance(r, dict)):
             # Never expected: create_configured was asked for Ask and paused routines. Take it back rather than keep it.
             bot_record._rollback(agent["id"], [r.get("id") for r in result["routines"] if isinstance(r, dict)])
+            _settle(slot, drop=True)
             raise Refused("the bot did not come out at the safe settings, so it was removed.")
-        by = "Kip" if ctx.agent_id else "Kairos"
-        _record({"at": time.time(), "bot_id": agent["id"], "name": agent["name"], "session_id": ctx.session_id,
-                 "by": by, "owner_user": owner, "routines": len(result["routines"])})
+        _settle(slot, bot_id=agent["id"], name=agent["name"], routines=len(result["routines"]))
     logger.info("bot made from a chat: %s (%s) in %s by %s, %d paused routine(s)", agent["name"], agent["id"],
                 ctx.session_id, by, len(result["routines"]))
     card = _card(agent, result["routines"], by)
@@ -305,6 +366,10 @@ async def _update_bot(args, ctx):
     agent = agent_service.get(bot_id) if isinstance(bot_id, str) else None
     if not agent or not made_here(bot_id, ctx.session_id):
         return "Not changed: update_bot only changes a bot this conversation made in the last day."
+    from core.session_manager import session_manager
+    if not asks_for_a_bot(latest_user_text(session_manager.get_session(ctx.session_id) or {}), agent["name"]):
+        return (f"Not changed: the person's latest message does not ask to change {agent['name']}. Change it only "
+                "when they ask in their own words.")
     try:
         fields = {}
         if args.get("name") is not None:
