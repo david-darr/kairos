@@ -12,10 +12,12 @@ const LAYOUT_URL = '/static/motion/layout.js';  // read only: the copy safe area
 
 const BASE = '/api/tab-studio';
 const ASPECTS = ['16:9', '9:16', '1:1'];
-const KINDS = ['title', 'statement', 'big-number', 'list', 'image', 'quote', 'split', 'logo', 'end', 'scene', 'stage'];
+const KINDS = ['title', 'statement', 'big-number', 'list', 'image', 'quote', 'split', 'logo', 'end', 'scene', 'stage', 'voxel'];
 const NEW_SCENE = { setting: 'meadow', shot: 'medium', cast: [], props: [] };
 // Pack B: a 3D studio shot (static/motion/stage.js): set tone, shot, 3D cast, stand-in people, glossy props, labels over heads.
 const NEW_STAGE = { set: 'lavender', shot: 'medium', cast: [], people: { count: 0 }, props: [], labels: [] };
+// Pack C: a blocky voxel world shot (static/motion/voxel.js): world, time of day, shot, seed, blocky cast, people, props, labels.
+const NEW_VOXEL = { world: 'meadow', time: 'day', shot: 'medium', seed: 0, cast: [], people: { count: 0 }, props: [], labels: [] };
 // A Pack A video's cast: each character's spec at the version the project pins (routes/character_routes.py).
 const castCache = new Map();
 async function castSpecs(p) {
@@ -120,8 +122,9 @@ async function preview(canvas, p, aspect, extra = {}) {
     player?.dispose?.();
     // A computer whose browser cannot draw WebGL (no GPU, a blocked context) still previews everything else: its 3D
     // shots show as stand-in cards of the same length. Renders are unchanged.
-    if (!p.beats.some(b => b.kind === 'stage') || /replaced before it was ready/.test(error.message)) throw error;
-    const flat = { ...p, characters, beats: p.beats.map(b => b.kind !== 'stage' ? b : { ...b, kind: 'statement', stage: undefined, text: b.text || '3D shot', sub: '3D shot, drawn in the render' }) };
+    if (!p.beats.some(b => b.kind === 'stage' || b.kind === 'voxel') || /replaced before it was ready/.test(error.message)) throw error;
+    const flat = { ...p, characters, beats: p.beats.map(b => b.kind !== 'stage' && b.kind !== 'voxel' ? b
+      : { ...b, kind: 'statement', stage: undefined, voxel: undefined, text: b.text || '3D shot', sub: '3D shot, drawn in the render' }) };
     delete flat.renderer;
     const stand = mount(canvas, flat, options);
     await stand.ready;
@@ -923,7 +926,7 @@ async function editor(host, id, looks, back, parentDisposed) {
   const addKind = select('Kind of beat to add', KINDS, 'statement', () => {});
   const beatsPanel = el('div', {}, [list, el('div', { class: 'ste-add' }, [addKind, button('Add beat', () => {
     if (state.p.beats.length >= maxBeats(state.p)) throw Error(`A video can have at most ${maxBeats(state.p)} beats.`);
-    changed(p => p.beats.splice(selected + 1, 0, { id: beatId(), kind: addKind.value, text: '', bars: 1, ...(addKind.value === 'scene' ? { scene: structuredClone(NEW_SCENE) } : {}), ...(addKind.value === 'stage' ? { stage: structuredClone(NEW_STAGE) } : {}) }));
+    changed(p => p.beats.splice(selected + 1, 0, { id: beatId(), kind: addKind.value, text: '', bars: 1, ...(addKind.value === 'scene' ? { scene: structuredClone(NEW_SCENE) } : {}), ...(addKind.value === 'stage' ? { stage: structuredClone(NEW_STAGE) } : {}), ...(addKind.value === 'voxel' ? { voxel: structuredClone(NEW_VOXEL) } : {}) }));
     selectBeat(selected + 1);
   })]), el('p', { class: 'meta', text: 'Drag on the timeline or here to reorder. Alt + Up or Down moves a beat in this list.' })]);
   const assetsPanel = el('div', { class: 'ste-assets' });
@@ -1211,12 +1214,25 @@ async function editor(host, id, looks, back, parentDisposed) {
         const b = p.beats[selected]; b.kind = v;
         if (v === 'scene') b.scene ||= structuredClone(NEW_SCENE); else delete b.scene;
         if (v === 'stage') b.stage ||= structuredClone(NEW_STAGE); else delete b.stage;
+        if (v === 'voxel') b.voxel ||= structuredClone(NEW_VOXEL); else delete b.voxel;
       }); drawInspector(); drawProject();
     }), path + '.kind'),
     textField('Text', 'text', 140, true), only(textField('Supporting text', 'sub', 100), !['big-number', 'list'].includes(kind)),
     only(textField('Number', 'number', 140), kind === 'big-number'), only(itemField, kind === 'list')]));
     if (kind === 'scene') inspector.append(group('Scene', [sceneForm({ beat, path, cast: state.p.cast || [], names, forms, helpers: sceneHelpers })], { 'data-group': 'scene' }));
     if (kind === 'stage') inspector.append(group('3D stage', [stageForm({ beat, path, cast: state.p.cast || [], names, forms, helpers: sceneHelpers })], { 'data-group': 'stage' }));
+    if (kind === 'voxel') {
+      // Pack C's blocky world shot, edited as JSON (three.js only).
+      const voxelText = el('textarea', { rows: 10, 'aria-label': 'Blocky world as JSON', spellcheck: 'false' });
+      voxelText.value = JSON.stringify(beat.voxel || NEW_VOXEL, null, 1);
+      const voxelField = field('Blocky world (world, time, shot, seed, cast, people, props, labels)', voxelText, path + '.voxel',
+        'Worlds: meadow, cave, village, sky-island, ocean. Times: day, dusk, night. Props: gem, lantern, crate, flag, ball, star. Cast blocky characters (form voxel).');
+      voxelText.addEventListener('input', () => {
+        try { setBeat('voxel', JSON.parse(voxelText.value)); voxelField.querySelector('.meta').textContent = 'Saved.'; }
+        catch { voxelField.querySelector('.meta').textContent = 'Not valid JSON yet; nothing saved.'; }
+      });
+      inspector.append(group('Blocky world', [voxelField], { 'data-group': 'voxel' }));
+    }
     // Pictures.
     const upload = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/gif,image/webp', 'aria-label': 'Upload an image' });
     upload.addEventListener('change', async () => {
@@ -1337,7 +1353,7 @@ async function editor(host, id, looks, back, parentDisposed) {
   function castGroup() {
     const box = group('Cast', [], { 'data-group': 'cast' });
     const cast = state.p.cast || [];
-    const used = new Set(state.p.beats.flatMap(b => b.kind === 'scene' ? (b.scene?.cast || []).map(m => m.character) : b.kind === 'stage' ? (b.stage?.cast || []).map(m => m.character) : []));
+    const used = new Set(state.p.beats.flatMap(b => b.kind === 'scene' ? (b.scene?.cast || []).map(m => m.character) : b.kind === 'stage' ? (b.stage?.cast || []).map(m => m.character) : b.kind === 'voxel' ? (b.voxel?.cast || []).map(m => m.character) : []));
     if (state.p.beats.some(b => b.kind === 'scene') || cast.length) box.append(field('Scene palette', select('Scene palette', PALETTES, state.p.palette || 'dawn', v => changed(p => { p.palette = v; })), 'palette'));
     cast.forEach((entry, i) => {
       const known = accountCharacters?.find(c => c.id === entry.character), name = names[entry.character] || known?.name || 'Character';

@@ -106,6 +106,11 @@ def missing(project) -> list[str]:
     return out
 
 
+# Beats whose characters speak the line: Pack A scenes, Pack B stage shots and Pack C voxel shots. (Stage shots had no
+# mouth shapes before Pack C: their lips stayed at rest while the narration played.)
+TALKING = ("scene", "stage", "voxel")
+
+
 def prepare(video_id, synthesize=None):
     """Speak and measure every narrated beat that needs it, save the measurements, and return the project.
     Lines already measured in the same voice are reused. A video without narration comes back unchanged."""
@@ -114,7 +119,7 @@ def prepare(video_id, synthesize=None):
         return project
     voice = project["narration"]["voice"]
     todo = missing(project)
-    lips = [b["id"] for b in project["beats"] if b["kind"] == "scene" and "spoken" in b and "mouth" not in b["spoken"]
+    lips = [b["id"] for b in project["beats"] if b["kind"] in TALKING and "spoken" in b and "mouth" not in b["spoken"]
             and b["id"] not in todo]
     # Word captions: lines spoken before the video asked for them are aligned from their own audio, without speaking again.
     words = video_store.word_captions(project)
@@ -142,7 +147,7 @@ def prepare(video_id, synthesize=None):
         _write(clip_path(video_id, key), samples)
         measured[b["id"]] = {"key": key, "seconds": round(len(samples) / RATE, 3),
                              "parts": [[round(video_store.LEAD + s, 3), round(video_store.LEAD + e, 3), t] for s, e, t in parts]}
-        if b["kind"] == "scene":
+        if b["kind"] in TALKING:
             # A speaking character's mouth follows this line's own audio envelope (core/video_mouth.py).
             measured[b["id"]]["mouth"] = video_mouth.for_beat(samples, video_store.LEAD, RATE)
         if words:

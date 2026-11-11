@@ -803,6 +803,11 @@ class FormatToolTests(unittest.TestCase):
         self.assertIn("Propose a port", out)
         card = studio.list_formats()[0]
         self.assertEqual(card["created_by"], "Researcher")
+        # Every built-in pack is built since Pack C (unit 6); a pack that cannot be used yet is played here by turning Pack C off.
+        from core import style_packs
+        unbuilt = patch.dict(style_packs.BUILT_IN["voxel-3d"], {"available": False, "note": "Not built yet."})
+        unbuilt.start()
+        self.addCleanup(unbuilt.stop)
         listing = call("content_studio_formats", b["Producer"])
         for text in ("Impossible ability", "Glimpse Lab", '"motion-type"', '"available": false'):
             self.assertIn(text, listing)

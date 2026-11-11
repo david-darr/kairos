@@ -34,7 +34,7 @@ def videos_dir() -> str:
 
 
 ASPECTS = {"16:9": (1920, 1080), "9:16": (1080, 1920), "1:1": (1080, 1080)}
-KINDS = ("title", "statement", "big-number", "list", "image", "quote", "split", "logo", "end", "scene", "stage")
+KINDS = ("title", "statement", "big-number", "list", "image", "quote", "split", "logo", "end", "scene", "stage", "voxel")
 CAMERAS = ("still", "push", "pull", "pan", "shake")
 TRANSITIONS = ("cut", "whip", "zoom", "flip", "dither", "mosaic", "wipe")
 MOODS = ("energetic", "calm", "warm", "dark", "playful")
@@ -130,7 +130,7 @@ def validate(project: dict) -> dict:
         _error("beats", f"give 1 to {most} beats.")
     ids = set()
     allowed = {"id", "kind", "bars", "text", "sub", "number", "items", "image", "camera", "transition", "treatment",
-               "say", "spoken", "seconds", "scene", "stage"}
+               "say", "spoken", "seconds", "scene", "stage", "voxel"}
     for i, b in enumerate(beats):
         path = f"beats[{i}]"
         if not isinstance(b, dict):
@@ -182,6 +182,10 @@ def validate(project: dict) -> dict:
             _stage(b.get("stage"), path + ".stage")
         elif "stage" in b:
             _error(path + ".stage", "only a stage beat (Pack B, 3D) has a stage; set kind to stage or remove it.")
+        if b["kind"] == "voxel":
+            _voxel(b.get("voxel"), path + ".voxel")
+        elif "voxel" in b:
+            _error(path + ".voxel", "only a voxel beat (Pack C, blocky world) has a voxel; set kind to voxel or remove it.")
     _cast(p, beats)
     _style_pack(p)
     if "renderer" in p:
@@ -189,6 +193,8 @@ def validate(project: dict) -> dict:
             p.pop("renderer")
         elif p["renderer"] not in RENDERERS_3D:
             _error("renderer", "choose threejs (built in) or blender (only when Blender is installed); it draws the 3D stage beats.")
+        elif p["renderer"] == "blender" and any(b["kind"] == "voxel" for b in beats):
+            _error("renderer", "a video with blocky world (voxel) beats renders with three.js only; Pack C has no Blender path.")
     # Tracks and clips over the beats (core/video_tracks.py); a video without them is unchanged.
     from core import video_tracks
     from core import video_media
@@ -291,7 +297,7 @@ def _scene(value, path):
 def _stage(value, path):
     """A Pack B stage shot: the studio set's tone, a shot size, up to three mascots, stand-in people, glossy props and
     floating labels over heads (static/motion/stage.js builds it in 3D)."""
-    from core import character_store, style_packs
+    from core import style_packs
     if not isinstance(value, dict):
         _error(path, "give set, shot, cast, people, props and labels.")
     for key in value.keys() - {"set", "shot", "pedestal", "cast", "people", "props", "labels"}:
@@ -309,6 +315,33 @@ def _stage(value, path):
         _error(path + ".shot", "choose " + ", ".join(style_packs.SHOTS) + ".")
     if not isinstance(value["pedestal"], bool):
         _error(path + ".pedestal", "use true or false.")
+    _shot_cast(value, path)
+    _shot_people(value, path, style_packs.MAX_PEOPLE)
+    if not isinstance(value["props"], list) or len(value["props"]) > MAX_PROPS:
+        _error(path + ".props", f"give at most {MAX_PROPS} props.")
+    for i, prop in enumerate(value["props"]):
+        where = f"{path}.props[{i}]"
+        if not isinstance(prop, dict):
+            _error(where, "give {shape, x, depth, size, color}.")
+        for key in prop.keys() - {"shape", "x", "depth", "size", "color"}:
+            _error(f"{where}.{key}", "unknown prop field; use shape, x, depth, size or color.")
+        if prop.get("shape") not in style_packs.STAGE_PROPS:
+            _error(where + ".shape", "choose " + ", ".join(style_packs.STAGE_PROPS) + ".")
+        prop.setdefault("x", .7 if i % 2 else -.7)
+        prop.setdefault("depth", .5)
+        prop.setdefault("size", .4)
+        prop.setdefault("color", i % 5)
+        _number(prop["x"], where + ".x", -1, 1)
+        _number(prop["depth"], where + ".depth", 0, 1)
+        _number(prop["size"], where + ".size", .1, 1)
+        if isinstance(prop["color"], bool) or not isinstance(prop["color"], int) or not 0 <= prop["color"] <= 4:
+            _error(where + ".color", "give 0 to 4 (mint, violet, gold, coral, blue).")
+    _shot_labels(value, path)
+
+
+def _shot_cast(value, path):
+    """A 3D shot's cast (Pack B stage, Pack C voxel): up to three members, one speaking at a time."""
+    from core import character_store, style_packs
     if not isinstance(value["cast"], list) or len(value["cast"]) > MAX_ON_SCREEN:
         _error(path + ".cast", f"give at most {MAX_ON_SCREEN} characters on screen.")
     seen, speaking = set(), 0
@@ -345,33 +378,24 @@ def _stage(value, path):
                 _error(where + ".react.expression", "choose " + ", ".join(character_store.EXPRESSIONS) + ".")
     if speaking > 1:
         _error(path + ".cast", "one narrator voice speaks at a time: mark at most one character speaking.")
+
+
+def _shot_people(value, path, most):
+    """A 3D shot's faceless stand-in people: {count, seed}."""
     people = value["people"]
     if not isinstance(people, dict) or people.keys() - {"count", "seed"}:
-        _error(path + ".people", "give {count, seed}: how many stand-in people (0 to 8) and a number that varies them.")
+        _error(path + ".people", f"give {{count, seed}}: how many stand-in people (0 to {most}) and a number that varies them.")
     people.setdefault("count", 0)
     people.setdefault("seed", 0)
-    for key, high in (("count", style_packs.MAX_PEOPLE), ("seed", 999)):
+    for key, high in (("count", most), ("seed", 999)):
         if isinstance(people[key], bool) or not isinstance(people[key], int) or not 0 <= people[key] <= high:
             _error(f"{path}.people.{key}", f"give a whole number from 0 to {high}.")
-    if not isinstance(value["props"], list) or len(value["props"]) > MAX_PROPS:
-        _error(path + ".props", f"give at most {MAX_PROPS} props.")
-    for i, prop in enumerate(value["props"]):
-        where = f"{path}.props[{i}]"
-        if not isinstance(prop, dict):
-            _error(where, "give {shape, x, depth, size, color}.")
-        for key in prop.keys() - {"shape", "x", "depth", "size", "color"}:
-            _error(f"{where}.{key}", "unknown prop field; use shape, x, depth, size or color.")
-        if prop.get("shape") not in style_packs.STAGE_PROPS:
-            _error(where + ".shape", "choose " + ", ".join(style_packs.STAGE_PROPS) + ".")
-        prop.setdefault("x", .7 if i % 2 else -.7)
-        prop.setdefault("depth", .5)
-        prop.setdefault("size", .4)
-        prop.setdefault("color", i % 5)
-        _number(prop["x"], where + ".x", -1, 1)
-        _number(prop["depth"], where + ".depth", 0, 1)
-        _number(prop["size"], where + ".size", .1, 1)
-        if isinstance(prop["color"], bool) or not isinstance(prop["color"], int) or not 0 <= prop["color"] <= 4:
-            _error(where + ".color", "give 0 to 4 (mint, violet, gold, coral, blue).")
+
+
+def _shot_labels(value, path):
+    """Floating labels over heads in a 3D shot: who each floats over, its number or word, a line under it, its time."""
+    from core import style_packs
+    people = value["people"]
     if not isinstance(value["labels"], list) or len(value["labels"]) > style_packs.MAX_LABELS:
         _error(path + ".labels", f"give at most {style_packs.MAX_LABELS} labels.")
     for i, label in enumerate(value["labels"]):
@@ -388,6 +412,46 @@ def _stage(value, path):
         _text(label["sub"], where + ".sub", 32)
         label.setdefault("at", 0)
         _number(label["at"], where + ".at", 0, 60)
+
+
+def _voxel(value, path):
+    """A Pack C voxel shot: the world (meadow, cave, village, sky island, ocean), the time of day, a shot size, a seed that
+    varies the world, up to three blocky characters, stand-in people, props and floating labels (static/motion/voxel.js)."""
+    from core import style_packs
+    if not isinstance(value, dict):
+        _error(path, "give world, time, shot, seed, cast, people, props and labels.")
+    for key in value.keys() - {"world", "time", "shot", "seed", "cast", "people", "props", "labels"}:
+        _error(f"{path}.{key}", "unknown voxel field; use world, time, shot, seed, cast, people, props or labels.")
+    value.setdefault("world", "meadow")
+    value.setdefault("time", "day")
+    value.setdefault("shot", "medium")
+    value.setdefault("seed", 0)
+    value.setdefault("cast", [])
+    value.setdefault("people", {"count": 0})
+    value.setdefault("props", [])
+    value.setdefault("labels", [])
+    for key, choices in (("world", style_packs.VOXEL_WORLDS), ("time", style_packs.VOXEL_TIMES), ("shot", style_packs.SHOTS)):
+        if value[key] not in choices:
+            _error(f"{path}.{key}", "choose " + ", ".join(choices) + ".")
+    if isinstance(value["seed"], bool) or not isinstance(value["seed"], int) or not 0 <= value["seed"] <= 999:
+        _error(path + ".seed", "give a whole number from 0 to 999; it varies the world's hills, trees and clouds.")
+    _shot_cast(value, path)
+    _shot_people(value, path, style_packs.VOXEL_MAX_PEOPLE)
+    if not isinstance(value["props"], list) or len(value["props"]) > MAX_PROPS:
+        _error(path + ".props", f"give at most {MAX_PROPS} props.")
+    for i, prop in enumerate(value["props"]):
+        where = f"{path}.props[{i}]"
+        if not isinstance(prop, dict):
+            _error(where, "give {kind, x, depth}.")
+        for key in prop.keys() - {"kind", "x", "depth"}:
+            _error(f"{where}.{key}", "unknown prop field; use kind, x or depth.")
+        if prop.get("kind") not in style_packs.VOXEL_PROPS:
+            _error(where + ".kind", "choose " + ", ".join(style_packs.VOXEL_PROPS) + ".")
+        prop.setdefault("x", .7 if i % 2 else -.7)
+        prop.setdefault("depth", .5)
+        _number(prop["x"], where + ".x", -1, 1)
+        _number(prop["depth"], where + ".depth", 0, 1)
+    _shot_labels(value, path)
 
 
 def _cast(p, beats):
@@ -423,13 +487,18 @@ def _cast(p, beats):
         for j, member in enumerate(b["scene"]["cast"] if b["kind"] == "scene" else []):
             if member["character"] not in pinned:
                 _error(f"beats[{i}].scene.cast[{j}].character", "add this character to the project's cast with its version first.")
-            if forms.get(member["character"]) == "3d":
-                _error(f"beats[{i}].scene.cast[{j}].character", "this is a 3D character; it plays stage beats. Cast a flat (2D) character in a scene.")
+            if forms.get(member["character"]) in ("3d", "voxel"):
+                _error(f"beats[{i}].scene.cast[{j}].character", "this is a 3D character or a blocky one; it plays stage or voxel beats. Cast a flat (2D) character in a scene.")
         for j, member in enumerate(b["stage"]["cast"] if b["kind"] == "stage" else []):
             if member["character"] not in pinned:
                 _error(f"beats[{i}].stage.cast[{j}].character", "add this character to the project's cast with its version first.")
             if forms.get(member["character"]) != "3d":
                 _error(f"beats[{i}].stage.cast[{j}].character", "a stage beat casts 3D characters (make one with form 3d, such as Pip 3D).")
+        for j, member in enumerate(b["voxel"]["cast"] if b["kind"] == "voxel" else []):
+            if member["character"] not in pinned:
+                _error(f"beats[{i}].voxel.cast[{j}].character", "add this character to the project's cast with its version first.")
+            if forms.get(member["character"]) != "voxel":
+                _error(f"beats[{i}].voxel.cast[{j}].character", "a voxel beat casts blocky characters (make one with form voxel, such as Pip Block).")
     if cast:
         p["cast"] = cast
     else:

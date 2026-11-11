@@ -151,7 +151,8 @@ const path = require('node:path');
     const sample = { aspects: [aspect], beats: [{ kind, camera, text: 'Designed for motion', number: '312', sub: 'A clear next step', items: ['One', 'Two'] }] };
     // Node has no WebGL: a Pack B stage beat mounts as the Blender overlay pass (no three.js), which still draws its type
     // and reports the 3D pose Blender plays.
-    const mounted = E.mount({ ownerDocument: doc, getContext: () => context }, sample, kind === 'stage' ? { layer: 'overlay' } : {});
+    // Pack C's voxel beat the same way (its world is left transparent in the overlay pass).
+    const mounted = E.mount({ ownerDocument: doc, getContext: () => context }, sample, kind === 'stage' || kind === 'voxel' ? { layer: 'overlay' } : {});
     await mounted.ready;
     if (kind === 'stage') { const pose = mounted.pose(.5); assert.ok(pose && pose.camera && pose.groups, 'a stage beat reports its pose'); }
     else assert.equal(mounted.pose(.5), null);

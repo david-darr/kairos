@@ -26,7 +26,14 @@ SCENES = ("Pack A (flat 2D with characters): cast approved characters (character
           "ring|coin, x -1 to 1, depth 0-1, size, color 0-4}; labels: up to 8 of {over c0|p0.., text (a number or short word, 16 "
           "characters), sub (32), at seconds}: numbers floating over heads}. Keep every person fictional and every real figure sourced. "
           "renderer=threejs (built in, the default) or blender (only when the person has Blender installed; otherwise it renders with "
-          "three.js and says so). With Blender, transitions into and out of stage beats are cuts. ")
+          "three.js and says so). With Blender, transitions into and out of stage beats are cuts. "
+          "Pack C (blocky voxel world, three.js only): cast blocky characters (character_make with form voxel, such as Pip Block; approved "
+          "on their sheet) in voxel beats: kind voxel with voxel={world: meadow, cave, village, sky-island or ocean; time: day, dusk or "
+          "night; shot: wide, medium or close; seed 0-999 (varies hills, trees and clouds); cast: up to 3 of {character, x, expression, "
+          "action, speaking, facing, react}; people {count 0-6, seed}; props: up to 6 of {kind gem|lantern|crate|flag|ball|star, x -1 to 1, "
+          "depth 0-1}; labels as in Pack B}. Our own blocky world: never use another company's block game's name, blocks, skins, "
+          "creatures or logos, in the video or in titles, tags and thumbnails. This look draws children: the channel or post must say "
+          "honestly whether it is made for kids. ")
 FLOW = ("Workflow: creative_direction(type=video) -> video_create with a beat sheet (one idea per beat, "
         "3 to 8 words on screen, 1 to 2 bars each, end card last; vary the kinds: at most half statements, a big-number "
         "for a figure, a list, a quote, and an image or split beat with a photo from image_search) -> video_preview -> "
@@ -172,7 +179,7 @@ async def _create(args, ctx):
         meta, version, data = style_pack_store.usable(pack_id)
         defaults = style_pack_store.video_defaults(data)
         beats_in = args.get("beats") or [b for c in args.get("chapters") or [] if isinstance(c, dict) for b in c.get("beats") or []]
-        if not any(isinstance(b, dict) and b.get("kind") in ("scene", "stage") for b in beats_in):
+        if not any(isinstance(b, dict) and b.get("kind") in ("scene", "stage", "voxel") for b in beats_in):
             defaults.pop("cast", None)
             defaults.pop("renderer", None)
         for key, value in defaults.items():
@@ -227,7 +234,7 @@ def edit(project, ops, agent=False):
                 raise ValueError(f"ops[{n}].field: project edits title, look, bpm, fps, aspects, music, narration, cast, palette, style_pack, chapters or renderer with value.")
             draft[op["field"]] = op["value"]
         elif kind == "set":
-            if op.get("field") not in ("kind", "bars", "text", "sub", "number", "items", "image", "camera", "transition", "treatment", "say", "scene", "stage") or "value" not in op:
+            if op.get("field") not in ("kind", "bars", "text", "sub", "number", "items", "image", "camera", "transition", "treatment", "say", "scene", "stage", "voxel") or "value" not in op:
                 raise ValueError(f"ops[{n}].field: choose a beat field from video_outline and give value.")
             if op["field"] == "say" and op["value"] in (None, ""):
                 draft["beats"][index(op.get("id"))].pop("say", None)   # an empty line takes the narration off that beat
@@ -261,7 +268,7 @@ def edit(project, ops, agent=False):
 
 @register("video_edit", "Change a video atomically. ops: set {op:set,id,field,value} (field say sets or, with an empty value, removes a narration line); "
           "insert {op:insert,before|after,beat}; remove {op:remove,id}; move {op:move,id,before|after}; "
-          "project {op:project,field,value} for title,look,bpm,fps (30 or 60),aspects,music,narration ({voice, captions, caption_style: line|highlight|box}),cast,palette,style_pack ({id, version}),chapters ([{id, title, start}]),renderer (threejs or blender); a scene beat's whole scene is set with field scene, a stage beat's with field stage. "
+          "project {op:project,field,value} for title,look,bpm,fps (30 or 60),aspects,music,narration ({voice, captions, caption_style: line|highlight|box}),cast,palette,style_pack ({id, version}),chapters ([{id, title, start}]),renderer (threejs or blender); a scene beat's whole scene is set with field scene, a stage beat's with field stage, a voxel beat's with field voxel. "
           + video_tracks.OP_HELP +
           "Use beat, track and clip ids from video_outline. A bad operation changes nothing. Preview again after edits.",
           _object({"video_id": _ID, "ops": {"type": "array", "items": {"type": "object"}}}, ("ops",)), surfaces=ALL, effect=WRITE)
@@ -437,7 +444,8 @@ def _character_line(meta):
         form = character_store.form_of(character_store.spec(meta["id"], meta["versions"][-1]["version"]))
     except LookupError:
         form = "2d"
-    return f"- {meta['name']} ({meta['family']}, {'3D, for stage beats' if form == '3d' else '2D, for scene beats'}), id {meta['id']}: {versions}"
+    kind = {"3d": "3D, for stage beats", "voxel": "blocky, for voxel beats"}.get(form, "2D, for scene beats")
+    return f"- {meta['name']} ({meta['family']}, {kind}), id {meta['id']}: {versions}"
 
 
 @register("character_list", "List this account's Pack A characters with their versions and approval status, and what a scene can use "
@@ -450,7 +458,9 @@ async def _characters(args, ctx):
               "Settings: " + ", ".join(style_packs.SETTINGS), "Palettes: " + ", ".join(style_packs.PALETTES),
               "Props: " + ", ".join(style_packs.PROPS), "Actions: " + ", ".join(video_store.ACTIONS),
               "Views: " + ", ".join(character_store.VIEWS), "Expressions: " + ", ".join(character_store.EXPRESSIONS),
-              "Pack B stage sets: " + ", ".join(style_packs.STAGE_SETS), "Pack B props: " + ", ".join(style_packs.STAGE_PROPS)]
+              "Pack B stage sets: " + ", ".join(style_packs.STAGE_SETS), "Pack B props: " + ", ".join(style_packs.STAGE_PROPS),
+              "Pack C worlds: " + ", ".join(style_packs.VOXEL_WORLDS) + "; times: " + ", ".join(style_packs.VOXEL_TIMES)
+              + "; props: " + ", ".join(style_packs.VOXEL_PROPS)]
     return _safe(ctx, "\n".join(lines))
 
 
@@ -468,12 +478,14 @@ def _taken_names():
           "mouth, outline, accent, cheek), proportions (head, body_width, limb_length, limb_width, eye_size, as shares of height), "
           "outline (4 to 14 thousandths of height) and accessory (none, scarf, antenna, leaf, cap, bow). form 3d makes a Pack B 3D character "
           "(glossy, built in 3D from the same numbers, approved on its own 3D sheet; the 3D starting designs are Pip 3D, Bo 3D and Tilly 3D). "
+          "form voxel makes a Pack C blocky character (built from rounded boxes with a big head and a pixel face; starting designs Pip "
+          "Block, Bo Block and Tilly Block). "
           "Change: character_id and changes. "
           "Never copy another channel's or brand's character; names on a format card's do-not-use list are refused. "
           "Then character_sheet sends the sheet to the person; only they approve it.",
           _object({"character_id": _str("A character to change; leave out to make a new one"),
                    "family": {"type": "string", "enum": list(character_store.FAMILIES)}, "name": _str("The character's name"),
-                   "form": {"type": "string", "enum": list(character_store.FORMS), "description": "2d (Pack A, default) or 3d (Pack B)"},
+                   "form": {"type": "string", "enum": list(character_store.FORMS), "description": "2d (Pack A, default), 3d (Pack B) or voxel (Pack C)"},
                    "changes": {"type": "object", "description": "palette, proportions, outline, accessory or name"},
                    "note": _str("What changed and why")}), surfaces=ALL, effect=WRITE)
 @_guard
@@ -488,8 +500,7 @@ async def _design(args, ctx):
     else:
         if not args.get("family"):
             raise ValueError("family: choose round, square or triangle for a new character.")
-        make = character_store.starter_3d if args.get("form") == "3d" else character_store.starter
-        meta = character_store.create(make(args["family"], **changes), by="model", note=args.get("note", ""))
+        meta = character_store.create(character_store.starter_for(args.get("form") or "2d", args["family"], **changes), by="model", note=args.get("note", ""))
     v = meta["versions"][-1]["version"]
     return _safe(ctx, _character_line(meta) + f"\nVersion {v} is a draft. Run character_sheet with character_id {meta['id']} and version {v} "
                       "to render its sheet and send it to the person for approval.")

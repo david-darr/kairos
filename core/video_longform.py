@@ -51,7 +51,7 @@ TYPICAL_FPS = 45.0     # measured 47.6 and 48.2 on the 3.5-minute Flat 2D sample
 SAMPLES_PER_CHAPTER = 4
 SHEET_SAMPLES = 12
 YOUTUBE_MIN_CHAPTERS, YOUTUBE_MIN_SECONDS = 3, 10   # YouTube's chapter rules (support.google.com/youtube/answer/9884579)
-ENGINE_FILES = ("engine.js", "kit.js", "layout.js", "rig.js", "scene.js", "stage.js", "stage3d.js", "overlay.js")
+ENGINE_FILES = ("engine.js", "kit.js", "layout.js", "rig.js", "scene.js", "stage.js", "stage3d.js", "overlay.js", "voxel.js", "voxel3d.js")
 _engine = {}
 
 

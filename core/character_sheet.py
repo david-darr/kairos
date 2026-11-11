@@ -4,6 +4,8 @@ The sheet is drawn by static/motion/sheet.js with the same rig the videos use, i
 window (electron/designRender.js, a PNG job on /api/characters/<id>/sheet), so what the person approves is exactly
 what the videos draw. LAYOUT is the sheet's grid; the page receives it so the checks below know where each cell is.
 
+A blocky character (Pack C, `form: voxel`) gets the same 3D sheet layout, drawn by sheet3d.js with the voxel model and
+renderer (static/motion/voxel.js, voxel3d.js), its faces as the pixel textures the videos draw.
 A 3D character (Pack B, `form: 3d`) gets a 3D sheet instead: static/motion/sheet3d.js renders the views, expressions and
 mouth shapes with the same model and three.js renderer the videos use, plus a flat colour key (LAYOUT_3D) that
 core/character_checks.stage_sheet_metrics measures. Approval is the same flow; a 3D version is approved on its own.
@@ -48,7 +50,7 @@ SCOPE = "sheet:{version}"
 
 
 def layout_for(spec) -> dict:
-    return LAYOUT_3D if character_store.form_of(spec) == "3d" else LAYOUT
+    return LAYOUT_3D if character_store.form_of(spec) in ("3d", "voxel") else LAYOUT
 
 
 class Unavailable(RuntimeError):
@@ -60,7 +62,7 @@ def page(character_id, version) -> str:
     spec = character_store.spec(character_id, version)
     meta = character_store.get(character_id)
     status = character_store.version_of(meta, version)["status"].replace("_", " ")
-    three_d = character_store.form_of(spec) == "3d"
+    three_d = character_store.form_of(spec) in ("3d", "voxel")     # Pack C's blocky sheet is drawn by sheet3d.js too
     html = (Path(STATIC_DIR) / "motion" / ("sheet3d.html" if three_d else "sheet.html")).read_text(encoding="utf-8")
     data = json.dumps({"spec": spec, "layout": layout_for(spec), "version": version, "status": status}, ensure_ascii=False).replace("</", "<\\/")
     return html.replace("<!--KD-SHEET-->", '<script type="application/json" id="kd-sheet-data">' + data + "</script>")
@@ -98,7 +100,7 @@ async def submit(character_id, version, png: bytes | None = None) -> dict:
         raise character_store.ApprovalError(f"Version {version} of {meta['name']} is already approved.")
     png = png if png is not None else await render(character_id, version)
     spec = character_store.spec(character_id, version)
-    if character_store.form_of(spec) == "3d":
+    if character_store.form_of(spec) in ("3d", "voxel"):
         metrics = character_checks.stage_sheet_metrics(png, spec, LAYOUT_3D)
     else:
         metrics = character_checks.sheet_metrics(png, spec, LAYOUT)

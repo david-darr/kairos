@@ -14,12 +14,18 @@ tools read them from here.
   renderers (David, 2026-11-10: "just add both as options"): three.js, built in and the default (static/motion/stage3d.js
   in the render window), and Blender, only when the person has it installed (core/blender_tools.py finds it; Kairos
   never bundles or downloads it) and picked it for the pack or the channel (core/video_blender.py runs it).
-- `voxel-3d`: listed, not built (unit 6).
+- `voxel-3d` (Pack C, build unit 6): a generic blocky world on our own palette (meadow, cave, village, sky island, ocean;
+  day, dusk and night), soft bevelled blocks drawn instanced, and blocky original characters built from boxes from their
+  character spec (form voxel) with pixel faces drawn in code. three.js only (static/motion/voxel.js, voxel3d.js): Pack C
+  has no Blender path. Kept apart from any well-known block game: no such game's textures, skins, fonts, logos, mobs, UI,
+  sounds or block names, and the Evaluator refuses that game's name in a Pack C post's title, tags or thumbnail
+  (services/content_studio/policy.py brand_findings). This look draws children: channels and posts state honestly whether
+  a video is made for kids (YouTube's made-for-kids setting, services/content_studio/prepare.py and youtube_publish.py).
 
 User-made packs (core/style_pack_store.py): `user_packs()` lists the current account's own packs with the same fields
 as a built-in entry, drawn by the built-in pack they are based on (their `base`). A user pack is available only while
-it has a version the person approved and its renderer runs today (the 2D engine); Blender and Three.js packs are
-recognised but unavailable until build unit 5. Packs are data only; nothing runs from a pack.
+it has a version the person approved and its renderer draws its base (the 2D engine for motion-type and flat-2d;
+three.js or Blender for glossy-3d; three.js for voxel-3d). Packs are data only; nothing runs from a pack.
 
 Render speed (the cost check, services/content_studio/formats.py, and Studio's estimates) comes from measured numbers,
 per renderer, in RENDER_SPEED: frames a second on the machine Pack B was built on (an RTX 4090), with the date and what
@@ -36,15 +42,24 @@ RENDER_SPEED = {
     "threejs": {"fps": 40.0, "measured": "2026-11-10, the 23 s Pack B sample in three.js with the look pass, RTX 4090"},
     # The whole part: overlay pass, Eevee at 32 samples (3.1 to 3.3 frames a second), FFmpeg composite: 3.4 frames a second.
     "blender": {"fps": 3.4, "measured": "2026-11-10, the 23 s Pack B sample in Blender 5.2.2 Eevee (32 samples) with the overlay pass and composite, RTX 4090"},
+    # Pack C's blocky world on three.js: thousands of instanced bevelled blocks, soft shadows, ambient occlusion.
+    # Capture through the render worker (2x supersampling, 4x MSAA, soft shadows, ambient occlusion, about 9,000 instanced
+    # blocks a shot): 38.2 fps; the whole 25.2 s sample took 29.4 s including Kokoro narration. One run.
+    "threejs-voxel": {"fps": 38.0, "measured": "2026-11-10, the 25 s Pack C sample (five worlds) in three.js, RTX 4090"},
 }
+# Which measured speed a pack's renderer uses: Pack C draws a whole world, so it has its own number.
+SPEED_KEYS = {("voxel-3d", "threejs"): "threejs-voxel"}
+
+
+def speed_key(base: str, renderer: str) -> str:
+    return SPEED_KEYS.get((base, renderer), renderer)
 
 
 def render_seconds_per_minute(renderer: str) -> float:
     """Seconds of rendering for one minute of video with this renderer, from its measured speed."""
     return round(1800 / RENDER_SPEED[renderer]["fps"], 1)
 
-# `units_per_minute` is render effort relative to the 2D engine, from the measured speeds below (RENDER_SPEED; only the
-# unbuilt voxel pack keeps a planning estimate). `max_seconds` is what the pack makes in one part (chapters: unit 4).
+# `units_per_minute` is render effort relative to the 2D engine, from the measured speeds (RENDER_SPEED, SPEED_KEYS). `max_seconds` is what the pack makes in one part (chapters: unit 4).
 BUILT_IN = {
     "motion-type": {"name": "Motion type", "available": True, "renderer": "2d-engine", "units_per_minute": 1.0,
                     "max_seconds": 480, "characters": False,
@@ -58,9 +73,12 @@ BUILT_IN = {
                   "note": "Our own glossy 3D mascot in a studio, with floating labels and numbers. Rendered with three.js, built in; "
                           "or with Blender when it is installed and picked for the pack or channel (slower, softer light). "
                           "Characters are approved from their 3D sheet before a video can use them. Up to 8 minutes, or 20 in chapters."},
-    "voxel-3d": {"name": "Blocky voxel 3D", "available": False, "renderer": "threejs", "units_per_minute": 8.0,
-                 "max_seconds": 480, "characters": True,
-                 "note": "A generic cube world with our own blocks and characters. Not built yet (build unit 6)."},
+    "voxel-3d": {"name": "Blocky voxel 3D", "available": True, "renderer": "threejs", "renderers": ["threejs"],
+                 "units_per_minute": 1.6, "max_seconds": 480, "characters": True,
+                 "note": "A generic blocky world on our own palette (meadow, cave, village, sky island, ocean; day, dusk, night) with "
+                         "our own blocky characters and their pixel faces. Rendered with three.js only (built in; no Blender path). "
+                         "This look draws children: say on the channel and each post whether it is made for kids. Characters are "
+                         "approved from their sheet before a video can use them. Up to 8 minutes, or 20 in chapters."},
 }
 
 # Pack A's scene palettes: one per channel keeps the series consistent. Each is a short list of flat colours; the
@@ -83,6 +101,11 @@ STAGE_SETS = ("lavender", "peach", "mint", "sky", "night")
 STAGE_PROPS = ("ball", "block", "pillar", "ring", "coin")
 STAGE_FACINGS = ("camera", "left", "right")
 MAX_PEOPLE, MAX_LABELS = 8, 8
+# Pack C's blocky world (static/motion/voxel.js): its worlds, times of day, props and stand-in people.
+VOXEL_WORLDS = ("meadow", "cave", "village", "sky-island", "ocean")
+VOXEL_TIMES = ("day", "dusk", "night")
+VOXEL_PROPS = ("gem", "lantern", "crate", "flag", "ball", "star")
+VOXEL_MAX_PEOPLE = 6
 SHOTS = ("wide", "medium", "close")
 PROPS = ("sun", "moon", "star", "cloud", "lightbulb", "heart", "book", "planet", "drop", "leaf", "gear", "arrow",
          "question", "coin", "clock", "rocket", "tree", "house", "magnifier", "atom")
@@ -106,13 +129,13 @@ def user_packs() -> list[dict]:
         base = BUILT_IN[data["base"]]
         runs = base["available"] and data["renderer"] in (base.get("renderers") or [base["renderer"]])
         if not runs:
-            state = "Its renderer is not built yet (build unit 5)."
+            state = "Its renderer does not draw this base (Pack C renders with three.js only)." if data["base"] == "voxel-3d" else "Its renderer is not built yet."
         elif version is None:
             state = "Not approved yet: approve its sample in Studio > Content > Styles."
         else:
             state = f"Approved version {version}."
         out.append({"id": meta["id"], "name": meta["name"], "available": bool(runs and version), "renderer": data["renderer"],
-                    "base": data["base"], "units_per_minute": units_per_minute(data["renderer"]), "max_seconds": base["max_seconds"],
+                    "base": data["base"], "units_per_minute": units_per_minute(speed_key(data["base"], data["renderer"])), "max_seconds": base["max_seconds"],
                     "characters": base["characters"], "approved_version": version,
                     "note": (data["summary"] + " " if data["summary"] else "") + state})
     return out
@@ -123,10 +146,11 @@ def units_per_minute(renderer: str) -> float:
     return round(RENDER_SPEED["2d-engine"]["fps"] / RENDER_SPEED[renderer]["fps"], 2)
 
 
-for _pack in BUILT_IN.values():
+for _id, _pack in BUILT_IN.items():
     if _pack["available"]:
-        _pack["units_per_minute"] = units_per_minute(_pack["renderer"])
-        _pack["render_seconds_per_minute"] = render_seconds_per_minute(_pack["renderer"])
+        _pack["speed_key"] = speed_key(_id, _pack["renderer"])
+        _pack["units_per_minute"] = units_per_minute(_pack["speed_key"])
+        _pack["render_seconds_per_minute"] = render_seconds_per_minute(_pack["speed_key"])
 
 
 def all_packs() -> dict:

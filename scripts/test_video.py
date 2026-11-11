@@ -138,6 +138,10 @@ class ValidationTests(unittest.TestCase):
                     p["beats"][0]["stage"] = {}      # Pack B: every stage field has its default
                 else:
                     p["beats"][0].pop("stage", None)
+                if kind == "voxel":
+                    p["beats"][0]["voxel"] = {}      # Pack C: every voxel field has its default
+                else:
+                    p["beats"][0].pop("voxel", None)
                 for transition in video_store.TRANSITIONS:
                     p["beats"][0]["transition"] = transition
                     video_store.validate(p)
@@ -1477,7 +1481,7 @@ class PackRegistryTests(unittest.TestCase):
         self.assertTrue(style_packs.available("flat-2d"))
         self.assertTrue(style_packs.available("motion-type"))
         self.assertTrue(style_packs.available("glossy-3d"))      # Pack B since unit 5
-        self.assertFalse(style_packs.available("voxel-3d"))
+        self.assertTrue(style_packs.available("voxel-3d"))       # Pack C since unit 6
         self.assertEqual(style_packs.user_packs(), [])
         from services.content_studio import formats
         cost = formats.cost("flat-2d", 120)

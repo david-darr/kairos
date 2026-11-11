@@ -169,7 +169,19 @@ const { pathToFileURL } = require('node:url');
   assert.deepEqual(M.packStatus({ status: 'awaiting_approval' }), ['Waiting for your OK', 'accent']);
   assert.equal(M.packUseText({ approved_version: 2, spec: { renderer: '2d-engine' } }), 'Channels and videos use version 2.');
   assert.equal(M.packUseText({ approved_version: null, spec: { renderer: '2d-engine' } }), 'Not approved yet, so no channel can use it.');
-  assert.equal(M.packUseText({ approved_version: 1, spec: { renderer: 'threejs', base: 'voxel-3d' } }), 'Its renderer is not built yet, so it cannot render.');
+  // Pack C (unit 6): a blocky world pack renders with three.js, says so, and asks for the made-for-kids answer.
+  assert.equal(M.packUseText({ approved_version: 1, spec: { renderer: 'threejs', base: 'voxel-3d' } }), 'Channels and videos use version 1.');
+  const blocky = { base: 'voxel-3d', renderer: 'threejs', look: { design_look: 'nordic', families: ['round'], palette: 'dawn', lighting: 'soft' }, characters: [],
+    scenes: { settings: ['meadow', 'cave'], shots: ['wide'], cameras: ['still'], transitions: ['cut'], times: ['day', 'night'] },
+    pacing: { words_per_second: 2.6, shot_seconds: [2, 7], hook_seconds: 5 }, captions: { on: true, case: 'sentence' }, music: { mood: 'calm' }, voice: { voice: 'af_heart' } };
+  const blockyFacts = Object.fromEntries(M.packFacts(blocky));
+  assert.match(blockyFacts['3D renderer'], /three\.js.*no Blender/);
+  assert.match(blockyFacts.Audience, /made for kids/);
+  assert.equal(blockyFacts.Worlds, 'meadow, cave; wide shots; day, night');
+  assert.deepEqual([M.kidsValue(1), M.kidsValue(0), M.kidsValue(null)], ['yes', 'no', '']);
+  assert.match(M.channelLookText({ made_for_kids: 1 }), /made for kids/);
+  assert.deepEqual(M.portChecks({ ok: false, findings: [{ check: 'brand', result: 'reject', reason: 'x' }] }).at(-1), ["Another game's name", 'Refused', 'error']);
+  assert.ok(!/—/.test(Object.values(blockyFacts).join(' ')), 'no em-dashes');
   // Pack B: a glossy 3D pack renders with three.js or Blender, and Studio says plainly when Blender is not installed.
   assert.equal(M.packUseText({ approved_version: 1, spec: { renderer: 'blender', base: 'glossy-3d' } }), 'Channels and videos use version 1.');
   const none = { blender: { found: false, supported: false } }, have = { blender: { found: true, supported: true, version: '5.2.2' } };

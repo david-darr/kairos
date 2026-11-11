@@ -241,7 +241,13 @@ def assemble(store, post_id, scheduled_at=None, probe_fn=None, api_ready=None):
              + (f" and {len(added)} hashtag{'s' if len(added) != 1 else ''}" if added else ""), "kairos")
         if tags:
             item("tags", f"Tags ({len(tags)}), under Show more", "kairos")
-        item("made_for_kids", f"Audience: {rules['made_for_kids']}", "kairos")
+        audience = store.audience(post)
+        if audience["made_for_kids"] is None:
+            problems.append("Say whether this video is made for kids before it goes up: this blocky world look draws children, "
+                            "and YouTube asks every upload. Set it on the channel (Content > Channels > Look) or on the post.")
+        else:
+            item("made_for_kids", f"Audience: {rules['made_for_kids_yes' if audience['made_for_kids'] else 'made_for_kids']}"
+                 + {"post": " (this post's setting)", "channel": " (the channel's setting)", "default": ""}[audience["source"]], "kairos")
     else:
         body = caption.strip() or (post["title"] or "")
         if tail:
@@ -385,7 +391,8 @@ def fill_plan(store, prep_id, now=None):
             fields.append({"key": key, "kind": "text", "value": value + "," if key == "tags" else value})
     toggles = [{"key": "ai_label", "name": rules["ai_label"]["name"]}]
     if channel["platform"] == "youtube":
-        toggles.append({"key": "made_for_kids", "name": rules["made_for_kids"]})
+        kids = bool(store.audience(post)["made_for_kids"])
+        toggles.append({"key": "made_for_kids", "name": rules["made_for_kids_yes" if kids else "made_for_kids"], "value": kids})
         cover = os.path.join(_cover_dir(), package["cover"]["file"]) if package["cover"].get("file") else None
         if package["kind"] == "video" and cover and os.path.isfile(cover):
             fields.append({"key": "thumbnail", "kind": "file", "path": cover, "name": os.path.basename(cover)})

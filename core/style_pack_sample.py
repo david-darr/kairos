@@ -15,6 +15,10 @@ not the distance to the Sun). Standard physics, not checked against a source in 
 A glossy 3D pack (Pack B) gets its own short "what if" sample instead: what if you could see how much everyone slept? The
 people and their numbers are made up, on purpose; the script states no real figure. It renders with the pack's renderer
 (three.js, or Blender when installed and picked), so a Blender pack's sample shows the Blender look.
+
+A blocky world pack (Pack C) gets a short explainer across its worlds and times of day: why the sea is salty (rain wears
+salt out of rock, rivers carry it to the sea, the sun lifts fresh water and leaves the salt; seawater is about 3.5% salt).
+Standard science from memory, not checked against a source in this module. three.js only.
 """
 from __future__ import annotations
 
@@ -100,11 +104,63 @@ def beats_3d(data) -> list[dict]:
     ]
 
 
+TITLE_VOXEL = "Why is the sea salty?"
+LINES_VOXEL = {
+    "hook": "Why is the sea salty, when rivers are fresh?",
+    "rain": "Rain falls on the hills.",
+    "rocks": "It wears down rocks and washes out tiny bits of salt.",
+    "rivers": "Rivers carry that salt past towns, all the way to the sea.",
+    "sun": "The sun lifts fresh water into clouds. The salt stays behind.",
+    "years": "After millions of years, seawater is about three and a half percent salt.",
+}
+
+
+def beats_voxel(data) -> list[dict]:
+    """Pack C's sample: voxel beats across the pack's worlds and times of day, cut on the narration. Why the sea is salty:
+    rain wears salt out of rock, rivers carry it to the sea, evaporation leaves it behind; seawater is about 3.5% salt.
+    Standard science from memory, not checked against a source in this module."""
+    scenes = data["scenes"]
+    cam = lambda *wanted: _pick(wanted, scenes["cameras"])         # noqa: E731
+    cut = lambda *wanted: _pick(wanted, scenes["transitions"])     # noqa: E731
+    world = lambda *wanted: _pick(wanted, scenes["settings"])      # noqa: E731
+    shot = lambda *wanted: _pick(wanted, scenes["shots"])          # noqa: E731
+    when = lambda *wanted: _pick(wanted, scenes.get("times") or ["day"])   # noqa: E731
+    props = scenes["props"]
+    prop = lambda kind, **more: [{"kind": kind, **more}] if kind in props else []   # noqa: E731
+    me = data["characters"][0]["character"]
+    who = lambda **more: {"character": me, "x": 0, **more}        # noqa: E731
+    return [
+        {"id": "hook", "kind": "voxel", "camera": cam("push", "still"), "transition": cut("whip", "cut"), "say": LINES_VOXEL["hook"],
+         "voxel": {"world": world("ocean"), "time": when("day"), "shot": shot("wide"), "seed": 3,
+                   "cast": [who(action="wave", expression="happy", speaking=True)], "props": prop("flag", x=.62, depth=.55)}},
+        {"id": "rain", "kind": "voxel", "camera": cam("pan", "still"), "transition": cut("cut"), "say": LINES_VOXEL["rain"],
+         "voxel": {"world": world("meadow"), "time": when("day"), "shot": shot("wide"), "seed": 5,
+                   "cast": [who(action="point", expression="happy", speaking=True)]}},
+        {"id": "rocks", "kind": "voxel", "camera": cam("push", "still"), "transition": cut("zoom", "cut"), "say": LINES_VOXEL["rocks"],
+         "voxel": {"world": world("cave"), "time": when("day"), "shot": shot("medium"), "seed": 2,
+                   "cast": [who(action="think", expression="thinking", speaking=True)],
+                   "props": prop("gem", x=-.72, depth=.35) + prop("lantern", x=.72, depth=.45)}},
+        {"id": "rivers", "kind": "voxel", "camera": cam("pull", "still"), "transition": cut("cut"), "say": LINES_VOXEL["rivers"],
+         "voxel": {"world": world("village"), "time": when("dusk", "day"), "shot": shot("wide"), "seed": 4,
+                   "cast": [who(action="idle", expression="happy", speaking=True)], "people": {"count": 3, "seed": 4}}},
+        {"id": "sun", "kind": "voxel", "camera": cam("still"), "transition": cut("whip", "cut"), "say": LINES_VOXEL["sun"],
+         "voxel": {"world": world("sky-island"), "time": when("day"), "shot": shot("medium"), "seed": 6,
+                   "cast": [who(action="idle", expression="neutral", speaking=True, react={"at": .9, "expression": "surprised"})]}},
+        {"id": "years", "kind": "voxel", "camera": cam("push", "still"), "transition": cut("cut"), "say": LINES_VOXEL["years"],
+         "voxel": {"world": world("ocean"), "time": when("night", "dusk"), "shot": shot("close", "medium"), "seed": 3,
+                   "cast": [who(action="nod", expression="happy", speaking=True)],
+                   "labels": [{"over": "c0", "text": "3.5%", "sub": "salt in seawater", "at": 1.2}]}},
+        {"id": "end", "kind": "end", "text": "Salt stays, water rises", "sub": "An original Kairos sample", "bars": 1.5},
+    ]
+
+
 def beats(data) -> list[dict]:
     """The sample's beats in the pack's own rules."""
     scenes = data["scenes"]
     if data["base"] == "glossy-3d" and data["characters"]:
         return beats_3d(data)
+    if data["base"] == "voxel-3d" and data["characters"]:
+        return beats_voxel(data)
     cam = lambda *wanted: _pick(wanted, scenes["cameras"])         # noqa: E731
     cut = lambda *wanted: _pick(wanted, scenes["transitions"])     # noqa: E731
     if data["base"] == "motion-type" or not data["characters"]:
@@ -159,7 +215,7 @@ def project_options(data, pack_id, version) -> dict:
     options = style_pack_store.video_defaults(data)
     if data["base"] == "flat-2d" and data["characters"]:
         options["palette"] = data["look"]["palette"] if isinstance(data["look"]["palette"], str) else "dawn"
-    elif data["base"] != "glossy-3d" or not data["characters"]:
+    elif data["base"] not in ("glossy-3d", "voxel-3d") or not data["characters"]:
         options.pop("cast", None)
     options.update(aspects=[ASPECT], style_pack={"id": pack_id, "version": version})
     return options
@@ -194,8 +250,6 @@ async def make(pack_id, version, owner: str, by: str = "") -> dict:
     if v["status"] == "approved":
         raise style_pack_store.ApprovalError(f"Version {version} of {meta['name']} is already approved.")
     data = style_pack_store.spec(pack_id, version)
-    if data["base"] == "voxel-3d":
-        raise ValueError(f"{meta['name']} is drawn by the voxel-3d base, which is not built yet (build unit 6); it cannot render a sample.")
     problems = style_pack_store.check_characters(data)
     if problems:
         raise ValueError("characters: " + " ".join(problems))
@@ -209,7 +263,7 @@ async def make(pack_id, version, owner: str, by: str = "") -> dict:
         return {**meta, "step": "sheets"}
     style_pack_store.set_sample_status(pack_id, version, "rendering")
     try:
-        title = TITLE_3D if data["base"] == "glossy-3d" and data["characters"] else TITLE
+        title = {"glossy-3d": TITLE_3D, "voxel-3d": TITLE_VOXEL}.get(data["base"], TITLE) if data["characters"] else TITLE
         project = video_store.create(title, owner=owner, beats=copy.deepcopy(beats(data)), **project_options(data, pack_id, version))
         job = await video_render.render(project["id"], ASPECT, sample_of=(pack_id, version))
         if job["status"] != "ready":

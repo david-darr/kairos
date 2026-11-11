@@ -27,6 +27,11 @@ sample with core/style_pack_sample.make. --renderer blender first makes a new ve
 pass and FFmpeg compositing; without Blender it renders with three.js and says so. --preview renders a few still frames
 of the sample's beats instead (for a look pass) and keeps them with --keep.
 
+Pack C (blocky voxel world, Video Styles unit 6): --pack-c adds the shipped starter pack (Blocky world explainer) with Pip
+Block, renders its blocky sheet through the worker and checks it, test-approves it in the temporary store, and makes the
+pack's sample (why the sea is salty, across the five worlds and three times of day) with core/style_pack_sample.make,
+three.js only. --preview works for it too.
+
 Content Studio Editor steps 5 to 7: --motion puts keyframed overlays (a title that slides in, a badge that pops and
 turns, an arrow that blinks), a video clip from a file "uploaded" through the store (a sky gradient FFmpeg makes here,
 standing in for the person's own file) and word captions (the box style; word times aligned from the narration with
@@ -430,26 +435,29 @@ async def main(args):
         else:
             raise RuntimeError("Electron's render worker did not connect.")
         spec = PACK_A if args.pack_a else SAMPLE if args.sample else SMOKE
-        if args.style_pack or args.long_form or args.pack_b:
+        pack3d = args.pack_b or args.pack_c
+        if args.style_pack or args.long_form or pack3d:
             spec = {"aspects": [style_pack_sample.ASPECT], "characters": [], "beats": []}
         # Characters: made from the starting family, sheet rendered by the worker and checked, then approved here.
         cast, sheets = [], []
         pack = None
-        if args.pack_b:
-            pack = style_pack_store.install_starter(style_pack_store.STARTER_3D_ID, by="smoke")
-            if args.renderer == "blender":
+        if pack3d:
+            pack = style_pack_store.install_starter(style_pack_store.STARTER_VOXEL_ID if args.pack_c else style_pack_store.STARTER_3D_ID, by="smoke")
+            if args.renderer == "blender" and args.pack_b:
                 pack = style_pack_store.new_version(pack["id"], {"renderer": "blender"}, by="smoke", note="Render with Blender.")
         pack_version = pack["versions"][-1]["version"] if pack else 1
-        if args.pack_b and args.preview:
+        if pack3d and args.preview:
             data = style_pack_store.spec(pack["id"], pack_version)
-            project = video_store.create(style_pack_sample.TITLE_3D, owner="smoke", beats=style_pack_sample.beats(data),
+            # The preview casts the pack's characters before the person approved them, which preview allows (render does not).
+            project = video_store.create(style_pack_sample.TITLE_VOXEL if args.pack_c else style_pack_sample.TITLE_3D, owner="smoke",
+                                         beats=style_pack_sample.beats(data),
                                          **{k: v for k, v in style_pack_sample.project_options(data, pack["id"], pack_version).items() if k != "style_pack"})
             project = await asyncio.to_thread(video_narration.prepare, project["id"])
             outline = video_render.outline(project)
             times = [b["start"] + (b["end"] - b["start"]) * f for b in outline[:-1] for f in (.3, .8)][:12]
             began = time.time()
             frames = await video_render.preview(project["id"], "16:9", times)
-            keep = Path(args.keep or tempfile.mkdtemp(prefix="pack-b-preview-"))
+            keep = Path(args.keep or tempfile.mkdtemp(prefix="pack-3d-preview-"))
             keep.mkdir(parents=True, exist_ok=True)
             for t, raw in zip(times, frames):
                 (keep / f"preview-{t:06.2f}.jpg").write_bytes(raw)
@@ -458,8 +466,8 @@ async def main(args):
                                         "notes": video_render._last_preview.get(project["id"], {}).get("notes", [])},
                           render_seconds=round(time.time() - began, 1), kept=str(keep), preview=True)
             return
-        if args.style_pack or args.long_form or args.pack_b:
-            if not args.pack_b:
+        if args.style_pack or args.long_form or pack3d:
+            if not pack3d:
                 pack = style_pack_store.install_starter(by="smoke")
             for entry in style_pack_store.spec(pack["id"], pack_version)["characters"]:
                 meta = await character_sheet.submit(entry["character"], entry["version"])
@@ -478,7 +486,7 @@ async def main(args):
         options = {k: v for k, v in spec.items() if k not in ("title", "characters", "beats")}
         if cast:
             options["cast"] = [{"character": c, "version": 1} for c in cast]
-        project = None if args.style_pack or args.long_form or args.pack_b else video_store.create(spec["title"], owner="smoke", beats=beats, **options)
+        project = None if args.style_pack or args.long_form or pack3d else video_store.create(spec["title"], owner="smoke", beats=beats, **options)
         if args.tracks:
             project = await add_tracks(project)
         if args.fps60 and not args.motion:
@@ -529,7 +537,7 @@ async def main(args):
                 print(f"video-render-smoke: {round(time.time() - began)} s, {states}", flush=True)
         ticker = asyncio.create_task(progress())
         try:
-            if args.style_pack or args.pack_b:
+            if args.style_pack or pack3d:
                 # The pack's own sample, exactly as Studio and the bots make it; the render job is caught for the report.
                 jobs = []
                 real_render = video_render.render
@@ -691,6 +699,7 @@ if __name__ == "__main__":
     parser.add_argument("--style-pack", action="store_true", dest="style_pack")
     parser.add_argument("--long-form", action="store_true", dest="long_form")
     parser.add_argument("--pack-b", action="store_true", dest="pack_b")
+    parser.add_argument("--pack-c", action="store_true", dest="pack_c")
     parser.add_argument("--renderer", choices=("threejs", "blender"), default="threejs")
     parser.add_argument("--preview", action="store_true")
     parser.add_argument("--tracks", action="store_true")

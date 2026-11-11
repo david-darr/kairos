@@ -661,8 +661,12 @@ class FormatCards(unittest.TestCase):
         self.assertIn('uses "Mister Glimpse"', policy.reasons(out))
         out = checks(thumbnail="The Glimpse Lab logo over a crowd")
         self.assertTrue(any(f["check"] == "distance" and f["field"] == "thumbnail" for f in out["findings"]))
-        out = checks(style_pack="voxel-3d")       # Pack C is not built yet (Pack B, glossy-3d, is since unit 5)
+        from core import style_packs
+        with patch.dict(style_packs.BUILT_IN["voxel-3d"], {"available": False, "note": "Not built yet."}):
+            out = checks(style_pack="voxel-3d")       # a pack that cannot be used yet (every built-in is built since Pack C)
         self.assertIn("cannot be made yet", policy.reasons(out))
+        out = checks(style_pack="voxel-3d", example_title="Minecraft, but the sea")      # Pack C: never the block game's name
+        self.assertTrue(any(f["check"] == "brand" for f in out["findings"]))
         out = checks(audience_match="Same people.")
         self.assertTrue(any(f["check"] == "audience_match" and f["result"] == "reject" for f in out["findings"]))
         self.assertTrue(any(f["check"] == "audience_match" and "no live channel" in f["reason"] for f in out["findings"]),
@@ -682,8 +686,11 @@ class FormatCards(unittest.TestCase):
 
     def test_cost_compares_with_the_cheapest_pack_that_could_make_it(self):
         self.assertEqual(formats.cost("motion-type", 120)["units"], 2.0)
-        heavy = formats.cost("voxel-3d", 120)       # not built: its planning estimate
+        from core import style_packs
+        with patch.dict(style_packs.BUILT_IN["voxel-3d"], {"available": False, "units_per_minute": 8.0}):
+            heavy = formats.cost("voxel-3d", 120)       # a pack not usable yet: its planning estimate
         self.assertEqual((heavy["units"], heavy["cheapest_units"], heavy["ratio"], heavy["available"]), (16.0, 2.0, 8.0, False))
+        self.assertTrue(formats.cost("voxel-3d", 120)["available"], "Pack C is built (unit 6)")
         # Pack B costs from each renderer's measured speed: Blender far more than three.js.
         three, blender = formats.cost("glossy-3d", 120), formats.cost("glossy-3d", 120, "blender")
         self.assertTrue(three["available"] and blender["ratio"] > three["ratio"] >= 1)
@@ -737,8 +744,8 @@ class FormatCards(unittest.TestCase):
         rows = {f["name"]: f for f in board["formats"]}
         self.assertEqual((rows["Strong format"]["kind"], rows["Strong format"]["eligible"], rows["list"]["kind"]), ("card", True, "label"))
         self.assertGreater(rows["Strong format"]["score"], rows["Weak format"]["score"])
-        # Packs that are built (Pack 0, Pack A since unit 3, Pack B since unit 5) are listed; the unbuilt ones only once used.
-        self.assertEqual([p["id"] for p in board["style_packs"]], ["motion-type", "flat-2d", "glossy-3d"])
+        # Packs that are built (Pack 0, Pack A since unit 3, Pack B since unit 5, Pack C since unit 6) are listed.
+        self.assertEqual([p["id"] for p in board["style_packs"]], ["motion-type", "flat-2d", "glossy-3d", "voxel-3d"])
         self.assertEqual(board["style_packs"][0]["posts_scored"], 31)
         first = review.run_review(s, NOW1, dry_run=False)
         self.assertFalse(any(p["subject_type"] == "format" for p in first["proposals"]), "behind once is not enough")

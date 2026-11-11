@@ -8,7 +8,8 @@
 //     page's file picker can be given a file without the person's dialog;
 //   - the title, description or caption, by focusing the field, selecting what is there and inserting the text
 //     (document.execCommand('insertText'), so the page's own editor sees ordinary input);
-//   - the platform's AI-content label and YouTube's "not made for kids", by turning a switch, checkbox or radio on.
+//   - the platform's AI-content label and YouTube's audience ("not made for kids", or "made for kids" when the post or
+//     its channel says so), by turning a switch, checkbox or radio on.
 //
 // What it never does, by design and by test (scripts/test_content_studio_publishing.py reads this file;
 // scripts/browser-smoke.cjs runs it against local pages that mimic the three upload flows):
@@ -37,6 +38,8 @@ const FIELDS = {
     tags: { kind: 'text', selectors: ['#tags-container input#text-input', 'ytcp-free-text-chip-bar input'], label: '^tags\\b' },
     thumbnail: { kind: 'file', selectors: ['input#file-loader', 'ytcp-thumbnails-compact-editor-uploader input[type=file]', 'input[type=file][accept*="image"]'] },
     made_for_kids: { kind: 'toggle', selectors: ['tp-yt-paper-radio-button[name="VIDEO_MADE_FOR_KIDS_NOT_MFK"]'], label: "^no,? it.?s not made for kids" },
+    // The person's honest answer when the post or channel says the video is made for kids (plan toggle value true).
+    made_for_kids_yes: { kind: 'toggle', selectors: ['tp-yt-paper-radio-button[name="VIDEO_MADE_FOR_KIDS_MFK"]'], label: "^yes,? it.?s made for kids" },
     ai_label: { kind: 'toggle', selectors: ['tp-yt-paper-radio-button[name="VIDEO_HAS_ALTERED_CONTENT_YES"]'], label: '^yes$', scope: 'altered|synthetic' },  // just "Yes": never "Yes, it's made for kids"
   },
   tiktok: {
@@ -195,7 +198,8 @@ function specsFor(plan) {
   const table = FIELDS[plan.platform] || {};
   const out = {};
   for (const f of plan.fields || []) if (table[f.key]) out[f.key] = { ...table[f.key], ...(f.key === 'tags' ? { loose: true } : {}) };
-  for (const t of plan.toggles || []) if (table[t.key]) out[t.key] = table[t.key];
+  // YouTube's audience: "not made for kids" unless the post's or channel's answer is yes (the plan's toggle value).
+  for (const t of plan.toggles || []) if (table[t.key]) out[t.key] = t.key === 'made_for_kids' && t.value === true ? table.made_for_kids_yes : table[t.key];
   return out;
 }
 

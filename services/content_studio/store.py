@@ -42,11 +42,16 @@ ASPECTS = ("9:16", "16:9", "1:1")
 # Columns added after the first release; a store made before them gains them when it opens.
 LATER_COLUMNS = {"snapshots": {"source": "TEXT NOT NULL DEFAULT 'manual'"},
                  "channels": {"look": "TEXT", "aspect": "TEXT", "notes": "TEXT NOT NULL DEFAULT ''", "voice": "TEXT", "style_pack": "TEXT",
-                              "long_per_week": "INTEGER", "renderer": "TEXT", "fps": "INTEGER"},
+                              "long_per_week": "INTEGER", "renderer": "TEXT", "fps": "INTEGER", "made_for_kids": "INTEGER"},
                  "posts": {"pick_reason": "TEXT NOT NULL DEFAULT ''", "tags": "TEXT NOT NULL DEFAULT ''",
                            "ai_label": "INTEGER NOT NULL DEFAULT 1", "format_id": "INTEGER REFERENCES formats(id)",
                            "port_id": "INTEGER REFERENCES ports(id)", "style_pack": "TEXT",
-                           "thumbnail": "TEXT NOT NULL DEFAULT ''", "long_form": "INTEGER NOT NULL DEFAULT 0", "video_id": "TEXT"}}
+                           "thumbnail": "TEXT NOT NULL DEFAULT ''", "long_form": "INTEGER NOT NULL DEFAULT 0", "video_id": "TEXT",
+                           "made_for_kids": "INTEGER"}}
+# Made for kids (YouTube's audience setting, which the law behind it requires creators to answer honestly): "yes", "no",
+# or "" for not set. A post's own answer wins over its channel's. A blocky world (Pack C) post with neither cannot be
+# prepared or posted: that look draws children, so the person says. Other posts default to "no", as before.
+AUDIENCE = {"": None, "no": 0, "yes": 1}
 # What a post keeps as appeal evidence (Video Styles build spec section 7): the person's approval, the shot plan,
 # the sources behind its facts, and the policy checks it passed.
 EVIDENCE_KINDS = ("approval", "shot_plan", "sources", "policy_check", "port", "plan_approval")
@@ -151,6 +156,15 @@ CREATE TABLE IF NOT EXISTS decisions (
 """
 JSON_COLS = {"numbers", "payload", "body", "beats", "audience", "do_not_use", "evidence", "audience_evidence", "checks", "package", "fill"}
 JSON_LISTS = {"beats", "do_not_use", "evidence", "audience_evidence"}
+
+
+def _audience(value):
+    """A made-for-kids answer as stored: 1, 0, or None (not set)."""
+    if isinstance(value, bool):
+        return int(value)
+    if value not in AUDIENCE:
+        raise StudioError('made for kids is "yes", "no", or empty for not set')
+    return AUDIENCE[value]
 
 
 def _clean_text(value, what, limit=300, required=True):
@@ -384,15 +398,18 @@ class Store:
         return row["n"] if row else 0
 
     def edit_channel(self, channel_id, look=None, aspect=None, notes=None, voice=None, style_pack=None, long_per_week=None,
-                     renderer=None, fps=None):
+                     renderer=None, fps=None, made_for_kids=None):
         """The channel's own look (a Studio video look id), aspect, voice notes, narrator voice (a Kokoro voice id) and
         style pack (a built-in or the account's own approved pack), so the Editor and Script Writer make each channel's
         posts in its own style and the channel keeps one voice. None leaves a field as it is; "" clears it.
         `renderer` picks what draws a glossy 3D pack's videos on this channel: "threejs" (built in), "blender" (only when
         Blender is installed, core/blender_tools.py), or "" for the pack's own choice. `fps` is the channel's frame
-        rate, 30 or 60 (0 clears it back to 30): the Editor makes the channel's videos at it."""
+        rate, 30 or 60 (0 clears it back to 30): the Editor makes the channel's videos at it. `made_for_kids` is the
+        channel's audience answer ("yes", "no", or "" for not set), used for every post that has no answer of its own."""
         self.get_channel(channel_id)
         changes = {}
+        if made_for_kids is not None:
+            changes["made_for_kids"] = _audience(made_for_kids)
         if fps is not None:
             if isinstance(fps, bool) or fps not in (0, 30, 60):
                 raise StudioError("the frame rate is 30 or 60 frames a second")
@@ -738,6 +755,8 @@ class Store:
                 if value is not True:
                     raise StudioError("every post carries the AI label; it cannot be turned off")
                 changes[key] = 1
+            elif key == "made_for_kids":
+                changes[key] = _audience(value)
             elif key == "render_status":
                 if value not in ("pending", "ok", "failed"):
                     raise StudioError("render_status must be pending, ok or failed")
@@ -758,6 +777,18 @@ class Store:
         if changes:
             self._update("posts", post_id, **changes)
         return self.get_post(post_id)
+
+    def audience(self, post):
+        """Whether a post is made for kids, and where the answer comes from: {made_for_kids: True, False or None, source:
+        "post", "channel", "default" or "unset"}. A blocky world (Pack C) post with no answer is "unset" (None)."""
+        from . import policy
+        channel = self.get_channel(post["channel_id"])
+        for source, value in (("post", post.get("made_for_kids")), ("channel", channel.get("made_for_kids"))):
+            if value is not None:
+                return {"made_for_kids": bool(value), "source": source}
+        if policy.is_voxel(post.get("style_pack")) or policy.is_voxel(channel.get("style_pack")):
+            return {"made_for_kids": None, "source": "unset"}
+        return {"made_for_kids": False, "source": "default"}
 
     def _move(self, post_id, allowed, new_state, now, **fields):
         post = self.get_post(post_id)

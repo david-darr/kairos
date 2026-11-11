@@ -21,7 +21,7 @@ from .store import PLATFORMS, StudioError
 # (Pack B in Blender costs far more than in three.js). `max_seconds` is what the
 # pack can make today. User-made packs (core/style_pack_store.py) join through style_packs.user_packs(): each is drawn by
 # its base pack and is available only once the person approved a version.
-from core.style_packs import BUILT_IN as STYLE_PACKS, RENDER_SPEED, all_packs, render_seconds_per_minute, units_per_minute
+from core.style_packs import BUILT_IN as STYLE_PACKS, RENDER_SPEED, all_packs, render_seconds_per_minute, speed_key, units_per_minute
 COST_WARN_RATIO = 3.0      # a port this many times dearer than the cheapest pack that could make it is a warning
 STALE_DAYS = 45            # evidence checked longer ago than this is flagged as stale
 PORT_STATES = ("proposed", "accepted", "rejected", "retired")
@@ -164,18 +164,19 @@ def cost(pack_id, length_s, renderer=None):
     packs_now = all_packs()
     pack = packs_now[pack_id]
     renderer = renderer if renderer in RENDER_SPEED and renderer in (pack.get("renderers") or [pack["renderer"]]) else pack["renderer"]
+    key = speed_key(pack.get("base") or pack_id, renderer)      # Pack C on three.js has its own measured speed
     minutes = max(length_s, 1) / 60
-    measured = pack["available"] and renderer in RENDER_SPEED
-    per_minute = units_per_minute(renderer) if measured else pack["units_per_minute"]
+    measured = pack["available"] and key in RENDER_SPEED and RENDER_SPEED[key]["measured"] != "not measured yet"
+    per_minute = units_per_minute(key) if measured else pack["units_per_minute"]
     units = round(per_minute * minutes, 2)
     able = [p for p in packs_now.values() if p["available"] and p["max_seconds"] >= length_s]
     cheapest = round(min(p["units_per_minute"] for p in able) * minutes, 2) if able else None
     out = {"pack": pack_id, "pack_name": pack["name"], "available": pack["available"], "length_s": length_s, "renderer": renderer,
            "max_seconds": pack["max_seconds"], "units": units, "cheapest_units": cheapest,
            "ratio": round(units / cheapest, 2) if cheapest else None,
-           "estimate": ("render time from measured speed: " + RENDER_SPEED[renderer]["measured"]) if measured else "planning units, not measured"}
+           "estimate": ("render time from measured speed: " + RENDER_SPEED[key]["measured"]) if measured else "planning units, not measured"}
     if measured:
-        out["render_minutes"] = round(render_seconds_per_minute(renderer) * minutes / 60, 1)
+        out["render_minutes"] = round(render_seconds_per_minute(key) * minutes / 60, 1)
     return out
 
 

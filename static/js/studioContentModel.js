@@ -173,7 +173,16 @@ export function channelLookText(channel, packs) {
   if (channel.look) bits.push(`look ${channel.look}`);
   if (channel.aspect) bits.push(channel.aspect);
   if (channel.notes) bits.push('voice notes set');
+  if (channel.made_for_kids === 1 || channel.made_for_kids === 0) bits.push(channel.made_for_kids ? 'made for kids' : 'not made for kids');
   return bits.length ? bits.join(', ') : 'No look set';
+}
+// Made for kids (YouTube's audience setting): a channel's or post's answer, "yes", "no" or "" (not set; a post then uses its
+// channel's). Stored as 1, 0 or null.
+export const KIDS_OPTIONS = [['', 'Not set'], ['no', 'No, not made for kids'], ['yes', 'Yes, made for kids']];
+export const POST_KIDS_OPTIONS = [['', 'The channel\'s answer'], ['no', 'No, not made for kids'], ['yes', 'Yes, made for kids']];
+export const kidsValue = stored => stored === 1 ? 'yes' : stored === 0 ? 'no' : '';
+export function kidsText(stored) {
+  return stored === 1 ? 'Yes, made for kids (this post\'s setting).' : stored === 0 ? 'No, not made for kids (this post\'s setting).' : '';
 }
 
 const shortDate = seconds => new Date(seconds * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -274,7 +283,9 @@ export const CHECK_NAMES = [['audience_match', 'Audience match'], ['distance', '
 // Each of the Evaluator's port checks as [name, result, tone]: Passed, Warning or Refused. Empty until checked.
 export function portChecks(checks) {
   if (!checks || !Array.isArray(checks.findings)) return [];
-  return CHECK_NAMES.map(([key, name]) => {
+  // Pack C's brand rule (another company's block game's name) shows only when it found something.
+  const names = checks.findings.some(f => f.check === 'brand') ? [...CHECK_NAMES, ['brand', 'Another game\'s name']] : CHECK_NAMES;
+  return names.map(([key, name]) => {
     const found = checks.findings.filter(f => f.check === key);
     if (found.some(f => f.result === 'reject')) return [name, 'Refused', 'error'];
     if (found.length) return [name, 'Warning', 'warn'];
@@ -498,7 +509,6 @@ export function packStatus(version) {
 // What a channel can do with the pack: use its approved version, or nothing yet.
 export function packUseText(pack) {
   const v = pack.approved_version;
-  if (pack.spec?.base === 'voxel-3d') return 'Its renderer is not built yet, so it cannot render.';
   return v ? `Channels and videos use version ${v}.` : 'Not approved yet, so no channel can use it.';
 }
 // Pack B's 3D renderer as Studio shows it: three.js is built in; Blender only when it is installed (routes/style_pack_routes.py `renderers`).
@@ -528,10 +538,14 @@ export function packFacts(spec, renderers) {
   const palette = typeof spec.look.palette === 'string' ? `${spec.look.palette} palette` : 'its own palette';
   return [
     ['Look', spec.base === 'glossy-3d' ? `Glossy 3D studio with a 3D mascot, design look ${spec.look.design_look}`
+      : spec.base === 'voxel-3d' ? `Blocky world of soft toy blocks with blocky characters, design look ${spec.look.design_look}`
       : `${spec.base === 'flat-2d' ? 'Flat 2D with characters' : 'Motion type'}, ${palette}, ${spec.look.lighting} light, design look ${spec.look.design_look}`],
     ...(spec.base === 'glossy-3d' ? [['3D renderer', rendererText(spec.renderer, renderers)]] : []),
+    ...(spec.base === 'voxel-3d' ? [['3D renderer', 'three.js, built into Kairos. The blocky world has no Blender option.'],
+      ['Audience', 'This look draws children. Each channel and post says whether its videos are made for kids before they go up.']] : []),
     ['Characters', spec.characters.length ? `${spec.characters.length} in its set (${spec.look.families.join(', ')} families)` : 'None'],
-    [spec.base === 'glossy-3d' ? 'Studio sets' : 'Scenes', `${spec.scenes.settings.join(', ')}; ${spec.scenes.shots.join(', ')} shots`],
+    [spec.base === 'glossy-3d' ? 'Studio sets' : spec.base === 'voxel-3d' ? 'Worlds' : 'Scenes', `${spec.scenes.settings.join(', ')}; ${spec.scenes.shots.join(', ')} shots`
+      + (spec.base === 'voxel-3d' && spec.scenes.times ? `; ${spec.scenes.times.join(', ')}` : '')],
     ['Camera and cuts', `${spec.scenes.cameras.join(', ')}; ${spec.scenes.transitions.join(', ')}`],
     ['Pacing', `${spec.pacing.words_per_second} words a second, shots of ${spec.pacing.shot_seconds[0]} to ${spec.pacing.shot_seconds[1]} s, hook in ${spec.pacing.hook_seconds} s`],
     ['Captions', spec.captions.on ? `On, ${spec.captions.case === 'upper' ? 'upper case' : 'sentence case'}` : 'Off'],

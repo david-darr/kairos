@@ -235,6 +235,8 @@ export async function mountContent(host, { signal } = {}) {
     if (!status3d?.blender?.supported) renderer.querySelector('option[value="blender"]').disabled = channel.renderer !== 'blender';
     // Step 6: the channel's frame rate; 60 is smoother and takes about twice as long to render.
     const fps = selectOf('Frame rate', [['30', '30 frames a second'], ['60', '60 frames a second']], String(channel.fps || 30));
+    // Pack C: whether this channel's videos are made for kids (YouTube asks every upload; a blocky world post needs an answer).
+    const kids = selectOf('Made for kids', M.KIDS_OPTIONS, M.kidsValue(channel.made_for_kids));
     const youtube = channel.platform === 'youtube';
     const longWeek = el('input', { type: 'number', min: '0', max: '7', step: '1', 'aria-label': 'Long videos a week', value: String(channel.long_per_week ?? 1) });
     longWeek.value = String(channel.long_per_week ?? 1);
@@ -246,6 +248,7 @@ export async function mountContent(host, { signal } = {}) {
         row({ title: 'Look', description: 'A Studio video look id. Leave it empty to let the Editor choose.', control: look, stack: true }),
         row({ title: 'Aspect', control: aspect }),
         row({ title: 'Frame rate', description: '60 is smoother for fast motion and takes about twice as long to render. Shorts and most explainers look fine at 30.', control: fps }),
+        row({ title: 'Made for kids', description: 'Answer honestly: YouTube asks this for every upload. A post can answer for itself. Blocky world videos draw children and cannot be prepared until this is set here or on the post. On YouTube, made-for-kids videos have comments and personalised ads turned off (general knowledge, not checked).', control: kids }),
         row({ title: 'Voice notes', control: notes, stack: true }),
         row({ title: 'Narrator voice', description: 'The Kokoro voice that narrates every video on this channel. Left empty, the first narrated video sets it.', control: voice, stack: true }),
         youtube ? row({ title: 'Long videos a week', description: 'Longer videos in chapters, on top of the daily Shorts. The team plans within it, and each plan comes to you before it renders.', control: longWeek }) : null]), status]);
@@ -253,7 +256,7 @@ export async function mountContent(host, { signal } = {}) {
       status.textContent = '';
       const week = Number(longWeek.value);
       if (youtube && (!Number.isInteger(week) || week < 0 || week > 7)) { status.textContent = 'Long videos a week is a whole number from 0 to 7.'; return; }
-      try { await send(`/channels/${channel.id}/edit`, { look: look.value.trim(), aspect: aspect.value, notes: notes.value.trim(), voice: voice.value.trim(), style_pack: pack.value, renderer: renderer.value, fps: Number(fps.value), ...(youtube ? { long_per_week: week } : {}) }); }
+      try { await send(`/channels/${channel.id}/edit`, { look: look.value.trim(), aspect: aspect.value, notes: notes.value.trim(), voice: voice.value.trim(), style_pack: pack.value, renderer: renderer.value, fps: Number(fps.value), made_for_kids: kids.value, ...(youtube ? { long_per_week: week } : {}) }); }
       catch (error) { status.textContent = M.loadFailure(error); return; }
       dialog.close(); toast('Look saved.'); await reload();
     }, 'primary');
@@ -364,6 +367,7 @@ export async function mountContent(host, { signal } = {}) {
       el('div', { class: 'sc-block' }, [el('h4', { text: 'Caption' }), el('p', { class: 'sc-text', text: post.caption || 'No caption yet.' })]),
       post.tags ? el('div', { class: 'sc-block' }, [el('h4', { text: 'Tags' }), el('p', { class: 'sc-text', text: post.tags })]) : null,
       post.thumbnail ? el('div', { class: 'sc-block' }, [el('h4', { text: 'Thumbnail' }), el('p', { class: 'sc-text', text: post.thumbnail })]) : null,
+      M.kidsText(post.made_for_kids) ? el('div', { class: 'sc-block', 'data-post-kids': '' }, [el('h4', { text: 'Made for kids' }), el('p', { class: 'sc-text', text: M.kidsText(post.made_for_kids) })]) : null,
       post.long_form ? el('div', { class: 'sc-block', 'data-post-chapters': '' }, [el('h4', { text: 'Chapters (added to the YouTube description)' }),
         el('p', { class: 'sc-text', text: post.chapters || 'The chapter list comes with the render.' })]) : null,
       el('div', { class: 'sc-block' }, [el('h4', { text: 'Script' }), el('p', { class: 'sc-text', text: post.script_ref || 'No script yet.' })]),
@@ -618,16 +622,19 @@ export async function mountContent(host, { signal } = {}) {
       const title = textInput('Title', { value: post.title, maxlength: '200' });
       const caption = el('textarea', { rows: 4, 'aria-label': 'Caption', maxlength: '5000' }); caption.value = post.caption || '';
       const script = el('textarea', { rows: 4, 'aria-label': 'Script', maxlength: '20000' }); script.value = post.script_ref || '';
+      const kids = selectOf('Made for kids', M.POST_KIDS_OPTIONS, M.kidsValue(post.made_for_kids));
       const save = btn('Save changes', async () => {
         const changes = {};
         if (title.value !== post.title) changes.title = title.value;
         if (caption.value !== (post.caption || '')) changes.caption = caption.value;
         if (script.value !== (post.script_ref || '')) changes.script_ref = script.value;
+        if (kids.value !== M.kidsValue(post.made_for_kids)) changes.made_for_kids = kids.value;
         if (Object.keys(changes).length) Object.assign(post, await send(`/posts/${post.id}/edit`, changes));
         toast('Saved.'); view();
       }, 'primary');
       return el('div', { class: 'sc-edit' }, [group({}, [row({ title: 'Title', control: title, stack: true }), row({ title: 'Caption', control: caption, stack: true }),
-        row({ title: 'Script', control: script, stack: true })]), el('div', { class: 'sc-actions' }, [save, btn('Cancel', () => view(), 'quiet')])]);
+        row({ title: 'Script', control: script, stack: true }),
+        row({ title: 'Made for kids', description: 'This post\'s own answer; left as the channel\'s, the channel decides.', control: kids })]), el('div', { class: 'sc-actions' }, [save, btn('Cancel', () => view(), 'quiet')])]);
     };
     view();
     return node;

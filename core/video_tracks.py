@@ -340,7 +340,7 @@ def timeline(project) -> dict:
         for key in ("text", "sub", "number", "items", "image", "camera", "transition", "say"):
             if key in b:
                 item[key] = b[key]
-        for key in ("scene", "stage"):
+        for key in ("scene", "stage", "voxel"):
             if key in b:
                 item[key] = b[key]
         beats.append(item)

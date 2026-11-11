@@ -87,13 +87,13 @@ function allowedRequest(raw, origin, designId, videoId = '', playerPath = '', lo
   try {
     const url = new URL(raw);
     if (url.origin !== origin || url.username || url.password) return false;
-    if (characterId) return url.pathname + url.search === playerPath || /^\/static\/motion\/(kit|layout|rig|sheet|sheet3d|stage|stage3d)\.js$/.test(url.pathname) || THREE_PATH.test(url.pathname);
+    if (characterId) return url.pathname + url.search === playerPath || /^\/static\/motion\/(kit|layout|rig|sheet|sheet3d|stage|stage3d|voxel|voxel3d)\.js$/.test(url.pathname) || THREE_PATH.test(url.pathname);
     if (videoId) {
       return (url.pathname + url.search === playerPath) ||
         (url.pathname.startsWith(`/api/videos/${videoId}/assets/`) && /^\/api\/videos\/[a-f0-9]{12}\/assets\/[a-f0-9]{64}\.(png|jpg|gif|webp)$/.test(url.pathname)) ||
         // A video clip's decoded frames (core/video_media.py), by number.
         (url.pathname.startsWith(`/api/videos/${videoId}/assets/media/`) && /^\/api\/videos\/[a-f0-9]{12}\/assets\/media\/[a-f0-9]{64}\/\d{1,6}\.jpg$/.test(url.pathname)) ||
-        /^\/static\/motion\/(engine|kit|layout|rig|scene|stage|stage3d|overlay)\.js$/.test(url.pathname) || THREE_PATH.test(url.pathname) ||
+        /^\/static\/motion\/(engine|kit|layout|rig|scene|stage|stage3d|overlay|voxel|voxel3d)\.js$/.test(url.pathname) || THREE_PATH.test(url.pathname) ||
         (url.pathname.startsWith(`/api/design-fonts/${look}/`) && /^\/api\/design-fonts\/[a-z0-9_-]+\/[A-Za-z0-9_.-]+\.(woff2?|ttf|otf)$/.test(url.pathname));
     }
     return url.pathname.startsWith(`/api/designs/${designId}/`) || url.pathname.startsWith('/api/design-fonts/');

@@ -48,6 +48,24 @@ def stage_plan(spec):
     return {"zh": zh, "hh": hh, "face": zh - .2 * hh, "zb": (bottom + top) / 2, "br": p["body_width"] * h * .5 * .78, "top": h + ACCESSORY_TOP.get(spec["accessory"], .02)}
 
 
+def voxel_plan(spec):
+    """Pack C's blocky body plan (static/motion/voxel.js voxelPlan): heights in metres from the feet. The head is sampled
+    on its forehead (no face pixels there); a test keeps these numbers equal to the JavaScript ones."""
+    p, h = spec["proportions"], STAGE_HEIGHT
+    head = p["head"] * h
+    leg = max(.16, p["limb_length"] * h * .55)
+    body = h - head - leg
+    top = h + {"leaf": .2, "antenna": .28, "bow": .08, "cap": .02}.get(spec["accessory"], 0)
+    taper = .74 if spec["family"] == "triangle" else 1      # a triangle body narrows towards the top
+    # Half the body's width at its centre row: the body box starts 0.36 of its height below the centre and spans 0.86 of it.
+    width = p["body_width"] * h * .5 * (1 + (taper - 1) * .36 / .86)
+    return {"zh": h - head / 2, "hh": head / 2, "face": h - head * .13, "zb": leg + body / 2, "br": width / 2, "top": top}
+
+
+def plan_for(spec):
+    return voxel_plan(spec) if spec.get("form") == "voxel" else stage_plan(spec)
+
+
 def _hsv(rgb):
     r, g, b = (float(x) / 255 for x in rgb)
     high, low = max(r, g, b), min(r, g, b)
@@ -86,7 +104,7 @@ def _patch(pixels, x, y, r=4):
 def stage_sheet_metrics(png: bytes, spec: dict, layout: dict) -> dict:
     """Measure a 3D sheet: its flat colour key (shares, silhouette height, body width) and its lit front view (hues)."""
     pixels = _array(png)
-    plan, problems = stage_plan(spec), []
+    plan, problems = plan_for(spec), []
     key = layout["key"]
     px = key["height"] / STAGE_HEIGHT                     # pixels per metre in the key and the front view
     x0, y0, x1, y1 = key["x"] + 14, key["y"] + 60, key["x"] + key["w"] - 14, key["y"] + key["h"] - 14
@@ -98,7 +116,7 @@ def stage_sheet_metrics(png: bytes, spec: dict, layout: dict) -> dict:
     found = shares(region[ys.min():ys.max() + 1, xs.min():xs.max() + 1], spec["palette"])
     found.pop("outline", None)
     silhouette = (ys.max() - ys.min() + 1) / px
-    metrics = {"ok": True, "form": "3d", "height_px": key["height"], "silhouette_m": round(silhouette, 3),
+    metrics = {"ok": True, "form": spec.get("form", "3d"), "height_px": key["height"], "silhouette_m": round(silhouette, 3),
                "shares": {k: round(v, 4) for k, v in found.items()}}
     if not .97 * STAGE_HEIGHT <= silhouette <= plan["top"] + .06:
         problems.append(f"The colour key's figure is {silhouette:.2f} m tall; the spec builds {STAGE_HEIGHT:.2f} m to {plan['top']:.2f} m.")

@@ -29,6 +29,7 @@ PLATFORMS = {
                      "how": "In Details, under Altered content, answer Yes.",
                      "api": "YouTube's containsSyntheticMedia flag is sent on with every upload."},
         "made_for_kids": "No, it's not made for kids",
+        "made_for_kids_yes": "Yes, it's made for kids",
         "cover": {"name": "Thumbnail", "how": "Upload the thumbnail in Details. Shorts take a frame you pick in the YouTube app."},
         "schedule": {"supported": True, "how": "In Visibility, choose Schedule and set the date and time."},
         "upload_url": "https://www.youtube.com/upload",

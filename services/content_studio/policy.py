@@ -23,6 +23,12 @@ Ported formats (section 2, build unit 2). A post made from a format card, and ev
 - Series rule: each episode is its own concept. The last few episodes of the same format on the channel are compared,
   and one with the same concept is refused (YouTube: "each video has a distinct storyline, focus, or concept").
 
+Blocky world posts (Pack C, the voxel-3d base, build unit 6). Mojang's usage guidelines restrict commercial use of their
+brand, and our blocky look must never be mistaken for their game:
+- Brand: the game's name (in any spacing, case or common misspelling) and its maker's name are refused in a Pack C post's
+  title, tags, caption and thumbnail, and in a Pack C port's example title and thumbnail. The names of its best-known
+  creatures are refused in the title, tags and thumbnail, where they can only mean that game. We use none of its assets.
+
 Evidence for an appeal (approval, shot plan, sources, these checks) is stored per post in `post_evidence`.
 """
 import re
@@ -261,9 +267,11 @@ def port_findings(store, port, today=None):
         found.append({"check": "audience_match", "result": "warn",
                       "reason": f"The source audience watches on {card['audience'].get('platform')}, and {port['niche_name']} has no "
                                 "live channel there."})
-    # 2. Distance from the source.
+    # 2. Distance from the source (and, for a Pack C port, from another company's block game).
     found += distance_findings(card, {"title": port["example_title"], "thumbnail": port["thumbnail"], "mascot": port["mascot"],
                                       "premise": port["premise"], "subject": port["subject"]})
+    if is_voxel(port["style_pack"]):
+        found += brand_findings({"example title": port["example_title"], "thumbnail": port["thumbnail"], "mascot": port["mascot"]})
     # 3. Cost to make in the chosen pack.
     pack = formats.all_packs().get(port["style_pack"])
     if pack is None:
@@ -293,6 +301,46 @@ def port_findings(store, port, today=None):
     return {"ok": not any(f["result"] == "reject" for f in found), "findings": found, "cost": cost}
 
 
+# The game whose look Pack C must never be mistaken for: its name in any spacing or case and common misspellings, and its
+# maker. Matched on the words with punctuation as spaces, so "Mine-craft", "MINE CRAFT" and "#minecraftmemes" all count,
+# while "examine crafts" does not.
+BRAND = re.compile(r"(?<![a-z0-9])(?:m+[i1y]+n+[e3]+ ?[ck]+r+[a4]+f+t+|m+[o0]+ ?j+[a4]+n+g+)")
+# Its best-known creatures and characters: refused where they can only mean that game (title, tags, thumbnail).
+BRAND_NAMES = re.compile(r"(?<![a-z])(creepers?|endermen|enderman|ender ?dragon|herobrine|nether ?portal|steve and alex)(?![a-z])")
+VOXEL_BASES = ("voxel-3d",)
+
+
+def _letters(text):
+    return " ".join(re.sub(r"[^a-z0-9]", " ", (text or "").lower()).split())
+
+
+def is_voxel(pack_id):
+    """True when a post's style pack (built in or the account's own) is drawn by the blocky voxel base."""
+    from . import formats
+    pack = formats.all_packs().get(pack_id) or {}
+    return (pack.get("base") or pack_id) in VOXEL_BASES
+
+
+def brand_findings(fields):
+    """fields: {label: text} of a Pack C post or port. Rejects the game's or its maker's name anywhere in them, and its
+    creatures' names in a title, tags or thumbnail."""
+    found = []
+    for label, text in fields.items():
+        if not text:
+            continue
+        if BRAND.search(_letters(text)):
+            found.append({"check": "brand", "result": "reject", "field": label,
+                          "reason": f"The {label} names another company's block game or its maker. Pack C videos are our own "
+                                    "blocky world: never use that game's name in a title, tag, caption or thumbnail."})
+            continue
+        hit = BRAND_NAMES.search(" ".join((text or "").lower().replace("-", " ").split()))
+        if hit and label in ("title", "tags", "thumbnail", "example title"):
+            found.append({"check": "brand", "result": "reject", "field": label, "quote": hit.group(1),
+                          "reason": f"The {label} uses \"{hit.group(1)}\", a creature or character of another company's block game. "
+                                    "Use our own characters and words."})
+    return found
+
+
 def check(store, post_id, title=None, script=None, fmt=None):
     """Every policy check on a post, or on a draft of it (title, script, format not yet saved)."""
     post = store.get_post(post_id)
@@ -300,6 +348,9 @@ def check(store, post_id, title=None, script=None, fmt=None):
     script = post["script_ref"] if script is None else script
     fmt = post["format"] if fmt is None else fmt
     findings = []
+    if is_voxel(post.get("style_pack")):
+        findings += brand_findings({"title": title, "tags": post.get("tags"), "caption": post.get("caption"),
+                                    "thumbnail": post.get("thumbnail")})
     findings += persona_findings(" ".join([title or "", post["caption"] or "", script or ""]))
     findings += hook_findings(title, script)
     findings += sameness_findings(store, post["channel_id"], title, script, fmt, exclude_post=post_id)

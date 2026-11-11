@@ -1,8 +1,9 @@
 import { clamp, range, inOut, hash } from './kit.js';
 import { normalizeStage } from './stage.js';
+import { normalizeVoxel } from './voxel.js';
 
 export const SIZES = { '16:9': [1920, 1080], '9:16': [1080, 1920], '1:1': [1080, 1080] };
-export const KINDS = ['title', 'statement', 'big-number', 'list', 'image', 'quote', 'split', 'logo', 'end', 'scene', 'stage'];
+export const KINDS = ['title', 'statement', 'big-number', 'list', 'image', 'quote', 'split', 'logo', 'end', 'scene', 'stage', 'voxel'];
 export const CAMERAS = ['still', 'push', 'pull', 'pan', 'shake'];
 export const TRANSITIONS = ['cut', 'whip', 'zoom', 'flip', 'dither', 'mosaic', 'wipe'];
 export const LIMITS = { beats: 100, text: 180, sub: 160, number: 24, item: 100, items: 5, minBpm: 40, maxBpm: 240, minBars: .25, maxBars: 16 };
@@ -58,9 +59,10 @@ export function normalizeProject(input = {}) {
     // Word captions (step 7): each part's words with their aligned times, when the line was aligned with confidence.
     if (result.captions.length && wordStyle) attachWords(result.captions, b.spoken?.words, start);
     // A Pack A scene keeps its setting, shot, cast and props, and the mouth shapes measured from its line.
-    if (kind === 'scene' || kind === 'stage') {
+    if (kind === 'scene' || kind === 'stage' || kind === 'voxel') {
       if (kind === 'scene') result.scene = normalizeScene(b.scene);
-      else result.stage = normalizeStage(b.stage);   // Pack B: a 3D studio shot (stage.js)
+      else if (kind === 'stage') result.stage = normalizeStage(b.stage);   // Pack B: a 3D studio shot (stage.js)
+      else result.voxel = normalizeVoxel(b.voxel);   // Pack C: a blocky voxel world shot (voxel.js)
       result.mouth = typeof b.spoken?.mouth === 'string' && /^[XAEOMF]{1,2000}$/.test(b.spoken.mouth) ? b.spoken.mouth : '';
     }
     start = end; return result;
@@ -232,7 +234,7 @@ export function listMarker(box) {
 export const TYPE = {
   title: [210, 270], statement: [150, 195], 'big-number': [525, 750],
   list: [135, 165], quote: [135, 180], end: [180, 240],
-  image: [135, 180], split: [135, 180], logo: [150, 195], scene: [56, 104], stage: [56, 104]
+  image: [135, 180], split: [135, 180], logo: [150, 195], scene: [56, 104], stage: [56, 104], voxel: [56, 104]
 };
 export function compositionAt(beats, index) {
   let previous = -1;
@@ -321,6 +323,7 @@ export function beatLayout(beat, aspect, measure, style = {}) {
       add(beat.text, x, top + .06, widthFraction, .54); add(beat.sub, x, top + .64, widthFraction, .11, 'body', 1); break;
     case 'scene':
     case 'stage':
+    case 'voxel':
       // The scene carries the shot; its words are a short label across the top, clear of the cast.
       add(beat.text, .03, 0, .94, portrait ? .1 : .15, 'title', 0, TYPE.scene);
       for (const box of boxes) Object.assign(box, { align: 'center', composition: 'center' });

@@ -39,10 +39,10 @@ PROPORTIONS = {"head": (.30, .55), "body_width": (.35, .80), "limb_length": (.18
 OUTLINE = (4, 14)          # outline weight in thousandths of the character's height
 STATES = ("draft", "awaiting_approval", "approved", "rejected")
 SPEC_FIELDS = {"name", "family", "proportions", "palette", "outline", "accessory", "parts", "views", "expressions", "mouths", "form"}
-# A character is drawn flat by the 2D rig (Pack A) or built in 3D by static/motion/stage.js (Pack B). The form is part of
-# the spec, so a 3D version is its own approved sheet: approving the flat Pip does not approve a 3D Pip. A spec without
-# `form` is 2D (every spec written before Pack B).
-FORMS = ("2d", "3d")
+# A character is drawn flat by the 2D rig (Pack A), built in 3D by static/motion/stage.js (Pack B), or built from boxes by
+# static/motion/voxel.js (Pack C, `voxel`). The form is part of the spec, so each form is its own approved sheet:
+# approving the flat Pip does not approve a 3D or a blocky Pip. A spec without `form` is 2D (every spec before Pack B).
+FORMS = ("2d", "3d", "voxel")
 HEX = re.compile(r"#[0-9a-f]{6}")
 NAME = re.compile(r"[A-Za-z][A-Za-z0-9 '-]{0,39}")
 MAX_VERSIONS = 50
@@ -108,9 +108,9 @@ def validate(spec: dict) -> dict:
         _error("family", "choose " + ", ".join(FAMILIES) + ".")
     form = s.pop("form", "2d")
     if form not in FORMS:
-        _error("form", "choose 2d (the flat rig) or 3d (the glossy 3D studio).")
-    if form == "3d":
-        s["form"] = "3d"
+        _error("form", "choose 2d (the flat rig), 3d (the glossy 3D studio) or voxel (the blocky world).")
+    if form in ("3d", "voxel"):
+        s["form"] = form
     if s["accessory"] not in ACCESSORIES:
         _error("accessory", "choose " + ", ".join(ACCESSORIES) + ".")
     props = s.get("proportions")
@@ -154,8 +154,26 @@ def starter_3d(family: str, **changes) -> dict:
     return merged(STARTERS_3D[family], changes)
 
 
+# Pack C's blocky characters: the family built from boxes (static/motion/voxel.js): a big head (about 40% of the height),
+# stubby limbs, rounded edges and a small pixel face drawn in code. Bo Block's limbs are coral instead of Bo's dark slate,
+# so a teal body over dark legs never reads as a well-known block game's default player.
+STARTERS_VOXEL = {family: {**spec, "name": spec["name"] + " Block", "form": "voxel"} for family, spec in STARTERS.items()}
+STARTERS_VOXEL["square"] = {**STARTERS_VOXEL["square"], "palette": {**STARTERS_VOXEL["square"]["palette"], "limb": "#e8735f"}}
+
+
+def starter_voxel(family: str, **changes) -> dict:
+    if family not in STARTERS_VOXEL:
+        _error("family", "choose " + ", ".join(FAMILIES) + ".")
+    return merged(STARTERS_VOXEL[family], changes)
+
+
+def starter_for(form: str, family: str, **changes) -> dict:
+    """Kairos's starting design of a family in a form (2d, 3d or voxel)."""
+    return {"3d": starter_3d, "voxel": starter_voxel}.get(form, starter)(family, **changes)
+
+
 def form_of(spec: dict) -> str:
-    return "3d" if spec.get("form") == "3d" else "2d"
+    return spec.get("form") if spec.get("form") in ("3d", "voxel") else "2d"
 
 
 def merged(base: dict, changes: dict) -> dict:

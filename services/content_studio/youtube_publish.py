@@ -169,12 +169,12 @@ def description(post):
     return (caption.rstrip() + "\n\nChapters\n" + chapters).strip()
 
 
-def metadata(post, privacy, publish_at=None):
+def metadata(post, privacy, publish_at=None, made_for_kids=False):
     """Exactly what was approved, plus the AI label. YouTube refuses < and > in titles and descriptions.
     `publish_at` (a schedule set on the prepared post) becomes YouTube's scheduled publish: the video uploads private
     and YouTube makes it public at that time (an unaudited project may keep it private regardless)."""
     clean = lambda s: (s or "").replace("<", "").replace(">", "")
-    status = {"privacyStatus": privacy, "selfDeclaredMadeForKids": False, "containsSyntheticMedia": True}
+    status = {"privacyStatus": privacy, "selfDeclaredMadeForKids": bool(made_for_kids), "containsSyntheticMedia": True}
     if publish_at:
         status.update(privacyStatus="private", publishAt=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(publish_at)))
     return {"snippet": {"title": clean(post["title"])[:100], "description": clean(description(post))[:5000],
@@ -208,6 +208,9 @@ def _ready(store, post_id):
         raise PostingError("Direct posting is for YouTube only. Use Prepare post for this platform.", 409)
     if channel["status"] != "live" or channel["paused"]:
         raise PostingError("That channel is archived or paused.", 409)
+    if store.audience(post)["made_for_kids"] is None:
+        raise PostingError("Say whether this video is made for kids first (on the channel's Look or on the post): this blocky "
+                           "world look draws children, and YouTube asks every upload.", 409)
     state, info, granted = _link()
     if not state.get("google_account") or not granted:
         raise PostingError("Connect YouTube posting first.", 409)
@@ -236,7 +239,7 @@ async def publish(store, post_id, by, now=None):
             if publish_at:
                 privacy = "private"   # a scheduled upload is private until YouTube publishes it at publish_at
             with open(path, "rb") as handle:
-                content, kind = _body(metadata(post, privacy, publish_at), handle.read())
+                content, kind = _body(metadata(post, privacy, publish_at, store.audience(post)["made_for_kids"]), handle.read())
             try:
                 answer = await google.request("youtube_upload", "POST", "/videos",
                                               params={"part": "snippet,status", "uploadType": "multipart"},

@@ -50,6 +50,7 @@ class ChannelEditBody(Body):
     long_per_week: Optional[int] = Field(None, ge=0, le=7)
     renderer: Optional[str] = Field(None, max_length=10)
     fps: Optional[int] = Field(None, ge=0, le=60)
+    made_for_kids: Optional[str] = Field(None, max_length=3)      # "yes", "no", or "" for not set
 
 
 class BatchBody(Body):
@@ -100,6 +101,7 @@ class EditBody(Body):
     format: Optional[str] = Field(None, max_length=80)
     tags: Optional[str] = Field(None, max_length=500)
     thumbnail: Optional[str] = Field(None, max_length=300)
+    made_for_kids: Optional[str] = Field(None, max_length=3)      # "yes", "no", or "" for the channel's answer
 
 
 class PostedBody(Body):

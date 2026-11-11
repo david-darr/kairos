@@ -221,6 +221,12 @@ def _pick(args, ctx, bot, role):
         tail += (" It is a Glossy 3D post: the Script Writer writes stage beats (a studio set, the mascot, stand-in people and labels "
                  "over heads) for " + (", ".join(castable) if castable else "a 3D character the Editor makes and the person approves first")
                  + "." + (f" The channel renders 3D with {renderer}: the Editor passes renderer={renderer} to video_create." if renderer else ""))
+    if _base(post["style_pack"]) == "voxel-3d":
+        castable = [c["name"] for c in _characters() if c["castable_version"] and c.get("form") == "voxel"]
+        tail += (" It is a Blocky world post (three.js only): the Script Writer writes voxel beats (worlds, times of day, our own "
+                 "blocky characters) for " + (", ".join(castable) if castable else "a blocky character the Editor makes and the person "
+                 "approves first") + ". Never use another company's block game's name in the title, tags, caption or thumbnail (the "
+                 "Evaluator refuses it), and the channel or post must say whether the video is made for kids.")
     if _base(post["style_pack"]) == "flat-2d":
         castable = [c["name"] for c in _characters() if c["castable_version"]]
         tail += (" It is a Flat 2D post: the Script Writer writes scene beats for " + ", ".join(castable) + "." if castable else
@@ -312,7 +318,7 @@ def _pack_matches(post, render_ref):
     """A flat-2d post's video is made of scene beats with approved characters (the render itself refuses others); a post
     in a user-made pack is made in that pack's approved version."""
     user_pack = post["style_pack"] not in formats.STYLE_PACKS
-    if _base(post["style_pack"]) not in ("flat-2d", "glossy-3d") and not user_pack:
+    if _base(post["style_pack"]) not in ("flat-2d", "glossy-3d", "voxel-3d") and not user_pack:
         return
     match = _STUDIO_RENDER.match((render_ref or "").strip())
     if not match:
@@ -332,6 +338,9 @@ def _pack_matches(post, render_ref):
     if _base(post["style_pack"]) == "glossy-3d":
         if not any(b["kind"] == "stage" for b in project["beats"]) or not project.get("cast"):
             raise StudioError("a Glossy 3D post needs stage beats with a cast 3D character; this video has none")
+    elif _base(post["style_pack"]) == "voxel-3d":
+        if not any(b["kind"] == "voxel" for b in project["beats"]) or not project.get("cast"):
+            raise StudioError("a Blocky world post needs voxel beats with a cast blocky character; this video has none")
     elif _base(post["style_pack"]) != "flat-2d":
         return
     elif not any(b["kind"] == "scene" for b in project["beats"]) or not project.get("cast"):

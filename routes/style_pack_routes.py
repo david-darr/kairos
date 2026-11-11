@@ -160,8 +160,6 @@ async def make_sample(pack_id: str, version: int, user: str = Depends(require_us
     if v["status"] == "approved":
         raise HTTPException(409, f"Version {version} is already approved.")
     data = _call(style_pack_store.spec, pack_id, version)
-    if data["base"] == "voxel-3d":
-        raise HTTPException(422, f"{meta['name']} is drawn by the voxel-3d base, which is not built yet.")
     try:
         if style_pack_sample.waiting_characters(data):
             return _public(await style_pack_sample.make(pack_id, version, owner=user, by=user))

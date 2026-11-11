@@ -217,8 +217,8 @@ class Approval(Accounts):
         self.assertFalse(style_packs.get(three["id"])["available"], "a 3D pack is available once approved, like any pack")
         voxel = store.create({k: v for k, v in store.validate(copy.deepcopy(store.STARTER)).items() if k != "scenes"} |
                              {"name": "Blocky", "renderer": "threejs", "base": "voxel-3d", "characters": []})
-        with self.assertRaisesRegex(ValueError, "not built yet"):
-            run(style_pack_sample.make(voxel["id"], 1, owner="david"))
+        self.assertFalse(style_packs.get(voxel["id"])["available"], "a blocky pack (Pack C) is available once approved, like any pack")
+        self.assertEqual(style_packs.get(voxel["id"])["units_per_minute"], style_packs.BUILT_IN["voxel-3d"]["units_per_minute"])
 
     def test_no_tool_approves_and_the_approve_route_is_the_persons(self):
         names = [n for n in tool_registry._REGISTRY if "style_pack" in n]

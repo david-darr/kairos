@@ -3,7 +3,7 @@
 A style pack is data, per account and versioned: the look (scene palette, which character families, outline weight,
 lighting, the design look for type and captions), the renderer it targets (our 2D engine on the motion-type or flat-2d
 base; three.js or Blender on the glossy-3d base, Pack B, where three.js is built in and Blender is used only when the
-person has it installed; the voxel-3d base is recognised and unavailable until unit 6), its
+person has it installed; three.js only on the voxel-3d base, Pack C's blocky world), its
 character set (character specs by id and version, core/character_store.py), scene and transition rules, pacing, caption
 style, music and voice defaults, and a long free-text director brief. Nothing in a pack is code and nothing runs from
 one: every field is checked against fixed lists and ranges here, and the engine only reads numbers and names from it.
@@ -61,6 +61,10 @@ CAMERAS = ("still", "push", "pull", "pan", "shake")
 # Pack B's studio (static/motion/stage.js): set tones and glossy props take the place of Pack A's settings and icons.
 STAGE_SETS = ("lavender", "peach", "mint", "sky", "night")
 STAGE_PROPS = ("ball", "block", "pillar", "ring", "coin")
+# Pack C's blocky world (static/motion/voxel.js): worlds take the place of settings; times of day are its own rule.
+VOXEL_WORLDS = ("meadow", "cave", "village", "sky-island", "ocean")
+VOXEL_PROPS = ("gem", "lantern", "crate", "flag", "ball", "star")
+VOXEL_TIMES = ("day", "dusk", "night")
 TRANSITIONS = ("cut", "whip", "zoom", "flip", "dither", "mosaic", "wipe")
 MOODS = ("energetic", "calm", "warm", "dark", "playful")
 LIGHTING = ("flat", "soft", "glow")
@@ -71,7 +75,7 @@ ORIGINS = ("brief", "duplicate", "starter", "import", "shared", "reference")
 SPEC_FIELDS = ("name", "summary", "renderer", "base", "look", "characters", "scenes", "pacing", "captions", "music",
                "voice", "director_brief")
 LOOK_FIELDS = ("design_look", "palette", "families", "outline", "lighting")
-SCENE_FIELDS = ("settings", "shots", "props", "cameras", "transitions")
+SCENE_FIELDS = ("settings", "shots", "props", "cameras", "transitions", "times")    # times: voxel-3d only
 PACING_FIELDS = ("words_per_second", "shot_seconds", "hook_seconds")
 HEX = re.compile(r"#[0-9a-f]{6}")
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 '&(),.:!?+-]{0,59}")
@@ -206,10 +210,14 @@ def validate(spec: dict) -> dict:
         _error("characters", "the motion-type base has no characters; use the flat-2d base for a character set.")
     scenes = s.setdefault("scenes", {})
     _fields(scenes, "scenes", SCENE_FIELDS)
-    three_d = s["base"] in ("glossy-3d", "voxel-3d")
-    settings, props = (STAGE_SETS, STAGE_PROPS) if three_d else (SETTINGS, PROPS)
-    for key, allowed in (("settings", settings), ("shots", SHOTS), ("props", props), ("cameras", CAMERAS),
-                         ("transitions", TRANSITIONS)):
+    voxel = s["base"] == "voxel-3d"
+    settings, props = (VOXEL_WORLDS, VOXEL_PROPS) if voxel else (STAGE_SETS, STAGE_PROPS) if s["base"] == "glossy-3d" else (SETTINGS, PROPS)
+    rules = [("settings", settings), ("shots", SHOTS), ("props", props), ("cameras", CAMERAS), ("transitions", TRANSITIONS)]
+    if voxel:
+        rules.append(("times", VOXEL_TIMES))
+    elif "times" in scenes:
+        _error("scenes.times", "only a voxel-3d (blocky world) pack has times of day.")
+    for key, allowed in rules:
         scenes[key] = _subset(scenes.get(key, list(allowed)), f"scenes.{key}", allowed, 0 if key == "props" else 1)
     pacing = s.setdefault("pacing", {})
     _fields(pacing, "pacing", PACING_FIELDS)
@@ -248,6 +256,12 @@ def validate(spec: dict) -> dict:
     return s
 
 
+# Which character form each base casts, and the plain names used in messages.
+FORM_OF_BASE = {"flat-2d": "2d", "glossy-3d": "3d", "voxel-3d": "voxel"}
+FORM_NAMES = {"2d": "flat (2D)", "3d": "glossy 3D", "voxel": "blocky"}
+BASE_NAMES = {"flat-2d": "flat 2D", "glossy-3d": "glossy 3D", "voxel-3d": "blocky world"}
+
+
 def check_characters(spec) -> list[str]:
     """The pack's characters exist in this account and match its families (problems as sentences)."""
     out = []
@@ -261,11 +275,10 @@ def check_characters(spec) -> list[str]:
         if data["family"] not in spec["look"]["families"]:
             out.append(f"{meta['name']} is a {data['family']} character; this pack's families are "
                        + ", ".join(spec["look"]["families"]) + ".")
-        form = character_store.form_of(data)
-        if spec["base"] == "glossy-3d" and form != "3d":
-            out.append(f"{meta['name']} is a flat (2D) character; a glossy 3D pack casts 3D characters (form 3d), approved on their 3D sheet.")
-        elif spec["base"] == "flat-2d" and form != "2d":
-            out.append(f"{meta['name']} is a 3D character; a flat 2D pack casts flat characters.")
+        form, want = character_store.form_of(data), FORM_OF_BASE.get(spec["base"])
+        if want and form != want:
+            out.append(f"{meta['name']} is a {FORM_NAMES[form]} character; a {BASE_NAMES[spec['base']]} pack casts {FORM_NAMES[want]} "
+                       f"characters (form {want}), approved on their own sheet.")
     return out
 
 
@@ -512,16 +525,19 @@ def rule_notes(project, data) -> list[str]:
             notes.append(f"{label} uses the {b.get('camera')} camera, which the {data['name']} pack does not use.")
         if i < len(project["beats"]) - 1 and b.get("transition", "cut") not in scenes["transitions"]:
             notes.append(f"{label} uses the {b.get('transition')} transition, which the {data['name']} pack does not use.")
-        if b["kind"] in ("scene", "stage"):
-            scene = b.get("scene") or b.get("stage") or {}
-            place = scene.get("setting") if b["kind"] == "scene" else scene.get("set")
+        if b["kind"] in ("scene", "stage", "voxel"):
+            scene = b.get(b["kind"]) or {}
+            place = {"scene": scene.get("setting"), "stage": scene.get("set"), "voxel": scene.get("world")}[b["kind"]]
             if place not in scenes["settings"]:
                 notes.append(f"{label} is set in {place}, outside the {data['name']} pack's settings.")
+            if b["kind"] == "voxel" and scene.get("time") not in scenes.get("times", VOXEL_TIMES):
+                notes.append(f"{label} is set at {scene.get('time')}, outside the {data['name']} pack's times of day.")
             if scene.get("shot") not in scenes["shots"]:
                 notes.append(f"{label} is a {scene.get('shot')} shot, outside the {data['name']} pack's shots.")
             for prop in scene.get("props", []):
-                if (prop.get("icon") or prop.get("shape")) not in scenes["props"]:
-                    notes.append(f"{label} shows a {prop.get('icon') or prop.get('shape')}, outside the {data['name']} pack's props.")
+                thing = prop.get("icon") or prop.get("shape") or prop.get("kind")
+                if thing not in scenes["props"]:
+                    notes.append(f"{label} shows a {thing}, outside the {data['name']} pack's props.")
             for member in scene.get("cast", []):
                 if not any(e["character"] == member["character"] for e in data["characters"]):
                     notes.append(f"{label} casts a character that is not in the {data['name']} pack's character set.")
@@ -614,8 +630,48 @@ STARTER_3D = {
     "voice": {"voice": "af_heart"},
     "director_brief": STARTER_3D_BRIEF,
 }
+# Pack C's starter: a blocky world explainer with Kairos's own round character built from boxes (Pip Block). Generic
+# name; nothing in it is another game's: our own blocks, palette, worlds and characters, and no game's name anywhere.
+STARTER_VOXEL_ID = "blocky-world-explainer"
+STARTER_VOXEL_BRIEF = (
+    "Blocky world explainer. Short, curious explainers about nature, science and how things work, told in a bright world "
+    "of soft toy blocks by our own blocky characters.\n\n"
+    "Before any spending: research and fact-check every claim and keep a source for each; write the script and a "
+    "timestamped shot plan, and get them approved.\n\n"
+    "Look: a generic world of rounded blocks in our own pastel palette (mint moss, apricot clay, lilac stone, blossom "
+    "trees, turquoise water), soft light with gentle shadows, round sun and moon, puffy round clouds. Worlds: meadow, cave, "
+    "village, sky island, ocean; day, dusk or night to match the story. Never use another game's blocks, textures, skins, "
+    "mobs, fonts, logos, sounds or name, and never put that game's name in a title, tag or thumbnail.\n\n"
+    "Characters: our own blocky family with big heads and small pixel faces, drawn from their approved sheets so they never "
+    "drift. One narrator voice; the character on screen mouths the line and reacts (happy, surprised, worried, thinking).\n\n"
+    "Camera: a wide shot to show the world, a medium shot to explain, a close shot for the surprising fact; slow push-ins, "
+    "gentle orbits, cuts on the narration, a whip or zoom only to change world.\n\n"
+    "Pacing: about two and a half words a second, the question in the first five seconds, shots of two to seven seconds, "
+    "numbers shown over heads when they are said.\n\n"
+    "Audience: this look draws children. Say honestly on the channel and on every post whether the video is made for kids, "
+    "keep calls to action free of personal data, and keep every fact sourced.\n\n"
+    "Quality: check sampled frames against the character sheets, keep labels and captions inside safe areas, and never "
+    "copy another channel's characters, mascots, logos, worlds, titles or catchphrases.")
+STARTER_VOXEL = {
+    "name": "Blocky world explainer",
+    "summary": "Explainers in a bright world of soft toy blocks, with our own blocky characters, five worlds and day, dusk and night.",
+    "renderer": "threejs", "base": "voxel-3d",
+    # The palette colours the title and end cards, in the meadow's sky and moss so a card sits in the same world.
+    "look": {"design_look": "nordic", "families": ["round"], "outline": 7, "lighting": "soft",
+             "palette": {"sky": ["#8ccaf2", "#e2f2ff"], "far": "#8fd6a6", "mid": "#69c2a0", "near": "#4f9c86",
+                         "ground": "#f3dca6", "prop": "#f7a8c8", "ink": "#1f3346", "glow": "#ffffff"}},
+    "scenes": {"settings": ["meadow", "cave", "village", "sky-island", "ocean"], "shots": ["wide", "medium", "close"],
+               "props": ["gem", "lantern", "crate", "flag", "ball", "star"], "cameras": ["still", "push", "pull", "pan"],
+               "transitions": ["cut", "zoom", "whip", "wipe"], "times": ["day", "dusk", "night"]},
+    "pacing": {"words_per_second": 2.6, "shot_seconds": [2, 7], "hook_seconds": 5.5},
+    "captions": {"on": True, "case": "sentence"},
+    "music": {"mood": "playful", "volume": .5},
+    "voice": {"voice": "af_heart"},
+    "director_brief": STARTER_VOXEL_BRIEF,
+}
 STARTERS = {STARTER_ID: {"spec": STARTER, "characters": STARTER_CHARACTERS},
-            STARTER_3D_ID: {"spec": STARTER_3D, "characters": ("round",), "form": "3d"}}
+            STARTER_3D_ID: {"spec": STARTER_3D, "characters": ("round",), "form": "3d"},
+            STARTER_VOXEL_ID: {"spec": STARTER_VOXEL, "characters": ("round",), "form": "voxel"}}
 
 
 def _character_for(data: dict, by: str) -> dict:
@@ -640,12 +696,12 @@ def _character_for(data: dict, by: str) -> dict:
 
 
 def default_cast(data: dict, by: str = "") -> dict:
-    """A flat-2d or glossy-3d pack with no character set gets one per family it allows (up to three): the newest approved
-    character of that family and form (flat for 2D, 3D for Pack B) in this account, else Kairos's own starting design for
-    it (made here as a draft)."""
-    if data["base"] not in ("flat-2d", "glossy-3d") or data["characters"]:
+    """A flat-2d, glossy-3d or voxel-3d pack with no character set gets one per family it allows (up to three): the newest
+    approved character of that family and form (flat for 2D, 3D for Pack B, blocky for Pack C) in this account, else
+    Kairos's own starting design for it (made here as a draft)."""
+    if data["base"] not in FORM_OF_BASE or data["characters"]:
         return data
-    form = "3d" if data["base"] == "glossy-3d" else "2d"
+    form = FORM_OF_BASE[data["base"]]
     cast = []
     for family in data["look"]["families"][:3]:
         found = None
@@ -653,8 +709,7 @@ def default_cast(data: dict, by: str = "") -> dict:
             version = character_store.approved_version(meta)
             if meta["family"] == family and version and character_store.form_of(character_store.spec(meta["id"], version)) == form:
                 found = {"character": meta["id"], "version": version}
-        starter = character_store.starter_3d(family) if form == "3d" else character_store.starter(family)
-        cast.append(found or _character_for(starter, by))
+        cast.append(found or _character_for(character_store.starter_for(form, family), by))
     return validate({**data, "characters": cast})
 
 
@@ -667,8 +722,7 @@ def install_starter(starter_id=STARTER_ID, by: str = "") -> dict:
     for meta in list_all():
         if meta.get("origin", {}).get("kind") == "starter" and meta["origin"].get("from") == starter_id:
             raise ApprovalError(f"This account already has the starter pack ({meta['name']}). Duplicate it to make another.")
-    make = character_store.starter_3d if entry.get("form") == "3d" else character_store.starter
-    cast = [_character_for(make(family), by) for family in entry["characters"]]
+    cast = [_character_for(character_store.starter_for(entry.get("form", "2d"), family), by) for family in entry["characters"]]
     return create({**copy.deepcopy(entry["spec"]), "characters": cast}, by=by, note="The starter pack.",
                   origin={"kind": "starter", "from": starter_id, "brief": entry["spec"]["director_brief"]})
 

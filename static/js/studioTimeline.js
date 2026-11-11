@@ -13,7 +13,7 @@ import { el } from './api.js';
 import * as M from './studioEditorModel.js';
 
 const KIND_GROUP = { title: 'type', statement: 'type', quote: 'type', 'big-number': 'data', list: 'data', image: 'picture',
-  split: 'picture', logo: 'picture', end: 'type', scene: 'scene', stage: 'stage' };
+  split: 'picture', logo: 'picture', end: 'type', scene: 'scene', stage: 'stage', voxel: 'stage' };
 const CLIP_GROUP = { text: 'type', image: 'picture', shape: 'data', video: 'picture', sound: 'sound' };
 const MAX_CANVAS = 16000;
 const peakCache = new Map();

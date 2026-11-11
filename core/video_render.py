@@ -351,7 +351,7 @@ async def _render(project, aspect, job_id):
 
 def _stage_info(project):
     return {"renderer": video_blender.effective(project), "picked": project.get("renderer", "threejs")} \
-        if any(b["kind"] == "stage" for b in project["beats"]) else None
+        if any(b["kind"] in ("stage", "voxel") for b in project["beats"]) else None
 
 
 async def preview(video_id, aspect, times=None):

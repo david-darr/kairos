@@ -1,5 +1,5 @@
 // A real narrated video render through the app's own render path. Run via run-electron-test.cjs:
-//   node scripts/run-electron-test.cjs video-render-smoke [--sample | --pack-a | --style-pack | --long-form] [--tracks] [--models <kokoro folder>] [--keep <folder>] [--name <stem>]
+//   node scripts/run-electron-test.cjs video-render-smoke [--sample | --pack-a | --style-pack | --long-form | --pack-b | --pack-c] [--tracks] [--models <kokoro folder>] [--keep <folder>] [--name <stem>]
 // --tracks (Content Studio Editor step 3) puts an overlay track, a shape track and an audio clip over the beats and checks
 // they reach the encoded video and the soundtrack.
 // --long-form renders a 3 to 5 minute chaptered video in the starter pack, stops it in its second chapter and resumes it (up to an hour).
@@ -56,6 +56,7 @@ app.whenReady().then(async () => {
   if (args.includes('--style-pack')) py.push('--style-pack');
   if (args.includes('--long-form')) py.push('--long-form');
   if (args.includes('--pack-b')) py.push('--pack-b');
+  if (args.includes('--pack-c')) py.push('--pack-c');
   if (args.includes('--preview')) py.push('--preview');
   if (args.includes('--tracks')) py.push('--tracks');
   for (const name of ['--motion', '--fps60', '--exports']) if (args.includes(name)) py.push(name);
@@ -108,6 +109,16 @@ app.whenReady().then(async () => {
     if (job.renderer !== want && !(want === 'blender' && blenderMissing && job.renderer === 'threejs')) return finish(1, `The sample rendered with ${job.renderer}, not ${want}.`);
     const strays = (job.notes || []).filter(n => /pack (does not use|keeps shots)|outside the .* pack|opening beat runs past/.test(n));
     if (strays.length) return finish(1, 'The Pack B sample strays from its own pack: ' + strays.join(' '));
+  }
+  // Pack C: the blocky sheet passed its own checks, the sample went to the person, it is 20 to 30 s, it rendered with
+  // three.js (Pack C has no Blender path), it keeps to its pack, and no frame drifted from the sheet.
+  if (args.includes('--pack-c')) {
+    if (!result.pack || result.pack.step !== 'sample' || result.pack.status !== 'awaiting_approval') return finish(1, 'The Pack C sample was not sent for approval.');
+    if (!(job.seconds >= 20 && job.seconds <= 30)) return finish(1, `The Pack C sample runs ${job.seconds} s, outside 20 to 30 s.`);
+    if (job.renderer !== 'threejs') return finish(1, `The Pack C sample rendered with ${job.renderer}, not three.js.`);
+    if (!(result.sheets || []).every(s => s.metrics && s.metrics.form === 'voxel')) return finish(1, 'The Pack C sheet is not a blocky (voxel) sheet.');
+    const strays = (job.notes || []).filter(n => /pack (does not use|keeps shots)|outside the .* pack|opening beat runs past|off the approved sheet|outside the .* shot/.test(n));
+    if (strays.length) return finish(1, 'The Pack C sample strays from its pack or sheet: ' + strays.join(' '));
   }
   // A long video: refused before its plan was approved, stopped in its second chapter and resumed from there, joined into one
   // 3 to 5 minute video with YouTube chapters, inside its pack's rules.
