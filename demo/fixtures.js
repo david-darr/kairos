@@ -1111,6 +1111,8 @@
       if (action === 'allowed-ports') return { ports: app.running ? app.ports : [] };
       return { session_id: id, lines: ['> kairos-garden dev', 'Local: http://127.0.0.1:5173/', 'Ready in 240 ms', 'GET / 200'] };
     }
+    // The account switcher (accountSwitcher.js): accounts are off in the demo, so there is none to show.
+    if (route === "/api/auth/device-accounts") return { enabled: false, accounts: [], max: 9, colors: [] };
     if (route === "/api/auth/status") return { auth_enabled: false, setup_required: false, username: "Alex", is_admin: state.isAdmin !== false, instance: state.empty ? "dev" : "" };
     if (route === '/api/forge/terminal/settings') return { forge_terminal_remote: !!state.forgeTerminalRemote };
     if (route === '/api/forge/root') return { path: state.forgeRoot || 'C:\\Users\\Alex\\Documents\\Kairos Projects' };
