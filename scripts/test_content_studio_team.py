@@ -303,7 +303,7 @@ class StudioToolTests(unittest.TestCase):
         self.assertIn("Only the Publisher", call("content_studio_publish_youtube", bots["Editor"], post_id=post["id"]))
         self.assertIn("Only a post you approved", call("content_studio_publish_youtube", bots["Publisher"], post_id=post["id"]))
         studio.approve(post["id"], "david")
-        self.assertIn("Connect YouTube posting first", call("content_studio_publish_youtube", bots["Publisher"], post_id=post["id"]))
+        self.assertIn("Connect YouTube posting for @space first", call("content_studio_publish_youtube", bots["Publisher"], post_id=post["id"]))
         from services.content_studio import youtube_publish
 
         async def fake_publish(store, post_id, by, now=None):
@@ -314,7 +314,7 @@ class StudioToolTests(unittest.TestCase):
         self.assertIn("NEWvideo_01", out)
         self.assertIn("kept it private", out)
         self.assertIn("Only the Researcher", call("content_studio_youtube_trending", bots["Publisher"]))
-        self.assertIn("Connect YouTube analytics first", call("content_studio_youtube_trending", bots["Researcher"]))
+        self.assertIn("Connect YouTube analytics for a channel first", call("content_studio_youtube_trending", bots["Researcher"]))
 
     def test_publisher_prepares_never_posts_and_reads_analytics_only_when_the_person_allowed_it(self):
         bots = self.bots

@@ -908,7 +908,7 @@ class Api(unittest.TestCase):
         self.assertEqual(([p["id"] for p in out["approved"]], out["skipped"]), ([batch["id"]], []))
         self.assertEqual(b.post(f"{P}/approvals/approve-batch", json={"post_ids": [batch["id"]]}).status_code, 409, "bea's own setting is off")
         got = d.get(f"{P}/posts/{batch['id']}").json()
-        self.assertEqual((got["pick_reason"], got["tags"], got["direct_post_blocker"]), ("why", "a, b", "Connect YouTube posting first."))
+        self.assertEqual((got["pick_reason"], got["tags"], got["direct_post_blocker"]), ("why", "a, b", f"Connect YouTube posting for {channel['handle']} first."))
 
     def test_format_cards_are_read_per_account(self):
         auth_manager.create_user("dee", "fourth-password-4")
