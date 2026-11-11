@@ -94,6 +94,6 @@ def _default_spend():
         from services import bot_spend
         budget = bot_spend.budget()
         return {"capped": budget["capped"], "near_cap": budget["near_cap"], "spent_usd": budget["spent_usd"],
-                "monthly_usd": budget["monthly_usd"]}
+                "monthly_usd": budget["monthly_usd"], "unknown_cost_runs": budget.get("unknown_cost_runs", 0)}
     except Exception:
         return None

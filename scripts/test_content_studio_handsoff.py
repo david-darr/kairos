@@ -342,6 +342,75 @@ class SecondReview(Case):
                 handsoff.producer_approve(self.store, self.queued(self.yt, "B"), "Producer", "Ready")
 
 
+class ThirdReview(Case):
+    """Codex's third review of 2026-11-11, kept fixed."""
+
+    def setUp(self):
+        super().setUp()
+        handsoff.set_hands_off(self.store, True, "david")
+
+    def approved(self, channel, title):
+        post = self.queued(channel, title)
+        self.store.approve(post, by="david")
+        return post
+
+    def test_a_publish_whose_answer_was_lost_is_held_and_counted(self):
+        from services.content_studio import social_auth, youtube_publish
+        ig, other = self.approved(self.ig, "Reel"), self.approved(self.ig, "Second reel")
+        social_auth.remember_publish(ig, platform="instagram", state="publishing", container_id="C1",
+                                     channel_id=self.ig["id"], caption="cap", at=time.time())
+        self.addCleanup(social_auth.forget_publish, ig)
+        self.assertIn("could not be confirmed", handsoff.gate(self.store, ig, spend=NOT_CAPPED))
+        self.assertIsNone(handsoff.gate(self.store, ig, spend=NOT_CAPPED, publishing=True), "the publish going out passes its own guard")
+        self.assertIn("for today", handsoff.gate(self.store, other, spend=NOT_CAPPED))
+        yt = self.approved(self.yt, "Video")
+        youtube_publish._set_pending(yt, {"at": time.time(), "title": "Video", "channel_id": self.yt["id"]})
+        self.addCleanup(youtube_publish._set_pending, yt, None)
+        self.assertIn("could not be confirmed", handsoff.gate(self.store, yt, spend=NOT_CAPPED))
+        self.tick()
+        self.assertEqual(self.posted, [])
+
+    def test_instagram_settles_a_lost_publish_by_asking_before_any_retry(self):
+        from unittest.mock import patch
+        from services.content_studio import instagram_api
+        pending = {"container_id": "C1", "caption": "Our caption"}
+
+        def fake(answers):
+            async def call(channel_id, method, path, **kw):
+                return answers[path]
+            return call
+        cases = [({"/C1": {"status_code": "PUBLISHED"}, "/ig/media": {"data": [{"id": "M9", "caption": "Our caption"}]}}, ("published", "M9")),
+                 ({"/C1": {"status_code": "FINISHED"}}, ("not_published", None)),
+                 ({"/C1": {"status_code": "SOMETHING"}}, ("unknown", None))]
+        for answers, expected in cases:
+            with patch.object(instagram_api, "_call", fake(answers)):
+                self.assertEqual(asyncio.run(instagram_api.reconcile(1, "ig", pending)), expected)
+
+    def test_youtube_settles_a_lost_upload_by_asking_before_any_retry(self):
+        from unittest.mock import AsyncMock, patch
+        from services.content_studio import youtube, youtube_publish
+        item = {"title": "Moon dust"}
+        found = {"items": [{"id": {"videoId": "V1"}, "snippet": {"title": "Moon dust"}}]}
+        with patch.object(youtube, "_call", AsyncMock(return_value=found)):
+            self.assertEqual(asyncio.run(youtube_publish.reconcile("acct", item)), ("published", "V1"))
+        with patch.object(youtube, "_call", AsyncMock(return_value={"items": []})):
+            self.assertEqual(asyncio.run(youtube_publish.reconcile("acct", item)), ("not_published", None))
+        with patch.object(youtube, "_call", AsyncMock(side_effect=RuntimeError("offline"))):
+            self.assertEqual(asyncio.run(youtube_publish.reconcile("acct", item)), ("unknown", None))
+
+    def test_runs_with_unknown_cost_make_spend_unknown(self):
+        post = self.approved(self.yt, "A")
+        state = {"capped": False, "near_cap": False, "spent_usd": 3.0, "monthly_usd": 50, "unknown_cost_runs": 2}
+        self.assertIn("no known cost", handsoff.gate(self.store, post, spend=lambda: state))
+        self.assertIsNone(handsoff.gate(self.store, post, spend=lambda: {**state, "unknown_cost_runs": 0}))
+        from services.content_studio import pipeline
+        from unittest.mock import patch
+        from services import bot_spend
+        with patch.object(bot_spend, "budget", return_value={"capped": False, "near_cap": False, "spent_usd": 1.0,
+                                                             "monthly_usd": 50, "unknown_cost_runs": 1}):
+            self.assertEqual(pipeline._default_spend()["unknown_cost_runs"], 1)
+
+
 class Policy(unittest.TestCase):
     def test_publish_tools_still_ask_and_approving_is_internal_but_self_guarded(self):
         self.assertIn("content_studio_approve_post", bot_policy.CONTENT_STUDIO_INTERNAL_TOOLS)

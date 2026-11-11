@@ -875,6 +875,7 @@ class Outcome:
     cwd: Optional[str] = None
     policy_revision: int = 0
     route: Optional[dict] = None
+    arguments_key: str = ""
 
 
 _inflight: dict = {}
@@ -1152,7 +1153,8 @@ def authorize_operation(*, bot_id: str, tool: str, arguments=None, mcp: Optional
     thread_id = session_id if session else (route or {}).get("thread_id")
     result = Outcome("ask", op=op, mode=policy.mode, owner=owner, thread_id=thread_id,
                      bot_id=bot_id, unattended=bool(run or route), run=run, provider=provider, cwd=op.cwd,
-                     policy_revision=policy.revision, invocation_id=invocation_id, route=route)
+                     policy_revision=policy.revision, invocation_id=invocation_id, route=route,
+                     arguments_key=arguments_key(args))
 
     def done(action: str, reason: str, source: str, **extra) -> Outcome:
         result.action, result.reason, result.source = action, reason, source
@@ -1170,6 +1172,10 @@ def authorize_operation(*, bot_id: str, tool: str, arguments=None, mcp: Optional
     if op.kind == READ:
         return done("allow", "Reading needs no approval.", "read")
     # Pause team (2026-11-11): one switch stops every step of the team's bots that is not a read, at every level.
+    # Kept on purpose (coordinator's call after the third review): asking the person (agent_ask) and the self-only
+    # tools (message_me, ring_me, ask_me_by_call, notify_me_by_call, notify_me_by_text) still work while paused. They
+    # reach only the person, within Reach me's own caps, and the Producer must be able to tell David things while the
+    # team is paused.
     paused_team = team_of(bot_id)
     if paused_team and paused_team.get("paused") and op.tool not in PERSON_ASK_TOOLS | SELF_ONLY_TOOLS:
         return done("deny", f"The {paused_team.get('name') or ''} team is paused, so this did not run. "
@@ -1178,8 +1184,13 @@ def authorize_operation(*, bot_id: str, tool: str, arguments=None, mcp: Optional
     # Only the handler of that call can use it (review finding, 2026-11-11): the mark lives in the task that ran the
     # approved call, so a parallel call (a native Bash beside a long run_code) never sees it; it is used once, for the
     # same kind of action, and ends with the call.
+    # Third review (2026-11-11): a context variable is inherited by tasks started later, so the mark also names the task
+    # that owns it, and covers only that task's own check of the same tool or of the very same arguments.
     mark = _OUTER.get() if not outer else None
-    if mark and not explicit_review and not force_prompt and not mark["used"]             and _inflight.get((bot_id, session_id)) is mark and mark["bot_id"] == bot_id:
+    if mark and not explicit_review and not force_prompt and not mark["used"] \
+            and _inflight.get((bot_id, session_id)) is mark and mark["bot_id"] == bot_id \
+            and mark.get("task") is not None and mark.get("task") is _current_task() \
+            and (mark.get("tool") == op.tool or mark.get("args") == arguments_key(args)):
         if mark["expires"] < time.time():
             _inflight.pop((bot_id, session_id), None)
         elif mark["kind"] == op.kind:
@@ -1266,12 +1277,29 @@ def authorize_operation(*, bot_id: str, tool: str, arguments=None, mcp: Optional
     return done("ask", "This approval level asks.", "default")
 
 
+def _current_task():
+    import asyncio
+    try:
+        return asyncio.current_task()
+    except RuntimeError:
+        return None
+
+
+def arguments_key(args) -> str:
+    """The call's arguments, normalized, to tell one call from another."""
+    try:
+        return json.dumps(args if isinstance(args, dict) else {}, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        return ""
+
+
 def mark_inflight(outcome: Outcome, source: Optional[str] = None) -> None:
     """An outer approval of a registry call stands for the one check its own handler makes inside it:
     the same kind of action, for this bot and conversation, once, for a couple of minutes."""
     if outcome.bot_id and outcome.op is not None:
         mark = {"kind": outcome.op.kind, "tool": outcome.op.tool, "expires": time.time() + INFLIGHT_SECONDS,
-                "id": outcome.invocation_id, "bot_id": outcome.bot_id, "used": False, "source": source or outcome.source}
+                "id": outcome.invocation_id, "bot_id": outcome.bot_id, "used": False, "source": source or outcome.source,
+                "task": _current_task(), "args": outcome.arguments_key}
         _inflight[(outcome.bot_id, outcome.thread_id)] = mark
         _OUTER.set(mark)   # visible only in this task: the approved call's own handler
 
@@ -1319,9 +1347,25 @@ def admission(bot_id: Optional[str], tool: str) -> Optional[str]:
     """How the registry call now running in this task was let through (its outer approval's source), or None."""
     mark = _OUTER.get()
     if not mark or mark.get("used") or mark.get("bot_id") != bot_id or mark.get("tool") != catalog.canonical(tool) \
-            or mark.get("expires", 0) < time.time():
+            or mark.get("expires", 0) < time.time() or mark.get("task") is not _current_task():
         return None
     return mark.get("source")
+
+
+def still_allowed() -> Optional[str]:
+    """Just before work an approved bot call starts after a wait (a sandbox command, a Gmail send, a Drive change): why
+    it must not start now, or None. The bot must still exist and its team must not be paused (third review,
+    2026-11-11). Outside a bot's call there is nothing to check."""
+    mark = _OUTER.get()
+    if not mark or not mark.get("bot_id"):
+        return None
+    bot_id = mark["bot_id"]
+    if _agent(bot_id) is None:
+        return "This bot no longer exists, so the action did not run."
+    team = team_of(bot_id)
+    if team and team.get("paused"):
+        return "The team was paused, so the action did not run."
+    return None
 
 
 def clear_inflight(bot_id: str) -> None:

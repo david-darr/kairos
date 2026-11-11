@@ -440,5 +440,53 @@ class SecondReview(TeamCase):
         self.assertIsNone(bot_policy.live_denial(bot, sid, outcome))
 
 
+class ThirdReview(TeamCase):
+    """Codex's third review of 2026-11-11, kept fixed."""
+
+    async def test_a_task_started_after_the_approval_cannot_use_it(self):
+        bot = make_bot("Child")
+        set_mode(bot, "ask")
+        sid = make_thread(bot)
+        outer = bot_policy.authorize_operation(bot_id=bot, tool="run_code", arguments={"code": "print(1)"},
+                                               surface=f"chat:{sid}", outer=True)
+        bot_policy.mark_inflight(outer, source="person")
+
+        async def child(tool, args):   # inherits the context, but is another task
+            return bot_policy.authorize_operation(bot_id=bot, tool=tool, arguments=args, surface=f"chat:{sid}")
+        for tool, args in (("Bash", {"command": "rm -rf /x"}), ("run_code", {"code": "print(1)"})):
+            self.assertEqual((await asyncio.create_task(child(tool, args))).action, "ask", tool)
+        other = bot_policy.authorize_operation(bot_id=bot, tool="Bash", arguments={"command": "ls"}, surface=f"chat:{sid}")
+        self.assertEqual(other.action, "ask", "a different tool with other arguments, in the same task")
+        own = bot_policy.authorize_operation(bot_id=bot, tool="run_code", arguments={"code": "print(1)"}, surface=f"chat:{sid}")
+        self.assertEqual((own.action, own.source), ("allow", "outer"))
+
+    async def test_waiting_work_rechecks_pause_and_the_bot_before_it_starts(self):
+        from unittest.mock import AsyncMock
+        import httpx
+        from core import google_workspace as google, sandbox
+        bot = make_bot("Launcher")
+        set_mode(bot, "full")
+        crew = self.team("Launchers", [bot])
+        sid = make_thread(bot)
+        outer = bot_policy.authorize_operation(bot_id=bot, tool="run_code", arguments={"code": "x"}, surface=f"chat:{sid}", outer=True)
+        bot_policy.mark_inflight(outer)
+        self.assertIsNone(bot_policy.still_allowed())
+        bot_departments.set_flags(crew["id"], self.user, paused=True)   # paused while the call waited
+        self.assertIn("paused", bot_policy.still_allowed())
+        launched = AsyncMock(side_effect=AssertionError("launched after the pause"))
+        with patch.object(sandbox, "available", AsyncMock(return_value=(True, ""))), \
+                patch.object(sandbox.asyncio, "create_subprocess_exec", launched):
+            with self.assertRaises(sandbox.SandboxUnavailable):
+                await sandbox.run("echo hi")
+        sent = AsyncMock(side_effect=AssertionError("sent after the pause"))
+        with patch.object(google, "_token", AsyncMock(return_value="t")), patch.object(httpx.AsyncClient, "request", sent):
+            for method, path in (("POST", "/users/me/messages/send"), ("DELETE", "/files/abc")):
+                with self.assertRaises(google.GoogleError):
+                    await google.request("gmail" if method == "POST" else "drive", method, path, body={}, account="a")
+        bot_departments.set_flags(crew["id"], self.user, paused=False)
+        agent_service.delete(bot)
+        self.assertIn("no longer exists", bot_policy.still_allowed())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -31,7 +31,7 @@ from urllib.parse import urlsplit
 from core import accounts
 
 from . import platforms, social_auth
-from .social_auth import SocialError, body, send
+from .social_auth import Limited, SocialError, body, send
 
 SOURCE = "instagram_api"
 FIRST_CHECK_S = 10
@@ -138,6 +138,31 @@ def _caption(package):
     return package["text"].get("caption") or ""
 
 
+UNSETTLED = ("Kairos could not confirm whether Instagram posted this, so it is not sent again until that is settled. "
+             "Check the account on Instagram: if it is there, record its link with Mark posted.")
+
+
+async def reconcile(channel_id, ig_user, pending):
+    """A media_publish whose answer was lost (third review, 2026-11-11): did Instagram post it? Asks the container
+    first (PUBLISHED, or not), then the account's recent media for the same caption. Returns ("published", media_id or
+    ""), ("not_published", None) or ("unknown", None)."""
+    try:
+        status = await _call(channel_id, "GET", f"/{pending['container_id']}", params={"fields": "status_code"})
+    except SocialError:
+        return "unknown", None
+    code = status.get("status_code")
+    if code != "PUBLISHED":
+        return ("not_published", None) if code in ("FINISHED", "IN_PROGRESS", "ERROR", "EXPIRED") else ("unknown", None)
+    try:
+        recent = await _call(channel_id, "GET", f"/{ig_user}/media", params={"fields": "id,caption,timestamp", "limit": "10"})
+    except SocialError:
+        return "published", ""
+    for row in recent.get("data") or []:
+        if isinstance(row, dict) and (row.get("caption") or "") == pending.get("caption", ""):
+            return "published", str(row.get("id") or "")
+    return "published", ""
+
+
 async def publish(store, post_id, by, now=None, guard=None):
     """Posts one approved post to its Instagram channel as a Reel. Returns what Instagram did. `guard` (a bot-made post,
     services/content_studio/handsoff.py gate) is read again just before media_publish, the irreversible step: a pause,
@@ -155,6 +180,17 @@ async def publish(store, post_id, by, now=None, guard=None):
                 raise SocialError(f"Instagram already has this post (media {already['media_id']}), so it is not sent again. "
                                   "Record its link with Mark posted if it is missing.", 409)
             post, channel, prep, path, package = social.package_for(store, post_id, by, "instagram")
+            if already.get("platform") == "instagram" and already.get("state") == "publishing":
+                settled, found = await reconcile(channel["id"], social_auth.record(channel["id"]).get("ig_user_id"), already)
+                if settled == "unknown":
+                    raise SocialError(UNSETTLED, 409)
+                if settled == "published":
+                    social_auth.remember_publish(post_id, state="published", media_id=found or "unknown")
+                    store.mark_published(post_id, now=now)
+                    return {"state": "posted", "post": store.get_post(post_id), "url": None, "media_id": found or None,
+                            "note": "Instagram had already posted it; record its link with Mark posted if it is missing.",
+                            "ai_label_by_api": None}
+                social_auth.forget_publish(post_id)   # Instagram never posted it: it may go now
             if os.path.getsize(path) > MAX_BYTES:
                 raise SocialError("Instagram's API takes Reels up to 300 MB. Make a smaller export, or use Open upload page.", 413)
             conn = social_auth.record(channel["id"])
@@ -177,23 +213,35 @@ async def publish(store, post_id, by, now=None, guard=None):
                     raise InstagramError("Meta answered without a container id. Try again.", 502)
                 await _upload(channel["id"], container_id, path)
                 await _wait(channel["id"], container_id)
-
-                def check():
-                    problem = guard() if guard else None
-                    if problem:
-                        raise SocialError(f"Not posted: {problem}", 409)
-                done = await _call(channel["id"], "POST", f"/{ig_user}/media_publish", data={"creation_id": container_id},
-                                   before=check)
-                media_id = str(done.get("id") or "")
-                if not media_id:
-                    raise InstagramError("Meta answered without a post id; check Instagram before trying again.", 502)
             except SocialError as exc:
                 prepare.record_failure(store, post_id, exc.detail, now=now)
                 raise
+
+            def check():
+                problem = guard() if guard else None
+                if problem:
+                    raise SocialError(f"Not posted: {problem}", 409)
+            # The post is "publishing" from here: not eligible again and counted for the day, until settled (third review).
+            social_auth.remember_publish(post_id, platform="instagram", state="publishing", container_id=container_id,
+                                         channel_id=channel["id"], caption=_caption(package), at=time.time() if now is None else now)
+            try:
+                done = await _call(channel["id"], "POST", f"/{ig_user}/media_publish", data={"creation_id": container_id},
+                                   before=check)
+            except SocialError as exc:
+                if exc.detail.startswith("Not posted:") or isinstance(exc, (InstagramError, Limited)):
+                    social_auth.forget_publish(post_id)   # refused before it was sent, or Meta answered no: not posted
+                    prepare.record_failure(store, post_id, exc.detail, now=now)
+                    raise
+                raise SocialError(UNSETTLED, 502) from exc
+            except Exception as exc:  # noqa: BLE001 - the answer was lost: whether it posted is unknown
+                raise SocialError(UNSETTLED, 502) from exc
+            media_id = str(done.get("id") or "")
+            if not media_id:
+                raise SocialError(UNSETTLED, 502)
             # Instagram has it now: record that at once, before anything else can fail, so it is never sent again and
             # counts toward the channel's posts for the day (review finding, 2026-11-11).
-            social_auth.remember_publish(post_id, platform="instagram", media_id=media_id, channel_id=channel["id"],
-                                         at=time.time() if now is None else now)
+            social_auth.remember_publish(post_id, platform="instagram", state="published", media_id=media_id,
+                                         channel_id=channel["id"], at=time.time() if now is None else now)
             store.mark_published(post_id, now=now)
             try:
                 info = await _call(channel["id"], "GET", f"/{media_id}", params={"fields": "permalink,shortcode"})

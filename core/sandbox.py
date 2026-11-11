@@ -232,7 +232,7 @@ def _cap(text: str) -> str:
 
 async def run(command: str, *, files: Optional[dict[str, str]] = None, source_dir: Optional[str] = None,
               timeout: int = DEFAULT_TIMEOUT_SECONDS, memory: str = "512m", cpus: str = "1",
-              pids: int = 128, network: bool = False, image: str = IMAGE) -> SandboxResult:
+              pids: int = 128, network: bool = False, image: str = IMAGE, before_launch=None) -> SandboxResult:
     """Run `command` with sh in a fresh container whose /work holds a copy of
     `source_dir` and/or `files` ({relative path: text}). `image` must be
     pinned by digest; core/sandbox_browser.py passes its own."""
@@ -266,6 +266,15 @@ async def run(command: str, *, files: Optional[dict[str, str]] = None, source_di
                 *hardening_args(memory, cpus, pids, network),
                 "-e", "HOME=/tmp", "-e", "PYTHONDONTWRITEBYTECODE=1", "-v", f"{workspace}:/work", "-w", "/work", image,
                 "timeout", "-s", "KILL", f"{timeout}s", "sh", "-c", command]
+        # Right before the launch: the waits above (Docker, the filtered network) may have outlived a pause or the
+        # bot itself (third review, 2026-11-11). `before_launch` raises to stop; a bot's call checks by default.
+        if before_launch is None:
+            from core import bot_policy
+            problem = bot_policy.still_allowed()
+            if problem:
+                raise SandboxUnavailable(problem)
+        else:
+            before_launch()
         proc = await asyncio.create_subprocess_exec(
             "docker", *args, stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)

@@ -195,6 +195,42 @@ def _ready(store, post_id):
     return post, channel, ident, render_file(post["render_ref"])
 
 
+UNSETTLED = ("Kairos could not confirm whether YouTube took this upload, so it is not sent again until that is settled. "
+             "Check the channel in YouTube Studio: if the video is there, record its link with Mark posted.")
+
+
+def pending(post_id=None):
+    """Uploads whose answer was lost (third review, 2026-11-11): post id -> {at, title, channel_id}."""
+    items = _load().get("pending") or {}
+    return items.get(str(post_id)) if post_id is not None else items
+
+
+def _set_pending(post_id, value):
+    state = _load()
+    items = dict(state.get("pending") or {})
+    if value is None:
+        items.pop(str(post_id), None)
+    else:
+        items[str(post_id)] = value
+    state["pending"] = items
+    _save(state)
+
+
+async def reconcile(ident, item):
+    """Did a lost upload land? The channel's newest uploads, by title, after the attempt. Returns ("published", video id),
+    ("not_published", None) or ("unknown", None)."""
+    try:
+        found = await youtube._call(ident, "youtube", "/search", {"part": "snippet", "forMine": "true", "type": "video",
+                                                                   "order": "date", "maxResults": 15})
+    except Exception:  # noqa: BLE001 - not knowing is "unknown", never "not posted"
+        return "unknown", None
+    for row in found.get("items") or []:
+        snippet = row.get("snippet") or {}
+        if snippet.get("title") == item.get("title"):
+            return "published", str((row.get("id") or {}).get("videoId") or "")
+    return "not_published", None
+
+
 async def publish(store, post_id, by, now=None, guard=None):
     """Uploads one approved post to its YouTube channel and records the posted link. Returns what YouTube set. `guard`
     (a bot-made post, services/content_studio/handsoff.py gate) is read again just before the upload."""
@@ -206,6 +242,19 @@ async def publish(store, post_id, by, now=None, guard=None):
     try:
         async with _locks.setdefault(account, asyncio.Lock()):
             post, channel, ident, path = _ready(store, post_id)
+            lost = pending(post_id)
+            if lost:
+                settled, video = await reconcile(ident, lost)
+                if settled == "unknown":
+                    raise PostingError(UNSETTLED, 409)
+                if settled == "published":
+                    url = f"https://www.youtube.com/watch?v={video}"
+                    posted = store.mark_posted(post_id, url, now=now) if video else store.mark_published(post_id, now=now)
+                    _set_pending(post_id, None)
+                    return {"post": posted, "video_id": video, "url": url if video else None, "privacy": None,
+                            "asked_privacy": None, "kept_private": False, "by": by, "publish_at": None,
+                            "note": "YouTube had already taken this upload; Kairos recorded it instead of uploading again."}
+                _set_pending(post_id, None)   # YouTube never took it: it may go now
             state = _load()
             try:
                 owned = await youtube._owned_channels(ident)
@@ -224,19 +273,27 @@ async def publish(store, post_id, by, now=None, guard=None):
             if publish_at:
                 privacy = "private"   # a scheduled upload is private until YouTube publishes it at publish_at
             with open(path, "rb") as handle:
-                content, kind = _body(metadata(post, privacy, publish_at, store.audience(post)["made_for_kids"]), handle.read())
+                meta = metadata(post, privacy, publish_at, store.audience(post)["made_for_kids"])
+                content, kind = _body(meta, handle.read())
 
             def check():
                 problem = guard() if guard else None
                 if problem:
                     raise PostingError(f"Not posted: {problem}", 409)
             check()
+            # From here the upload is pending: if its answer is lost, the next try asks YouTube before sending again.
+            _set_pending(post_id, {"at": time.time() if now is None else now, "title": ((meta.get("snippet") or {}).get("title") or post["title"]),
+                                   "channel_id": channel["id"]})
             try:
                 answer = await google.request("youtube_upload", "POST", "/videos",
                                               params={"part": "snippet,status", "uploadType": "multipart"},
                                               content=content, content_type=kind, account=ident, timeout=UPLOAD_TIMEOUT_S,
                                               before=check)
+            except PostingError:
+                _set_pending(post_id, None)   # stopped before it was sent
+                raise
             except google.GoogleError as exc:
+                _set_pending(post_id, None)   # YouTube answered with an error: nothing was taken
                 problem = youtube.classify(exc, "youtube_upload")
                 if problem and problem["kind"] in ("api_disabled", "wrong_project"):
                     raise PostingError("YouTube did not take the upload. " + youtube.problem_text(problem), 409) from exc
@@ -245,6 +302,9 @@ async def publish(store, post_id, by, now=None, guard=None):
                 if exc.status == 429 or exc.reason in youtube.QUOTA_REASONS:
                     raise PostingError("YouTube's upload quota for your project ran out. Try again tomorrow, or use Prepare post.", 429) from exc
                 raise PostingError(f"YouTube did not take the upload: {exc}", 502) from exc
+            except Exception as exc:  # noqa: BLE001 - the answer was lost: whether YouTube took it is unknown
+                raise PostingError(UNSETTLED, 502) from exc
+            _set_pending(post_id, None)
             video = answer.get("id") if isinstance(answer, dict) else None
             if not video:
                 raise PostingError("YouTube answered without a video id; check YouTube Studio before trying again.", 502)

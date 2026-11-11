@@ -611,6 +611,8 @@ async def request(api: str, method: str, path: str, *, params: dict | None = Non
         raise GoogleError("Invalid Google API request")
     account = account or _account.get() or (_calendar_account().get("id") if api == "calendar" else None)
     url = HOSTS[api] + path
+    if before is None and method.upper() != "GET":
+        before = _bot_still_allowed   # a bot's send, delete or change re-checks pause right before it goes
     for retry in range(2):
         token = await _token(account, force=bool(retry))
         if before:
@@ -644,6 +646,15 @@ async def request(api: str, method: str, path: str, *, params: dict | None = Non
             return response.json()
         return response.content
     raise GoogleError("Google authorization expired; reconnect the account", 401)
+
+
+def _bot_still_allowed():
+    """A bot's approved call that changes something re-checks, just before each attempt, that its team is not paused and
+    the bot still exists (core/bot_policy.py still_allowed). Nothing to check outside a bot's call."""
+    from core import bot_policy
+    problem = bot_policy.still_allowed()
+    if problem:
+        raise GoogleError(problem, 409)
 
 
 def _scoped(account: str | None, api: str, method: str, path: str, **kwargs):

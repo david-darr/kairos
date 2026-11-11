@@ -110,6 +110,10 @@ def spend_problem(spend=None):
         state_ = None
     if not state_:
         return "The spend could not be checked, so nothing is approved or posted until it can be."
+    # A run whose cost is unknown makes the month's total unknown too (third review, 2026-11-11): it fails closed.
+    if state_.get("unknown_cost_runs") or state_.get("spent_usd") is None and state_.get("monthly_usd") is not None:
+        return ("The spend could not be checked: some of this month's runs have no known cost, so nothing is approved "
+                "or posted until it can be.")
     if state_.get("capped"):
         return "The monthly spend cap is reached, so the team has stopped."
     return None
@@ -119,11 +123,28 @@ def _capped(spend=None) -> bool:
     return spend_problem(spend) is not None
 
 
-def _posted_today(store, channel_id, now) -> int:
-    return sum(1 for p in store.list_posts(state="posted", channel_id=channel_id) if (p.get("posted_at") or 0) > now - DAY)
+def unsettled(post_id):
+    """A publish whose answer was lost (Instagram "publishing", a YouTube upload pending), or None."""
+    from . import social_auth, youtube_publish
+    record = social_auth.published(post_id) or {}
+    if record.get("state") == "publishing":
+        return {"platform": "instagram", "at": record.get("at"), "channel_id": record.get("channel_id")}
+    item = youtube_publish.pending(post_id)
+    if item:
+        return {"platform": "youtube", "at": item.get("at"), "channel_id": item.get("channel_id")}
+    return None
 
 
-def gate(store, post_id, now=None, spend=None, require_hands_off=True):
+def _posted_today(store, channel_id, now, exclude=None) -> int:
+    """Posts that went out on the channel in the last day, and publishes still being settled (they may have gone out)."""
+    posted = sum(1 for p in store.list_posts(state="posted", channel_id=channel_id) if (p.get("posted_at") or 0) > now - DAY)
+    from . import social_auth, youtube_publish
+    waiting = [r for key, r in social_auth.published().items() if r.get("state") == "publishing" and key != str(exclude)]
+    waiting += [r for key, r in youtube_publish.pending().items() if key != str(exclude)]
+    return posted + sum(1 for r in waiting if r.get("channel_id") == channel_id and (r.get("at") or 0) > now - DAY)
+
+
+def gate(store, post_id, now=None, spend=None, require_hands_off=True, publishing=False):
     """Why this post may not go out now, or None. The one gate every bot-made post passes, from the scheduler or from
     the Publisher's own tool, and again just before the irreversible call (review finding, 2026-11-11): the team is
     running (and hands-off on, for an automatic post), the post is approved for an automatic platform, its channel is
@@ -140,6 +161,9 @@ def gate(store, post_id, now=None, spend=None, require_hands_off=True):
         return "Only an approved post goes out."
     if post["platform"] not in AUTO_PLATFORMS:
         return "TikTok waits for the person's own tap."
+    if not publishing and unsettled(post_id):   # the guard of the publish now going out skips its own record
+        return ("Its last publish could not be confirmed, so it is not sent again until that is settled "
+                "(Kairos asks the platform first).")
     channel = store.get_channel(post["channel_id"])
     if channel["status"] != "live" or channel["paused"]:
         return "That channel is archived or paused."
@@ -152,7 +176,7 @@ def gate(store, post_id, now=None, spend=None, require_hands_off=True):
     if prep and prep.get("scheduled_at") and prep["scheduled_at"] > now:
         return "Its scheduled time has not come yet."
     slots = max(1, int((store.get_niche(channel["niche_id"]) or {}).get("slots") or 1))
-    if _posted_today(store, channel["id"], now) >= slots:
+    if _posted_today(store, channel["id"], now, exclude=post_id if publishing else None) >= slots:
         return f"{channel['handle']} already posted its {slots} for today."
     return None
 
@@ -175,7 +199,7 @@ def due(store, now=None, spend=None) -> list:
 def guard_for(store, post_id, spend=None, require_hands_off=True, now=None):
     """The check a publisher runs immediately before its irreversible call: the gate, read fresh (at the pass's own
     time when the scheduler gave one, else the clock)."""
-    return lambda: gate(store, post_id, now=now, spend=spend, require_hands_off=require_hands_off)
+    return lambda: gate(store, post_id, now=now, spend=spend, require_hands_off=require_hands_off, publishing=True)
 
 
 async def _publish_youtube(store, post_id, by, guard=None):
@@ -225,6 +249,8 @@ async def publish_due(store, now=None, publishers=None, spend=None) -> list:
                 _remember_alert(store, f"yt_note:{post['id']}", "note", f"YouTube: \"{post['title']}\". {note}", urgent=False)
         except Exception as error:  # noqa: BLE001 - kept and reported, never raised into the scheduler
             detail = getattr(error, "detail", None) or str(error) or type(error).__name__
+            if "could not confirm" in detail:
+                _remember_alert(store, f"unsettled:{post['id']}", "failing", f"\"{post['title']}\": {detail}")
             failures[str(post["id"])] = failures.get(str(post["id"]), 0) + 1
             results.append({"post_id": post["id"], "ok": False, "platform": post["platform"], "error": detail})
             if failures[str(post["id"])] >= FAILS_BEFORE_ALERT:
