@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "f707d17a26aa90d1d465cb1ebf7e2306bb5fa26cd6cd59a468d51cf8d8abf657",
+  "app.js": "54c0c0530183f4d42a4a431da76f7eb3f2447960027fda90b4c218edd499f2b5",
   "fixtures.js": "67d97bbe9d7176e875c624fd99abe71c2c6e8aecf6a9d8e0940880d332a9c8ba",
   "index.html": "c2d216301aae8fa4b2c0bd67aa81b0bedd2fc114251448f7c1de1e54cf4a143a",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -1805,7 +1805,7 @@
   "static/js/views/settingsHooks.js": "aff3d447199c55e266cbc4f20dbe734c6cf526d9dc3bd750ef5e60da645293a8",
   "static/js/views/settingsNotifications.js": "18df61204a29010921e1f528c18af53b669f3b0fb102cfb6aecfb1415806d1a4",
   "static/js/views/settingsReachMe.js": "7bd7ba6bab61c3f0a1f0b689ac3e06b979b0784971a1669f153a8709c40130ee",
-  "static/js/views/speechPanel.js": "8d615b3fbd10fec368562c86b6fca96a1e41bf73981b35dd5382554ab756cc61",
+  "static/js/views/speechPanel.js": "fa28f51d9df8f23b0057dc6264e62134a094e8057cbbf6aaa9a2fd9e84eae714",
   "static/js/views/stub.js": "f401016e0a236e84b5a18f08c99800a5d10e7e7d0a9225f66c88ea423fefecfe",
   "static/js/views/swarm.js": "eb719518c3bc8320a7d5c2bbb7e34aaec0bd7e91bd8b91f25c035692064620ad",
   "static/js/views/taskBoard.js": "6ffc9d83794e7a153d5399e93812d8de5862f811303adda66e90ed2458f683b8",
