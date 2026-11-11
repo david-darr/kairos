@@ -5,6 +5,7 @@ access. When AUTH_ENABLED=false (the local-desktop default), every request
 resolves to the single local user with admin rights — no login screen, no
 friction, matching the "single trusted user on their own machine" case.
 """
+import asyncio
 import re
 import secrets
 from typing import Optional
@@ -179,11 +180,114 @@ def get_current_user(request: Request) -> Optional[str]:
     return auth_manager.validate_session(token)
 
 
+# Long-lived connections end with their session (account switcher review, 2026-11-11). A websocket (a realtime call)
+# or a streamed response (the live chat feed) is signed in once, when it opens; switching accounts, signing out or a
+# password change ends that session, and the connection must not keep serving the old account. Every connection
+# opened with a session is registered here; core/auth.py tells us when sessions end, and each connection is also
+# re-checked every SESSION_RECHECK_SECONDS (an expired session, a deleted account).
+SESSION_RECHECK_SECONDS = 15
+_STREAM_TYPES = {b"text/event-stream", b"application/x-ndjson", b"application/jsonl"}
+_live_sessions: dict = {}  # session token -> set of (event loop, asyncio.Event)
+
+
+def _sessions_ended(tokens) -> None:
+    for token in tokens:
+        for loop, ended in list(_live_sessions.get(token, ())):
+            try:
+                loop.call_soon_threadsafe(ended.set)
+            except RuntimeError:  # that loop is closed: its connection is gone
+                pass
+
+
+auth_module.revoke_listeners.append(_sessions_ended)
+
+
+class _SessionGuard:
+    """Wraps one connection's receive and send. Once its session ends: a websocket is closed (code 4401) and
+    reads as disconnected; a streamed response (an event stream or line-by-line JSON) sends its last, empty chunk
+    and the app reads a disconnect, so the stream stops. Any other reply goes out whole: the switch and sign-out
+    routes end the very session they came with, and their answers must still arrive."""
+
+    def __init__(self, scope, receive, send, session):
+        self.kind, self.session = scope["type"], session
+        self._receive, self._send = receive, send
+        self.ended = asyncio.Event()
+        self.entry = (asyncio.get_running_loop(), self.ended)
+        _live_sessions.setdefault(session, set()).add(self.entry)
+        self.watcher = None
+        self.closed = False
+        self.streaming = False  # set when an HTTP reply starts with a stream's content type
+
+    async def _watch(self):
+        while not self.ended.is_set():
+            try:
+                await asyncio.wait_for(self.ended.wait(), SESSION_RECHECK_SECONDS)
+            except asyncio.TimeoutError:
+                if auth_manager.validate_session(self.session) is None:
+                    self.ended.set()
+
+    async def _finish(self):
+        if self.kind == "websocket":
+            if not self.closed:
+                self.closed = True
+                try:
+                    await self._send({"type": "websocket.close", "code": 4401, "reason": "signed out"})
+                except Exception:
+                    pass
+            return {"type": "websocket.disconnect", "code": 4401}
+        return {"type": "http.disconnect"}
+
+    async def receive(self):
+        if self.ended.is_set():
+            return await self._finish()
+        if self.watcher is None:
+            self.watcher = asyncio.ensure_future(self._watch())
+        message = asyncio.ensure_future(self._receive())
+        stop = asyncio.ensure_future(self.ended.wait())
+        done, _ = await asyncio.wait({message, stop}, return_when=asyncio.FIRST_COMPLETED)
+        if message not in done and self.kind == "http" and not self.streaming:
+            await message  # not a stream: its reply goes out whole
+            done = {message}
+        if message in done:
+            stop.cancel()
+            return message.result()
+        message.cancel()
+        return await self._finish()
+
+    async def send(self, message):
+        if message.get("type") == "http.response.start":
+            kind = dict(message.get("headers") or []).get(b"content-type", b"").split(b";")[0].strip().lower()
+            self.streaming = kind in _STREAM_TYPES
+        if not self.ended.is_set() or self.closed:
+            if self.closed and self.kind == "websocket":
+                return
+            if self.closed and message.get("type") == "http.response.body":
+                return
+            return await self._send(message)
+        if self.kind == "websocket":
+            await self._finish()
+            return
+        if self.streaming and message.get("type") == "http.response.body" and message.get("more_body"):
+            self.closed = True  # a stream: its last chunk, empty
+            return await self._send({"type": "http.response.body", "body": b"", "more_body": False})
+        return await self._send(message)
+
+    def close(self):
+        if self.watcher:
+            self.watcher.cancel()
+        entries = _live_sessions.get(self.session)
+        if entries:
+            entries.discard(self.entry)
+            if not entries:
+                _live_sessions.pop(self.session, None)
+
+
 class AccountContextMiddleware:
     """Sets the account every request and websocket works in (core/accounts.py, Multi-Account phase 1),
     from the same sign-in check the routes use, or a model tool call's turn token. No sign-in, no account:
     personal data is then refused, never guessed. A plain ASGI layer, so the account follows the request
-    into the endpoint and any work it starts; it is added outermost in app.py."""
+    into the endpoint and any work it starts; it is added outermost in app.py. A connection signed in with a
+    session cookie is also guarded: it ends when that session does (_SessionGuard)."""
 
     def __init__(self, app):
         self.app = app
@@ -193,9 +297,13 @@ class AccountContextMiddleware:
             return await self.app(scope, receive, send)
         from starlette.requests import HTTPConnection
         from core import accounts
+        session = None
         try:
             connection = HTTPConnection(scope)
-            account = accounts.account_for_user(get_current_user(connection))
+            user = get_current_user(connection)
+            account = accounts.account_for_user(user)
+            if user is not None and auth_enabled():
+                session = connection.cookies.get(SESSION_COOKIE_NAME)
             if account is None and connection.headers.get("X-JARVIS-Tool-Token"):
                 # A model's tool call (mcp_servers/hive_mind_cli.py, the bot MCP proxy) carries its turn's
                 # token instead of a sign-in: it works in the account the turn ran in.
@@ -205,9 +313,15 @@ class AccountContextMiddleware:
         except Exception:  # an unreadable sign-in is no sign-in, never a crashed request
             account = None
         token = accounts.set_current(account)
+        guard = _SessionGuard(scope, receive, send, session) if session else None
         try:
-            await self.app(scope, receive, send)
+            if guard:
+                await self.app(scope, guard.receive, guard.send)
+            else:
+                await self.app(scope, receive, send)
         finally:
+            if guard:
+                guard.close()
             accounts.reset_current(token)
 
 

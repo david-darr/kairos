@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from core import accounts
 from core import auth as auth_module
 from core.auth import auth_manager, auth_enabled, SESSION_COOKIE_NAME, SESSION_TTL_SECONDS, SINGLE_USER, UI_COOKIE_NAME
-from core.auth import ACCOUNT_COLORS, ACCOUNTS_COOKIE_NAME, MAX_DEVICE_ACCOUNTS, REMEMBER_SHOWN_AFTER_EXPIRY_SECONDS
+from core.auth import ACCOUNT_COLORS, ACCOUNTS_COOKIE_NAME, DEVICE_COOKIE_NAME, MAX_DEVICE_ACCOUNTS, REMEMBER_SHOWN_AFTER_EXPIRY_SECONDS
 from core.middleware import get_current_user, require_admin, require_user
 from core.constants import INSTANCE
 from services.email_service import email_service
@@ -24,21 +24,23 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 # -- the device's remembered sign-ins (the account switcher, 2026-11-11) -------------------------------------
-# core/auth.py explains the model: the kairos_accounts cookie holds one remembered token per account signed in on
-# this device; jarvis_session holds the session of the account open now. Switching opens a fresh session from a
-# remembered token (after its PIN) and closes the one that was open, so the device only ever holds one session.
+# core/auth.py explains the model: the kairos_device cookie is the device's secret (a bearer secret like the session
+# cookie), rotated on every change; the server keeps one remembered row per account signed in on the device;
+# jarvis_session holds the open account's session. Switching opens a fresh session for the chosen account and
+# closes every session the device held, so the device only ever holds one.
 
-def _device_tokens(request: Request) -> list[str]:
-    raw = request.cookies.get(ACCOUNTS_COOKIE_NAME) or ""
-    return [t for t in raw.split(".") if auth_module._TOKEN_SHAPE.match(t)][:MAX_DEVICE_ACCOUNTS * 2]
+def _device_secret(request: Request) -> str | None:
+    value = request.cookies.get(DEVICE_COOKIE_NAME) or ""
+    return value if auth_module._TOKEN_SHAPE.match(value) else None
 
 
-def _store_device_tokens(response: Response, tokens: list[str]) -> None:
-    if tokens:
-        response.set_cookie(ACCOUNTS_COOKIE_NAME, ".".join(tokens), httponly=True, samesite="lax",
+def _store_device(response: Response, device: str | None) -> None:
+    if device:
+        response.set_cookie(DEVICE_COOKIE_NAME, device, httponly=True, samesite="lax",
                             max_age=SESSION_TTL_SECONDS + REMEMBER_SHOWN_AFTER_EXPIRY_SECONDS)
     else:
-        response.delete_cookie(ACCOUNTS_COOKIE_NAME)
+        response.delete_cookie(DEVICE_COOKIE_NAME)
+    response.delete_cookie(ACCOUNTS_COOKIE_NAME)  # the first build's cookie, never needed again
 
 
 def _store_session(response: Response, token: str) -> None:
@@ -46,23 +48,25 @@ def _store_session(response: Response, token: str) -> None:
     response.set_cookie(SESSION_COOKIE_NAME, token, httponly=True, samesite="lax", max_age=max(1, int(expires_at - time.time())))
 
 
-def _device(request: Request) -> tuple[list[dict], str | None, str | None]:
-    """This device's remembered accounts (rows from auth_manager.remembered), the open session and the remembered
-    token behind it. A session from before the switcher is adopted here, so its account stays on the switcher."""
+def _device(request: Request) -> tuple[str | None, str | None, bool]:
+    """This device's secret (after bringing older sign-ins onto it), the open session if valid, and whether the
+    secret changed (so the caller must store it)."""
     from core import mobile_activity
+    device = _device_secret(request)
     session = request.cookies.get(SESSION_COOKIE_NAME)
     open_user = auth_manager.validate_session(session) if session else None
-    tokens = _device_tokens(request)
-    remember = None
-    if open_user:
+    legacy = [t for t in (request.cookies.get(ACCOUNTS_COOKIE_NAME) or "").split(".") if auth_module._TOKEN_SHAPE.match(t)][:20]
+    before = auth_manager.remember_of(session) if open_user else None
+    adopted = auth_manager.device_adopt(device, session if open_user else None, legacy)
+    if open_user and not before:
         remember = auth_manager.remember_of(session)
-        if not remember:
-            remember = auth_manager.adopt(session)
-            if remember:  # its push enrollment follows it (core/auth.py notification_session_valid)
-                mobile_activity.rebind(mobile_activity.binding(session), mobile_activity.binding(remember))
-        if remember and remember not in tokens:
-            tokens.append(remember)
-    return auth_manager.remembered(tokens), (session if open_user else None), remember
+        if remember:  # its push enrollment follows it (core/auth.py notification_session_valid)
+            mobile_activity.rebind(mobile_activity.binding(session), mobile_activity.binding(remember))
+    return adopted, (session if open_user else None), adopted != device
+
+
+def _open_remember(session: str | None) -> str | None:
+    return auth_manager.remember_of(session) if session else None
 
 
 def _from_the_app(request: Request) -> None:
@@ -81,19 +85,14 @@ def _from_the_app(request: Request) -> None:
 
 def _sign_in_here(request: Request, response: Response, username: str) -> None:
     """A password sign-in on this device: the account joins the device's switcher and becomes the open one."""
-    rows, session, _ = _device(request)
-    others = [r for r in rows if r["username"] != username]
+    device, session, _ = _device(request)
+    others = [r for r in auth_manager.device_accounts(device) if r["username"] != username]
     if len(others) >= MAX_DEVICE_ACCOUNTS:
         raise HTTPException(status_code=400, detail=f"This device already has {MAX_DEVICE_ACCOUNTS} accounts signed in. "
                                                     "Sign out of one first.")
-    for row in rows:
-        if row["username"] == username:  # signing in again replaces the old remembered sign-in
-            auth_manager.forget(row["token"])
-    if session:  # the account that was open stays remembered, but is no longer open on this device
-        auth_manager.delete_session(session)
-    remember, token = auth_manager.sign_in(username)
+    device, token = auth_manager.device_sign_in(device, username, session)
     _store_session(response, token)
-    _store_device_tokens(response, [r["token"] for r in others] + [remember])
+    _store_device(response, device)
 
 
 def _switch_refused(status: int, code: str, detail: str, **extra) -> JSONResponse:
@@ -108,16 +107,16 @@ class SwitchRequest(BaseModel):
 @router.get("/device-accounts")
 async def device_accounts(request: Request, response: Response) -> dict:
     """The accounts signed in on this device, for the switcher: names, colours, which is open, which need the
-    password again, which ask a PIN. Only this device's own (its cookie); never a list of the install's accounts."""
+    password again, which ask a PIN. Only this device's own; never a list of the install's accounts."""
     if not auth_enabled():
         return {"enabled": False, "accounts": [], "max": MAX_DEVICE_ACCOUNTS, "colors": list(ACCOUNT_COLORS)}
-    rows, _session, remember = _device(request)
-    tokens = [r["token"] for r in rows]
-    if tokens != _device_tokens(request):
-        _store_device_tokens(response, tokens)
+    device, session, changed = _device(request)
+    if changed or request.cookies.get(ACCOUNTS_COOKIE_NAME) is not None:
+        _store_device(response, device)
+    remember = _open_remember(session)
     return {"enabled": True, "max": MAX_DEVICE_ACCOUNTS, "colors": list(ACCOUNT_COLORS), "accounts": [
-        {"username": r["username"], "color": auth_manager.account_color(r["username"]), "active": r["token"] == remember,
-         "expired": r["expired"], "pin": auth_manager.has_switch_pin(r["username"])} for r in rows]}
+        {"username": r["username"], "color": auth_manager.account_color(r["username"]), "active": r["id"] == remember,
+         "expired": r["expired"], "pin": auth_manager.has_switch_pin(r["username"])} for r in auth_manager.device_accounts(device)]}
 
 
 @router.post("/switch")
@@ -127,39 +126,36 @@ async def switch_account(body: SwitchRequest, request: Request) -> Response:
     if not auth_enabled():
         raise HTTPException(status_code=400, detail="Accounts are off: there is only this computer's user.")
     _from_the_app(request)
-    rows, session, remember = _device(request)
-    target = next((r for r in rows if r["username"] == body.username), None)
-    if target is None:
-        raise HTTPException(status_code=404, detail="That account is not signed in on this device.")
-    tokens = [r["token"] for r in rows]
-    if target["token"] == remember:
-        return JSONResponse({"username": body.username, "color": auth_manager.account_color(body.username)})
-    if target["expired"]:
-        return _switch_refused(401, "password_required", "That sign-in has expired. Enter the password to sign in again.")
-    check = auth_manager.check_switch_pin(body.username, body.pin)
-    if not check["ok"]:
-        if check["reason"] == "forget":
-            from core import mobile_activity
-            mobile_activity.revoke(session_binding=mobile_activity.binding(target["token"]))
-            auth_manager.forget(target["token"])
-            refused = _switch_refused(401, "password_required", "Too many wrong PINs. Enter the password to sign in again.")
-            _store_device_tokens(refused, [t for t in tokens if t != target["token"]])
-            return refused
-        if check["reason"] == "locked":
-            return _switch_refused(429, "pin_locked", f"Too many wrong PINs. Try again in {check['retry_after']} seconds.",
-                                   retry_after=check["retry_after"])
-        if check["reason"] == "wrong":
-            return _switch_refused(403, "pin_wrong", "That PIN is not right.", tries_left=check["tries_left"])
-        return _switch_refused(403, "pin_required", "Enter this account's PIN.")
-    opened = auth_manager.open_remembered(target["token"])
-    if opened is None:
-        return _switch_refused(401, "password_required", "That sign-in has expired. Enter the password to sign in again.")
-    if session:
-        auth_manager.delete_session(session)
-    answer = JSONResponse({"username": body.username, "color": auth_manager.account_color(body.username)})
-    _store_session(answer, opened)
-    _store_device_tokens(answer, tokens)
-    return answer
+    device, session, changed = _device(request)
+    current = next((r for r in auth_manager.device_accounts(device) if r["id"] == _open_remember(session)), None)
+    if current and current["username"] == body.username:
+        answer = JSONResponse({"username": body.username, "color": auth_manager.account_color(body.username)})
+        if changed:
+            _store_device(answer, device)
+        return answer
+    result = auth_manager.device_switch(device, body.username, body.pin, session)
+    if result["ok"]:
+        answer = JSONResponse({"username": body.username, "color": auth_manager.account_color(body.username)})
+        _store_session(answer, result["session"])
+        _store_device(answer, result["device"])
+        return answer
+    reason = result["reason"]
+    if reason == "absent":
+        refused = JSONResponse({"detail": "That account is not signed in on this device."}, status_code=404)
+    elif reason == "expired":
+        refused = _switch_refused(401, "password_required", "That sign-in has expired. Enter the password to sign in again.")
+    elif reason == "forget":
+        refused = _switch_refused(401, "password_required", "Too many wrong PINs. Enter the password to sign in again.")
+    elif reason == "locked":
+        refused = _switch_refused(429, "pin_locked", f"Too many wrong PINs. Try again in {result['retry_after']} seconds.",
+                                  retry_after=result["retry_after"])
+    elif reason == "wrong":
+        refused = _switch_refused(403, "pin_wrong", "That PIN is not right.", tries_left=result["tries_left"])
+    else:
+        refused = _switch_refused(403, "pin_required", "Enter this account's PIN.")
+    if changed:
+        _store_device(refused, device)
+    return refused
 
 
 class SignOutAccountRequest(BaseModel):
@@ -171,17 +167,17 @@ async def sign_out_account(body: SignOutAccountRequest, request: Request, respon
     """Signs one account out of this device only; the others stay signed in."""
     from core import mobile_activity
     _from_the_app(request)
-    rows, _session, remember = _device(request)
+    device, session, _ = _device(request)
+    rows = auth_manager.device_accounts(device)
     target = next((r for r in rows if r["username"] == body.username), None)
     if target is None:
         raise HTTPException(status_code=404, detail="That account is not signed in on this device.")
-    mobile_activity.revoke(session_binding=mobile_activity.binding(target["token"]))
-    auth_manager.forget(target["token"])
-    if target["token"] == remember:
+    was_open = target["id"] == _open_remember(session)
+    mobile_activity.revoke(session_binding=mobile_activity.binding(target["id"]))
+    _store_device(response, auth_manager.device_sign_out(device, body.username))
+    if was_open:
         response.delete_cookie(SESSION_COOKIE_NAME)
-    left = [r for r in rows if r["token"] != target["token"]]
-    _store_device_tokens(response, [r["token"] for r in left])
-    return {"ok": True, "was_open": target["token"] == remember, "remaining": [r["username"] for r in left]}
+    return {"ok": True, "was_open": was_open, "remaining": [r["username"] for r in rows if r["id"] != target["id"]]}
 
 
 @router.post("/logout-all")
@@ -189,15 +185,15 @@ async def logout_all(request: Request, response: Response) -> dict:
     """Signs every account out of this device."""
     from core import mobile_activity
     _from_the_app(request)
-    rows, session, _remember = _device(request)
-    for row in rows:
-        mobile_activity.revoke(session_binding=mobile_activity.binding(row["token"]))
-        auth_manager.forget(row["token"])
+    device, session, _ = _device(request)
+    for row in auth_manager.device_accounts(device):
+        mobile_activity.revoke(session_binding=mobile_activity.binding(row["id"]))
+    auth_manager.device_sign_out(device)
     if session:
         mobile_activity.revoke(session_binding=mobile_activity.binding(session))
         auth_manager.delete_session(session)
     response.delete_cookie(SESSION_COOKIE_NAME)
-    response.delete_cookie(ACCOUNTS_COOKIE_NAME)
+    _store_device(response, None)
     return {"ok": True}
 
 
@@ -410,17 +406,20 @@ async def logout(request: Request, response: Response) -> dict:
     """Signs the open account out of this device; other accounts signed in on it stay (the switcher lists them)."""
     from core import mobile_activity
     token = request.cookies.get(SESSION_COOKIE_NAME)
+    device = _device_secret(request) if auth_enabled() else None
     remember = auth_manager.remember_of(token)
     mobile_activity.revoke(session_binding=mobile_activity.binding(token))
-    if remember:
+    left = [r for r in auth_manager.device_accounts(device) if r["id"] != remember]
+    if remember and any(r["id"] == remember for r in auth_manager.device_accounts(device)):
         mobile_activity.revoke(session_binding=mobile_activity.binding(remember))
-        auth_manager.forget(remember)
-    elif token:
+        name = auth_manager._sessions.get(remember, {}).get("username")
+        _store_device(response, auth_manager.device_sign_out(device, name))
+    elif remember:
+        mobile_activity.revoke(session_binding=mobile_activity.binding(remember))
+        auth_manager._drop([remember])
+    if token:
         auth_manager.delete_session(token)
     response.delete_cookie(SESSION_COOKIE_NAME)
-    left = auth_manager.remembered([t for t in _device_tokens(request) if t != remember])
-    if request.cookies.get(ACCOUNTS_COOKIE_NAME) is not None:
-        _store_device_tokens(response, [r["token"] for r in left])
     return {"ok": True, "remaining": [r["username"] for r in left]}
 
 
@@ -463,12 +462,14 @@ class ChangePasswordRequest(BaseModel):
 
 
 @router.post("/password")
-async def change_password(body: ChangePasswordRequest, user: str = Depends(require_user)) -> dict:
+async def change_password(body: ChangePasswordRequest, request: Request, user: str = Depends(require_user)) -> dict:
     """Self-service password change (Settings > Account, David's ask
     2026-08-31, matching Odysseus's Account panel)."""
     if not auth_manager.verify_password(user, body.current_password):
         raise HTTPException(status_code=401, detail="current password is incorrect")
     auth_manager.change_password(user, body.new_password)
+    # Every other sign-in of this account ends, on every device (sessions and remembered sign-ins); this one stays.
+    auth_manager.revoke_other_sign_ins(user, request.cookies.get(SESSION_COOKIE_NAME))
     return {"ok": True}
 
 

@@ -19,6 +19,7 @@ import os
 import hashlib
 import re
 import secrets
+import threading
 import time
 from typing import Optional
 
@@ -36,12 +37,20 @@ SESSION_COOKIE_NAME = "jarvis_session"
 SESSION_TTL_SECONDS = 7 * 24 * 60 * 60  # 7 days, matches Odysseus
 
 # The account switcher (David's ask 2026-11-11, like Google's): each person signs in once on a device, and the
-# device remembers that sign-in so switching back is one click. The device holds, in this cookie, one "remembered"
-# token per account signed in on it. A remembered token is not a session: no route accepts it as one. Only
-# POST /api/auth/switch turns it into a fresh session for the open account (jarvis_session), after the account's
-# switching PIN when it has one. So a device can only ever reach the accounts signed in on it, and copying the
-# cookie out of the browser does not get round a PIN. A remembered sign-in lasts as long as the session it came
-# from (SESSION_TTL_SECONDS from the password): after that the switcher asks for the password again.
+# device remembers that sign-in so switching back is one click. The device holds one secret, in DEVICE_COOKIE_NAME;
+# the server keeps a "remembered" row per account signed in on that device, bound to the secret's hash. A
+# remembered row is not a session and its id never leaves the server. Only POST /api/auth/switch opens a session
+# from it, after the account's switching PIN when it has one.
+#
+# The device cookie is a bearer secret, exactly like the session cookie: whoever holds a copy holds that device's
+# accounts. It is httponly and samesite=lax, and it is narrowed three ways (review 2026-11-11):
+# - it is rotated on every sign-in, switch and sign-out, so a copy goes dead the next time the device switches;
+# - a remembered row ends when its password sign-in's session would (SESSION_TTL_SECONDS); after that it only
+#   shows as "sign in again" and can open nothing;
+# - signing an account out of a device, changing its password, an admin reset or deleting it revoke its rows.
+# Switches are serialized (one lock) and each closes every live session the device holds, not only the one sent.
+DEVICE_COOKIE_NAME = "kairos_device"
+# The first switcher build (an hour on local dev, 2026-11-11) kept one token per account here; still read once.
 ACCOUNTS_COOKIE_NAME = "kairos_accounts"
 MAX_DEVICE_ACCOUNTS = 9
 # An expired remembered sign-in still shows on the switcher (as "sign in again") for this long.
@@ -147,8 +156,18 @@ def auth_enabled() -> bool:
         return False
 
 
+# Called with the tokens of sessions that just ended (sign-out, switch, password change, expiry, deleted account):
+# core/middleware.py closes the websockets and streams opened with them.
+revoke_listeners: list = []
+
+
+def _digest(value: str) -> str:
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
 class AuthManager:
     def __init__(self) -> None:
+        self._lock = threading.RLock()
         self._users: dict = read_json(AUTH_FILE, {"users": {}})
         self._sessions: dict = read_json(SESSIONS_FILE, {})
         self._resets: dict = read_json(PASSWORD_RESETS_FILE, {})
@@ -357,11 +376,7 @@ class AuthManager:
 
     def drop_sessions(self, username: str) -> None:
         """End every open session for one account (after an admin resets its password)."""
-        stale = [t for t, s in self._sessions.items() if s.get("username") == username]
-        for t in stale:
-            del self._sessions[t]
-        if stale:
-            write_json_atomic(SESSIONS_FILE, self._sessions)
+        self._drop([t for t, s in self._sessions.items() if s.get("username") == username])
 
     def set_admin(self, username: str, is_admin: bool) -> None:
         user = self._users["users"].get(username)
@@ -386,11 +401,7 @@ class AuthManager:
         # Any live sessions for this user stop authenticating on next use
         # anyway (validate_session re-checks the user exists), but drop them
         # now so /api/auth/users reflects reality immediately.
-        stale = [t for t, s in self._sessions.items() if s.get("username") == username]
-        for t in stale:
-            del self._sessions[t]
-        if stale:
-            write_json_atomic(SESSIONS_FILE, self._sessions)
+        self._drop([t for t, s in self._sessions.items() if s.get("username") == username])
 
     def disable_totp(self, username: str) -> None:
         user = self._users["users"].get(username)
@@ -445,6 +456,22 @@ class AuthManager:
         write_json_atomic(SESSIONS_FILE, self._sessions)
         return token
 
+    def _drop(self, tokens) -> None:
+        """Ends sessions and remembered rows (and the sessions opened from those rows), saves, and tells the
+        listeners, which close any websocket or stream still running on one of them."""
+        with self._lock:
+            ending = {t for t in tokens if t and t in self._sessions}
+            ending |= {t for t, s in self._sessions.items() if s.get("remember") in ending}
+            for token in ending:
+                del self._sessions[token]
+            if ending:
+                write_json_atomic(SESSIONS_FILE, self._sessions)
+        for listener in list(revoke_listeners) if ending else []:
+            try:
+                listener(ending)
+            except Exception:
+                pass
+
     def validate_session(self, token: str) -> Optional[str]:
         session = self._sessions.get(token)
         if not session:
@@ -467,9 +494,7 @@ class AuthManager:
         return session["username"]
 
     def delete_session(self, token: str) -> None:
-        if token in self._sessions:
-            del self._sessions[token]
-            write_json_atomic(SESSIONS_FILE, self._sessions)
+        self._drop([token])
 
     def notification_session_valid(self, username: str, binding: str) -> bool:
         """Validate device enrollment without persisting a bearer session token. An enrollment made since the
@@ -478,53 +503,150 @@ class AuthManager:
         if username not in self._users["users"]:
             return False
         now = time.time()
-        for token, row in self._sessions.items():
+        for token, row in list(self._sessions.items()):
             if row.get("username") != username or row.get("expires_at", 0) <= now:
                 continue
-            if not secrets.compare_digest(hashlib.sha256(token.encode()).hexdigest(), binding):
+            if not secrets.compare_digest(_digest(token), binding):
                 continue
             if row.get("kind") == "remember":
                 return any(other.get("remember") == token and other.get("expires_at", 0) > now
-                           for other in self._sessions.values())
+                           for other in list(self._sessions.values()))
             return True
         return False
 
     # -- sign-ins remembered on a device (the account switcher) ----------
+    # A device is the hash of its secret (DEVICE_COOKIE_NAME). Its rows: "remember" rows (one per account signed
+    # in on it) and the sessions opened from them, each carrying "device". Every change below runs under the lock
+    # and rotates the secret; the route sets the new one as the cookie.
 
-    def sign_in(self, username: str) -> tuple[str, str]:
-        """A password sign-in on a device: a remembered token for the device's cookie and the session opened
-        from it. Both end SESSION_TTL_SECONDS from now; switching never extends them."""
-        now = time.time()
-        remember, session = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
-        self._sessions[remember] = {"username": username, "expires_at": now + SESSION_TTL_SECONDS,
-                                    "kind": "remember", "created_at": now}
-        self._sessions[session] = {"username": username, "expires_at": now + SESSION_TTL_SECONDS, "remember": remember}
-        self._purge_remembered(now)
-        write_json_atomic(SESSIONS_FILE, self._sessions)
-        return remember, session
+    def _device_rows(self, device_hash: Optional[str]) -> list[str]:
+        return [t for t, s in self._sessions.items() if device_hash and s.get("device") == device_hash]
+
+    def device_accounts(self, device: Optional[str]) -> list[dict]:
+        """The accounts signed in on a device, in sign-in order, each {"username", "id", "expired"}. "id" is the
+        server's own row key, never sent to the device."""
+        if not device:
+            return []
+        now, dh = time.time(), _digest(device)
+        rows = [(t, s) for t, s in list(self._sessions.items()) if s.get("kind") == "remember" and s.get("device") == dh
+                and s.get("username") in self._users["users"]]
+        rows.sort(key=lambda r: r[1].get("created_at", 0))
+        return [{"username": s["username"], "id": t, "expired": s["expires_at"] <= now} for t, s in rows]
+
+    def _rotate(self, device: Optional[str]) -> str:
+        """A new secret for the device: every row bound to the old one moves to it, so the old value opens nothing."""
+        new = secrets.token_urlsafe(32)
+        old, fresh = (_digest(device) if device else None), _digest(new)
+        for token in self._device_rows(old):
+            self._sessions[token]["device"] = fresh
+        return new
+
+    def _device_sessions(self, device: Optional[str]) -> list[str]:
+        dh = _digest(device) if device else None
+        return [t for t in self._device_rows(dh) if self._sessions[t].get("kind") != "remember"]
+
+    def device_sign_in(self, device: Optional[str], username: str, open_session: Optional[str] = None) -> tuple[str, str]:
+        """A password sign-in on a device: the account joins it (replacing an older row for the same account) and
+        becomes the open one. Every session the device held closes. Answers (new device secret, session)."""
+        with self._lock:
+            ending = self._device_sessions(device) + [open_session]
+            ending += [r["id"] for r in self.device_accounts(device) if r["username"] == username]
+            self._drop(ending)
+            new = self._rotate(device)
+            now, dh = time.time(), _digest(new)
+            remember, session = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+            self._sessions[remember] = {"username": username, "expires_at": now + SESSION_TTL_SECONDS,
+                                        "kind": "remember", "created_at": now, "device": dh}
+            self._sessions[session] = {"username": username, "expires_at": now + SESSION_TTL_SECONDS,
+                                       "remember": remember, "device": dh}
+            self._purge_remembered(now)
+            write_json_atomic(SESSIONS_FILE, self._sessions)
+            return new, session
+
+    def device_switch(self, device: Optional[str], username: str, pin: Optional[str], open_session: Optional[str] = None) -> dict:
+        """Opens another account signed in on this device. Answers {"ok": True, "device", "session"} or
+        {"ok": False, "reason": "absent" | "expired" | one of check_switch_pin's reasons, ...}. On success every
+        session the device held closes (including one a parallel switch just opened) and its secret rotates."""
+        with self._lock:
+            target = next((r for r in self.device_accounts(device) if r["username"] == username), None)
+            if target is None:
+                return {"ok": False, "reason": "absent"}
+            if target["expired"]:
+                return {"ok": False, "reason": "expired"}
+            check = self.check_switch_pin(username, pin)
+            if not check["ok"]:
+                if check["reason"] == "forget":
+                    self._drop([target["id"]])
+                return check
+            self._drop(self._device_sessions(device) + [open_session])
+            new = self._rotate(device)
+            row = self._sessions[target["id"]]
+            session = secrets.token_urlsafe(32)
+            self._sessions[session] = {"username": username, "expires_at": row["expires_at"], "remember": target["id"],
+                                       "device": _digest(new)}
+            write_json_atomic(SESSIONS_FILE, self._sessions)
+            return {"ok": True, "device": new, "session": session}
+
+    def device_sign_out(self, device: Optional[str], username: Optional[str] = None) -> Optional[str]:
+        """Signs one account (or, with no name, every account) out of a device. Answers the device's new secret,
+        or None when nothing is left on it."""
+        with self._lock:
+            self._drop([r["id"] for r in self.device_accounts(device) if username is None or r["username"] == username])
+            if username is None:
+                self._drop(self._device_rows(_digest(device) if device else None))
+            if not self.device_accounts(device):
+                return None
+            new = self._rotate(device)
+            write_json_atomic(SESSIONS_FILE, self._sessions)
+            return new
+
+    def device_adopt(self, device: Optional[str], session: Optional[str], legacy=()) -> Optional[str]:
+        """Brings sign-ins from before device secrets onto this device: an open session with no device behind it,
+        and the first switcher build's per-account tokens (the kairos_accounts cookie). Answers the device secret
+        to keep: a new one when anything was brought over, else the one given."""
+        with self._lock:
+            found = []
+            row = self._sessions.get(session or "")
+            if row and row.get("kind") != "remember" and not row.get("device") and self.validate_session(session):
+                remember = row.get("remember")
+                if not remember or remember not in self._sessions:
+                    remember = secrets.token_urlsafe(32)
+                    self._sessions[remember] = {"username": row["username"], "expires_at": row["expires_at"],
+                                                "kind": "remember", "created_at": time.time()}
+                    row["remember"] = remember
+                found.append(remember)
+            for token in legacy:
+                old = self._sessions.get(token)
+                if old and old.get("kind") == "remember" and not old.get("device") and token not in found:
+                    found.append(token)
+            if not found:
+                return device
+            device = device or secrets.token_urlsafe(32)
+            dh = _digest(device)
+            have = {r["username"] for r in self.device_accounts(device)}
+            for remember in found:
+                entry = self._sessions[remember]
+                for token, other in self._sessions.items():
+                    if other.get("remember") == remember:
+                        other["device"] = dh
+                if entry["username"] not in have:
+                    entry["device"] = dh
+                    have.add(entry["username"])
+            new = self._rotate(device)
+            write_json_atomic(SESSIONS_FILE, self._sessions)
+            return new
+
+    def revoke_other_sign_ins(self, username: str, keep_session: Optional[str]) -> None:
+        """After a password change: every session and remembered sign-in of the account ends, on every device,
+        except the session that changed it and the remembered row it came from."""
+        keep = {keep_session, self.remember_of(keep_session)} - {None}
+        self._drop([t for t, s in list(self._sessions.items()) if s.get("username") == username and t not in keep])
 
     def _purge_remembered(self, now: float) -> None:
         stale = [t for t, s in self._sessions.items() if s.get("kind") == "remember"
                  and s.get("expires_at", 0) + REMEMBER_SHOWN_AFTER_EXPIRY_SECONDS < now]
         for token in stale:
             del self._sessions[token]
-
-    def remembered(self, tokens: list[str]) -> list[dict]:
-        """The accounts a device's cookie remembers, in sign-in order, each {"username", "token", "expired"}.
-        Unknown tokens, deleted accounts and anything that is not a remembered sign-in are left out; one row per
-        account (the newest)."""
-        now, rows = time.time(), {}
-        for token in tokens:
-            row = self._sessions.get(token)
-            if not row or row.get("kind") != "remember" or row.get("username") not in self._users["users"]:
-                continue
-            if row.get("expires_at", 0) + REMEMBER_SHOWN_AFTER_EXPIRY_SECONDS < now:
-                continue
-            previous = rows.get(row["username"])
-            if previous and self._sessions[previous["token"]].get("created_at", 0) > row.get("created_at", 0):
-                continue
-            rows[row["username"]] = {"username": row["username"], "token": token, "expired": row["expires_at"] <= now}
-        return sorted(rows.values(), key=lambda r: self._sessions[r["token"]].get("created_at", 0))
 
     def remember_of(self, session_token: Optional[str]) -> Optional[str]:
         """The remembered sign-in a session was opened from, if any."""
@@ -533,42 +655,8 @@ class AuthManager:
 
     def binding_token(self, session_token: Optional[str]) -> Optional[str]:
         """What a device's push enrollment is bound to: the remembered sign-in behind the session (it outlives the
-        sessions switching opens and closes), else the session itself."""
+        sessions switching opens and closes), else the session itself. Server-side only, never sent anywhere."""
         return self.remember_of(session_token) or session_token
-
-    def adopt(self, session_token: str) -> Optional[str]:
-        """A session from before the switcher (no remembered sign-in behind it) gets one, ending when it does,
-        so the device keeps that account on its switcher. Answers the remembered token, or None."""
-        row = self._sessions.get(session_token or "")
-        if not row or row.get("kind") == "remember" or row.get("remember") or not self.validate_session(session_token):
-            return None
-        remember = secrets.token_urlsafe(32)
-        self._sessions[remember] = {"username": row["username"], "expires_at": row["expires_at"], "kind": "remember",
-                                    "created_at": time.time()}
-        row["remember"] = remember
-        write_json_atomic(SESSIONS_FILE, self._sessions)
-        return remember
-
-    def open_remembered(self, remember: str) -> Optional[str]:
-        """A fresh session from a device's remembered sign-in (the switch route, after any PIN), ending when the
-        remembered sign-in does. None if it is gone or expired."""
-        row = self._sessions.get(remember or "")
-        if not row or row.get("kind") != "remember" or row.get("username") not in self._users["users"]:
-            return None
-        if row["expires_at"] <= time.time():
-            return None
-        session = secrets.token_urlsafe(32)
-        self._sessions[session] = {"username": row["username"], "expires_at": row["expires_at"], "remember": remember}
-        write_json_atomic(SESSIONS_FILE, self._sessions)
-        return session
-
-    def forget(self, remember: str) -> None:
-        """Signs one account out of one device: its remembered sign-in and every session opened from it."""
-        stale = [t for t, s in self._sessions.items() if t == remember or s.get("remember") == remember]
-        for token in stale:
-            del self._sessions[token]
-        if stale:
-            write_json_atomic(SESSIONS_FILE, self._sessions)
 
     # -- password reset (forgot password, David's ask 2026-09-10) ---------
     # Callers (routes/auth_routes.py) MUST return an identical response
@@ -621,11 +709,7 @@ class AuthManager:
         # duress - drop every existing session so a stale/leaked cookie
         # elsewhere stops working immediately rather than outliving the
         # password it was issued under.
-        stale = [t for t, s in self._sessions.items() if s.get("username") == username]
-        for t in stale:
-            del self._sessions[t]
-        if stale:
-            write_json_atomic(SESSIONS_FILE, self._sessions)
+        self._drop([t for t, s in self._sessions.items() if s.get("username") == username])
         return True
 
 
