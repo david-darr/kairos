@@ -89,6 +89,7 @@ module.exports = async ({ js, waitFor, delay, navigate, demoState, capture }) =>
     assert.ok(demoState.botsVoice.log.some(e => e.route === `/api/agent-calls/${answered.id}/opening`), 'and the bot opens with why it rang');
     assert.equal(await js(`${dialog}.querySelector('[data-call=mute]').disabled`), false, 'Mute works in the live call');
     await hangUp();
+    for (let i = 0; i < 60 && !calls().at(-1).ended; i++) await delay(50);   // the end request is sent as the screen closes
     assert.ok(calls().at(-1).ended, 'hanging up ends it');
 
     // -- Bug 1b: after a dead start, the next call in the same page load works with no refresh --------------------------
