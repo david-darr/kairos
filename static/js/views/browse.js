@@ -49,7 +49,33 @@ function iconButton(name, label, onClick, { disabled = false, className = "" } =
 const bridge = () => (window.jarvis && window.jarvis.browse) || null;
 const OVERLAYS = '.modal-backdrop:not(.hidden), .palette-backdrop:not(.hidden)';
 const SETTING_NAMES = { camera: "Camera", microphone: "Microphone", "camera+microphone": "Camera and microphone",
-  location: "Location", notifications: "Notifications", clipboard: "Read the clipboard" };
+  location: "Location", notifications: "Notifications", clipboard: "Read the clipboard", screen: "Screen sharing" };
+// What a site asks for, as the prompt says it: "meet.google.com wants to use your microphone".
+const WANTS = { camera: "wants to use your camera", microphone: "wants to use your microphone",
+  "camera+microphone": "wants to use your camera and microphone", location: "wants to know your location",
+  notifications: "wants to show notifications", clipboard: "wants to read your clipboard" };
+const DEVICE_NAMES = { microphone: "microphone", camera: "camera", screen: "screen" };
+// The operating system keeps Kairos from a device: where the person turns it on.
+function osBlockedText(kinds, platform) {
+  const list = kinds.map((k) => DEVICE_NAMES[k] || k);
+  const what = list.length > 1 ? `${list.slice(0, -1).join(", ")} and ${list.at(-1)}` : list[0];
+  if (platform === "darwin") {
+    const panes = kinds.map((k) => (k === "screen" ? "Screen & System Audio Recording" : k === "camera" ? "Camera" : "Microphone"));
+    return `macOS is keeping Kairos from your ${what}. Open System Settings, then Privacy & Security, then ${panes.join(" and ")}, turn on Kairos, and reopen Kairos.`;
+  }
+  if (platform === "win32") {
+    const panes = kinds.filter((k) => k !== "screen").map((k) => (k === "camera" ? "Camera" : "Microphone"));
+    return `Windows is keeping apps from your ${what}. Open Settings, then Privacy & security, then ${panes.join(" and ")}, and turn on access for desktop apps. Then reload this page.`;
+  }
+  return `Your computer is keeping Kairos from your ${what}. Allow it in your system's privacy settings, then reload this page.`;
+}
+const usingText = (kinds) => {
+  const devices = kinds.filter((k) => k !== "screen").map((k) => DEVICE_NAMES[k]);
+  const parts = [];
+  if (devices.length) parts.push(`using your ${devices.join(" and ")}`);
+  if (kinds.includes("screen")) parts.push("sharing your screen");
+  return parts.join(" and ");
+};
 
 const hostOf = (url) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } };
 const safeIcon = (src) => (typeof src === "string" && /^data:image\/(png|x-icon|vnd\.microsoft\.icon|gif|jpeg|webp|svg\+xml);base64,/.test(src) ? src : null);
@@ -87,6 +113,10 @@ export async function render(container) {
   let home = null, tabMenuId = null;
   // Browse's own look (browseLook.js), laid over Kairos's appearance while Browse shows.
   let look = loadLook(), lookOpen = false;
+  // Screen sharing: the site's request while the picker is open, the source
+  // picked so far and whether the computer's sound goes too. `stopNote` is
+  // the in-use strip's message after a Stop that could not end everything.
+  let screenReq = null, screenPick = null, screenAudio = false, stopNote = null;
   const cleanups = [];
   const active = () => tabs.find((t) => t.id === activeId) || null;
 
@@ -298,10 +328,20 @@ export async function render(container) {
     else if (event.event === "found" && event.tabId === activeId) findCount = event.matches ? `${event.active} of ${event.matches}` : "No matches";
     else if (event.event === "crashed" && event.tabId === activeId) notice = { kind: "error", text: "This tab stopped working. Reload to try again." };
     else if (event.event === "home-changed") { home?.refresh(); return; }
+    else if (event.event === "permission-closed") prompts = prompts.filter((p) => p.requestId !== event.requestId);
+    else if (event.event === "screen-closed") { if (screenReq && screenReq.requestId === event.requestId) { screenReq = null; if (page === "screen") page = null; } }
+    else if (event.event === "media-os-blocked" && Array.isArray(event.kinds) && event.kinds.length) notice = { kind: "error", text: osBlockedText(event.kinds, event.platform) };
     else return;
     draw();
   }));
   cleanups.push(b.onPermission((request) => { prompts.push(request); draw(); }));
+  // A site asked to share the screen: the picker takes the page's place.
+  if (b.onScreenRequest) cleanups.push(b.onScreenRequest((request) => {
+    if (screenReq) b.answerScreen(screenReq.requestId, null, false);
+    screenReq = request; screenPick = null; screenAudio = !!request.audio;
+    page = "screen"; siteOpen = false; tabMenuId = null;
+    draw();
+  }));
   cleanups.push(b.onShortcut(({ name }) => shortcut(name)));
   cleanups.push(b.onDownload(() => { if (page === "downloads") drawDownloads(); }));
   if (b.onPasswordOffer) cleanups.push(b.onPasswordOffer((offer) => { pwOffer = offer; pwStatus = ""; draw(); }));
@@ -355,8 +395,10 @@ export async function render(container) {
     const secure = /^https:/.test(t.url);
     const rows = Object.keys(SETTING_NAMES).filter((k) => k !== "camera+microphone").map((key) => {
       const value = settings[`permission:${key}`] || "ask";
+      // A screen share is always picked at the time, so it is Ask or Block.
+      const choices = key === "screen" ? ["ask", "block"] : ["ask", "allow", "block"];
       const select = el("select", { "aria-label": SETTING_NAMES[key], onchange: (e) => setSite(`permission:${key}`, e.target.value === "ask" ? null : e.target.value) },
-        ["ask", "allow", "block"].map((v) => el("option", { value: v, text: v === "ask" ? "Ask" : v === "allow" ? "Allow" : "Block", selected: v === value })));
+        choices.map((v) => el("option", { value: v, text: v === "ask" ? "Ask" : v === "allow" ? "Allow" : "Block", selected: v === value })));
       return el("label", { class: "browse-site-row" }, [el("span", { text: SETTING_NAMES[key] }), select]);
     });
     const adblockOff = settings.adblock === "off";
@@ -396,6 +438,7 @@ export async function render(container) {
         t.url ? favicon(t.favicon, t.title || hostOf(t.url)) : el("span", { class: "browse-favicon browse-favicon-letter", "aria-hidden": "true", text: "+" }),
         el("span", { class: "browse-tab-title", text: t.title || hostOf(t.url) || "New tab" }),
         t.audible || t.muted ? el("span", { class: "browse-tab-audio", text: t.muted ? "muted" : "♪" }) : null,
+        t.capturing && t.capturing.length ? el("span", { class: "browse-tab-live", role: "img", title: `This tab is ${usingText(t.capturing)}`, "aria-label": `This tab is ${usingText(t.capturing)}` }) : null,
       ]),
       el("button", { type: "button", class: "browse-icon-btn browse-tab-close", "aria-label": `Close ${t.title || "tab"}`, text: "×", onclick: () => b.close(t.id) }),
     ]);
@@ -520,16 +563,39 @@ export async function render(container) {
 
   function drawStrips() {
     const parts = [];
+    // A site's request: Block, Allow once (this page only) or Always allow for
+    // this site. A frame of another site inside the page gets no Always.
     for (const p of prompts.slice(0, 1)) {
-      const remember = el("input", { type: "checkbox", checked: true });
-      const answer = (value) => { b.answerPermission(p.requestId, value, remember.checked); prompts = prompts.filter((x) => x !== p); draw(); };
+      const canRemember = p.canRemember !== false && !p.embedded;
+      const answer = (value, remember) => { b.answerPermission(p.requestId, value, remember && canRemember); prompts = prompts.filter((x) => x !== p); draw(); };
+      const site = hostOf(p.origin) || p.origin;
+      const who = p.embedded ? `${hostOf(p.embedded) || p.embedded}, inside ${site},` : site;
+      const background = p.tabId !== activeId ? ` (in the tab "${(tabs.find((t) => t.id === p.tabId) || {}).title || site}")` : "";
       parts.push(el("div", { class: "browse-strip browse-prompt", role: "alertdialog", "aria-label": "Permission request" }, [
-        el("span", { text: `${hostOf(p.origin) || p.origin} wants to use: ${SETTING_NAMES[p.setting] || p.setting}. This is the site asking, not Kairos.` }),
-        el("label", { class: "browse-remember" }, [remember, el("span", { text: "Remember for this site" })]),
-        el("button", { type: "button", class: "btn", text: "Block", onclick: () => answer("block") }),
-        el("button", { type: "button", class: "btn primary", text: "Allow", onclick: () => answer("allow") }),
-      ]));
+        el("span", { text: `${who} ${WANTS[p.setting] || `wants: ${SETTING_NAMES[p.setting] || p.setting}`}${background}. This is the site asking, not Kairos.` }),
+        el("button", { type: "button", class: "btn", text: "Block", onclick: () => answer("block", true) }),
+        el("button", { type: "button", class: "btn", text: "Allow once", onclick: () => answer("allow", false) }),
+        canRemember ? el("button", { type: "button", class: "btn primary", text: "Always allow for this site", onclick: () => answer("allow", true) }) : null,
+      ].filter(Boolean)));
     }
+    // In use: the page on screen has the microphone, camera or screen.
+    const live = active();
+    if (live && live.url && live.capturing && live.capturing.length && !page) {
+      const stopIt = async () => {
+        const result = await b.stopCapture(live.id).catch(() => null);
+        stopNote = result && result.ok ? null : { tabId: live.id, text: "Kairos couldn't end all of it from here. Reload the page to be sure it stops." };
+        draw();
+      };
+      const note = stopNote && stopNote.tabId === live.id ? stopNote.text : "";
+      parts.push(el("div", { class: "browse-strip browse-capture", role: "status", "aria-label": "In use" }, [
+        el("span", { class: "browse-capture-text" }, [
+          el("span", { class: "browse-capture-dot", "aria-hidden": "true" }),
+          el("span", { text: `${hostOf(live.url) || "This site"} is ${usingText(live.capturing)}.${note ? " " + note : ""}` }),
+        ]),
+        note ? el("button", { type: "button", class: "btn", text: "Reload page", onclick: () => { stopNote = null; b.reload(live.id); draw(); } }) : null,
+        el("button", { type: "button", class: "btn primary", text: live.capturing.length === 1 && live.capturing[0] === "screen" ? "Stop sharing" : "Stop", onclick: stopIt }),
+      ].filter(Boolean)));
+    } else if (stopNote && (!live || stopNote.tabId !== live.id || !(live.capturing || []).length)) stopNote = null;
     // Save a sign-in: only on the person's click.
     if (pwOffer && pwOffer.tabId === activeId) {
       const o = pwOffer;
@@ -584,12 +650,81 @@ export async function render(container) {
     if (page === "history") return drawHistory();
     if (page === "downloads") return drawDownloads();
     if (page === "settings") return drawSettings();
+    if (page === "screen") return drawScreen();
     if (!t || !t.url) {
       inner.replaceChildren();
       home = mountHome(inner, { b, go });
       return;
     }
     inner.replaceChildren();
+  }
+
+  // The screen-sharing picker: the screens and windows main offered for this
+  // request, with their pictures. Nothing is shared until Share is pressed.
+  function answerScreen(sourceId) {
+    const req = screenReq;
+    if (!req) return;
+    screenReq = null;
+    b.answerScreen(req.requestId, sourceId, !!sourceId && screenAudio && !!req.audio);
+    if (page === "screen") page = null;
+    draw();
+  }
+  function drawScreen() {
+    const req = screenReq;
+    if (!req) { inner.replaceChildren(); return; }
+    const site = hostOf(req.origin) || req.origin;
+    const who = req.embedded ? `${hostOf(req.embedded) || req.embedded}, inside ${site},` : site;
+    const sources = Array.isArray(req.sources) ? req.sources : [];
+    const share = el("button", { type: "button", class: "btn primary", text: "Share", disabled: !screenPick, onclick: () => answerScreen(screenPick) });
+    const tile = (s) => {
+      const thumb = safeIcon(s.thumb);
+      return el("button", { type: "button", class: "browse-screen-source" + (s.id === screenPick ? " selected" : ""), "aria-pressed": String(s.id === screenPick), title: s.name,
+        onclick: () => { screenPick = s.id; drawScreen(); }, ondblclick: () => answerScreen(s.id) }, [
+        thumb ? el("img", { class: "browse-screen-thumb", src: thumb, alt: "" }) : el("span", { class: "browse-screen-thumb empty", "aria-hidden": "true" }),
+        el("span", { class: "browse-screen-name", text: s.name }),
+      ]);
+    };
+    const group = (kind, label) => {
+      const list = sources.filter((s) => s.kind === kind);
+      return list.length ? el("section", { class: "browse-settings-section", "aria-label": label }, [
+        el("h3", { class: "browse-settings-title", text: label }),
+        el("div", { class: "browse-screen-grid", role: "group", "aria-label": label }, list.map(tile))]) : null;
+    };
+    inner.replaceChildren(el("div", { class: "browse-internal browse-screen", role: "dialog", "aria-label": "Share your screen" }, [
+      el("div", { class: "browse-internal-head" }, [el("h2", { text: "Share your screen" }),
+        el("button", { type: "button", class: "browse-icon-btn", "aria-label": "Cancel sharing", text: "×", onclick: () => answerScreen(null) })]),
+      el("p", { class: "browse-screen-ask", text: `${who} wants to see your screen. Pick a whole screen or one window. This is the site asking, not Kairos.` }),
+      sources.length ? null : el("p", { class: "browse-empty", text: "Kairos can't see any screens or windows to share. On a Mac, turn on Kairos in System Settings, Privacy & Security, Screen & System Audio Recording, then reopen Kairos." }),
+      group("screen", "Screens"),
+      group("window", "Windows"),
+      el("div", { class: "browse-screen-actions" }, [
+        req.audio ? el("label", { class: "browse-remember" }, [
+          el("input", { type: "checkbox", checked: screenAudio, onchange: (e) => { screenAudio = e.target.checked; } }),
+          el("span", { text: "Also share your computer's sound, if the site asks for it" })]) : null,
+        el("span", { class: "browse-spacer" }),
+        el("button", { type: "button", class: "btn", text: "Cancel", onclick: () => answerScreen(null) }),
+        share,
+      ].filter(Boolean)),
+    ].filter(Boolean)));
+  }
+
+  // Browser settings: every site's remembered permission answers, to remove.
+  const permsBox = el("div");
+  async function drawPermissions() {
+    const rows = await (b.permissions ? b.permissions() : Promise.resolve([])).catch(() => []);
+    if (destroyed || page !== "settings") return;
+    const list = Array.isArray(rows) ? rows : [];
+    permsBox.replaceChildren(el("section", { class: "browse-settings-section", "aria-label": "Site permissions" }, [
+      el("h3", { class: "browse-settings-title", text: "Site permissions" }),
+      list.length ? el("ul", { class: "browse-list" }, list.map((r) => el("li", {}, [
+        el("div", { class: "browse-list-main static" }, [
+          el("span", { class: "browse-list-title", text: hostOf(r.origin) || r.origin }),
+          el("span", { class: "browse-list-meta", text: `${SETTING_NAMES[r.setting] || r.setting}: ${r.value === "allow" ? "Always allowed" : "Blocked"}` })]),
+        el("button", { type: "button", class: "btn quiet", text: "Remove", "aria-label": `Remove ${SETTING_NAMES[r.setting] || r.setting} for ${hostOf(r.origin) || r.origin}`,
+          onclick: async () => { await b.setSite(r.origin + "/", `permission:${r.setting}`, null); drawPermissions(); } }),
+      ]))) : el("p", { class: "browse-list-meta", text: "No site has a remembered answer. Sites ask again each time until you choose Always allow or Block." }),
+      el("p", { class: "browse-list-meta", text: "Removing one means the site asks again next time." }),
+    ]));
   }
 
   async function drawHistory(query = "") {
@@ -669,6 +804,7 @@ export async function render(container) {
         el("button", { type: "button", class: "browse-icon-btn", "aria-label": "Close settings", text: "×", onclick: () => { page = null; draw(); } })]),
       el("label", { class: "browse-site-row" }, [el("span", { text: "Search engine" }), engine]),
       audioBox,
+      permsBox,
       passwordsBox,
       el("section", { class: "browse-settings-section", "aria-label": "Ad blocking" }, [
         el("h3", { class: "browse-settings-title", text: "Ad blocking" }),
@@ -677,12 +813,15 @@ export async function render(container) {
       ]),
     ]));
     drawAudio();
+    drawPermissions();
     settingsHandle?.destroy();
     settingsHandle = mountPasswords(passwordsBox, { b });
   }
 
   function draw() {
     if (destroyed) return;
+    // The picker closed some other way (another tab, History, Escape): the share is cancelled.
+    if (screenReq && page !== "screen") { const req = screenReq; screenReq = null; b.answerScreen(req.requestId, null, false); }
     root.classList.toggle("side-hidden", sideHidden);
     rail.hidden = !sideHidden;
     for (const box of [topBox, addrRow, dropBox, pinsBox, tabsBox, botWork, bottomBox]) box.hidden = sideHidden;
@@ -694,7 +833,7 @@ export async function render(container) {
     inner.hidden = !showInner;
     // History and the other pages refetch only when what is shown changes,
     // not on every tab update, so their search box keeps its text and focus.
-    const key = `${page}|${activeId}|${!!(active() && active().url)}`;
+    const key = `${page}|${activeId}|${!!(active() && active().url)}|${screenReq ? screenReq.requestId : ""}`;
     if (key !== innerKey) { innerKey = key; drawInner(); }
     requestAnimationFrame(syncBounds);
   }
@@ -708,6 +847,7 @@ export async function render(container) {
   b.setVisible(nativeShown());
 
   return () => {
+    if (screenReq) { b.answerScreen(screenReq.requestId, null, false); screenReq = null; }
     destroyed = true;
     home?.destroy();
     settingsHandle?.destroy();

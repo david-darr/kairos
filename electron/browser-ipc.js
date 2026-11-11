@@ -92,6 +92,15 @@ function installBrowseIpc({ ipcMain, fromAppWindow, getBrowse, resolveBrowse = a
   on("browse:permission-answer", (b, requestId, answer, remember) => {
     if (isId(requestId) && (answer === "allow" || answer === "block")) b.answerPermission(requestId, answer, remember === true);
   });
+  // Every site's remembered permissions (Browser settings), to see and remove them.
+  handle("browse:permissions", (b) => b.permissionList(), []);
+
+  // Cameras, microphones and screen sharing (browser-media.js). The picker's
+  // answer is a source id main offered for that request, or null to cancel.
+  on("browse:screen-answer", (b, requestId, sourceId, audio) => {
+    if (isId(requestId) && (sourceId === null || text(sourceId, 200))) b.answerScreen(requestId, sourceId, audio === true);
+  });
+  handle("browse:capture-stop", (b, tabId) => (isId(tabId) ? b.stopCapture(tabId) : undefined));
 
   // The password keeper (browser-passwords.js). Saved passwords never come
   // back over these channels: fill and the generator write into the page in

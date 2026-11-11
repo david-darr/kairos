@@ -122,7 +122,12 @@
       "icon": "icon-mac.png",
       "artifactName": "Kairos-${version}-${arch}.${ext}",
       "darkModeSupport": true,
-      "hardenedRuntime": false
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Kairos uses your microphone when you allow a site in Kairos Browse to, such as a video call, and for voice features you turn on.",
+        "NSCameraUsageDescription": "Kairos uses your camera when you allow a site in Kairos Browse to, such as a video call.",
+        "NSAudioCaptureUsageDescription": "Kairos shares your computer's sound only when you choose to while sharing your screen in Kairos Browse."
+      }
     },
     "linux": {
       "target": "AppImage",

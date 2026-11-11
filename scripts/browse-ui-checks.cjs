@@ -137,13 +137,96 @@ module.exports = async function browseChecks({ js, base, output, fs }) {
     await run("document.querySelector('.browse-site-btn').click();");
 
     // A site's permission request is a strip above the page that names the site.
-    await run("window.__browseStub.emit('permission', { requestId: 5, tabId: 1, origin: 'https://example.com', setting: 'camera' });");
+    // Block, Allow once (this page only) or Always allow for this site (2.3.0, video calls).
+    const promptButtons = "return [...document.querySelectorAll('.browse-prompt .btn')].map(b => b.textContent);";
+    const clickPrompt = (label) => run(`[...document.querySelectorAll('.browse-prompt .btn')].find(b => b.textContent === ${JSON.stringify(label)}).click();`);
+    await run("window.__browseStub.emit('permission', { requestId: 5, tabId: 1, origin: 'https://example.com', setting: 'camera', embedded: null, canRemember: true });");
     await until("document.querySelector('.browse-prompt')");
-    assert.match(await run("return document.querySelector('.browse-prompt').textContent;"), /example\.com wants to use: Camera\. This is the site asking, not Kairos\./);
+    assert.match(await run("return document.querySelector('.browse-prompt').textContent;"), /example\.com wants to use your camera\. This is the site asking, not Kairos\./);
+    assert.deepEqual(await run(promptButtons), ['Block', 'Allow once', 'Always allow for this site']);
     assert.ok(await run("return document.querySelector('.browse-page').contains(document.querySelector('.browse-prompt'));"));
-    await run("[...document.querySelectorAll('.browse-prompt .btn')].find(b => b.textContent === 'Allow').click();");
+    await new Promise((r) => setTimeout(r, 200));
+    await shot('permission-prompt');
+    await clickPrompt('Always allow for this site');
     assert.deepEqual((await calls('answerPermission')).at(-1).args, [5, 'allow', true]);
     assert.equal(await run("return !!document.querySelector('.browse-prompt');"), false);
+    await run("window.__browseStub.emit('permission', { requestId: 6, tabId: 1, origin: 'https://meet.google.com', setting: 'microphone', embedded: null, canRemember: true });");
+    await until("document.querySelector('.browse-prompt')");
+    assert.match(await run("return document.querySelector('.browse-prompt').textContent;"), /^meet\.google\.com wants to use your microphone\./);
+    await clickPrompt('Allow once');
+    assert.deepEqual((await calls('answerPermission')).at(-1).args, [6, 'allow', false]);
+    await run("window.__browseStub.emit('permission', { requestId: 7, tabId: 1, origin: 'https://zoom.us', setting: 'camera+microphone', embedded: null, canRemember: true });");
+    await until("document.querySelector('.browse-prompt')");
+    await clickPrompt('Block');
+    assert.deepEqual((await calls('answerPermission')).at(-1).args, [7, 'block', true], 'Block is remembered');
+    // Another site inside the page: both named, no Always, and the answer is not remembered.
+    await run("window.__browseStub.emit('permission', { requestId: 8, tabId: 1, origin: 'https://example.com', setting: 'camera', embedded: 'https://calls.vendor.test', canRemember: false });");
+    await until("document.querySelector('.browse-prompt')");
+    assert.match(await run("return document.querySelector('.browse-prompt').textContent;"), /^calls\.vendor\.test, inside example\.com, wants to use your camera\./);
+    assert.deepEqual(await run(promptButtons), ['Block', 'Allow once']);
+    await clickPrompt('Block');
+    assert.deepEqual((await calls('answerPermission')).at(-1).args, [8, 'block', false]);
+    // A prompt main withdrew (unanswered for a minute) goes away.
+    await run("window.__browseStub.emit('permission', { requestId: 9, tabId: 1, origin: 'https://example.com', setting: 'location', canRemember: true });");
+    await until("document.querySelector('.browse-prompt')");
+    await run("window.__browseStub.emit('event', { event: 'permission-closed', requestId: 9 });");
+    await until("!document.querySelector('.browse-prompt')");
+
+    // In use: a strip names what the page has, with Stop; the tab shows a live dot.
+    await run("window.__browseStub.emit('state', { activeId: 1, tabs: [{ id: 1, url: 'https://meet.google.com/abc', title: 'Meet', blocked: 0, active: true, capturing: ['microphone', 'camera'] }] });");
+    await until("document.querySelector('.browse-capture')");
+    assert.match(await run("return document.querySelector('.browse-capture').textContent;"), /meet\.google\.com is using your microphone and camera\./);
+    assert.ok(await run("return !!document.querySelector('.browse-tab .browse-tab-live');"), 'the tab shows it too');
+    await shot('in-use');
+    await run("[...document.querySelectorAll('.browse-capture .btn')].find(b => b.textContent === 'Stop').click();");
+    await until("window.__browseStub.calls().some(c => c.name === 'stopCapture')");
+    assert.deepEqual((await calls('stopCapture')).at(-1).args, [1]);
+    // A Stop that could not end everything says so and offers a reload.
+    await run("window.__browseStub.stopResult({ ok: false, remaining: ['screen'] }); window.__browseStub.emit('state', { activeId: 1, tabs: [{ id: 1, url: 'https://meet.google.com/abc', title: 'Meet', blocked: 0, active: true, capturing: ['screen'] }] });");
+    await until("document.querySelector('.browse-capture')?.textContent.includes('sharing your screen')");
+    await run("[...document.querySelectorAll('.browse-capture .btn')].find(b => b.textContent === 'Stop sharing').click();");
+    await until("[...document.querySelectorAll('.browse-capture .btn')].some(b => b.textContent === 'Reload page')");
+    assert.match(await run("return document.querySelector('.browse-capture').textContent;"), /Reload the page to be sure it stops\./);
+    await run("window.__browseStub.stopResult({ ok: true, remaining: [] }); window.__browseStub.emit('state', { activeId: 1, tabs: [{ id: 1, url: 'https://meet.google.com/abc', title: 'Meet', blocked: 0, active: true, capturing: [] }] });");
+    await until("!document.querySelector('.browse-capture')");
+
+    // The OS keeps Kairos from the microphone: said plainly, with where to turn it on.
+    await run("window.__browseStub.emit('event', { event: 'media-os-blocked', tabId: 1, kinds: ['microphone'], platform: 'win32' });");
+    await until("document.querySelector('.browse-notice.error')?.textContent.includes('Privacy & security')");
+    assert.match(await run("return document.querySelector('.browse-notice.error').textContent;"), /Windows is keeping apps from your microphone\. Open Settings, then Privacy & security, then Microphone/);
+    await run("window.__browseStub.emit('event', { event: 'media-os-blocked', tabId: 1, kinds: ['screen'], platform: 'darwin' });");
+    await until("document.querySelector('.browse-notice.error')?.textContent.includes('Screen & System Audio Recording')");
+    await run("document.querySelector('.browse-notice [aria-label=Dismiss]').click();");
+
+    // Screen sharing: the picker takes the page's place; Share sends only the picked source.
+    const thumb = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==';
+    const screenReq = (id) => `window.__browseStub.emit('screenRequest', { requestId: ${id}, tabId: 1, origin: 'https://meet.google.com', embedded: null, audio: true, sources: [
+      { id: 'screen:0:0', name: 'Entire screen', kind: 'screen', thumb: '${thumb}' }, { id: 'window:42:0', name: 'Quarterly notes', kind: 'window', thumb: null }] });`;
+    await run("window.__browseStub.emit('state', { activeId: 1, tabs: [{ id: 1, url: 'https://meet.google.com/abc', title: 'Meet', blocked: 0, active: true, capturing: [] }] });");
+    await run(screenReq(11));
+    await until("document.querySelector('.browse-screen')");
+    assert.equal(await run("return document.querySelector('.browse-viewport').hidden;"), true, 'the native page hides behind the picker');
+    assert.match(await run("return document.querySelector('.browse-screen-ask').textContent;"), /^meet\.google\.com wants to see your screen\./);
+    assert.deepEqual(await run("return [...document.querySelectorAll('.browse-screen-name')].map(n => n.textContent);"), ['Entire screen', 'Quarterly notes']);
+    assert.equal(await run("return [...document.querySelectorAll('.browse-screen .btn')].find(b => b.textContent === 'Share').disabled;"), true, 'nothing picked yet');
+    await run("[...document.querySelectorAll('.browse-screen-source')][1].click();");
+    await until("document.querySelector('.browse-screen-source.selected')");
+    await shot('screen-picker');
+    await run("[...document.querySelectorAll('.browse-screen .btn')].find(b => b.textContent === 'Share').click();");
+    assert.deepEqual((await calls('answerScreen')).at(-1).args, [11, 'window:42:0', true]);
+    await until("!document.querySelector('.browse-screen')");
+    // Cancel, and leaving the picker another way, share nothing.
+    await run(screenReq(12));
+    await until("document.querySelector('.browse-screen')");
+    await run("[...document.querySelectorAll('.browse-screen .btn')].find(b => b.textContent === 'Cancel').click();");
+    assert.deepEqual((await calls('answerScreen')).at(-1).args, [12, null, false]);
+    await run(screenReq(13));
+    await until("document.querySelector('.browse-screen')");
+    await run("document.querySelector('[aria-label=History]').click();");
+    await until("window.__browseStub.calls().filter(c => c.name === 'answerScreen').length === 3");
+    assert.deepEqual((await calls('answerScreen')).at(-1).args, [13, null, false]);
+    await run("document.querySelector('[aria-label=\"Close history\"]').click();");
+    await run("window.__browseStub.emit('state', { activeId: 1, tabs: [{ id: 1, url: 'https://example.com/', title: 'example.com page', blocked: 4, active: true }] });");
 
     // A blocked pop-up is reported with a way to open it.
     await run("window.__browseStub.emit('event', { event: 'popup-blocked', tabId: 1, url: 'https://popup.example/' });");
@@ -191,6 +274,13 @@ module.exports = async function browseChecks({ js, base, output, fs }) {
     assert.match(await run("return document.querySelector('[aria-label=Sound] [role=status]').textContent;"), /isn't connected/, 'an unplugged output is said so');
     await run("const s = document.querySelector('[aria-label=\"Audio output\"]'); s.value = ''; s.dispatchEvent(new Event('change'));");
     await until("window.__browseStub.calls().some(c => c.name === 'setAudioOutput' && c.args[0] === '')");
+    // Site permissions (2.3.0): every remembered answer, each removable.
+    await until("document.querySelector('[aria-label=\"Site permissions\"] li')");
+    assert.match(await run("return document.querySelector('[aria-label=\"Site permissions\"]').textContent;"), /meet\.google\.com.*Microphone: Always allowed.*zoom\.us.*Camera: Blocked/);
+    assert.equal(await run("return /\\u2014/.test(document.querySelector('[aria-label=\"Site permissions\"]').textContent);"), false, 'no em-dashes in the copy');
+    await run("document.querySelector('[aria-label=\"Remove Microphone for meet.google.com\"]').click();");
+    await until("window.__browseStub.calls().some(c => c.name === 'setSite' && c.args[1] === 'permission:microphone')");
+    assert.deepEqual((await calls('setSite')).at(-1).args, ['https://meet.google.com/', 'permission:microphone', null]);
     assert.match(await run("return document.querySelector('[aria-label=\"Saved passwords\"]').textContent;"), /example\.com.*dave/);
     // Let bots use saved passwords (David, 2026-11-07): on by default, one plain line, and the bots' uses listed.
     const botBox = "document.querySelector('.browse-pw-bots input[type=checkbox]')";

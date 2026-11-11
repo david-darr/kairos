@@ -87,6 +87,9 @@ ELECTRON_SUITES = {
     "ask-user-checks": ["static/js/*question*.js", "static/js/*askUser*.js", "static/css/question-prompt.css", "scripts/ask-user-checks.cjs"],
     "browser-smoke": ["electron/browser.js", "electron/studio-prepare.js", "electron/studio-pages.js", "static/js/browserPane.js",
                       "scripts/browser-smoke.cjs", "scripts/fixtures/studio-mock/*"],
+    # Browse's cameras, microphones and screen sharing (2.3.0).
+    "browse-media-checks": ["electron/browser-media.js", "electron/browser-permissions.js", "electron/browser-browse.js",
+                            "electron/browser-ipc.js", "electron/browser-tabs.js", "scripts/browse-media-checks.cjs"],
     "preview-smoke": ["electron/forgePreview.js", "static/js/forgeAppPreview.js", "scripts/preview-smoke.cjs"],
     "bg-tasks-smoke": ["static/js/backgroundTasks.js", "static/css/background-tasks.css", "routes/background_task_routes.py", "scripts/bg-tasks-smoke.cjs"],
     "crm-smoke": ["tabs/crm/*", "scripts/crm-smoke.cjs"],

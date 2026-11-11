@@ -6,8 +6,9 @@
 const { contextBridge } = require('electron');
 
 const calls = [];
-const handlers = { state: [], event: [], permission: [], shortcut: [], download: [], openRequest: [], passwordOffer: [], passwordSuggest: [] };
+const handlers = { state: [], event: [], permission: [], shortcut: [], download: [], openRequest: [], passwordOffer: [], passwordSuggest: [], screenRequest: [] };
 let audioLabel = 'Desk Speakers (not here)';
+let stopResult = { ok: true, remaining: [] };
 let tabs = [], activeId = null, nextId = 1;
 let pinned = [{ id: 1, url: 'https://github.com/', title: 'GitHub', position: 0, thumb: null },
   { id: 2, url: 'https://mail.example.com/', title: 'Mail', position: 1, thumb: null }];
@@ -74,6 +75,11 @@ contextBridge.exposeInMainWorld('jarvis', { ...desktop, browse: {
   setSearchEngine: call('setSearchEngine', () => ({ ok: true })),
   adblockStats: call('adblockStats', () => ({ lists: 3, network: 106000, cosmetic: 26000, skipped: 7600, skippedBy: {} })),
   answerPermission: (...args) => record('answerPermission', args),
+  // Cameras, microphones and screen sharing (electron/browser-media.js).
+  permissions: call('permissions', () => [{ origin: 'https://meet.google.com', setting: 'microphone', value: 'allow' }, { origin: 'https://zoom.us', setting: 'camera', value: 'block' }]),
+  answerScreen: (...args) => record('answerScreen', args),
+  stopCapture: call('stopCapture', () => stopResult),
+  onScreenRequest: on('screenRequest'),
   downloads: call('downloads', () => [{ id: 'd1', url: 'https://example.com/report.pdf', filename: 'report.pdf', state: 'completed', received: 10, total: 10 }]),
   download: call('download', () => ({ ok: true })),
   onState: on('state'), onEvent: on('event'), onDownload: on('download'), onPermission: on('permission'), onShortcut: on('shortcut'),
@@ -88,4 +94,5 @@ contextBridge.exposeInMainWorld('jarvis', { ...desktop, browse: {
 contextBridge.exposeInMainWorld('__browseStub', {
   calls: () => JSON.parse(JSON.stringify(calls)),
   emit: (kind, payload) => emit(kind, payload),
+  stopResult: (value) => { stopResult = value; },
 });

@@ -10,7 +10,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { session } = require("electron");
+const { session, desktopCapturer, systemPreferences, webContents: webContentsModule } = require("electron");
 const { createGate, SEARCH } = require("./browser-gate");
 const { openStore } = require("./browser-store");
 const { createAdblock, createListUpdater } = require("./browser-adblock");
@@ -19,12 +19,14 @@ const { createDownloads } = require("./browser-downloads");
 const { createTabs } = require("./browser-tabs");
 const { createPasswords } = require("./browser-passwords");
 const { createAudio } = require("./browser-audio");
+const { createMedia } = require("./browser-media");
 
 const PERMISSION_TIMEOUT_MS = 60000;
 const LIST_CHECK_MS = 6 * 60 * 60 * 1000;
 // Settings a page's site panel may change. Anything else is refused.
-const SITE_KEYS = /^(adblock|popups|permission:(camera|microphone|location|notifications|clipboard))$/;
-const SITE_VALUES = { adblock: ["off"], popups: ["allow"], permission: ["allow", "block"] };
+const SITE_KEYS = /^(adblock|popups|permission:(camera|microphone|location|notifications|clipboard|screen))$/;
+// Screen sharing is never allowed ahead of time (each share is picked), so it can only be blocked.
+const SITE_VALUES = { adblock: ["off"], popups: ["allow"], permission: ["allow", "block"], "permission:screen": ["block"] };
 
 // The home screen's settings (Speed Dial, David 2026-11-03), kept in the
 // store's meta table. Anything unknown or malformed falls back to these.
@@ -78,22 +80,52 @@ function createBrowse({ host, partition, folder, downloadsFolder, reservedPorts,
   const pending = new Map();
   let nextRequest = 1;
 
+  // The Browse tab showing these contents, or null (the side pane, a sign-in pop-up).
+  function tabFor(webContents) {
+    if (!tabs || !webContents) return null;
+    return tabs.list().tabs.find((t) => { const wc = tabs.webContentsOf(t.id); return wc && wc.id === webContents.id; }) || null;
+  }
+
   // The permission prompt is drawn by the app (U3). Only a Browse tab may
-  // ask; the side pane and anything else is refused without a prompt.
-  function ask({ webContents, origin, setting }) {
-    const tab = tabs && tabs.list().tabs.find((t) => { const wc = tabs.webContentsOf(t.id); return wc && wc.id === webContents.id; });
+  // ask; the side pane and anything else is refused without a prompt. A
+  // prompt left unanswered is withdrawn after a minute and counts as Block
+  // for that one request (nothing is remembered).
+  function ask({ webContents, origin, setting, embedded = null, canRemember = true }) {
+    const tab = tabFor(webContents);
     if (!tab) return { answer: "block", remember: false };
     const requestId = nextRequest++;
     return new Promise((resolve) => {
-      const timer = setTimeout(() => { pending.delete(requestId); resolve({ answer: "block", remember: false }); }, PERMISSION_TIMEOUT_MS);
-      pending.set(requestId, (reply) => { clearTimeout(timer); pending.delete(requestId); resolve(reply); });
-      send("browse:permission", { requestId, tabId: tab.id, origin, setting });
+      const timer = setTimeout(() => {
+        pending.delete(requestId);
+        send("browse:event", { event: "permission-closed", requestId });
+        resolve({ answer: "block", remember: false });
+      }, PERMISSION_TIMEOUT_MS);
+      pending.set(requestId, (reply) => {
+        clearTimeout(timer); pending.delete(requestId);
+        resolve(canRemember ? reply : { answer: reply.answer, remember: false });
+      });
+      send("browse:permission", { requestId, tabId: tab.id, origin, setting, embedded, canRemember });
     });
   }
 
   // The audio output chosen in Browse settings (browser-audio.js).
   const audio = createAudio({ store });
-  createPermissions({ store, ask, speakerSelection: () => audio.allowSpeakerSelection() }).attach(partitionSession);
+  // Cameras, microphones and screen sharing (browser-media.js).
+  const media = createMedia({
+    store, tabFor, send, log, desktopCapturer, systemPreferences,
+    fromFrame: (frame) => webContentsModule.fromFrame(frame),
+    touch: () => tabs && tabs.touch(),
+  });
+  media.attach(partitionSession);
+  const permissions = createPermissions({ store, ask, isTab: (wc) => !!tabFor(wc), beforeGrant: media.beforeGrant, pickScreen: media.pickScreen,
+    speakerSelection: () => audio.allowSpeakerSelection() });
+  permissions.attach(partitionSession);
+  // A page's Allow once answers and in-use marks end when it navigates away or closes.
+  function watchMedia(tab, wc) {
+    const end = () => { permissions.forget(wc.id); media.forgetPick(wc.id); media.reset(tab.id); };
+    wc.on("did-start-navigation", (details) => { if (details.isMainFrame && !details.isSameDocument) end(); });
+    wc.once("destroyed", end);
+  }
   const downloads = createDownloads({ store, folder: downloadsFolder, shell, notify: (d) => send("browse:download", d) });
   downloads.attach(partitionSession);
   adblock.attach(partitionSession, {
@@ -108,7 +140,8 @@ function createBrowse({ host, partition, folder, downloadsFolder, reservedPorts,
     host, session: partitionSession, gate, store, adblock,
     notify: (payload) => send(payload.event ? "browse:event" : "browse:state", payload),
     onShortcut: (name, tabId) => send("browse:shortcut", { name, tabId }),
-    onTabContents: (tab, wc) => { audio.attach(wc); if (passwordBackend) passwords.attach(tab, wc); },
+    onTabContents: (tab, wc) => { audio.attach(wc); watchMedia(tab, wc); if (passwordBackend) passwords.attach(tab, wc); },
+    capturing: (tabId) => media.capturing(tabId),
   });
 
   function ensureRestored() {
@@ -119,9 +152,15 @@ function createBrowse({ host, partition, folder, downloadsFolder, reservedPorts,
 
   function setSite(url, key, value) {
     if (typeof key !== "string" || !SITE_KEYS.test(key)) return { ok: false };
-    const kind = key.startsWith("permission:") ? "permission" : key;
+    const kind = SITE_VALUES[key] ? key : key.startsWith("permission:") ? "permission" : key;
     if (value !== null && !SITE_VALUES[kind].includes(value)) return { ok: false };
     return { ok: store.setSite(url, key, value) };
+  }
+
+  // Every site's remembered permission answers, for Browser settings.
+  function permissionList() {
+    return store.allSiteSettings().filter((r) => SITE_KEYS.test(r.key) && r.key.startsWith("permission:"))
+      .map((r) => ({ origin: r.origin, setting: r.key.slice("permission:".length), value: r.value }));
   }
 
   return {
@@ -132,6 +171,10 @@ function createBrowse({ host, partition, folder, downloadsFolder, reservedPorts,
       return { ok: !!resolve };
     },
     setSite,
+    permissionList,
+    media,
+    answerScreen: (requestId, sourceId, audioOn) => media.answerScreen(requestId, sourceId, audioOn),
+    stopCapture: (tabId) => media.stop(tabId),
     home() {
       let saved = null;
       try { saved = JSON.parse(store.getMeta("home") || "null"); } catch { saved = null; }
@@ -148,6 +191,7 @@ function createBrowse({ host, partition, folder, downloadsFolder, reservedPorts,
     close() {
       clearInterval(listTimer); clearTimeout(firstRefresh);
       passwords.close();
+      media.close();
       for (const resolve of pending.values()) resolve({ answer: "block", remember: false });
       tabs.closeAll();
       try { store.close(); } catch { /* already closed */ }

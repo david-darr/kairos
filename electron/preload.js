@@ -133,7 +133,9 @@ contextBridge.exposeInMainWorld("jarvis", {
       clearPinThumb: invoke("browse:pin-thumb-clear"), duplicate: invoke("browse:duplicate"),
       site: invoke("browse:site"), setSite: invoke("browse:site-set"), clearSite: invoke("browse:site-clear"),
       searchEngines: invoke("browse:search-engines"), setSearchEngine: invoke("browse:search-engine"), adblockStats: invoke("browse:adblock-stats"),
-      answerPermission: send("browse:permission-answer"),
+      answerPermission: send("browse:permission-answer"), permissions: invoke("browse:permissions"),
+      // Screen sharing picker and the in-use indicator's Stop.
+      answerScreen: send("browse:screen-answer"), stopCapture: invoke("browse:capture-stop"), onScreenRequest: subscribe("browse:screen-request"),
       downloads: invoke("browse:downloads"), download: invoke("browse:download"),
       // Password keeper: answers and actions only; no password ever comes back.
       answerPassword: invoke("browse:password-answer"), fillPassword: invoke("browse:password-fill"),

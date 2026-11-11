@@ -67,7 +67,9 @@ function hexColor(value) {
   return null;
 }
 
-function createTabs({ host, session: partitionSession, gate, store, adblock, notify = () => {}, onShortcut = () => {}, onTabContents = () => {} }) {
+// `capturing(tabId)` lists what a tab is using now (microphone, camera,
+// screen; browser-media.js), shown on the tab.
+function createTabs({ host, session: partitionSession, gate, store, adblock, notify = () => {}, onShortcut = () => {}, onTabContents = () => {}, capturing = () => [] }) {
   const tabs = new Map();
   let order = [];
   let activeId = null;
@@ -97,6 +99,7 @@ function createTabs({ host, session: partitionSession, gate, store, adblock, not
       // Chameleon (Browse's look): the site's declared theme colour, else one
       // sampled from the top of the page.
       color: tab.themeColor || tab.sampledColor || null,
+      capturing: capturing(tab.id),
     };
   }
 
@@ -299,11 +302,12 @@ function createTabs({ host, session: partitionSession, gate, store, adblock, not
   }
 
   // Keep at most LIVE_LIMIT views besides the active one; the least
-  // recently used, silent ones go first.
+  // recently used, silent ones go first. A tab using the microphone, camera
+  // or screen (a call) is never discarded.
   function discardExtra() {
     const live = order.map((id) => tabs.get(id)).filter((t) => t.view && t.id !== activeId);
     if (live.length <= LIVE_LIMIT) return;
-    live.filter((t) => !t.view.webContents.isCurrentlyAudible()).sort((a, b) => a.lastActive - b.lastActive)
+    live.filter((t) => !t.view.webContents.isCurrentlyAudible() && !capturing(t.id).length).sort((a, b) => a.lastActive - b.lastActive)
       .slice(0, live.length - LIVE_LIMIT).forEach(destroyView);
   }
 
@@ -468,6 +472,8 @@ function createTabs({ host, session: partitionSession, gate, store, adblock, not
     setBounds(rect) { bounds = { x: rect.x || 0, y: rect.y || 0, width: rect.width || 0, height: rect.height || 0 }; layout(); },
     setVisible(on) { visible = !!on; layout(); },
     list: () => ({ tabs: order.map((id) => meta(tabs.get(id))), activeId }),
+    // Re-send the tab list (a tab started or stopped using a device).
+    touch: () => emit(),
     webContentsOf: wcOf,
     closeAll() { popups.closeAll(); for (const id of [...order]) destroyView(tabs.get(id)); tabs.clear(); order = []; activeId = null; clearTimeout(saveTimer); },
     popups,
