@@ -150,11 +150,13 @@ app.whenReady().then(async () => {
     assert.equal(before, 'claude-sonnet-5-5', 'opening Suggest models changed nothing');
     await shot('suggest-models-desktop');
     await js("[...document.querySelectorAll('.bots-report-dialog[open] button')].find(b => b.textContent === 'Apply these models').click(); true");
-    await waitFor(`/Updated 3 bots/.test(${dialogText})`);
+    await waitFor(`/Updated 1 bot\./.test(${dialogText})`);
     const after = Object.fromEntries((await api('/api/agents')).map(a => [a.name, a.model_override]));
     assert.equal(after.Producer, 'claude-opus-5-5');
     assert.equal(after.Researcher, 'claude-sonnet-5-5');
-    checks.push('Suggest models proposes Opus for the Producer, changes nothing until Apply, then applies the picks');
+    // The Bots welcome may open over the dialog on a fresh profile once the bots changed; it is not ours.
+    await js("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Not now')?.click(); true");
+    checks.push('Suggest models proposes Opus for the Producer, changes nothing until Apply, then changes only the bot whose model differs');
     await closeDialog();
 
     // 6. Phone width: the report fits, with no sideways scroll.
