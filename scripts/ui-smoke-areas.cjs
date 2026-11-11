@@ -28,7 +28,7 @@ const SHARED = [
 
 const AREAS = [
   { name: 'Browse', runs: [['ui-smoke', '--browse-only']],
-    files: [/^static\/js\/(views\/browse|browseHome|browseLook|browserPane)\.js$/, /^static\/css\/browse\.css$/, /^scripts\/(browse-ui-checks\.cjs|fixtures\/browse-)/] },
+    files: [/^static\/js\/(views\/browse|browseHome|browseLook|browserPane)\.js$/, /^static\/css\/browse\.css$/, /^scripts\/(browse-(ui|media)-checks\.cjs|fixtures\/browse-)/] },
   { name: 'Bots', runs: [['ui-smoke', '--bots-only']],
     files: [/^static\/js\/(bots|botStatus|botNotifications|views\/bots)/, /^static\/css\/bots/, /^scripts\/(bots-.+-checks\.cjs|fixtures\/bots-)/] },
   { name: 'Agents (bot conversations, call, village)', runs: [['ui-smoke', '--agents-call-only'], ['ui-smoke', '--agents-ecosystem-only'], ['ui-smoke', '--agents-messenger-only'], ['ui-smoke', '--agents-layout-only'], ['ui-smoke', '--agents-birth-only'], ['ui-smoke', '--agents-profile-only'], ['ui-smoke', '--agents-phone-only']],

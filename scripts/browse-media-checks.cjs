@@ -43,12 +43,15 @@ const CALL = `<!doctype html><title>Call</title><h1>call</h1><script>
   window.share = () => navigator.mediaDevices.getDisplayMedia({ video: true, audio: true }).then(use).catch((e) => e.name);
   window.state = (name) => navigator.permissions.query({ name }).then((s) => s.state).catch((e) => 'error:' + e.name);
   window.live = () => window.streams.flatMap((s) => s.getTracks()).filter((t) => t.readyState === 'live').map((t) => t.kind).sort().join('+');
-  window.ended = 0;
-  window.watchEnded = () => window.streams.flatMap((s) => s.getTracks()).forEach((t) => t.addEventListener('ended', () => { window.ended += 1; }));
+  // A stream the page keeps to itself, handed to nothing Kairos could watch.
+  window.hidden = () => navigator.mediaDevices.getUserMedia({ audio: true }).then((s) => { window.kept = s; return 'kept'; }).catch((e) => e.name);
+  window.keptLive = () => !!(window.kept && window.kept.getTracks().some((t) => t.readyState === 'live'));
 </script>`;
 const server = http.createServer((req, res) => {
   res.setHeader('Content-Type', 'text/html');
   if (req.url.startsWith('/call')) return res.end(CALL);
+  // A link that answers 204: the browser stays on the page that followed it.
+  if (req.url === '/nocontent') { res.statusCode = 204; return res.end(); }
   // A page embedding another site's call widget, allowed the camera by the page.
   if (req.url === '/embed') return res.end(`<!doctype html><title>Embed</title><iframe id="w" allow="camera; microphone" src="${OTHER}/call"></iframe>`);
   res.end('<!doctype html><title>Home</title><p>home</p>');
@@ -150,26 +153,88 @@ app.whenReady().then(async () => {
     assert.equal(browse.store.getSite(SITE, 'permission:microphone'), null);
   });
 
-  await check('in use: Stop ends the tracks the page holds and clears the mark', async () => {
-    const { result } = await ask('mic()', ['allow', false]);
-    assert.equal(result, 'audio');
-    await run('watchEnded()');
+  // Resolves once a new page commits in the tab.
+  const committed = () => new Promise((resolve) => { const t = setTimeout(() => resolve(false), 10000); wc.once('did-navigate', () => { clearTimeout(t); resolve(true); }); });
+
+  await check('review 2: the mark is main\'s own; a page ending one stream while keeping another cannot clear it', async () => {
+    const { result } = await ask('hidden()', ['allow', false]);
+    assert.equal(result, 'kept', 'a stream the page keeps to itself');
+    assert.equal((await ask('mic()', null)).result, 'audio', 'a second stream, used in a call');
     assert.deepEqual(capturing(id), ['microphone']);
     assert.ok(sent.some((s) => s.channel === 'browse:state' && (s.payload.tabs || []).some((t) => t.id === id && (t.capturing || []).includes('microphone'))), 'the app was told');
-    const stopped = await call('browse:capture-stop', appSender, id);
-    assert.equal(stopped.ok, true);
-    assert.deepEqual(capturing(id), []);
-    assert.equal(await run('live()'), '', 'the page has no live track left');
-    assert.ok(await run('window.ended') >= 1, 'the page heard "ended", as from its own Stop');
-    assert.deepEqual(await call('browse:capture-stop', pageSender, id), { ok: false }, 'only the app can press Stop');
+    await run("streams.forEach((s) => s.getTracks().forEach((t) => t.stop()))");
+    await wait(2500);
+    assert.equal(await run('keptLive()'), true, 'the kept stream still records');
+    assert.deepEqual(capturing(id), ['microphone'], 'so the mark stays');
   });
 
-  await check('the mark clears by itself when the page ends its own tracks', async () => {
-    const { result } = await ask('cam()', ['allow', false]);
-    assert.equal(result, 'video');
-    assert.deepEqual(capturing(id), ['camera']);
-    await run("streams.forEach((s) => s.getTracks().forEach((t) => t.stop()))");
-    assert.ok(await until(() => capturing(id).length === 0, 6000), 'cleared within a few seconds');
+  await check('review 2: Stop reloads the page, which ends every track it held, and the mark clears when the new page commits', async () => {
+    assert.deepEqual(await call('browse:capture-stop', pageSender, id), { ok: false }, 'only the app can press Stop');
+    const done = committed();
+    const stopped = await call('browse:capture-stop', appSender, id);
+    assert.deepEqual(stopped, { ok: true, reloaded: true });
+    assert.ok(await done, 'the page reloaded');
+    await loaded(wc);
+    assert.deepEqual(capturing(id), []);
+    assert.equal(await run('keptLive()'), false, 'nothing of the old page records');
+    assert.ok((await ask('mic()', ['block', false])).prompt, 'Allow once ended with the page');
+  });
+
+  await check('review 3: a navigation that never commits (204) keeps the page, its tracks and its mark', async () => {
+    assert.equal((await ask('mic()', ['allow', false])).result, 'audio');
+    assert.deepEqual(capturing(id), ['microphone']);
+    const from = sent.length;
+    await call('browse:navigate', appSender, id, `${SITE}/nocontent`);
+    await wait(1500); await loaded(wc);
+    assert.match(wc.getURL(), /\/call$/, 'still on the call page');
+    assert.equal(await run('live()'), 'audio', 'its track still records');
+    assert.deepEqual(capturing(id), ['microphone'], 'so the mark stays');
+    assert.equal(sent.slice(from).filter((s) => s.channel === 'browse:permission').length, 0);
+    assert.equal((await ask('mic()', null)).prompt, null, 'and its Allow once still holds');
+    const done = committed();
+    await call('browse:capture-stop', appSender, id);
+    await done; await loaded(wc);
+  });
+
+  await check('review 4: a prompt open when the page reloads is withdrawn; a late answer reaches nobody', async () => {
+    const from = sent.length;
+    run('mic()').catch(() => {});
+    const prompt = await nextSent('browse:permission', from);
+    assert.ok(prompt);
+    const done = committed();
+    wc.reload();
+    assert.ok(await done); await loaded(wc);
+    assert.ok(await until(() => sent.slice(from).some((s) => s.channel === 'browse:event' && s.payload.event === 'permission-closed' && s.payload.requestId === prompt.payload.requestId)), 'the app was told to close it');
+    emit('browse:permission-answer', appSender, prompt.payload.requestId, 'allow', true);
+    await wait(300);
+    assert.equal(browse.store.getSite(SITE, 'permission:microphone'), null, 'nothing remembered');
+    assert.deepEqual(capturing(id), []);
+    const fresh = await ask('mic()', ['block', false]);
+    assert.ok(fresh.prompt, 'the new page is asked itself');
+    assert.equal(fresh.result, 'NotAllowedError');
+  });
+
+  await check('review 1: removing an Always allow ends what an open page holds (it reloads)', async () => {
+    const first = await ask('mic()', ['allow', true]);
+    assert.equal(first.result, 'audio');
+    assert.equal(browse.store.getSite(SITE, 'permission:microphone'), 'allow');
+    assert.deepEqual(capturing(id), ['microphone']);
+    const done = committed();
+    assert.deepEqual(await call('browse:site-set', appSender, `${SITE}/`, 'permission:microphone', null), { ok: true, reloaded: 1 });
+    assert.ok(await done, 'the page reloaded'); await loaded(wc);
+    assert.deepEqual(capturing(id), []);
+    assert.equal(await run('live()'), '');
+    const again = await ask('mic()', ['block', false]);
+    assert.ok(again.prompt, 'asked again');
+  });
+
+  await check('review 1: blocking a site that was given the camera with Allow once ends it too', async () => {
+    assert.equal((await ask('cam()', ['allow', false])).result, 'video');
+    const done = committed();
+    assert.deepEqual(await call('browse:site-set', appSender, `${SITE}/`, 'permission:camera', 'block'), { ok: true, reloaded: 1 });
+    assert.ok(await done); await loaded(wc);
+    assert.equal((await ask('cam()', null)).result, 'NotAllowedError');
+    await call('browse:site-set', appSender, `${SITE}/`, 'permission:camera', null);
   });
 
   await check('Block is remembered: no prompt, denied; the site then reads as blocked', async () => {
@@ -196,7 +261,9 @@ app.whenReady().then(async () => {
     const kept = await ask('cam()', null);
     assert.equal(kept.prompt, null, 'Always allow: no prompt after a reload');
     assert.equal(kept.result, 'video');
+    const done = committed();
     await call('browse:capture-stop', appSender, id);
+    await done; await loaded(wc);
   });
 
   await check('screen sharing: getDisplayMedia goes to the Kairos picker; Cancel shares nothing', async () => {
@@ -229,8 +296,9 @@ app.whenReady().then(async () => {
     emit('browse:screen-answer', appSender, req.payload.requestId, screens[0].id, false);
     assert.match(await result, /video/, 'the page got a video track');
     assert.deepEqual(capturing(id), ['screen']);
-    const stopped = await call('browse:capture-stop', appSender, id);
-    assert.equal(stopped.ok, true);
+    const done = committed();
+    assert.deepEqual(await call('browse:capture-stop', appSender, id), { ok: true, reloaded: true });
+    assert.ok(await done); await loaded(wc);
     assert.deepEqual(capturing(id), []);
     assert.equal(await run('live()'), '');
   });
@@ -248,8 +316,10 @@ app.whenReady().then(async () => {
     const { result } = await ask('cam()', null);
     assert.equal(result, 'video');
     assert.deepEqual(capturing(id), ['camera']);
+    const done = committed();
     await call('browse:navigate', appSender, id, `${SITE}/home`);
-    assert.ok(await until(() => capturing(id).length === 0, 5000));
+    assert.ok(await done);
+    assert.deepEqual(capturing(id), [], 'cleared when the new page committed');
   });
 
   await check('another site in a frame: the prompt names both, has no Always, and is not remembered', async () => {
@@ -285,5 +355,5 @@ app.whenReady().then(async () => {
 
   browse.close();
   if (failures.length) finish(1, 'FAIL\n' + failures.map((f) => ' - ' + f).join('\n'));
-  else finish(0, `PASS: ${checksRun} checks. Browse media: the state reads not blocked before an answer, prompts name the site (and both sites for a frame), Allow once for the page, Always and Block remembered and removable, only the app answers, the screen picker shares only an offered source, the in-use mark with Stop and its own clearing, navigation ends it, the app window unchanged.`);
+  else finish(0, `PASS: ${checksRun} checks. Browse media: the state reads not blocked before an answer, prompts name the site (and both sites for a frame), Allow once for the page, Always and Block remembered and removable, only the app answers, the screen picker shares only an offered source, the in-use mark kept by main until a new page commits (not by a 204, not by the page), Stop and revoking reload the page, prompts withdrawn on reload, the app window unchanged.`);
 });

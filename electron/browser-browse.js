@@ -96,14 +96,15 @@ function createBrowse({ host, partition, folder, downloadsFolder, reservedPorts,
     const requestId = nextRequest++;
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
+        if (!pending.has(requestId)) return;
         pending.delete(requestId);
         send("browse:event", { event: "permission-closed", requestId });
         resolve({ answer: "block", remember: false });
       }, PERMISSION_TIMEOUT_MS);
-      pending.set(requestId, (reply) => {
+      pending.set(requestId, { tabId: tab.id, resolve: (reply) => {
         clearTimeout(timer); pending.delete(requestId);
         resolve(canRemember ? reply : { answer: reply.answer, remember: false });
-      });
+      } });
       send("browse:permission", { requestId, tabId: tab.id, origin, setting, embedded, canRemember });
     });
   }
@@ -115,16 +116,25 @@ function createBrowse({ host, partition, folder, downloadsFolder, reservedPorts,
     store, tabFor, send, log, desktopCapturer, systemPreferences,
     fromFrame: (frame) => webContentsModule.fromFrame(frame),
     touch: () => tabs && tabs.touch(),
+    reloadTab: (tabId) => { const wc = tabs && tabs.webContentsOf(tabId); if (!wc) return false; wc.reload(); return true; },
   });
   media.attach(partitionSession);
   const permissions = createPermissions({ store, ask, isTab: (wc) => !!tabFor(wc), beforeGrant: media.beforeGrant, pickScreen: media.pickScreen,
     speakerSelection: () => audio.allowSpeakerSelection() });
   permissions.attach(partitionSession);
-  // A page's Allow once answers and in-use marks end when it navigates away or closes.
+  // A page's answers, open prompts, picker and in-use mark end when a new
+  // page commits in the tab (did-navigate: a navigation that never commits,
+  // such as a 204, leaves the page and what it holds in place) or the tab
+  // closes. Prompts still open for the old page are withdrawn, so an answer
+  // can never reach the page that replaced it.
+  function withdrawPrompts(tabId) {
+    for (const [id, p] of [...pending]) if (p.tabId === tabId) { send("browse:event", { event: "permission-closed", requestId: id }); p.resolve({ answer: "block", remember: false }); }
+  }
   function watchMedia(tab, wc) {
-    const end = () => { permissions.forget(wc.id); media.forgetPick(wc.id); media.reset(tab.id); };
-    wc.on("did-start-navigation", (details) => { if (details.isMainFrame && !details.isSameDocument) end(); });
-    wc.once("destroyed", end);
+    const id = wc.id;
+    const ended = () => { media.forgetPick(id); media.reset(tab.id); withdrawPrompts(tab.id); };
+    wc.on("did-navigate", () => { permissions.navigated(id); ended(); });
+    wc.once("destroyed", () => { permissions.forget(id); ended(); });
   }
   const downloads = createDownloads({ store, folder: downloadsFolder, shell, notify: (d) => send("browse:download", d) });
   downloads.attach(partitionSession);
@@ -154,7 +164,30 @@ function createBrowse({ host, partition, folder, downloadsFolder, reservedPorts,
     if (typeof key !== "string" || !SITE_KEYS.test(key)) return { ok: false };
     const kind = SITE_VALUES[key] ? key : key.startsWith("permission:") ? "permission" : key;
     if (value !== null && !SITE_VALUES[kind].includes(value)) return { ok: false };
-    return { ok: store.setSite(url, key, value) };
+    const ok = store.setSite(url, key, value);
+    const ended = ok && key.startsWith("permission:") && value !== "allow" ? endGrants(url, key.slice("permission:".length)) : 0;
+    return ended ? { ok, reloaded: ended } : { ok };
+  }
+
+  // A site's answer was removed or turned to Block: whatever its open pages
+  // were given ends now. Allow once answers for it are dropped, and a page
+  // that holds it (a call's microphone, a shared screen, a location watch)
+  // is reloaded, the one way to be sure it lets go. Returns how many reloaded.
+  function endGrants(url, setting) {
+    let origin = null;
+    try { origin = new URL(url).origin; } catch { return 0; }
+    let reloaded = 0;
+    for (const t of tabs.list().tabs) {
+      const wc = tabs.webContentsOf(t.id);
+      if (!wc) continue;
+      let here = null;
+      try { here = new URL(wc.getURL()).origin; } catch { here = null; }
+      if (here !== origin) continue;
+      const held = permissions.wasGranted(wc.id, setting) || media.capturing(t.id).includes(setting);
+      permissions.revoke(wc.id, setting);
+      if (held) { wc.reload(); reloaded += 1; }
+    }
+    return reloaded;
   }
 
   // Every site's remembered permission answers, for Browser settings.
@@ -166,9 +199,9 @@ function createBrowse({ host, partition, folder, downloadsFolder, reservedPorts,
   return {
     tabs, store, gate, ensureRestored,
     answerPermission(requestId, answer, remember) {
-      const resolve = pending.get(requestId);
-      if (resolve) resolve({ answer: answer === "allow" ? "allow" : "block", remember: !!remember });
-      return { ok: !!resolve };
+      const p = pending.get(requestId);
+      if (p) p.resolve({ answer: answer === "allow" ? "allow" : "block", remember: !!remember });
+      return { ok: !!p };
     },
     setSite,
     permissionList,
@@ -192,7 +225,7 @@ function createBrowse({ host, partition, folder, downloadsFolder, reservedPorts,
       clearInterval(listTimer); clearTimeout(firstRefresh);
       passwords.close();
       media.close();
-      for (const resolve of pending.values()) resolve({ answer: "block", remember: false });
+      for (const p of [...pending.values()]) p.resolve({ answer: "block", remember: false });
       tabs.closeAll();
       try { store.close(); } catch { /* already closed */ }
     },

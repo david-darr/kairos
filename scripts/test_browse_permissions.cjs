@@ -82,7 +82,7 @@ function broker(store, { tabs = null, answers = [] } = {}) {
     assert.equal(await perms.decide(wc, 'media', { mediaTypes: ['audio'], requestingUrl: MEET, isMainFrame: true }), true);
     assert.equal(asked.length, 1, 'same page: no second prompt');
     assert.equal(perms.check(wc, 'media', 'https://meet.google.com', { mediaType: 'audio', isMainFrame: true }), true);
-    perms.forget(wc.id);
+    perms.navigated(wc.id);
     assert.equal(await perms.decide(wc, 'media', { mediaTypes: ['audio'], requestingUrl: MEET, isMainFrame: true }), false, 'asks again after a navigation (and this time the queue says block)');
     assert.equal(asked.length, 2);
   });
@@ -176,6 +176,44 @@ function broker(store, { tabs = null, answers = [] } = {}) {
     store.setSite(MEET, 'permission:screen', null);
   });
 
+  await test('review 4: an answer that arrives after the page changed is thrown away (nothing granted, remembered or kept for the new page)', async () => {
+    let release;
+    const perms = createPermissions({ store, ask: () => new Promise((r) => { release = r; }), isTab: () => true });
+    const wc = page('https://meet.google.com/reload-race');
+    const decided = perms.decide(wc, 'media', { mediaTypes: ['audio'], requestingUrl: wc.url, isMainFrame: true });
+    await new Promise((r) => setImmediate(r));
+    perms.navigated(wc.id);
+    release({ answer: 'allow', remember: true });
+    assert.equal(await decided, false);
+    assert.equal(store.getSite(wc.url, 'permission:microphone'), null, 'not remembered');
+    assert.equal(perms.wasGranted(wc.id, 'microphone'), false);
+    let asked = 0;
+    const again = createPermissions({ store, ask: () => { asked += 1; return { answer: 'block' }; } });
+    assert.equal(await again.decide(wc, 'media', { mediaTypes: ['audio'], requestingUrl: wc.url, isMainFrame: true }), false);
+    assert.equal(asked, 1, 'the new page is asked itself');
+  });
+
+  await test('review 3: answers last until a new page commits; a navigation that never commits (a 204) keeps them', async () => {
+    const perms = createPermissions({ store, ask: () => ({ answer: 'allow', remember: false }) });
+    const wc = page('https://meet.google.com/stay');
+    assert.equal(await perms.decide(wc, 'media', { mediaTypes: ['audio'], requestingUrl: wc.url, isMainFrame: true }), true);
+    assert.equal(perms.wasGranted(wc.id, 'microphone'), true);
+    // No navigated() call: the 204 never committed, so the page and its answer stay.
+    assert.equal(perms.check(wc, 'media', 'https://meet.google.com', { mediaType: 'audio', isMainFrame: true }), true);
+    assert.equal(perms.wasGranted(wc.id, 'microphone'), true);
+    perms.navigated(wc.id);
+    assert.equal(perms.wasGranted(wc.id, 'microphone'), false);
+  });
+
+  await test('review 1: revoking drops Allow once answers for the setting; wasGranted names pages that hold it', async () => {
+    const perms = createPermissions({ store, ask: () => ({ answer: 'allow', remember: false }) });
+    const wc = page('https://meet.google.com/revoke');
+    await perms.decide(wc, 'media', { mediaTypes: ['audio', 'video'], requestingUrl: wc.url, isMainFrame: true });
+    assert.equal(perms.wasGranted(wc.id, 'camera'), true);
+    perms.revoke(wc.id, 'camera');
+    assert.equal(perms.wasGranted(wc.id, 'camera'), true, 'still held until the page reloads');
+    assert.equal(perms.check(wc, 'media', 'https://meet.google.com', { mediaType: 'audio', isMainFrame: true }), true, 'the microphone answer is untouched');
+  });
   // -- screen sharing and the OS switch (browser-media.js), with a stubbed capturer
   const thumb = { isEmpty: () => false, toJPEG: () => Buffer.from('jpeg') };
   const SOURCES = [{ id: 'screen:0:0', name: 'Entire screen', thumbnail: thumb }, { id: 'window:42:0', name: 'Notes', thumbnail: thumb }];
@@ -184,7 +222,7 @@ function broker(store, { tabs = null, answers = [] } = {}) {
     const wc = { id: 99, isDestroyed: () => false, getURL: () => MEET };
     const frame = { url: MEET, executeJavaScript: async () => true };
     const media = createMedia({
-      store, platform, log: { error() {} }, pickTimeoutMs: 2000, pollMs: 60000,
+      store, platform, log: { error() {} }, pickTimeoutMs: 2000,
       tabFor: (w) => (tabbed && w === wc ? { id: 7 } : null),
       send: (channel, payload) => sent.push({ channel, payload }),
       desktopCapturer: { getSources: async () => SOURCES },
@@ -305,6 +343,9 @@ function broker(store, { tabs = null, answers = [] } = {}) {
     assert.deepEqual(ev.payload.kinds, ['microphone']);
     assert.equal(ev.payload.platform, 'win32');
     assert.deepEqual(h.media.capturing(7), ['microphone', 'camera'], 'the tab is marked as in use');
+    h.media.reset(7);
+    await h.media.beforeGrant({ webContents: h.wc, setting: 'camera', details: {}, current: () => false });
+    assert.deepEqual(h.media.capturing(7), [], 'review 4: no mark for a page that is already gone');
     h.media.close();
 
     h = mediaHarness({ platform: 'darwin', status: { camera: 'not-determined' } });

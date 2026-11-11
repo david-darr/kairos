@@ -69,12 +69,10 @@ function osBlockedText(kinds, platform) {
   }
   return `Your computer is keeping Kairos from your ${what}. Allow it in your system's privacy settings, then reload this page.`;
 }
+// "your microphone and camera", "your screen".
 const usingText = (kinds) => {
-  const devices = kinds.filter((k) => k !== "screen").map((k) => DEVICE_NAMES[k]);
-  const parts = [];
-  if (devices.length) parts.push(`using your ${devices.join(" and ")}`);
-  if (kinds.includes("screen")) parts.push("sharing your screen");
-  return parts.join(" and ");
+  const list = kinds.map((k) => DEVICE_NAMES[k] || k);
+  return "your " + (list.length > 1 ? `${list.slice(0, -1).join(", ")} and ${list.at(-1)}` : list[0]);
 };
 
 const hostOf = (url) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } };
@@ -114,9 +112,8 @@ export async function render(container) {
   // Browse's own look (browseLook.js), laid over Kairos's appearance while Browse shows.
   let look = loadLook(), lookOpen = false;
   // Screen sharing: the site's request while the picker is open, the source
-  // picked so far and whether the computer's sound goes too. `stopNote` is
-  // the in-use strip's message after a Stop that could not end everything.
-  let screenReq = null, screenPick = null, screenAudio = false, stopNote = null;
+  // picked so far and whether the computer's sound goes too.
+  let screenReq = null, screenPick = null, screenAudio = false;
   const cleanups = [];
   const active = () => tabs.find((t) => t.id === activeId) || null;
 
@@ -438,7 +435,7 @@ export async function render(container) {
         t.url ? favicon(t.favicon, t.title || hostOf(t.url)) : el("span", { class: "browse-favicon browse-favicon-letter", "aria-hidden": "true", text: "+" }),
         el("span", { class: "browse-tab-title", text: t.title || hostOf(t.url) || "New tab" }),
         t.audible || t.muted ? el("span", { class: "browse-tab-audio", text: t.muted ? "muted" : "♪" }) : null,
-        t.capturing && t.capturing.length ? el("span", { class: "browse-tab-live", role: "img", title: `This tab is ${usingText(t.capturing)}`, "aria-label": `This tab is ${usingText(t.capturing)}` }) : null,
+        t.capturing && t.capturing.length ? el("span", { class: "browse-tab-live", role: "img", title: `This tab has ${usingText(t.capturing)}`, "aria-label": `This tab has ${usingText(t.capturing)}` }) : null,
       ]),
       el("button", { type: "button", class: "browse-icon-btn browse-tab-close", "aria-label": `Close ${t.title || "tab"}`, text: "×", onclick: () => b.close(t.id) }),
     ]);
@@ -578,24 +575,19 @@ export async function render(container) {
         canRemember ? el("button", { type: "button", class: "btn primary", text: "Always allow for this site", onclick: () => answer("allow", true) }) : null,
       ].filter(Boolean)));
     }
-    // In use: the page on screen has the microphone, camera or screen.
+    // In use: the page on screen was given the microphone, camera or screen.
+    // Kairos can't see when a page lets go, so the strip stays until the page
+    // is gone; Stop reloads it, the one way to be sure it lets go.
     const live = active();
     if (live && live.url && live.capturing && live.capturing.length && !page) {
-      const stopIt = async () => {
-        const result = await b.stopCapture(live.id).catch(() => null);
-        stopNote = result && result.ok ? null : { tabId: live.id, text: "Kairos couldn't end all of it from here. Reload the page to be sure it stops." };
-        draw();
-      };
-      const note = stopNote && stopNote.tabId === live.id ? stopNote.text : "";
       parts.push(el("div", { class: "browse-strip browse-capture", role: "status", "aria-label": "In use" }, [
         el("span", { class: "browse-capture-text" }, [
           el("span", { class: "browse-capture-dot", "aria-hidden": "true" }),
-          el("span", { text: `${hostOf(live.url) || "This site"} is ${usingText(live.capturing)}.${note ? " " + note : ""}` }),
+          el("span", { text: `${hostOf(live.url) || "This site"} has ${usingText(live.capturing)} on this page. Stop reloads the page to end it.` }),
         ]),
-        note ? el("button", { type: "button", class: "btn", text: "Reload page", onclick: () => { stopNote = null; b.reload(live.id); draw(); } }) : null,
-        el("button", { type: "button", class: "btn primary", text: live.capturing.length === 1 && live.capturing[0] === "screen" ? "Stop sharing" : "Stop", onclick: stopIt }),
-      ].filter(Boolean)));
-    } else if (stopNote && (!live || stopNote.tabId !== live.id || !(live.capturing || []).length)) stopNote = null;
+        el("button", { type: "button", class: "btn primary", text: "Stop", onclick: async () => { await b.stopCapture(live.id).catch(() => null); draw(); } }),
+      ]));
+    }
     // Save a sign-in: only on the person's click.
     if (pwOffer && pwOffer.tabId === activeId) {
       const o = pwOffer;
@@ -723,7 +715,7 @@ export async function render(container) {
         el("button", { type: "button", class: "btn quiet", text: "Remove", "aria-label": `Remove ${SETTING_NAMES[r.setting] || r.setting} for ${hostOf(r.origin) || r.origin}`,
           onclick: async () => { await b.setSite(r.origin + "/", `permission:${r.setting}`, null); drawPermissions(); } }),
       ]))) : el("p", { class: "browse-list-meta", text: "No site has a remembered answer. Sites ask again each time until you choose Always allow or Block." }),
-      el("p", { class: "browse-list-meta", text: "Removing one means the site asks again next time." }),
+      el("p", { class: "browse-list-meta", text: "Removing one means the site asks again next time. A page of that site that is using it now reloads." }),
     ]));
   }
 

@@ -76,33 +76,56 @@ function remember(store, url, setting, answer) {
 // { answer: 'allow' | 'block', remember: boolean }. It is the UI's prompt;
 // no answer means block. `isTab(webContents)` says whether the contents are
 // a Browse tab (the side pane and sign-in pop-ups share the profile but
-// never get a prompt). `beforeGrant({ webContents, setting, details })` runs
-// once an allow is decided, before the page hears it: the OS check and the
-// in-use indicator (browser-media.js).
+// never get a prompt). `beforeGrant({ webContents, setting, details,
+// current })` runs once an allow is decided, before the page hears it: the
+// OS check and the in-use mark (browser-media.js); `current()` says whether
+// the page that asked is still the one in the tab.
+// `pickScreen({ webContents, details, current })` is the screen picker
+// (browser-media.js): true once the person picked a screen or window.
 // `speakerSelection()` says whether pages may pick an audio output, which
 // Browse's own audio routing needs while a device is chosen (browser-audio.js).
-// `pickScreen({ webContents, details })` is the screen picker
-// (browser-media.js): true once the person picked a screen or window.
+//
+// Every answer belongs to one document. The tab's document generation goes
+// up when a new page commits in it (navigated(), wired to did-navigate, so a
+// navigation that never commits, such as a 204, keeps the page and its
+// answers). An answer that arrives after the page changed is thrown away:
+// the new page never inherits a prompt meant for the old one.
 function createPermissions({ store, ask, isTab = () => true, beforeGrant = async () => {}, pickScreen = async () => true, speakerSelection = () => false }) {
-  // Allow once: per tab, per page. webContents id -> Set of
-  // "<page origin>|<frame origin>|<setting>".
-  const once = new Map();
-  const onceKey = (top, requester, k) => `${top}|${requester}|${k}`;
-  function hasOnce(wc, top, requester, setting) {
-    const set = once.get(wc.id);
-    return !!set && keysOf(setting).every((k) => set.has(onceKey(top, requester, k)));
+  // webContents id -> { gen, once: Set("<frame origin>|<setting>"), granted: Set(setting) }
+  const docs = new Map();
+  function doc(wc) {
+    if (!docs.has(wc.id)) docs.set(wc.id, { gen: 0, once: new Set(), granted: new Set() });
+    return docs.get(wc.id);
   }
-  function grantOnce(wc, top, requester, setting) {
-    if (!once.has(wc.id)) once.set(wc.id, new Set());
-    for (const k of keysOf(setting)) once.get(wc.id).add(onceKey(top, requester, k));
+  const hasOnce = (wc, requester, setting) => keysOf(setting).every((k) => doc(wc).once.has(`${requester}|${k}`));
+  function grantOnce(wc, requester, setting) { for (const k of keysOf(setting)) doc(wc).once.add(`${requester}|${k}`); }
+  // A new page committed in the tab (or it closed): its answers end.
+  function navigated(webContentsId) {
+    const d = docs.get(webContentsId);
+    docs.set(webContentsId, { gen: d ? d.gen + 1 : 1, once: new Set(), granted: new Set() });
   }
-  // The page navigated or the tab closed: its Allow once answers end.
-  function forget(webContentsId) { once.delete(webContentsId); }
+  function forget(webContentsId) { docs.delete(webContentsId); }
+  // Whether the page now in the tab was given this setting (by a prompt or a
+  // remembered allow), so revoking it can end what it holds.
+  const wasGranted = (webContentsId, setting) => {
+    const d = docs.get(webContentsId);
+    return !!d && keysOf(setting).some((k) => d.granted.has(k));
+  };
+  // Removing or blocking a site's answer: Allow once answers for it end too.
+  function revoke(webContentsId, setting) {
+    const d = docs.get(webContentsId);
+    if (!d) return;
+    for (const k of keysOf(setting)) for (const key of [...d.once]) if (key.endsWith(`|${k}`)) d.once.delete(key);
+  }
 
   const live = (wc) => wc && !wc.isDestroyed();
 
-  async function grant(webContents, setting, details) {
-    try { await beforeGrant({ webContents, setting, details }); } catch { /* the grant stands; the indicator is best-effort */ }
+  async function grant(webContents, setting, details, gen) {
+    const current = () => live(webContents) && doc(webContents).gen === gen;
+    if (!current()) return false;
+    try { await beforeGrant({ webContents, setting, details, current }); } catch { /* the OS check and the mark are best-effort */ }
+    if (!current()) return false;
+    for (const k of keysOf(setting)) doc(webContents).granted.add(k);
     return true;
   }
 
@@ -113,6 +136,8 @@ function createPermissions({ store, ask, isTab = () => true, beforeGrant = async
     const top = webOrigin(webContents.getURL());
     const requester = details.requestingUrl ? webOrigin(details.requestingUrl) : top;
     if (!top || !requester) return false;
+    const gen = doc(webContents).gen;
+    const current = () => live(webContents) && doc(webContents).gen === gen;
     const blocked = storedAnswer(store, top, setting) === "block";
     if (setting === "screen") {
       if (blocked) return false;
@@ -120,26 +145,31 @@ function createPermissions({ store, ask, isTab = () => true, beforeGrant = async
       // as a plain no. (A bare display-capture request has no picker; the
       // display handler shows it then.)
       if (permission !== "media") return true;
-      try { return !!(await pickScreen({ webContents, details })); } catch { return false; }
+      let picked = false;
+      try { picked = !!(await pickScreen({ webContents, details, current })); } catch { picked = false; }
+      return picked && current();
     }
     if (requester !== top) {
       // An embedded frame: camera and microphone only, never remembered.
       if (!MEDIA.has(setting) || blocked) return false;
-      if (hasOnce(webContents, top, requester, setting)) return grant(webContents, setting, details);
+      if (hasOnce(webContents, requester, setting)) return grant(webContents, setting, details, gen);
       const reply = await Promise.resolve(ask({ webContents, origin: top, setting, embedded: requester, canRemember: false })).catch(() => null);
-      if (!reply || reply.answer !== "allow" || !live(webContents)) return false;
-      grantOnce(webContents, top, requester, setting);
-      return grant(webContents, setting, details);
+      if (!reply || reply.answer !== "allow" || !current()) return false;
+      grantOnce(webContents, requester, setting);
+      return grant(webContents, setting, details, gen);
     }
     const known = storedAnswer(store, top, setting);
     if (known === "block") return false;
-    if (known === "allow" || hasOnce(webContents, top, top, setting)) return grant(webContents, setting, details);
+    if (known === "allow" || hasOnce(webContents, top, setting)) return grant(webContents, setting, details, gen);
     const reply = await Promise.resolve(ask({ webContents, origin: top, setting, embedded: null, canRemember: true })).catch(() => null);
+    // The page changed while the prompt was up: the answer was for a page
+    // that is gone, so nothing is granted or remembered.
+    if (!current()) return false;
     const answer = reply && reply.answer === "allow" ? "allow" : "block";
     if (reply && reply.remember) remember(store, top, setting, answer);
-    if (answer !== "allow" || !live(webContents)) return false;
-    if (!reply.remember) grantOnce(webContents, top, top, setting);
-    return grant(webContents, setting, details);
+    if (answer !== "allow") return false;
+    if (!reply.remember) grantOnce(webContents, top, setting);
+    return grant(webContents, setting, details, gen);
   }
 
   // The synchronous check Chromium makes before some APIs, and behind
@@ -160,8 +190,8 @@ function createPermissions({ store, ask, isTab = () => true, beforeGrant = async
     const known = storedAnswer(store, top, setting);
     if (known === "block") return false;
     if (setting === "screen") return true;
-    if (requester !== top) return MEDIA.has(setting) && hasOnce(webContents, top, requester, setting);
-    if (known === "allow" || hasOnce(webContents, top, top, setting)) return true;
+    if (requester !== top) return MEDIA.has(setting) && hasOnce(webContents, requester, setting);
+    if (known === "allow" || hasOnce(webContents, top, setting)) return true;
     return MEDIA.has(setting) && trustworthy(top);
   }
 
@@ -176,7 +206,7 @@ function createPermissions({ store, ask, isTab = () => true, beforeGrant = async
     partitionSession.setDevicePermissionHandler(() => false);
   }
 
-  return { attach, decide, check, forget };
+  return { attach, decide, check, navigated, forget, wasGranted, revoke };
 }
 
 module.exports = { createPermissions, _settingFor: settingFor, _webOrigin: webOrigin, _trustworthy: trustworthy };

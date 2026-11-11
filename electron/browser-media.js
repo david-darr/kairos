@@ -12,21 +12,17 @@
 //      macOS's Privacy & Security list keeps Kairos from the microphone,
 //      camera or screen, a page just sees a device error. Kairos says so,
 //      plainly, with where to turn it on.
-//   3. The in-use indicator. Electron reports no capture state, so Kairos
-//      keeps its own: a tab is marked from the moment it is given a camera,
-//      microphone or screen. The mark clears when the page navigates or
-//      closes, when the person presses Stop, or when every track Kairos saw
-//      the page use has ended. Kairos sees tracks through a small helper put
-//      into the page right before access is granted; a track it never saw
-//      keeps the mark on, so a page can't hide its capture by avoiding it.
+//   3. The in-use mark. Electron reports no capture state, and anything the
+//      page itself reports could be faked, so the mark is the main process's
+//      own record: a page is marked from the moment it is given a camera,
+//      microphone or screen, and the mark stays until that page is gone (a
+//      new page commits in the tab, or the tab closes). Stop reloads the
+//      page, which is the one way to be sure every track it holds ends.
 //
 // Every source id the page receives was offered by this module for that
 // very request, and nothing is shared without the person's click.
 
-const crypto = require("crypto");
-
 const PICK_TIMEOUT_MS = 120000;
-const POLL_MS = 2000;
 const KINDS = ["microphone", "camera", "screen"];
 
 function webOrigin(url) {
@@ -36,93 +32,18 @@ function webOrigin(url) {
   } catch { return null; }
 }
 
-// The helper, run in the page's own world. It records each capture track the
-// page hands to a call (a peer connection, a video element, Web Audio, a
-// recorder stream), by kind, and can report or stop them. Its handle sits on
-// window under a random, fixed, non-enumerable name the page cannot replace.
-function helperSource(key) {
-  return `(() => {
-  const KEY = ${JSON.stringify(key)};
-  if (Object.prototype.hasOwnProperty.call(window, KEY)) return true;
-  const seen = new Map();
-  const shared = new WeakSet();
-  const kindOf = (t) => {
-    try {
-      if (shared.has(t)) return "screen";
-      const s = typeof t.getSettings === "function" ? t.getSettings() : {};
-      if (s.displaySurface) return "screen";
-      if (s.deviceId) return t.kind === "audio" ? "microphone" : "camera";
-    } catch (e) {}
-    return null;
-  };
-  const add = (t) => { try { if (t && typeof t.stop === "function" && !seen.has(t)) { const k = kindOf(t); if (k) seen.set(t, k); } } catch (e) {} };
-  const addStream = (s) => { try { if (s && typeof s.getTracks === "function") s.getTracks().forEach(add); } catch (e) {} };
-  const before = (proto, name, fn) => {
-    const orig = proto && proto[name];
-    if (typeof orig !== "function") return;
-    proto[name] = function (...args) { try { fn(...args); } catch (e) {} return orig.apply(this, args); };
-  };
-  const md = window.MediaDevices && MediaDevices.prototype;
-  for (const [name, isScreen] of [["getUserMedia", false], ["getDisplayMedia", true]]) {
-    const orig = md && md[name];
-    if (typeof orig !== "function") continue;
-    md[name] = function (...args) {
-      return orig.apply(this, args).then((s) => { try { if (isScreen) s.getTracks().forEach((t) => shared.add(t)); addStream(s); } catch (e) {} return s; });
-    };
-  }
-  if (window.RTCPeerConnection) {
-    before(RTCPeerConnection.prototype, "addTrack", (t, ...streams) => { add(t); streams.forEach(addStream); });
-    before(RTCPeerConnection.prototype, "addTransceiver", (t) => add(t));
-    before(RTCPeerConnection.prototype, "addStream", addStream);
-  }
-  if (window.RTCRtpSender) before(RTCRtpSender.prototype, "replaceTrack", add);
-  if (window.MediaStream) before(MediaStream.prototype, "addTrack", add);
-  if (window.BaseAudioContext) {
-    before(BaseAudioContext.prototype, "createMediaStreamSource", addStream);
-    before(BaseAudioContext.prototype, "createMediaStreamTrackSource", add);
-  }
-  if (window.AudioContext) before(AudioContext.prototype, "createMediaStreamSource", addStream);
-  if (window.MediaStreamTrack) {
-    const clone = MediaStreamTrack.prototype.clone;
-    if (typeof clone === "function") MediaStreamTrack.prototype.clone = function () { const c = clone.apply(this, arguments); try { if (seen.has(this)) seen.set(c, seen.get(this)); } catch (e) {} return c; };
-  }
-  const src = window.HTMLMediaElement && Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "srcObject");
-  if (src && src.set) Object.defineProperty(HTMLMediaElement.prototype, "srcObject", { ...src, set(v) { addStream(v); return src.set.call(this, v); } });
-  const api = Object.freeze({
-    status() {
-      const live = { microphone: 0, camera: 0, screen: 0 }, count = { microphone: 0, camera: 0, screen: 0 };
-      for (const [t, k] of seen) { count[k] += 1; if (t.readyState === "live") live[k] += 1; }
-      return { live, seen: count };
-    },
-    stop(kind) {
-      let n = 0;
-      for (const [t, k] of seen) {
-        if (kind && k !== kind) continue;
-        if (t.readyState === "live") { t.stop(); n += 1; try { t.dispatchEvent(new Event("ended")); } catch (e) {} }
-      }
-      return n;
-    },
-  });
-  Object.defineProperty(window, KEY, { value: api, enumerable: false, configurable: false, writable: false });
-  return true;
-})()`;
-}
-
 function kindsOf(setting) {
   if (setting === "camera+microphone") return ["camera", "microphone"];
   return KINDS.includes(setting) ? [setting] : [];
 }
 
-const count = (v) => (Number.isInteger(v) && v >= 0 && v < 1e6 ? v : 0);
-
 // `tabFor(webContents)` is the Browse tab showing those contents, or null.
-// `touch()` re-sends the tab list (each tab carries what it is using).
-// `send(channel, payload)` reaches the app window. The electron pieces come
-// in as arguments so the rules can be tested without a real capture.
-function createMedia({ store, tabFor, touch = () => {}, send = () => {}, desktopCapturer, systemPreferences, fromFrame, platform = process.platform, log = console, pickTimeoutMs = PICK_TIMEOUT_MS, pollMs = POLL_MS }) {
-  const key = "__kairos_capture_" + crypto.randomBytes(8).toString("hex");
-  const helper = helperSource(key);
-  // tabId -> { kinds: Set, frames: Set<WebFrameMain>, timer }
+// `touch()` re-sends the tab list (each tab carries what its page was given).
+// `reloadTab(tabId)` reloads a tab's page. `send(channel, payload)` reaches
+// the app window. The electron pieces come in as arguments so the rules can
+// be tested without a real capture.
+function createMedia({ store, tabFor, touch = () => {}, send = () => {}, reloadTab = () => false, desktopCapturer, systemPreferences, fromFrame, platform = process.platform, log = console, pickTimeoutMs = PICK_TIMEOUT_MS }) {
+  // tabId -> Set of kinds the page now in the tab was given.
   const capture = new Map();
   const pending = new Map();
   let nextRequest = 1;
@@ -149,98 +70,41 @@ function createMedia({ store, tabFor, touch = () => {}, send = () => {}, desktop
     return blocked;
   }
 
-  // -- the in-use indicator
+  // -- the in-use mark
   function capturing(tabId) {
-    const c = capture.get(tabId);
-    return c ? KINDS.filter((k) => c.kinds.has(k)) : [];
+    const kinds = capture.get(tabId);
+    return kinds ? KINDS.filter((k) => kinds.has(k)) : [];
   }
-  async function install(frame) {
-    if (!frame) return false;
-    try { return (await frame.executeJavaScript(helper)) === true; } catch { return false; }
-  }
-  async function frameStatus(frame) {
-    try {
-      const s = await frame.executeJavaScript(`(window[${JSON.stringify(key)}] ? window[${JSON.stringify(key)}].status() : null)`);
-      if (!s || typeof s !== "object") return null;
-      const out = { live: {}, seen: {} };
-      for (const k of KINDS) { out.live[k] = count(s.live && s.live[k]); out.seen[k] = count(s.seen && s.seen[k]); }
-      return out;
-    } catch { return null; }
-  }
-  // What the helpers in a tab's frames report, summed. A frame that is gone
-  // (navigated, removed) reports nothing and is dropped.
-  async function tally(c) {
-    const total = { live: { microphone: 0, camera: 0, screen: 0 }, seen: { microphone: 0, camera: 0, screen: 0 } };
-    for (const frame of [...c.frames]) {
-      const s = await frameStatus(frame);
-      if (!s) { c.frames.delete(frame); continue; }
-      for (const k of KINDS) { total.live[k] += s.live[k]; total.seen[k] += s.seen[k]; }
-    }
-    return total;
-  }
-  // A kind clears when Kairos saw the page use it and none of those tracks is live.
-  function settle(tabId, c, total) {
-    let changed = false;
-    for (const k of [...c.kinds]) if (total.seen[k] > 0 && total.live[k] === 0) { c.kinds.delete(k); changed = true; }
-    if (!c.kinds.size) { clearInterval(c.timer); capture.delete(tabId); changed = true; }
-    if (changed) touch();
-  }
-  async function poll(tabId) {
-    const c = capture.get(tabId);
-    if (!c || c.polling) return;
-    c.polling = true;
-    try { const total = await tally(c); if (capture.get(tabId) === c) settle(tabId, c, total); } finally { c.polling = false; }
-  }
-  async function using(tabId, frame, kinds) {
+  function using(tabId, kinds) {
     if (!kinds.length) return;
-    let c = capture.get(tabId);
-    if (!c) {
-      c = { kinds: new Set(), frames: new Set(), timer: null, polling: false };
-      capture.set(tabId, c);
-      c.timer = setInterval(() => poll(tabId).catch(() => {}), pollMs);
-      c.timer.unref?.();
-    }
-    for (const k of kinds) c.kinds.add(k);
-    if (frame && await install(frame)) c.frames.add(frame);
+    if (!capture.has(tabId)) capture.set(tabId, new Set());
+    for (const k of kinds) capture.get(tabId).add(k);
     touch();
   }
-  // The page navigated or closed.
+  // A new page committed in the tab, or it closed: the old page's capture
+  // ended with it. Any picker still open for the tab is cancelled.
   function reset(tabId) {
-    const c = capture.get(tabId);
-    if (c) { clearInterval(c.timer); capture.delete(tabId); touch(); }
+    if (capture.delete(tabId)) touch();
     for (const [id, p] of [...pending]) if (p.tabId === tabId) { send("browse:event", { event: "screen-closed", requestId: id }); p.finish(null); }
   }
-  // The person pressed Stop. Every track Kairos saw is stopped (the page hears
-  // "ended", as when a call site's own Stop is pressed). Anything still live,
-  // or in use without Kairos having seen it, keeps its mark and is reported,
-  // so the app can offer to reload the page instead.
-  async function stop(tabId) {
-    const c = capture.get(tabId);
-    if (!c) return { ok: true, remaining: [] };
-    for (const frame of [...c.frames]) {
-      try { await frame.executeJavaScript(`(window[${JSON.stringify(key)}] ? window[${JSON.stringify(key)}].stop() : 0)`); } catch { c.frames.delete(frame); }
-    }
-    const total = await tally(c);
-    if (capture.get(tabId) === c) settle(tabId, c, total);
-    const remaining = capturing(tabId);
-    return { ok: !remaining.length, remaining };
+  // Stop, or revoking a site's answer: the page is reloaded, the only way to
+  // be sure every track it holds ends (a page can keep a stream Kairos never
+  // sees). The mark clears when the new page commits (reset()).
+  function stop(tabId) {
+    if (!capture.has(tabId)) return { ok: true, reloaded: false };
+    return { ok: !!reloadTab(tabId), reloaded: true };
   }
 
   // Called by browser-permissions.js once a camera or microphone is allowed,
-  // before the page hears the answer.
-  async function beforeGrant({ webContents, setting, details = {} }) {
+  // before the page hears the answer. `current()` says the page that asked
+  // is still the one in the tab.
+  async function beforeGrant({ webContents, setting, current = () => true }) {
     const kinds = kindsOf(setting).filter((k) => k !== "screen");
     if (!kinds.length) return;
     const tab = tabFor(webContents);
     if (!tab) return;
-    const origin = webOrigin(webContents.getURL());
-    await checkOs(kinds, tab.id, origin);
-    const main = webContents.mainFrame;
-    let frame = main;
-    if (details.requestingUrl && !details.isMainFrame && main) {
-      frame = (main.framesInSubtree || []).find((f) => f.url === details.requestingUrl) || main;
-    }
-    await using(tab.id, frame, kinds);
+    await checkOs(kinds, tab.id, webOrigin(webContents.getURL()));
+    if (current()) using(tab.id, kinds);
   }
 
   // -- screen sharing
@@ -288,7 +152,7 @@ function createMedia({ store, tabFor, touch = () => {}, send = () => {}, desktop
   // treat as a failure, not a cancel). So the picker runs here: Cancel is a
   // plain no, and a pick is kept for the handler. Called by
   // browser-permissions.js for a site that is not blocked.
-  async function pickScreen({ webContents, details = {} }) {
+  async function pickScreen({ webContents, details = {}, current = () => true }) {
     const tab = tabFor(webContents);
     if (!tab) return false;
     const top = webOrigin(webContents.getURL());
@@ -298,7 +162,7 @@ function createMedia({ store, tabFor, touch = () => {}, send = () => {}, desktop
     // The site's request does not say yet whether it wants sound; it is only
     // shared if the site asks for it too (onDisplayRequest).
     const pick = await runPicker({ tabId: tab.id, top, requester, audio: true });
-    if (!pick || webContents.isDestroyed()) return false;
+    if (!pick || webContents.isDestroyed() || !current()) return false;
     chosen.set(webContents.id, { ...pick, requester, at: Date.now() });
     return true;
   }
@@ -321,7 +185,7 @@ function createMedia({ store, tabFor, touch = () => {}, send = () => {}, desktop
       const pick = earlier && earlier.requester === requester && Date.now() - earlier.at < CHOSEN_MS
         ? earlier : await runPicker({ tabId: tab.id, top, requester, audio: request.audioRequested });
       if (!pick || wc.isDestroyed()) return deny();
-      await using(tab.id, frame, ["screen"]);
+      using(tab.id, ["screen"]);
       answered = true;
       const streams = { video: pick.source };
       if (pick.audio && request.audioRequested && platform === "win32") streams.audio = "loopback";
@@ -345,11 +209,10 @@ function createMedia({ store, tabFor, touch = () => {}, send = () => {}, desktop
   function close() {
     chosen.clear();
     for (const p of [...pending.values()]) p.finish(null);
-    for (const c of capture.values()) clearInterval(c.timer);
     capture.clear();
   }
 
-  return { attach, beforeGrant, pickScreen, forgetPick: (webContentsId) => chosen.delete(webContentsId), answerScreen, capturing, reset, stop, poll, close, osStatus, _key: key };
+  return { attach, beforeGrant, pickScreen, forgetPick: (webContentsId) => chosen.delete(webContentsId), answerScreen, capturing, reset, stop, close, osStatus };
 }
 
-module.exports = { createMedia, _helperSource: helperSource, _kindsOf: kindsOf };
+module.exports = { createMedia, _kindsOf: kindsOf };

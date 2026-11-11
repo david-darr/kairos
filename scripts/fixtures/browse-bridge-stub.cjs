@@ -8,7 +8,7 @@ const { contextBridge } = require('electron');
 const calls = [];
 const handlers = { state: [], event: [], permission: [], shortcut: [], download: [], openRequest: [], passwordOffer: [], passwordSuggest: [], screenRequest: [] };
 let audioLabel = 'Desk Speakers (not here)';
-let stopResult = { ok: true, remaining: [] };
+const stopResult = { ok: true, reloaded: true };
 let tabs = [], activeId = null, nextId = 1;
 let pinned = [{ id: 1, url: 'https://github.com/', title: 'GitHub', position: 0, thumb: null },
   { id: 2, url: 'https://mail.example.com/', title: 'Mail', position: 1, thumb: null }];
@@ -94,5 +94,4 @@ contextBridge.exposeInMainWorld('jarvis', { ...desktop, browse: {
 contextBridge.exposeInMainWorld('__browseStub', {
   calls: () => JSON.parse(JSON.stringify(calls)),
   emit: (kind, payload) => emit(kind, payload),
-  stopResult: (value) => { stopResult = value; },
 });

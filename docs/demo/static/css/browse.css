@@ -263,3 +263,22 @@ html[data-app-mode="browse"] #view-content { padding: 0; }
 .browse-pw-bot-use { padding: 6px 0 10px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
 .browse-pw-bots { font-weight: 600; }
 .browse-settings-section .browse-list li { flex-wrap: wrap; }
+
+/* -- cameras, microphones and screen sharing (browser-media.js) */
+.browse-tab-live { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); flex: 0 0 8px; }
+.browse-capture { background: var(--accent-dim); }
+.browse-capture-text { display: flex; align-items: center; gap: 8px; }
+.browse-capture-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--danger); flex: 0 0 9px; animation: browse-live 1.6s ease-in-out infinite; }
+@keyframes browse-live { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .browse-capture-dot { animation: none; } }
+.browse-screen-ask { margin: 0; color: var(--text-dim); }
+.browse-screen-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.browse-screen-source { display: flex; flex-direction: column; gap: 6px; padding: 8px; font: inherit; font-size: 12px; color: var(--text-dim); text-align: left;
+  background: var(--bg-panel-solid); border: 1px solid var(--border); border-radius: 10px; cursor: pointer; min-width: 0; }
+.browse-screen-source:hover { background: var(--accent-dim); }
+.browse-screen-source.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); color: var(--text); }
+.browse-screen-source:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.browse-screen-thumb { width: 100%; aspect-ratio: 16 / 10; object-fit: contain; background: var(--bg); border-radius: 6px; }
+.browse-screen-thumb.empty { display: block; }
+.browse-screen-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browse-screen-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid var(--border); }

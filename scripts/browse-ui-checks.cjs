@@ -175,19 +175,15 @@ module.exports = async function browseChecks({ js, base, output, fs }) {
     // In use: a strip names what the page has, with Stop; the tab shows a live dot.
     await run("window.__browseStub.emit('state', { activeId: 1, tabs: [{ id: 1, url: 'https://meet.google.com/abc', title: 'Meet', blocked: 0, active: true, capturing: ['microphone', 'camera'] }] });");
     await until("document.querySelector('.browse-capture')");
-    assert.match(await run("return document.querySelector('.browse-capture').textContent;"), /meet\.google\.com is using your microphone and camera\./);
+    assert.match(await run("return document.querySelector('.browse-capture').textContent;"), /meet\.google\.com has your microphone and camera on this page\. Stop reloads the page to end it\./);
     assert.ok(await run("return !!document.querySelector('.browse-tab .browse-tab-live');"), 'the tab shows it too');
     await shot('in-use');
     await run("[...document.querySelectorAll('.browse-capture .btn')].find(b => b.textContent === 'Stop').click();");
     await until("window.__browseStub.calls().some(c => c.name === 'stopCapture')");
     assert.deepEqual((await calls('stopCapture')).at(-1).args, [1]);
-    // A Stop that could not end everything says so and offers a reload.
-    await run("window.__browseStub.stopResult({ ok: false, remaining: ['screen'] }); window.__browseStub.emit('state', { activeId: 1, tabs: [{ id: 1, url: 'https://meet.google.com/abc', title: 'Meet', blocked: 0, active: true, capturing: ['screen'] }] });");
-    await until("document.querySelector('.browse-capture')?.textContent.includes('sharing your screen')");
-    await run("[...document.querySelectorAll('.browse-capture .btn')].find(b => b.textContent === 'Stop sharing').click();");
-    await until("[...document.querySelectorAll('.browse-capture .btn')].some(b => b.textContent === 'Reload page')");
-    assert.match(await run("return document.querySelector('.browse-capture').textContent;"), /Reload the page to be sure it stops\./);
-    await run("window.__browseStub.stopResult({ ok: true, remaining: [] }); window.__browseStub.emit('state', { activeId: 1, tabs: [{ id: 1, url: 'https://meet.google.com/abc', title: 'Meet', blocked: 0, active: true, capturing: [] }] });");
+    await run("window.__browseStub.emit('state', { activeId: 1, tabs: [{ id: 1, url: 'https://meet.google.com/abc', title: 'Meet', blocked: 0, active: true, capturing: ['screen'] }] });");
+    await until("document.querySelector('.browse-capture')?.textContent.includes('has your screen on this page')");
+    await run("window.__browseStub.emit('state', { activeId: 1, tabs: [{ id: 1, url: 'https://meet.google.com/abc', title: 'Meet', blocked: 0, active: true, capturing: [] }] });");
     await until("!document.querySelector('.browse-capture')");
 
     // The OS keeps Kairos from the microphone: said plainly, with where to turn it on.
