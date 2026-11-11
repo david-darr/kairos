@@ -6,6 +6,11 @@ const fs = require('node:fs');
   const p = { bots: [{ key: 'a', routines: [{}, {}] }, { key: 'b', routines: [] }], skills: [{ name: 'write' }], connections: [], presets: [], sections: ['rooms'] };
   assert.deepEqual(M.counts(p), { bots: 2, routines: 2, skills: 1, connections: 0, presets: 0 });
   const selected = M.selection(p); selected.bots = ['b']; assert.equal(M.counts(p, selected).routines, 0);
+  // Counts read in the right number: "1 bot", never "1 bots".
+  assert.equal(M.summaryText({ bots: 1, routines: 0, skills: 0, connections: 0 }), '1 bot, 0 paused routines, 0 skills, 0 connections');
+  assert.equal(M.summaryText({ bots: 7, routines: 1, skills: 1, connections: 1 }), '7 bots, 1 paused routine, 1 skill, 1 connection');
+  assert.equal(M.plural(1, 'chat'), '1 chat'); assert.equal(M.plural(2, 'chat'), '2 chats');
+  for (const file of ['static/js/botsPackagePreview.js', 'static/js/botsTemplates.js', 'static/js/botsBackup.js']) assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /\$\{[^}]+\} (bots|routines|skills|connections|chats|triggers)\b/, file + ' uses plural()');
   assert.equal(M.fileProblem({ name: 'team.md', size: 10 }), '');
   assert.match(M.fileProblem({ name: 'team.exe', size: 10 }), /JSON/);
   assert.match(M.fileProblem({ name: 'team.json', size: M.MAX_PACKAGE_BYTES + 1 }), /4 MB/);

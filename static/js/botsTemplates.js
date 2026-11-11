@@ -1,6 +1,6 @@
 import { api, el, openPanelDialog, clearSharedReads } from './api.js';
 import { Button, loadBotsCss } from './botsUi.js';
-import { fileProblem, failure } from './botsPackageModel.js';
+import { fileProblem, failure, plural } from './botsPackageModel.js';
 import { renderPreview } from './botsPackagePreview.js';
 
 const BASE = '/api/bot-lifecycle';
@@ -55,7 +55,7 @@ export function mount(host, ctx = {}) {
       const add = Button({ label: 'Add', variant: 'primary', onClick: () => act(add, async () => {
         const result2 = await request('/packages/import', { token: result.token, selection: preview.selection() }, signal);
         if (signal.aborted) return;
-        status.textContent = `Added ${result2.created.length} bots. ${(result2.warnings || []).join(' ')}`;
+        status.textContent = `Added ${plural(result2.created.length, 'bot')}. ${(result2.warnings || []).join(' ')}`;
         add.remove(); document.dispatchEvent(new CustomEvent('jarvis:agents-changed'));
       }, status) });
       preview = renderPreview(result.preview); content.replaceChildren(preview.node, status, add);

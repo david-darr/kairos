@@ -1,11 +1,11 @@
 import { el } from './api.js';
-import { selection, counts } from './botsPackageModel.js';
+import { selection, counts, summaryText } from './botsPackageModel.js';
 
 export function renderPreview(preview, { onChange = () => {}, selectable = true } = {}) {
   const picked = selection(preview);
   const root = el('section', { class: 'bots-package-preview', 'aria-label': 'Package preview' });
   const summary = el('p', { role: 'status' });
-  const paint = () => { const c = counts(preview, picked); summary.textContent = `${c.bots} bots, ${c.routines} paused routines, ${c.skills} skills, ${c.connections} connections`; onChange(picked); };
+  const paint = () => { const c = counts(preview, picked); summary.textContent = summaryText(c); onChange(picked); };
   root.append(el('h3', { text: preview.name || 'Package' }), summary);
   for (const [group, field] of [['bots', 'key'], ['skills', 'name'], ['connections', 'name'], ['presets', 'name']]) {
     for (const row of preview[group] || []) {

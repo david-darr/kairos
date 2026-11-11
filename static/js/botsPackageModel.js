@@ -13,6 +13,11 @@ export function counts(preview, picked = selection(preview)) {
   return { bots: picked.bots.length, routines: (preview.bots || []).filter(b => picked.bots.includes(b.key)).reduce((n, b) => n + (b.routines || []).length, 0),
     skills: picked.skills.length, connections: picked.connections.length, presets: picked.presets.length };
 }
+// "1 bot", "2 bots", "0 paused routines": a count with its noun in the right number.
+export const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
+export function summaryText(c) {
+  return [plural(c.bots, 'bot'), plural(c.routines, 'paused routine'), plural(c.skills, 'skill'), plural(c.connections, 'connection')].join(', ');
+}
 export function failure(error) {
   const detail = error?.detail || error?.message || error;
   return typeof detail === 'object' ? [detail.message, ...(detail.cleanup_errors || [])].filter(Boolean).join('. ') : String(detail || 'Could not finish. Try again.');

@@ -1,7 +1,7 @@
 import { api, el } from './api.js';
 import { Button, loadBotsCss } from './botsUi.js';
 import { request, uploadFile, download } from './botsTemplates.js';
-import { canRestore, failure } from './botsPackageModel.js';
+import { canRestore, failure, plural } from './botsPackageModel.js';
 
 export function mountScout(host, { signal, showImport }) {
   let destroyed = false;
@@ -37,7 +37,7 @@ export function mount(host, ctx = {}) {
   const inspect = Button({ label: 'Preview backup', onClick: () => work(inspect, async () => {
     if (!file.files[0]?.name.toLowerCase().endsWith('.kbackup')) throw new Error('Choose a .kbackup file.');
     const data = await uploadFile('/backups/preview', file.files[0], signal, password.value); if (signal.aborted) return;
-    uploadId = data.upload_id; preview.replaceChildren(el('p', { text: `${data.counts.bots} bots, ${data.counts.routines} routines, ${data.counts.chats} chats, ${data.counts.triggers} triggers` }));
+    uploadId = data.upload_id; preview.replaceChildren(el('p', { text: [plural(data.counts.bots, 'bot'), plural(data.counts.routines, 'routine'), plural(data.counts.chats, 'chat'), plural(data.counts.triggers, 'trigger')].join(', ') }));
     status.textContent = 'Preview only. Restore replaces this workspace and pauses all automation.';
   }) });
   const restore = Button({ label: 'Replace workspace', variant: 'danger', onClick: () => work(restore, async () => {
