@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "d440e7c6349b5505278c317c634b759d11c58307f6d6ed42435ff8b4acb1e824",
+  "app.js": "3937613948649ff647158f18ba8ddd4bae3d3825b5245f3d66c3a361f660996e",
   "fixtures.js": "98682c9314d850ddd7d6b9cdeeb72562f295069b0d681eaf7e5f81ae22b61414",
   "index.html": "c2d216301aae8fa4b2c0bd67aa81b0bedd2fc114251448f7c1de1e54cf4a143a",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -1290,7 +1290,7 @@
   "static/js/botsAvatarEditor.js": "c531b8d187fb291e4282a2957ac701760442ea9067272af75dc6c69fe85888a8",
   "static/js/botsBackup.js": "4f3a34a5cfa81df0ce268d0f7a8e9e8dc84fa0dffef3912a5746d60b4f3f8090",
   "static/js/botsBrowserProfiles.js": "232957019c7ffb41ee8ff8635512126983186685aaa92bf0547fa722855c35cb",
-  "static/js/botsCallBar.js": "bf929918a124d43e49d80dd2adf9fb1b1ce6373f018d86d66dfe26720261132a",
+  "static/js/botsCallBar.js": "e174e545863014707795726c5a0e89571beba0ca4440068a077d666ecbab01e8",
   "static/js/botsChat.js": "cd11bd6c3f36576e1a6ef6e02f8138b97daa89cc56e1922edc62b24b4ed11561",
   "static/js/botsChatAttachments.js": "2bfea2d6e3983348acfb3f7b75d60497d8e525255744301b35cceed99adfe0ac",
   "static/js/botsChatSearch.js": "368ea7761a9b2bcc8fe151664ce851182f2d38b65c35b912a1e8b298955129d6",
