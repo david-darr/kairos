@@ -3,7 +3,7 @@
 // Bots tab at the Ask level. Kip's conversation in the Bots tab shows the same card. Real backend fixture with a
 // scripted model ("makebot NAME | ROLE" calls the real tool, scripts/cli_backend_fixture.py) and real Chromium,
 // on a fresh port and data folder, isolated from every running Kairos.
-//   node scripts/run-electron-test.cjs bots-from-chat-checks
+//   node scripts/run-electron-test.cjs chat-bot-maker-checks
 const { app, BrowserWindow } = require('electron');
 const { exitAfterFlush } = require('./electron-exit.cjs');
 const fs = require('node:fs');
@@ -13,7 +13,7 @@ const net = require('node:net');
 const { spawn } = require('node:child_process');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
-const output = path.join(root, 'data', 'bots-from-chat-review', 'run-' + Date.now());
+const output = path.join(root, 'data', 'chat-bot-maker-review', 'run-' + Date.now());
 fs.mkdirSync(path.join(output, 'userData'), { recursive: true });
 app.setPath('userData', path.join(output, 'userData'));
 app.commandLine.appendSwitch('force-device-scale-factor', '1');
