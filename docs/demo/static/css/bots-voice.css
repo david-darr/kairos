@@ -11,6 +11,8 @@
   border: 1px solid var(--call-line); border-radius: 999px; background: linear-gradient(180deg, var(--call-ground-top), var(--call-ground-bottom)); background-color: var(--call-ground-bottom);
   color: var(--call-ink); font-family: var(--k-font-sans); box-shadow: 0 12px 34px color-mix(in srgb, var(--call-ground-bottom) 45%, transparent); touch-action: none; }
 .call-pill[hidden], .call-pill [hidden] { display: none !important; }
+/* Over a modal sheet such as Settings (its scrim is z-index 1500) the pill stays on top, off the sheet's panel (place()). */
+.call-pill[data-over-modal] { z-index: 1600; }
 .call-pill[data-dragging] { cursor: grabbing; opacity: .92; }
 .call-pill button { min-width: 44px; min-height: 44px; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; }
 .call-pill :focus-visible { outline: 2px solid var(--call-ink); outline-offset: 2px; }
