@@ -87,13 +87,20 @@ export function neuralSpeaker(options, getSelection) {
     pause(){if(context&&speaking&&!paused&&!cancelled){paused=true;poke('suspend');}},
     resume(){if(paused){paused=false;poke('resume');}},
     filler:playClip,
-    async prepare(){if(!context){context=new AudioContext();options.onContext?.(context);analyser=context.createAnalyser();analyser.fftSize=256;analyser.connect(context.destination);}await context.resume();},
+    async prepare(){this.unlock();await context.resume();},
+    // Make the audio context and ask it to run, without waiting. Called inside a tap, this is what lets a phone (WebKit)
+    // or a browser's autoplay rule start the bot's voice; outside one, resume() can wait for a tap that never comes.
+    unlock(){if(!context){context=new AudioContext();options.onContext?.(context);analyser=context.createAnalyser();analyser.fftSize=256;analyser.connect(context.destination);}poke('resume');},
+    // 'running' once the voice can play; 'suspended' (or iOS 'interrupted') while it waits for a tap; 'none' before unlock().
+    get state(){return context?.state||'none';},
+    // A context that never started is dropped, so the next call makes a fresh one inside its own tap.
+    release(){if(context&&context.state!=='running'){this.cancel();try{context.close()?.catch?.(()=>{});}catch{}context=null;analyser=null;}},
     feed(text){if(!cancelled)chunker.feed(text);},
     flushSentence(){if(!cancelled)chunker.flushSentence();},
     finish(){chunker.finish();finished=true;pump();},
     reset(){this.cancel();cancelled=false;finished=false;lastHeard=[];next=context?.currentTime||0;},
     cancel(){lastHeard=jobs.length?playedNow():lastHeard;const wasPaused=paused;paused=false;if(wasPaused)poke('resume');generation++;cancelled=true;jobs=[];head=0;count=0;finished=false;chunker.reset();cancelAnimationFrame(frame);options.onLevel?.(0);controllers.forEach(c=>c.abort());controllers.clear();sources.forEach(s=>{try{s.stop();}catch{}});sources.clear();speaking=false;},
-    dispose(){this.cancel();context?.close();context=null;},
+    dispose(){this.cancel();try{context?.close()?.catch?.(()=>{});}catch{}context=null;analyser=null;},
   };
 }
 

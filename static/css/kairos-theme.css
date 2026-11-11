@@ -74,6 +74,8 @@
   --call-key-quiet-ink: #F6EEE1;
   --call-hangup:        #C2412C;
   --call-hangup-ink:    #FFFFFF;
+  --call-answer:        #4F6E4A;  /* the one-tap Answer key when a call's audio waits for a touch (--k-success) */
+  --call-answer-ink:    #FFFFFF;
 }
 
 /* The Agent village's illustration palette (the pixel-art buildings, trees,

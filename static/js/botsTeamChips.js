@@ -2,6 +2,7 @@ import { h, Button, loadBotsCss } from './botsUi.js';
 import { registerRowRenderer } from './botsTranscript.js';
 import { goalCard } from './botsGoalCard.js';
 import { botKip } from './botsKip.js';
+import { callDetailsNode } from './callSummaryDetails.js';
 
 export function chipLabel(message) {
   const meta = message.meta || {};
@@ -18,7 +19,9 @@ export function teamChip(row, ctx = {}) {
     h('summary', {}, [partner ? botKip({ ...partner, id: partner.bot_id || partner.id }, { size: 16 }) : null,
       h('span', { text: `${chipLabel(message)}${text ? `: ${text.replace(/\s+/g, ' ').slice(0, 140)}` : ''}` })]),
     h('div', { class: 'bots-room-chip-detail', text }),
-    meta.done_when || message.done_when ? h('p', { text: `Done when: ${meta.done_when || message.done_when}` }) : null]);
+    meta.done_when || message.done_when ? h('p', { text: `Done when: ${meta.done_when || message.done_when}` }) : null,
+    // A group call's one summary row: its transcript and latency open from it (callSummaryDetails.js).
+    message.kind === 'call_summary' ? callDetailsNode(meta.details, (node, markdown) => { node.textContent = markdown; }) : null]);
   const target = meta.target || message.target || (partner?.room_id ? { tab: 'botsRoom', roomId: partner.room_id, threadId: partner.thread_id } :
     partner?.bot_id ? { tab: 'botsShell', agentId: partner.bot_id, sessionId: partner.thread_id || partner.session_id } : null);
   if (target && ctx.openTarget) root.append(Button({ label: 'Open conversation', onClick: () => ctx.openTarget(target) }));

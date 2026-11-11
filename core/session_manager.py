@@ -301,19 +301,23 @@ class SessionManager:
         _clear_claude_session(session)
         return store.save_session(session, rebuild_messages_from=index)
 
-    def upsert_call_summary(self, session_id: str, call_id: str, content: str) -> None:
-        """One call note, updated in place when its delegated work finishes."""
+    def upsert_call_summary(self, session_id: str, call_id: str, content: str, details: dict | None = None) -> None:
+        """One call note, updated in place when its delegated work finishes. `details` (the transcript, latency and
+        work, services/agent_calls.call_details) rides on the same message and opens from it in the chat."""
         session = self.get_session(session_id)
         if session is None:
             raise KeyError(session_id)
         for index, message in enumerate(session['messages']):
             if message.get('call_summary_id') == call_id:
                 message['content'] = content
+                if details is not None:
+                    message['call_details'] = details
                 _clear_claude_session(session)
                 session['updated_at'] = time.time()
                 store.save_session(session, rebuild_messages_from=index)
                 return
-        self.append_message(session_id, 'assistant', content, extra={'call_summary_id': call_id})
+        self.append_message(session_id, 'assistant', content,
+                            extra={'call_summary_id': call_id, **({'call_details': details} if details is not None else {})})
 
     def record_sent_text(self, session_id: str, index: int, typed: str, sent: str) -> None:
         """Keep the exact text a user message went out as, when it differs

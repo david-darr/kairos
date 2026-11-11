@@ -25,6 +25,11 @@ import { pickConversation, pickSpeechModel, pickCallMode, pickVoice, consentKey,
 // the fallback when Show Kip is off.
 const UNREAD_POLL_MS = 6000;
 const CALL_MASCOT = { setup: 'idle', preparing: 'thinking', listening: 'listening', transcribing: 'thinking', thinking: 'thinking', speaking: 'speaking', paused: 'sleeping' };
+// How long a call waits for the bot's voice (its AudioContext) to start before it asks for a tap (2026-11-11). On a phone
+// a call opened with no fresh tap, like a ring answered from its notification, finds audio locked: WebKit holds
+// resume() until the person touches the page (or refuses it), and the call used to wait on it forever.
+export const AUDIO_WAIT_MS = 1500;
+const PHONE_SVG = '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z"/></svg>';
 let ongoingCall = null;
 
 export function agentCall(agent, controller) {
@@ -299,6 +304,13 @@ export function agentCall(agent, controller) {
   const blockerText = el('p', { role: 'alert' });
   const blockerAction = el('button', { type: 'button', class: 'btn primary agent-call-blocker-action' });
   const blocker = el('div', { class: 'agent-call-blocker', hidden: true }, [blockerText, blockerAction]);
+  // One tap to start (2026-11-11, David's phone: a ring answered from its notification gave a dead call). When the call's
+  // audio is locked (no fresh tap on this page), the call waits here with one big key instead of sitting silent; the tap
+  // starts the voice and the microphone inside the touch, which is what a phone needs.
+  const gateLabel = el('span', { class: 'agent-call-key-label' });
+  const gateDisc = el('span', { class: 'agent-call-key-disc', 'aria-hidden': 'true' }); gateDisc.innerHTML = PHONE_SVG;
+  const gateButton = el('button', { type: 'button', class: 'agent-call-key agent-call-gate-key', 'data-call': 'answer' }, [gateDisc, gateLabel]);
+  const gate = el('div', { class: 'agent-call-gate', hidden: true }, [gateButton, el('p', { text: 'One tap lets Kairos use your microphone and speaker.' })]);
   const settingsToggle = el('button', { type: 'button', class: 'agent-call-action agent-call-settings-toggle', text: 'Call settings', 'aria-expanded': 'false', onclick: () => {
     // In a live call the settings in use cannot change underneath it: this ends the call and opens them here.
     if (active) { hangup({ keepOpen: true }); say1('Call ended. Change what you need, then press Start call.'); showSettings(true); return; }
@@ -334,7 +346,7 @@ export function agentCall(agent, controller) {
     el('div', { class: 'agent-call-sheet-actions' }, [chat, interruptButton, hold, settingsToggle]), holdHint, outputBox,
     transcript, membersLine, workList, summaryStatus, setup, privacy]);
   for (const [name, node] of [['chat', chat], ['interrupt', interruptButton], ['hold', hold], ['settings', settingsToggle]]) node.dataset.call = name;
-  const scene = el('div', { class: 'agent-call-scene' }, [el('div', { class: 'agent-call-avatar' }, [orb]), el('h1', { text: agent.name }), clock, meter, status, ringNote, notice, blocker, error]);
+  const scene = el('div', { class: 'agent-call-scene' }, [el('div', { class: 'agent-call-avatar' }, [orb]), el('h1', { text: agent.name }), clock, meter, status, ringNote, gate, notice, blocker, error]);
   dialog.append(el('header', { class: 'agent-call-top' }, [minimizer, kind, moreToggle]), scene, sheet, controls);
   if (room) drawMembers();
   document.body.append(dialog);
@@ -368,9 +380,12 @@ export function agentCall(agent, controller) {
     if (disposed) return;
     if (room) drawMembers();
     if (active) { restore(); return; }
+    // Inside the tap: start the bot's voice now, so a phone lets it play once the call is ready (a ring answered with no
+    // tap comes here too; its audio stays locked and the call asks for one tap).
+    primeAudio();
     if (!dialog.open) { dialog.showModal(); dialog.focus({ preventScroll: true }); }
     if (starting || preparingVoice) return;
-    error.textContent = ''; showSettings(false); openSheet(false); clearLines();
+    error.textContent = ''; hideGate(); showSettings(false); openSheet(false); clearLines();
     setState('preparing', `Calling ${agent.name}...`);
     if (await loadSetup()) autoStart();
   } });
@@ -379,9 +394,40 @@ export function agentCall(agent, controller) {
   function clearLines() { notice.hidden = true; notice.textContent = ''; blocker.hidden = true; blockerText.textContent = ''; }
   function say1(text) { notice.textContent = text; notice.hidden = !text; }
   function block(text, label, fix) {
-    blockerText.textContent = text; blockerAction.textContent = label; blockerAction.onclick = fix; blocker.hidden = false;
+    hideGate();
+    // The fix is a tap, so it also unlocks the call's audio (a refused microphone on a phone is often a missing tap).
+    blockerText.textContent = text; blockerAction.textContent = label; blockerAction.onclick = () => { primeAudio(true); fix(); }; blocker.hidden = false;
     setState('setup', 'Not connected yet');
   }
+  // Unlock the call's audio inside a tap: the bot's voice (its AudioContext) always; with `full`, the device voice too,
+  // which on a phone speaks only after one line was started inside a tap (an empty, silent one here).
+  function primeAudio(full = false) {
+    try { localSpeaker.unlock(); } catch { /* no Web Audio in this window: the call says so when it starts */ }
+    if (full && neural.selection().provider !== 'neural' && isSpeechOutputSupported()) {
+      try { const line = new SpeechSynthesisUtterance(''); line.volume = 0; window.speechSynthesis.speak(line); } catch { /* optional */ }
+    }
+  }
+  // The bot's voice must be able to play before the call goes to the server. resume() can wait for a tap forever (WebKit)
+  // or be refused (NotAllowedError); either way, after AUDIO_WAIT_MS the call asks for one tap instead of hanging.
+  async function prepareAudio() {
+    const ready = localSpeaker.prepare().then(() => true, () => false);
+    const started = await Promise.race([ready, new Promise(resolve => setTimeout(() => resolve(false), AUDIO_WAIT_MS))]);
+    if (!started || localSpeaker.state !== 'running') throw Object.assign(new Error('Tap to start the call.'), { name: 'AudioLocked' });
+  }
+  function showGate() {
+    const answering = !!ringOpening;
+    gateLabel.textContent = answering ? 'Answer' : 'Tap to start';
+    gateButton.setAttribute('aria-label', answering ? `Answer ${agent.name}` : `Start the call with ${agent.name}`);
+    blocker.hidden = true; gate.hidden = false; dialog.dataset.gate = 'open';
+    setState('setup', answering ? 'Tap Answer to start the call.' : 'Tap to start the call.');
+    gateButton.focus({ preventScroll: true });
+  }
+  function hideGate() { gate.hidden = true; delete dialog.dataset.gate; }
+  gateButton.onclick = () => {
+    if (active || starting || disposed) return;
+    hideGate(); primeAudio(true); error.textContent = '';
+    setState('preparing', `Calling ${agent.name}...`); autoStart();
+  };
   function showSettings(open) {
     setup.hidden = !open; settingsToggle.setAttribute('aria-expanded', String(open));
     settingsToggle.textContent = open ? 'Hide call settings' : 'Call settings';
@@ -827,7 +873,9 @@ export function agentCall(agent, controller) {
     try {
       if (callMode.value==='local'&&!isCallRecordingSupported()) throw new Error('Microphone access is unavailable. Check your device permissions.');
       if(isCloud()&&(!navigator.mediaDevices?.getUserMedia||!window.AudioWorkletNode))throw new Error('Realtime voice requires a secure browser with microphone access and AudioWorklet.');
-      await localSpeaker.prepare(); stopPlayback();
+      await prepareAudio();
+      if (disposed || epoch !== token || !dialog.open) return;
+      stopPlayback();
       await transport.start(agent,conversation.value,conversationModel.value.trim(),ringOpening);
       if(disposed||epoch!==token||!dialog.open){transport.end();return;}
       voiceTrace.reset(); partials.reset(); turnTrace = currentTrace = null; bargeIns = 0; backchannels = 0; utterance = { during: false, asked: false }; delete dialog.dataset.bargeIns; delete dialog.dataset.backchannels;
@@ -859,7 +907,9 @@ export function agentCall(agent, controller) {
       timer = setInterval(() => { const seconds = Math.floor((Date.now() - startedAt) / 1000); clock.textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`; drawRealtimeCost(seconds); if (Date.now() - lastActivity > livePrefs.idle_minutes * 60000 && !voiceBusy && !speechActive) hangup(); }, 1000);
     } catch (problem) {
       if (epoch === token) {
-        active = false; live.stop();transport.end();recorder?.close(); recorder = null;
+        active = false; live.stop();transport.end();recorder?.close(); recorder = null; paintKeys(); emitState();
+        // Audio waits for a tap (a ring answered from a notification, a phone): one big key starts it.
+        if (problem?.name === 'AudioLocked') { showGate(); return; }
         // One plain sentence and the button that fixes it. A refused microphone is the common one.
         if (['NotAllowedError','SecurityError'].includes(problem?.name)) block('Kairos needs your microphone for calls. Allow it, then try again.', 'Allow microphone', () => { blocker.hidden = true; autoStart(); });
         else if (problem?.name === 'NotFoundError') block('No microphone was found. Plug one in, then try again.', 'Try again', () => { blocker.hidden = true; autoStart(); });
@@ -867,7 +917,8 @@ export function agentCall(agent, controller) {
         setState('setup','Call could not start');
       }
     }
-    finally { starting = false; start.disabled = false; settingsToggle.disabled = false; }
+    // Only this attempt's own end clears `starting`: hang-up already cleared it, and a newer attempt owns it now.
+    finally { if (token === epoch) { starting = false; start.disabled = false; settingsToggle.disabled = false; } }
   }
   function hangup(options) {
     const keepOpen = options?.keepOpen === true;
@@ -877,6 +928,12 @@ export function agentCall(agent, controller) {
     showSettings(false); openSheet(false); clearLines(); clock.textContent = '00:00'; model.disabled = false; unread = false; unreadBase = undefined; clearInterval(unreadTimer); unreadTimer = null;
     response = null; recognitionTiming = {}; timing.textContent = ''; heard.textContent = ''; latencyLine.textContent = ''; latencyLine.hidden = true;
     endWhenQuiet = false; firstAudioPending = false; typedUndo?.(); typedUndo = null;
+    // A start still waiting (on audio, the server or the microphone) is abandoned, never left holding `starting`: the next
+    // Call in this page load starts clean (2026-11-11: a ring answer that waited on locked audio blocked every later call
+    // until a refresh). The voice's context is dropped unless it is running, so the next tap makes a fresh one.
+    starting = false; start.disabled = false; settingsToggle.disabled = false; autoRun++; hideGate();
+    ring = null; ringOpening = null; ringNote.hidden = true; ringNote.textContent = '';
+    localSpeaker.release();
     engineStatus.textContent = ''; hold.hidden = holdHint.hidden = true;
     setState('setup', 'Ready when you are'); if (!keepOpen) dialog.close(); button.classList.remove('is-call-active');
     minimized = false; ongoingCall = null; speaking = null; delete dialog.dataset.speaker; callBar?.destroy(); callBar = null; emitState();

@@ -4,7 +4,7 @@
 - the tool-run cap: work hand-offs in a row without a word are refused until the bot speaks; a hand-off is never silent
 - texts typed during a live call go into it (app call screen, phone or Discord bridge, realtime voice)
 - per-call latency: first audio and reply gaps recorded and shown
-- the call transcript written back into the bot's chat with the summary
+- one summary message per call, its transcript and latency folded into that message (2026-11-11)
 
     .venv\\Scripts\\python.exe -X utf8 scripts\\test_call_extras.py
 """
@@ -499,21 +499,69 @@ class TranscriptWriteBack(Base):
                          {"role": "user", "content": "(typed) ship it", "typed": True},
                          {"role": "assistant", "content": "Shipping now, and", "interrupted": True}], ended=True)
         agent_calls.record_latency(call, first_audio_ms=500)
-        saved = []
+        saved, asked = [], []
 
         async def summary(call_, messages, max_tokens):
-            yield "Asked about the build; asked to ship."
+            asked.append(messages[-1]["content"])
+            yield "## Call notes\n- Asked about the build.\n- Asked to ship.\n\nShipping is under way."
         with patch.object(agent_calls, "_summary_stream", summary), \
-                patch.object(agent_calls.session_manager, "upsert_call_summary", lambda parent, ident, text: saved.append(text)):
+                patch.object(agent_calls.session_manager, "upsert_call_summary",
+                             lambda parent, ident, text, details=None: saved.append((ident, text, details))):
             await agent_calls.finalize(call)
             await agent_calls.finalize(call)            # a later update (work finished) keeps the transcript
-        for text in saved:
-            self.assertTrue(text.startswith("**Call summary**\n\nAsked about the build"))
-            self.assertIn("Latency: first audio 500 ms after pick-up.", text)
-            self.assertIn("**Transcript**\n\n**You:** Is the build green?\n\n**Kip:** Yes, all green.\n\n**You:** (typed) ship it"
-                          "\n\n**Kip:** Shipping now, and (cut off)", text)
         self.assertEqual(len(saved), 2)
+        self.assertEqual({ident for ident, _text, _details in saved}, {call["id"]}, "both land on the call's one message")
+        for _ident, text, details in saved:
+            # One short paragraph (2026-11-11): no headings, lists or blank lines that a chat style splits into bubbles.
+            self.assertEqual(text, "**Call summary.** Asked about the build. Asked to ship. Shipping is under way.")
+            self.assertNotIn("\n", text)
+            self.assertNotIn("Transcript", text)
+            self.assertNotIn("Latency", text)
+            self.assertEqual(details["latency"], "Latency: first audio 500 ms after pick-up.")
+            self.assertEqual(details["transcript"], "**You:** Is the build green?\n\n**Kip:** Yes, all green.\n\n**You:** (typed) ship it"
+                             "\n\n**Kip:** Shipping now, and (cut off)")
+            self.assertEqual(details["work"], [])
+        self.assertIn("Is the build green?", asked[1], "the re-summary reads the call's dialogue, not its earlier summary")
         self.assertEqual(call["messages"], [])
+
+    async def test_a_call_with_nothing_said_posts_nothing(self):
+        call = new_call([], ended=True)
+        saved = []
+        with patch.object(agent_calls.session_manager, "upsert_call_summary", lambda *args, **kwargs: saved.append(args)):
+            await agent_calls.finalize(call)
+        self.assertEqual(saved, [], "a call that never connected leaves no message in the chat")
+        self.assertEqual(call["summary_state"], "saved")
+
+    async def test_a_repeated_hang_up_writes_no_second_summary(self):
+        call = new_call([{"role": "user", "content": "Hello"}])
+        scheduled = []
+        with patch.object(agent_calls, "schedule_summary", lambda call_: scheduled.append(call_["id"])), \
+                patch.object(agent_calls, "interrupt", lambda *args, **kwargs: None):
+            agent_calls.end(call)                       # the hang-up
+            call["summary_state"] = "pending"
+            agent_calls.end(call)                       # its keepalive retry, the unload beacon
+            call["summary_state"] = "saved"
+            agent_calls.end(call)                       # the heartbeat
+            call["summary_state"] = "failed"
+            agent_calls.end(call)                       # a failed summary is tried again
+        self.assertEqual(scheduled, [call["id"], call["id"]])
+
+
+class OneSummaryMessage(unittest.TestCase):
+    def test_the_summary_is_one_message_with_its_details_in_a_real_chat(self):
+        from core.session_manager import session_manager as real_sessions
+        sid = real_sessions.create_session("Kip", owner_user="alice")["id"]
+        real_sessions.append_message(sid, "user", "ring me")
+        real_sessions.upsert_call_summary(sid, "c" * 32, "**Call summary.** First.", details={"transcript": "**You:** hi", "latency": ""})
+        real_sessions.upsert_call_summary(sid, "c" * 32, "**Call summary.** Updated.", details={"transcript": "**You:** hi", "latency": "Latency: x."})
+        notes = [m for m in real_sessions.get_session(sid)["messages"] if m.get("call_summary_id") == "c" * 32]
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(notes[0]["content"], "**Call summary.** Updated.")
+        self.assertEqual(notes[0]["call_details"], {"transcript": "**You:** hi", "latency": "Latency: x."})
+        self.assertEqual(len(real_sessions.get_session(sid)["messages"]), 2, "the person's message and the one summary")
+
+
+class TranscriptKeepsItsEnd(Base):
 
     async def test_a_long_transcript_keeps_its_end(self):
         call = new_call([{"role": "user", "content": f"line {n} " + "x" * 200} for n in range(400)])

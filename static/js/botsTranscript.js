@@ -13,6 +13,7 @@
 // count, ids}, reply_to_id, reply_to {id,role,snippet}, citations, via.
 import { h, messageTray, touchTray, reactionBar, versionSwitcher, replyQuote, citationBadges, userEditor } from './botsMessageActions.js';
 import { attachmentGallery } from './botsChatAttachments.js';
+import { callSummaryParts, callDetailsNode } from './callSummaryDetails.js';
 
 export const WINDOW_SIZE = 120, TOP_REVEAL_PX = 250, FOLLOW_PX = 80, QUIET_GAP = 900, JOIN_GAP = 300;
 export const COLLAPSE_CHARS = 600, COLLAPSE_LINES = 8;
@@ -330,6 +331,11 @@ export function mountTranscript(host, opts) {
       // A reply that failed before any text: say so, and offer the retry the message menu also has.
       const retry = opts.handlers?.regenerate ? h('button', { type: 'button', class: 'bots-btn', text: 'Try again', onclick: () => opts.handlers.regenerate(message) }) : null;
       bubbles.append(h('div', { class: 'bots-msg-bubble bots-msg-failed', role: 'status' }, [h('span', { text: failedReplyText(message, speaker?.name) }), retry].filter(Boolean)));
+    } else if (message.call_summary_id && !raw.has(message.id)) {
+      // A call's summary is one message, never split into bubbles; its transcript and latency fold under it.
+      const { summary, details } = callSummaryParts(message);
+      bubbles.append(h('div', { class: 'bots-msg-bubble bots-call-summary' }, [bodyNode(message, summary),
+        callDetailsNode(details, (node, text) => opts.renderBody(node, text, false))].filter(Boolean)));
     } else {
       const parts = opts.replyStyle?.() === 'conversational' && !raw.has(message.id) ? splitConversational(message.content) : [message.content || ''];
       for (const part of parts) bubbles.append(h('div', { class: 'bots-msg-bubble' }, [bodyNode(message, part)]));

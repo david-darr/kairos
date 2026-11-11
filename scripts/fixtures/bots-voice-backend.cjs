@@ -30,8 +30,11 @@ module.exports = ({ state }) => {
         if (route === '/api/speech/prepare' && method === 'POST') return { prepare_ms: 1, engine: 'cpu' };
         if (route === '/api/agent-calls' && method === 'POST') {
           const id = ((s.callCounter = (s.callCounter || 0) + 1)).toString(16).padStart(32, '0');
-          s.calls ||= {}; return s.calls[id] = { id, parent_id: body.parent_id, agent_id: body.agent_id, room_id: body.room_id || null, ended: false, summary_state: 'open', jobs: [] };
+          s.calls ||= {}; return s.calls[id] = { id, parent_id: body.parent_id, agent_id: body.agent_id, room_id: body.room_id || null, ring_id: body.ring_id || null, ended: false, summary_state: 'open', jobs: [] };
         }
+        // A call that answers a ring opens with the reason it rang: one line of the bot's words (one event of the stream).
+        const opening = /^\/api\/agent-calls\/([a-f0-9]{32})\/opening$/.exec(route);
+        if (opening && method === 'POST') { (s.log ||= []).push({ route, method }); return { type: 'text', delta: 'Hi, just calling to say hi.' }; }
         const match = /^\/api\/agent-calls\/([a-f0-9]{32})\/(prepare|end|interrupt)$/.exec(route);
         if (match && method === 'POST') {
           const call = s.calls?.[match[1]];

@@ -21,6 +21,7 @@ import { createRecorder, transcribeBlob, getSpeechStatus, isRecordingSupported }
 import { creativeSelectionButton } from './creativeConnections.js';
 import { mountSessionAttachments, attachmentHistory } from './sessionAttachments.js';
 import { agentCall } from './agentCall.js';
+import { callSummaryParts, callDetailsNode } from './callSummaryDetails.js';
 
 const CLI_KINDS = ['claude_cli', 'codex_cli', 'antigravity_cli'];
 const queues = new Map();
@@ -110,7 +111,10 @@ export async function mountSessionChat(host, options = {}) {
     const agent = message && renderAgentHandoff(message, sessionId);
     if (agent) return agent;
     const body = el('div', { class: 'msg-body' });
-    renderMessageBody(body, text, sessionId, role === 'assistant');
+    // A call's one summary: the short text, with its transcript and latency folded under it (callSummaryDetails.js).
+    const call = message?.call_summary_id ? callSummaryParts({ ...message, content: text }) : null;
+    renderMessageBody(body, call ? call.summary : text, sessionId, role === 'assistant');
+    if (call) { const fold = callDetailsNode(call.details, (node, markdown) => renderMessageBody(node, markdown, sessionId, true)); if (fold) body.append(fold); }
     return el('div', { class: `msg ${role}`, ...(message?.call_summary_id ? {'data-call-summary':message.call_summary_id} : {}) }, [body,
       ...(options.agent && role === 'assistant' ? [el('div', { class: 'agent-message-byline' }, [agentAvatar(options.agent, 24), el('span', { text: options.agent.name })])] : []),
       ...(role === 'user' && message?.attachments?.length ? [attachmentHistory(message.attachments, sessionId)] : []),

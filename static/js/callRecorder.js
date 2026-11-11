@@ -30,7 +30,10 @@ export function createCallRecorder({ onLevel, onSpeechStart, onSegment, onChunk,
         node = new AudioWorkletNode(active, 'kairos-call-capture', { channelCount: 1, numberOfInputs: 1, numberOfOutputs: 1 });
         const ready = new Promise((resolve, reject) => {
           settleReady = resolve;
-          readyTimer = setTimeout(() => reject(new Error('Microphone capture did not start. Check your input device and try again.')), 5000);
+          // A context still waiting for a tap (a phone, or a page opened from a notification) is "locked", not broken:
+          // the call screen then asks for one tap instead of blaming the microphone.
+          readyTimer = setTimeout(() => reject(active.state === 'running' ? new Error('Microphone capture did not start. Check your input device and try again.')
+            : Object.assign(new Error('Tap to start the call.'), { name: 'AudioLocked' })), 5000);
         });
         node.port.onmessage = ({ data }) => {
           if (closed || !enabled) return;
@@ -49,7 +52,10 @@ export function createCallRecorder({ onLevel, onSpeechStart, onSegment, onChunk,
         gain = active.createGain(); gain.gain.value = 0;
         source.connect(node); node.connect(gain); gain.connect(active.destination);
         enabled = true; node.port.postMessage({ type: 'mode', value: mode }); if (silenceMs > 0) node.port.postMessage({ type: 'silence', value: silenceMs }); node.port.postMessage({ type: 'enabled', value: true });
-        await Promise.all([active.resume(), ready]);
+        // The worklet's first message is the proof the context runs. resume() is asked for but never waited on: on a
+        // phone with no recent tap it can stay pending for good, and the 5 s timer above turns that into AudioLocked.
+        active.resume().catch(() => {});
+        await ready;
       } catch (error) { close(); throw error; }
     },
     // `barge` keeps the microphone open while Kairos speaks: no segmenting, only a watch for the user's voice over the echo.
