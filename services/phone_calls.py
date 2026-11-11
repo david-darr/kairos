@@ -495,14 +495,45 @@ class LivePipeline(phone_bridge.Pipeline):
             call_ask.attach(call, session["ask"])      # a call placed by ask_me_by_call: its first reply is the answer
         return cls(account, owner, record, bot, call)
 
+    @staticmethod
+    def _speech_model() -> Optional[str]:
+        from core import speech
+        return "small.en" if os.path.isfile(speech.model_path("small.en")) else speech.installed_model()
+
     async def transcribe(self, pcm16: bytes) -> str:
         from core import phone_audio, speech
-        name = "small.en" if os.path.isfile(speech.model_path("small.en")) else speech.installed_model()
         try:
-            result = await asyncio.to_thread(speech.transcribe_call, phone_audio.wav_bytes(pcm16), name, "auto")
+            result = await asyncio.to_thread(speech.transcribe_call, phone_audio.wav_bytes(pcm16), self._speech_model(), "auto")
         except speech.SpeechUnavailable:
             return ""
         return result.get("text", "")
+
+    async def warm(self) -> dict:
+        """What an app call loads when it starts (POST /api/agent-calls/{id}/prepare and /api/speech/prepare): the
+        conversation model, the speech-to-text model on the engine calls use, and Smart Turn plus the call voice
+        (routes/speech_routes._warm_optional). All at once, each timed; a part that fails says so and the call goes on."""
+        from core import speech
+        from routes import speech_routes
+        from services import agent_calls
+
+        def recognition():
+            with speech.ENGINE_LOCK:
+                return speech.prepare_call(self._speech_model(), "auto")
+
+        timings: dict = {}
+
+        async def timed(name: str, work) -> None:
+            began = time.perf_counter()
+            try:
+                await work
+                timings[name] = round((time.perf_counter() - began) * 1000)
+            except Exception as error:
+                timings[name] = f"failed ({type(error).__name__})"
+
+        await asyncio.gather(timed("conversation", agent_calls._conversation(self.call).prepare()),
+                             timed("speech_recognition", asyncio.to_thread(recognition)),
+                             timed("smart_turn_and_voice", asyncio.to_thread(speech_routes._warm_optional)))
+        return timings
 
     async def end_of_turn(self, pcm16: bytes):
         from core import phone_audio, turn_detect

@@ -29,24 +29,29 @@ SENTENCE = re.compile(r"(?<=[.!?])\s+")
 LEAD_SECONDS = 2.0            # how far ahead of playback frames are sent (what a barge-in has to clear)
 BARGE_VOICED_MS = 400         # speech this long over the bot's voice is an interruption; shorter is a backchannel
 MAX_CALL_SECONDS = 30 * 60
+STALL_FLUSH_SECONDS = 0.1     # a finished sentence with no more text after it this long is spoken (callVoice.js: 100 ms)
+RENDER_AHEAD = 2              # sentences rendered while the one before them plays (callVoice.js prefetches the same way)
 
 
 class Endpointer:
     """Speech turns from 16 kHz float audio. Energy based, all timing from sample counts.
 
-    push() returns events: ('start',), ('pause', id, samples) when Smart Turn should be asked, ('segment', samples).
+    push() returns events: ('start',), ('pause', id, samples) when Smart Turn should be asked, ('segment', samples,
+    quiet_ms) with how long the person had been quiet when the turn was ended (the endpoint wait).
     With Smart Turn on, a verdict of complete ends the turn after the 200 ms pause; incomplete waits up to `cap_ms` of
-    quiet; no verdict falls back to the ordinary silence wait. This mirrors static/js/speechSegments.js.
+    quiet; no verdict falls back to the ordinary silence wait. Smart Turn hears the last `window_ms` up to the end of the
+    voice plus the trailing keep. This mirrors static/js/speechSegments.js (the app call's endpointer), number for number.
     """
     HOP = 320                  # 20 ms at 16 kHz
 
     def __init__(self, rate: int = 16000, pre_roll_ms: int = 400, silence_ms: int = 700, smart: bool = False,
                  cap_ms: int = 2500, pause_ms: int = 200, onset_ms: int = 60, min_voiced_ms: int = 120,
-                 max_ms: int = 30000, trailing_ms: int = 160):
+                 max_ms: int = 30000, trailing_ms: int = 160, window_ms: int = 8000):
         self.rate, self.smart = rate, smart
         ms = lambda value: int(rate * value / 1000)   # noqa: E731
         self.pre_roll, self.silence, self.cap, self.pause = ms(pre_roll_ms), ms(silence_ms), ms(cap_ms), ms(pause_ms)
         self.onset, self.min_voiced, self.max, self.trailing = ms(onset_ms), ms(min_voiced_ms), ms(max_ms), ms(trailing_ms)
+        self.window = ms(window_ms)
         self.pause_id = 0
         self.noise, self.calibration, self.calibrated = 0.002, [], 0
         self.buffer = np.zeros(0, dtype=np.float32)
@@ -115,8 +120,15 @@ class Endpointer:
         if self.smart and not self.asked and self.quiet >= self.pause and self.voiced >= self.min_voiced:
             self.asked = True
             self.pause_id += 1
-            events.append(("pause", self.pause_id, np.concatenate(self.parts)))
+            events.append(("pause", self.pause_id, self._heard()[-self.window:]))
         return events + self._decide()
+
+    def _heard(self):
+        """The utterance so far, cut `trailing` after the last voiced audio."""
+        audio = np.concatenate(self.parts)
+        if self.quiet > self.trailing:
+            audio = audio[: len(audio) - (self.quiet - self.trailing)]
+        return audio
 
     def _decide(self) -> list:
         if not self.active:
@@ -131,14 +143,12 @@ class Endpointer:
         return self._finish() if done else []
 
     def _finish(self) -> list:
-        voiced, parts, quiet = self.voiced, self.parts, self.quiet
+        voiced, quiet = self.voiced, self.quiet
+        audio = self._heard() if voiced >= self.min_voiced else None
         self._reset()
-        if voiced < self.min_voiced:
+        if audio is None:
             return []
-        audio = np.concatenate(parts)
-        if quiet > self.trailing:
-            audio = audio[: len(audio) - (quiet - self.trailing)]
-        return [("segment", audio)]
+        return [("segment", audio, round(quiet * 1000 / self.rate))]
 
 
 def split_sentences(buffer: str) -> tuple[list[str], str]:
@@ -152,6 +162,81 @@ def split_sentences(buffer: str) -> tuple[list[str], str]:
             sentences.append(carry)
             carry = ""
     return sentences, (carry + " " + rest) if carry else rest
+
+
+# The app call's sentence rule (static/js/voiceOutput.js createChunker), so a phone or Discord call starts speaking as
+# soon as an app call would: a boundary only where the next thing starts a sentence, no split after an abbreviation, the
+# first sentence alone (however short), or at a clause break once it has FIRST_CLAUSE_WORDS words.
+SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"'])")
+ABBREVIATION = re.compile(
+    r"(?:\b(?:Mr|Mrs|Ms|Mx|Dr|Prof|Sr|Jr|St|Mt|Ave|Blvd|Dept|Gen|Col|Lt|Sgt|Capt|Rep|Sen|Gov|Hon|Rev|vs|Inc|Ltd|Co|Corp|"
+    r"Fig|approx|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)|\b(?!I\.)[A-Z]|\b[A-Za-z]\.[A-Za-z]|\be\.g|\bi\.e)\.$")
+CLAUSE_BREAK = re.compile(r"[,;](?=\s)|\s+-{1,2}\s+|\s*[—–]\s*")
+FIRST_CLAUSE_WORDS = 6
+FINISHED = re.compile(r"[.!?][\"')\]]?\s*$")
+
+
+class SentenceChunker:
+    """Streamed text -> sentences to speak, the moment each is complete (see SENTENCE_END above)."""
+
+    def __init__(self):
+        self.buffer, self.started = "", False
+
+    @staticmethod
+    def _sentence_end(text: str):
+        for match in SENTENCE_END.finditer(text):
+            if not ABBREVIATION.search(text[:match.start()]):
+                return match
+        return None
+
+    @staticmethod
+    def _clause_end(text: str):
+        for match in CLAUSE_BREAK.finditer(text):
+            head = text[: match.start() + (1 if match.group(0)[:1] in ",;" else 0)].strip()
+            if len(head.split()) >= FIRST_CLAUSE_WORDS:
+                return head, match.end()
+        return None
+
+    def _emit(self, out: list, sentence: str) -> None:
+        if sentence:
+            self.started = True
+            out.append(sentence)
+
+    def feed(self, text: str) -> list:
+        self.buffer += text
+        out: list = []
+        while True:
+            match = self._sentence_end(self.buffer)
+            clause = None if self.started else self._clause_end(self.buffer)
+            if clause and (match is None or clause[1] <= match.start() + 1):
+                self.buffer = self.buffer[clause[1]:]
+                self._emit(out, clause[0])
+                continue
+            if match is None:
+                return out
+            sentence = self.buffer[: match.start() + 1].strip()
+            self.buffer = self.buffer[match.end():]
+            self._emit(out, sentence)
+
+    def holds_sentence(self) -> bool:
+        """The text so far ends a sentence, but the next token could still change that ("3." may be "3.5")."""
+        tail = self.buffer
+        return bool(FINISHED.search(tail)) and not ABBREVIATION.search(tail.rstrip()) and not re.search(r"\d\.\s*$", tail)
+
+    def flush_sentence(self) -> list:
+        """No more text came for a moment: a finished sentence goes now instead of waiting for the next one."""
+        if not self.holds_sentence():
+            return []
+        out: list = []
+        sentence, self.buffer = self.buffer.strip(), ""
+        self._emit(out, sentence)
+        return out
+
+    def finish(self) -> list:
+        out: list = []
+        leftover, self.buffer = self.buffer.strip(), ""
+        self._emit(out, leftover)
+        return out
 
 
 def spoken_text(text: str) -> str:
@@ -180,6 +265,10 @@ class Pipeline:
     def end_requested(self) -> bool:
         """The bot asked to end the call (an ask answered), past the hang-up guard (agent_calls.request_end)."""
         return False
+    async def warm(self) -> Optional[dict]:
+        """Load what the first turn would otherwise wait for (the conversation model, speech-to-text, Smart Turn, the
+        voice), as an app call does when it starts. Returns what was warmed and how long it took, in ms."""
+        return None
 
 
 class TurnBridge:
@@ -209,10 +298,14 @@ class TurnBridge:
         self.heard: list[str] = []
         self.frames_in = 0
         # Latency (Hermes audit): when the person last stopped, waiting for the bot's first frame; the call's start.
+        # The gap is measured from the end of their speech (the endpoint wait included), as the app call measures it.
         self.call_started = clock()
         self.awaiting_since: Optional[float] = None
         self.segment_at: Optional[float] = None
+        self.speech_end_at: Optional[float] = None
         self.first_audio_done = False
+        self.timing: Optional[dict] = None     # the current turn's stages, logged once its first frame is out
+        self.turn_count = 0
         self.typed_waiting: list[str] = []
         try:
             pipeline.on_typed(self.typed)
@@ -259,6 +352,8 @@ class TurnBridge:
                 self._spawn(self._ask(event[1], event[2]))
             elif event[0] == "segment":
                 self.segment_at = self.clock()
+                quiet_ms = event[2] if len(event) > 2 else 0
+                self.speech_end_at = self.segment_at - quiet_ms / 1000
                 during, self.during = self.during, False
                 if self.backchannel:
                     self.backchannel = False    # a short "mm-hm" over the bot's voice is not a turn
@@ -358,12 +453,21 @@ class TurnBridge:
 
     async def _respond(self, samples, during: bool = False, text: Optional[str] = None, measure: bool = True) -> None:
         self.phase = "thinking"
-        started = (self.segment_at if self.segment_at is not None else self.clock()) if measure else None
-        self.segment_at = None
+        started = None
+        if measure:
+            ended = self.speech_end_at if self.speech_end_at is not None else self.segment_at
+            started = ended if ended is not None else self.clock()
+        timing = {"speech_end": started, "decided": self.segment_at if self.segment_at is not None else started} \
+            if measure else None
+        self.segment_at = self.speech_end_at = None
         self.awaiting_since = started
+        self.timing = timing
         try:
             if text is None:
+                began = self.clock()
                 text = (await self.pipeline.transcribe(phone_audio.float_to_pcm16(samples))).strip()
+                if timing is not None:
+                    timing["stt"] = self.clock() - began
             if not text:
                 return
             if during and is_backchannel(text, self._asked()):
@@ -372,7 +476,9 @@ class TurnBridge:
             self.played = []
             self.heard.append(text)
             request_id = self.REQUEST_PREFIX + ":" + uuid.uuid4().hex
-            await self._say(self.pipeline.converse(text, request_id))
+            if timing is not None:
+                timing["converse"] = self.clock()
+            await self._say(self.pipeline.converse(text, request_id), timing)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -381,6 +487,8 @@ class TurnBridge:
             self.phase = "idle"
             if self.awaiting_since is not None and self.awaiting_since == started:
                 self.awaiting_since = None        # no audio came of it: nothing to measure
+            if self.timing is timing:
+                self.timing = None
             self._turn_over()
             self._next_typed()
 
@@ -389,63 +497,119 @@ class TurnBridge:
             return converter
         return self._new_converter(rate)
 
-    async def _say(self, deltas) -> None:
-        """Speak a stream of text: each finished sentence is rendered while the one before it is still playing.
-        Nothing plays before the first sentence (no filler); `self.played` records when each sentence starts so a
-        barge-in knows what was heard."""
-        queue: asyncio.Queue = asyncio.Queue(maxsize=4)
+    async def _say(self, deltas, timing: Optional[dict] = None) -> None:
+        """Speak a stream of text as an app call does: each sentence goes to the voice the moment it is complete (the
+        first one alone, or at a clause break; a finished sentence with no text after it for STALL_FLUSH_SECONDS goes
+        too), up to RENDER_AHEAD sentences render while the one before them plays, and frames go out as each piece of
+        audio comes. Three stages run apart, so the model is never held up by the voice and the voice never by
+        playback. Nothing plays before the first sentence (no filler); `self.played` records when each sentence starts
+        so a barge-in knows what was heard. `timing` (a measured turn) gets each stage's time."""
+        texts: asyncio.Queue = asyncio.Queue()       # model text as it streams
+        sentences: asyncio.Queue = asyncio.Queue()   # (number, sentence) ready to speak
+        audio: asyncio.Queue = asyncio.Queue()       # (number, sentence, frames) ready to send; None ends it
+        ahead = asyncio.Semaphore(RENDER_AHEAD + 1)  # the sentence playing, and the ones rendered after it
+        holding: set = set()                         # sentences holding a place in `ahead`
         self.played = []
 
-        async def render(number: int, sentence: str) -> None:
-            converter = None
+        def mark(name: str) -> None:
+            if timing is not None and name not in timing:
+                timing[name] = self.clock()
+
+        async def pump() -> None:
+            try:
+                async for delta in deltas:
+                    if delta:
+                        mark("first_output")
+                        texts.put_nowait(delta)
+            finally:
+                texts.put_nowait(None)
+
+        async def chunk() -> None:
+            chunker, count = SentenceChunker(), 0
+            try:
+                while True:
+                    try:
+                        delta = await (asyncio.wait_for(texts.get(), STALL_FLUSH_SECONDS) if chunker.holds_sentence()
+                                       else texts.get())
+                    except asyncio.TimeoutError:
+                        delta = ""
+                    if delta is None:
+                        found = chunker.finish()
+                    elif delta:
+                        found = chunker.feed(delta)
+                    else:
+                        found = chunker.flush_sentence()     # the model paused after a full stop
+                    for sentence in found:
+                        count += 1
+                        mark("first_sentence")
+                        sentences.put_nowait((count, sentence))
+                    if delta is None:
+                        return
+            finally:
+                sentences.put_nowait(None)
+
+        async def render_one(number: int, sentence: str) -> bool:
+            converter, sent = None, False
+            if number == 1:
+                mark("tts_start")
             async for rate, pcm in self.pipeline.speak(spoken_text(sentence)):
+                if number == 1:
+                    mark("tts_audio")
                 converter = self._converted(converter, rate)
                 frames = converter.frames(pcm)
                 if frames:
-                    await queue.put((number, sentence, frames))
+                    sent = True
+                    audio.put_nowait((number, sentence, frames))
             if converter:
                 tail = converter.frames(b"", final=True)
                 if tail:
-                    await queue.put((number, sentence, tail))
+                    sent = True
+                    audio.put_nowait((number, sentence, tail))
+            return sent
 
-        async def produce() -> None:
-            buffer, count = "", 0
+        async def render() -> None:
             try:
-                async for delta in deltas:
-                    buffer += delta
-                    sentences, buffer = split_sentences(buffer)
-                    for sentence in sentences:
-                        count += 1
-                        await self._guarded(render, count, sentence)
-                if buffer.strip():
-                    await self._guarded(render, count + 1, buffer)
+                while (item := await sentences.get()) is not None:
+                    number, sentence = item
+                    await ahead.acquire()
+                    holding.add(number)
+                    if not await self._guarded(render_one, number, sentence):
+                        holding.discard(number)      # nothing to play: its place goes to the next sentence
+                        ahead.release()
             finally:
-                await queue.put(None)
+                audio.put_nowait(None)
 
-        producer = asyncio.create_task(produce())
+        stages = [asyncio.create_task(stage()) for stage in (pump, chunk, render)]
         playing = None
         try:
-            while (item := await queue.get()) is not None:
+            while (item := await audio.get()) is not None:
                 number, sentence, frames = item
                 self.phase = "speaking"
                 if number != playing:
                     playing = number
+                    for done in [n for n in holding if n < number]:
+                        holding.discard(done)        # played: the voice may render one more ahead
+                        ahead.release()
                     self.played.append((sentence, max(self.play_end, self.clock())))
                 await self._send_frames(frames)
-            await producer
+            await asyncio.gather(*stages)            # a model failure surfaces here, as before
             if self.pace and self.phase == "speaking":
                 await self.sleep(max(0.0, self.play_end - self.clock()))
         finally:
-            producer.cancel()
-            await asyncio.gather(producer, return_exceptions=True)
+            # Every stage ends with put_nowait, never a wait, so cancelling here cannot hang (2026-11-11: a barge-in
+            # over a long reply waited forever on a full queue and froze the call).
+            for stage in stages:
+                stage.cancel()
+            await asyncio.gather(*stages, return_exceptions=True)
 
-    async def _guarded(self, render, number: int, sentence: str) -> None:
+    async def _guarded(self, render, number: int, sentence: str):
         try:
-            await render(number, sentence)
+            return await render(number, sentence)
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.warning("%s: a sentence could not be spoken", self.LABEL)
+            return None
 
     def _first_frame(self) -> None:
         now = self.clock()
@@ -458,6 +622,29 @@ class TurnBridge:
                 self.pipeline.record_latency(gap_ms=round(gap * 1000))
         except Exception:
             logger.info("%s: latency not recorded", self.LABEL)
+        timing, self.timing = self.timing, None
+        if timing is not None and timing.get("speech_end") is not None:
+            timing["first_frame"] = now
+            self._log_timing(timing)
+
+    def _log_timing(self, timing: dict) -> None:
+        """One line per measured turn, the stages the app call reports (call audio timing, speech timing):
+        endpoint_ms   the person stopped -> the turn was ended (silence wait, or Smart Turn's pause and verdict)
+        stt_ms        speech-to-text
+        first_output_ms  the model asked -> its first text
+        first_sentence_ms  the model asked -> the first sentence ready for the voice
+        tts_first_audio_ms  the first sentence to the voice -> its first audio
+        send_ms       that audio -> the first frame out (resampled, encoded, queued)
+        speech_end_to_audio_ms  the person stopped -> the bot's first frame out"""
+        def ms(later: str, earlier: str):
+            a, b = timing.get(later), timing.get(earlier)
+            return round((a - b) * 1000) if a is not None and b is not None else None
+        self.turn_count += 1
+        stt = round(timing["stt"] * 1000) if timing.get("stt") is not None else None
+        logger.info("%s timing turn=%d endpoint_ms=%s stt_ms=%s first_output_ms=%s first_sentence_ms=%s "
+                    "tts_first_audio_ms=%s send_ms=%s speech_end_to_audio_ms=%s", self.LABEL, self.turn_count,
+                    ms("decided", "speech_end"), stt, ms("first_output", "converse"), ms("first_sentence", "converse"),
+                    ms("tts_audio", "tts_start"), ms("first_frame", "tts_audio"), ms("first_frame", "speech_end"))
 
     async def _send_frames(self, frames: list) -> None:
         if frames and (self.awaiting_since is not None or not self.first_audio_done):

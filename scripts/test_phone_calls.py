@@ -500,14 +500,14 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         wav_seconds = len(self.pipeline.heard[0]) / 2 / 16000                    # the STT got 16 kHz audio of the utterance
         self.assertGreater(wav_seconds, 0.5)
         self.assertLess(wav_seconds, 1.4)
-        self.assertEqual(self.pipeline.spoken, ["Sure thing. I can do that for you."])
+        self.assertEqual(self.pipeline.spoken, ["Sure thing.", "I can do that for you."])   # the first sentence goes alone
         media = self.socket.media_sent()
         self.assertTrue(all(m["streamSid"] == "MZ1" for m in media))
         payloads = [base64.b64decode(m["media"]["payload"]) for m in media]
         self.assertTrue(all(len(p) == 160 for p in payloads))
         energy = max(float(np.abs(phone_audio.mulaw_decode(p)).max()) for p in payloads)
         self.assertGreater(energy, 3000)
-        self.assertAlmostEqual(len(payloads) * 0.02, 0.4, delta=0.05)            # the 0.4 s the voice rendered, as 20 ms frames
+        self.assertAlmostEqual(len(payloads) * 0.02, 0.4 * len(self.pipeline.spoken), delta=0.05)   # 0.4 s per sentence, as 20 ms frames
         self.assertTrue(self.pipeline.closed)
 
     async def test_the_opening_line_is_spoken_before_the_caller_says_anything(self):

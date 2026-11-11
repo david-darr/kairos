@@ -919,7 +919,7 @@ class RealTransportFilter(unittest.IsolatedAsyncioTestCase):
         transport._on_voice(None, SimpleNamespace(pcm=b"\x01\x00" * 4))
         transport._on_voice(SimpleNamespace(id=1), SimpleNamespace(pcm=None))
         transport._on_voice(SimpleNamespace(id=1), SimpleNamespace(pcm=b"\x02\x00" * 4))
-        self.assertEqual(events, [("audio", "1", b"\x02\x00" * 4)])
+        self.assertEqual(events, [("audio", "1", b"\x02\x00" * 4, None)])   # no RTP timestamp on this fake
         self.assertEqual(transport.members(), {"1", "2"})
         transport.send(b"a")
         transport.send(b"b")
@@ -1016,7 +1016,7 @@ class Receiving(unittest.IsolatedAsyncioTestCase):
         await rig.bridge.handle(("opus", OWNER, dave_wrapped(opus_of(0))))
         await settle()
         self.assertIsNotNone(rig.bridge.cant_hear)
-        self.assertEqual(rig.pipeline.spoken, [dv.CANT_HEAR_LINE])
+        self.assertEqual(" ".join(rig.pipeline.spoken), dv.CANT_HEAR_LINE)   # said in two pieces, as an app call would
         self.assertTrue(rig.sent, "it says it out loud rather than sitting silent")
         self.assertEqual(rig.bridge.ended, "cannot hear")
 
@@ -1038,14 +1038,14 @@ class Receiving(unittest.IsolatedAsyncioTestCase):
         await rig.quiet(1.5)
         self.assertEqual(rig.bridge.ended, "cannot hear")
         self.assertIn("receiving stopped", rig.bridge.cant_hear)
-        self.assertEqual(rig.pipeline.spoken, [dv.CANT_HEAR_LINE])
+        self.assertEqual(" ".join(rig.pipeline.spoken), dv.CANT_HEAR_LINE)   # said in two pieces, as an app call would
 
     async def test_the_cannot_hear_line_waits_for_the_greeting(self):
         rig = self.rig(opening="This is Kip, an AI assistant from Kairos. How can I help?", receiving=lambda: False)
         await rig.begin()
         await rig.quiet(1.5)
         self.assertEqual(rig.pipeline.spoken[:2], ["This is Kip, an AI assistant from Kairos.", "How can I help?"])
-        self.assertEqual(rig.pipeline.spoken[-1], dv.CANT_HEAR_LINE)
+        self.assertTrue(" ".join(rig.pipeline.spoken).endswith(dv.CANT_HEAR_LINE))
         self.assertEqual(rig.bridge.ended, "cannot hear")
 
     def test_the_real_extension_no_longer_decodes_or_dies(self):
@@ -1106,7 +1106,7 @@ class RealTransportReceive(unittest.IsolatedAsyncioTestCase):
         transport._on_voice(None, frame)                          # mapped, but no cached member: found by its stream
         transport._on_voice(SimpleNamespace(id=int(OWNER)), SimpleNamespace(opus=b"opus-2", packet=None))
         transport._on_voice(SimpleNamespace(id=int(OWNER)), SimpleNamespace(opus=b"", packet=None))   # a lost packet
-        self.assertEqual(self.events, [("opus", OWNER, b"opus-1"), ("opus", OWNER, b"opus-2")])
+        self.assertEqual(self.events, [("opus", OWNER, b"opus-1", None), ("opus", OWNER, b"opus-2", None)])
 
     async def test_nothing_escapes_into_the_extensions_thread(self):
         transport, _ = self.transport()
@@ -1195,7 +1195,7 @@ class LifecycleReceiving(Lifecycle):
         for _ in range(dv.CANT_HEAR_PACKETS):
             self.host.transport_made.on_event(("opus", OWNER, dave_wrapped(b"OPUS" + b"\x00" * 8)))
         await asyncio.wait_for(self.wait_gone(), 3)
-        self.assertIn(dv.CANT_HEAR_LINE, self.pipeline.spoken)
+        self.assertIn(dv.CANT_HEAR_LINE, " ".join(self.pipeline.spoken))
         self.assertEqual(self.host.dms[-1], (OWNER, dv.CANT_HEAR_DM.format(channel="voice-room")))
         self.assertTrue(self.host.transport_made.disconnected)
         self.assertTrue(self.pipeline.closed)
@@ -1372,7 +1372,7 @@ class WaitingForDave(unittest.IsolatedAsyncioTestCase):
             await settle()
         self.assertEqual(rig.sent, [])
         self.assertEqual(rig.bridge.ended, "cannot hear")
-        self.assertNotIn(dv.CANT_HEAR_LINE, rig.pipeline.spoken, "it does not say it when they could not hear it")
+        self.assertNotIn(dv.CANT_HEAR_LINE, " ".join(rig.pipeline.spoken), "it does not say it when they could not hear it")
 
     async def test_frames_before_their_key_arrives_are_waited_out_not_counted(self):
         keyed = [False]
@@ -1436,6 +1436,233 @@ class WaitingForDave(unittest.IsolatedAsyncioTestCase):
         state.dave_protocol_version = 0
         state.can_encrypt = False
         self.assertTrue(transport.ready_to_speak(), "a channel without DAVE")
+
+
+# -- latency (2026-11-11, David: Discord replies were "a lot slower" than an app call) ------------------------------
+
+class TimedPipeline(FakePipeline):
+    """The fake pipeline, noting on the rig's clock when the turn was handed to speech-to-text, and with a model that
+    can be held part-way through its reply."""
+    def __init__(self, clock, reply="Sure. It is sunny in Austin today. Bring sunglasses.", hold_after=None, **options):
+        super().__init__(reply=reply, **options)
+        self.clock, self.hold_after, self.decided, self.finished = clock, hold_after, [], False
+        self.release = asyncio.Event()
+
+    async def transcribe(self, pcm16):
+        self.decided.append(self.clock())
+        return await super().transcribe(pcm16)
+
+    async def converse(self, text, request_id):
+        for index, word in enumerate(self.reply.split(" ")):
+            yield (" " if index else "") + word
+            if self.hold_after is not None and index + 1 == self.hold_after:
+                await self.release.wait()          # the model is still writing the rest of its reply
+        self.finished = True
+
+
+class LongVoicePipeline(FakePipeline):
+    """A voice that hands each sentence back in many 100 ms pieces, as Kokoro does."""
+    async def speak(self, text):
+        self.spoken.append(text)
+        piece = (np.sin(np.arange(2400) * 0.05) * 8000).astype("<i2").tobytes()
+        for _ in range(60):
+            yield 24000, piece
+
+
+def js_number(name: str) -> int:
+    import re
+    source = (ROOT / "static" / "js" / "speechSegments.js").read_text(encoding="utf-8")
+    found = re.search(rf"\b{name}\s*=\s*(\d+)", source)
+    return int(found.group(1))
+
+
+class Latency(unittest.IsolatedAsyncioTestCase):
+    """Where a Discord turn's time goes, against fakes. Speech ends; the endpointer decides the turn is over (the same
+    wait an app call has); speech-to-text; the model's first sentence goes to the voice at once; its first frame goes
+    out while the model is still writing."""
+
+    async def bursty_talk(self, rig, seconds, burst=5, timestamps=True):
+        """Their frames arrive in bunches, as over a real network: nothing for `burst` frames, then all of them at
+        once, each with its RTP timestamp. Returns the clock when their last frame arrived."""
+        frames = int(round(seconds / 0.02))
+        sent = 0
+        while sent < frames:
+            count = min(burst, frames - sent)
+            rig.clock.t += 0.02 * count
+            for index in range(sent, sent + count):
+                event = ("audio", OWNER, chunk(0.3, start=index * audio.FRAME_SAMPLES))
+                await rig.bridge.handle(event + ((50_000 + index * audio.FRAME_SAMPLES) % dv.RTP_WRAP,) if timestamps else event)
+            sent += count
+            await rig.bridge.tick()
+            await settle(3)
+        return rig.clock.t
+
+    async def decided_after(self, rig, last_voice, limit=3.0):
+        while not rig.pipeline.decided and rig.clock.t - last_voice < limit:
+            rig.clock.t += 0.02
+            await rig.bridge.tick()
+            await settle(3)
+        self.assertTrue(rig.pipeline.decided, "the turn ended")
+        return round((rig.pipeline.decided[0] - last_voice) * 1000)
+
+    def test_the_endpointer_uses_the_app_calls_numbers(self):
+        endpointer = phone_bridge.Endpointer(smart=True)
+        ms = lambda samples: round(samples * 1000 / endpointer.rate)   # noqa: E731
+        self.assertEqual(ms(endpointer.silence), 700, "speechSegments.js: silenceMs = 700")
+        self.assertEqual(ms(endpointer.pause), js_number("SMART_PAUSE_MS"))
+        self.assertEqual(ms(endpointer.cap), js_number("SMART_CAP_MS"))
+        self.assertEqual(ms(endpointer.trailing), js_number("TRAILING_KEEP_MS"))
+        self.assertEqual(ms(endpointer.window), js_number("SMART_WINDOW_MS"))
+
+    async def test_the_endpoint_wait_is_the_app_calls_even_when_frames_arrive_in_bursts(self):
+        for timestamps in (True, False):
+            for burst in (1, 5, 6):
+                with self.subTest(burst=burst, timestamps=timestamps):
+                    rig = Rig(pipeline=None)
+                    rig.pipeline = TimedPipeline(rig.clock)
+                    rig.bridge = phone_bridge_factory(rig, False, True, {}, {})
+                    await rig.begin()
+                    await rig.quiet(0.4)
+                    last_voice = await self.bursty_talk(rig, 1.2, burst=burst, timestamps=timestamps)
+                    waited = await self.decided_after(rig, last_voice)
+                    # 700 ms of quiet after their last frame, to the tick (an app call: 700 ms after the last sample).
+                    self.assertGreaterEqual(waited, 700)
+                    self.assertLessEqual(waited, 740, f"the end of the turn was decided {waited} ms after they stopped")
+
+    async def test_with_smart_turn_a_complete_sentence_ends_after_the_short_pause(self):
+        rig = Rig(pipeline=None, smart_turn=True)
+        rig.pipeline = TimedPipeline(rig.clock, verdict=True)
+        rig.bridge = phone_bridge_factory(rig, False, True, {}, {"smart_turn": True})
+        await rig.begin()
+        await rig.quiet(0.4)
+        last_voice = await self.bursty_talk(rig, 1.0, burst=5)
+        waited = await self.decided_after(rig, last_voice)
+        self.assertGreaterEqual(waited, js_number("SMART_PAUSE_MS"))
+        self.assertLessEqual(waited, js_number("SMART_PAUSE_MS") + 60)
+
+    async def test_their_timestamps_fill_a_real_pause_in_their_speech(self):
+        rig = Rig()
+        await rig.begin()
+        await rig.quiet(0.4)
+        heard = []
+        original = rig.bridge._push
+
+        async def counting(samples):
+            heard.append(len(samples))
+            await original(samples)
+        rig.bridge._push = counting
+        await rig.bridge.handle(("audio", OWNER, chunk(0.3), 1000))
+        rig.clock.t += 0.02
+        await rig.bridge.handle(("audio", OWNER, chunk(0.3), 1000 + 960 + 960 * 15))   # they paused 300 ms
+        self.assertTrue(any(abs(n - 4800) <= 1 for n in heard), f"the 300 ms they did not send is heard as silence: {heard}")
+
+    async def test_the_first_sentence_goes_out_while_the_model_is_still_writing(self):
+        rig = Rig(pipeline=None)
+        rig.pipeline = TimedPipeline(rig.clock, hold_after=3)        # "Sure. It is" and then it pauses
+        rig.bridge = phone_bridge_factory(rig, False, True, {}, {})
+        await rig.begin()
+        await rig.quiet(0.4)
+        await rig.talk(0.8)
+        await rig.quiet(0.8)
+        await asyncio.sleep(0.05)
+        self.assertFalse(rig.pipeline.finished, "the model has not finished its reply")
+        self.assertEqual(rig.pipeline.spoken, ["Sure."], "the first sentence went to the voice alone, at once")
+        self.assertTrue(rig.sent, "and its first frames are out")
+        rig.pipeline.release.set()
+        await asyncio.wait_for(rig.bridge.turn, 2)
+        self.assertEqual(rig.pipeline.spoken, ["Sure.", "It is sunny in Austin today.", "Bring sunglasses."])
+
+    async def test_a_finished_sentence_is_spoken_when_the_model_pauses_after_it(self):
+        rig = Rig(pipeline=None)
+        rig.pipeline = TimedPipeline(rig.clock, reply="Okay, here it is. More soon.", hold_after=4)
+        rig.bridge = phone_bridge_factory(rig, False, True, {}, {})
+        await rig.begin()
+        await rig.quiet(0.4)
+        await rig.talk(0.8)
+        await rig.quiet(0.8)
+        await asyncio.sleep(phone_bridge.STALL_FLUSH_SECONDS + 0.1)
+        self.assertEqual(rig.pipeline.spoken, ["Okay, here it is."], "not held back waiting for the next sentence")
+        rig.pipeline.release.set()
+        await asyncio.wait_for(rig.bridge.turn, 2)
+
+    async def test_a_long_first_sentence_starts_at_a_clause_break(self):
+        chunker = phone_bridge.SentenceChunker()
+        found = chunker.feed("It looks like a sunny afternoon in Austin, with a high near seventy five. Bring a hat.")
+        self.assertEqual(found, ["It looks like a sunny afternoon in Austin,", "with a high near seventy five."])
+        self.assertEqual(chunker.finish(), ["Bring a hat."])
+        chunker = phone_bridge.SentenceChunker()
+        self.assertEqual(chunker.feed("Dr. Smith said 3.5 is fine. "), [], "no split after an abbreviation or in a number")
+        self.assertEqual(chunker.feed("Yes"), ["Dr. Smith said 3.5 is fine."])
+
+    async def test_each_turn_logs_where_its_time_went(self):
+        rig = Rig(pipeline=None)
+        rig.pipeline = TimedPipeline(rig.clock)
+        rig.bridge = phone_bridge_factory(rig, False, True, {}, {})
+        lines = []
+        with patch.object(phone_bridge.logger, "info", lambda message, *args: lines.append(message % args)):
+            await rig.begin()
+            await rig.quiet(0.4)
+            await rig.talk(0.8)
+            await rig.quiet(0.8)
+            await asyncio.wait_for(rig.bridge.turn, 2)
+        timing = [line for line in lines if line.startswith("discord voice timing")]
+        self.assertEqual(len(timing), 1, lines)
+        for stage in ("endpoint_ms=7", "stt_ms=", "first_output_ms=", "first_sentence_ms=", "tts_first_audio_ms=",
+                      "send_ms=", "speech_end_to_audio_ms="):
+            self.assertIn(stage, timing[0])
+        self.assertNotIn("=None", timing[0], "every stage was measured")
+
+    async def test_the_reply_gap_counts_from_the_end_of_their_speech(self):
+        rig = Rig(pipeline=None)
+        rig.pipeline = TimedPipeline(rig.clock)
+        recorded = []
+        rig.pipeline.record_latency = lambda gap_ms=None, first_audio_ms=None: recorded.append(gap_ms)
+        rig.bridge = phone_bridge_factory(rig, False, True, {}, {})
+        await rig.begin()
+        await rig.quiet(0.4)
+        await rig.talk(0.8)
+        await rig.quiet(0.8)
+        await asyncio.wait_for(rig.bridge.turn, 2)
+        gaps = [gap for gap in recorded if gap is not None]
+        self.assertEqual(len(gaps), 1)
+        self.assertGreaterEqual(gaps[0], 700, "the endpoint wait is part of the gap, as in an app call")
+
+    async def test_talking_over_a_long_reply_stops_it_without_hanging(self):
+        rig = Rig(pipeline=LongVoicePipeline(reply="One two three four five. Six seven eight nine ten. Eleven."),
+                  pace=True, sleep=never)
+        await rig.begin()
+        await rig.quiet(0.4)
+        await rig.talk(0.6)
+        await rig.quiet(1.0)
+        self.assertEqual(rig.bridge.phase, "speaking")
+        await asyncio.wait_for(rig.talk(0.8), 2)           # 2026-11-11: this froze on a full queue
+        self.assertEqual(rig.cleared, [1])
+        await asyncio.wait_for(rig.bridge._shutdown(), 2)
+
+    async def test_joining_warms_the_call_up_before_the_person_speaks(self):
+        warmed = asyncio.Event()
+
+        class Warming(FakePipeline):
+            async def warm(self):
+                warmed.set()
+                return {"conversation": 1}
+        bot = bots.create_bot("Warm", "token-value-456", OWNER, "ep1")
+        bots.set_voice_channel(bot["id"], VOICE_CHANNEL)
+        host = FakeHost()
+
+        async def factory(account, agent, bot):
+            return Warming()
+        db = os.path.join(_DATA.name, f"out-{uuid.uuid4().hex}.sqlite3")
+        with patch.object(dv, "HOST", host), patch.object(dv, "PIPELINE_FACTORY", factory), \
+                patch.object(dv, "CODEC_FACTORY", FakeCodec), patch.object(dv, "REQUIREMENTS", lambda: []), \
+                patch.object(bot_outbound, "DB_FILE", db):
+            dv._last_join.clear()
+            try:
+                await dv.join("local", bots.get_bot(bot["id"]), AGENT, "", clock=FakeClock(), pace=False)
+                await asyncio.wait_for(warmed.wait(), 1)
+            finally:
+                await dv.leave_all()
+                bots.delete_bot(bot["id"])
 
 
 if __name__ == "__main__":

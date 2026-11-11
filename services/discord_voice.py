@@ -40,8 +40,18 @@ JOIN_WAIT_SECONDS = 2 * 60     # how long it waits in the channel for the person
 RING_WAIT_SECONDS = 60         # a bot calling them: like a ring, about a minute, then Reach me's next way
 MAX_SECONDS = 30 * 60
 TICK_SECONDS = 0.05
-SILENCE_FILL_GAP = 0.06        # Discord sends audio only while someone talks; gaps longer than this are fed as silence
+# Discord sends audio only while someone talks, so the endpointer is fed silence for the gaps. The time line it hears is
+# kept on the wall clock (2026-11-11: it used to run ahead by every network hiccup, since a late frame's gap was filled
+# and the frames bunched behind it were then added on top, so the end of a turn was decided that much later):
+# - between two of their frames, the gap their own RTP timestamps show (exact, jitter does not matter), or, with no
+#   timestamps, the arrival gap past SILENCE_FILL_GAP;
+# - after their last frame, silence up to now once TAIL_GRACE has passed with nothing (a frame merely late is not
+#   silence), then every tick, so the 700 ms wait (or Smart Turn's pause) ends when it would in an app call.
+SILENCE_FILL_GAP = 0.06
+TAIL_GRACE = 0.1
+TAIL_STEP = 0.02
 MAX_FILL_SECONDS = 5.0
+RTP_WRAP = 2 ** 32
 CAPS = {"bot": 3, "account": 6}      # bot-started calls per day (the same as rings)
 USER_CAP = 30                        # calls the person asks for themselves, per day
 BOT_COOLDOWN_SECONDS = 90
@@ -121,7 +131,10 @@ class VoiceBridge(phone_bridge.TurnBridge):
         self.pending_since: Optional[float] = None
         self.started = clock()
         self.last_activity = self.started
-        self.fed_until = self.started
+        self.heard_until = self.started        # the wall time the endpointer has heard up to (their audio or silence)
+        self.tail_filled = 0.0                 # silence fed since their last frame
+        self.last_timestamp: Optional[int] = None
+        self.last_frame_seconds = audio.FRAME_SECONDS
         self.ended: Optional[str] = None
         self.done = asyncio.Event()
         self.arrived = asyncio.Event()         # the person is in the channel and the opening has started
@@ -129,7 +142,7 @@ class VoiceBridge(phone_bridge.TurnBridge):
     # -- the loop --------------------------------------------------------------------------------------
 
     async def run(self, queue: asyncio.Queue) -> str:
-        self.started = self.last_activity = self.fed_until = self.clock()
+        self.started = self.last_activity = self.heard_until = self.clock()
         self.prepare()
         try:
             if self.present:
@@ -167,7 +180,7 @@ class VoiceBridge(phone_bridge.TurnBridge):
                 data = self._decode(data)
                 if data is None:
                     return
-            await self._audio(data)
+            await self._audio(data, event[3] if len(event) > 3 else None)
         elif kind == "joined" and str(event[1]) == self.linked_user:
             self.present = True
             await self._begin()
@@ -199,10 +212,11 @@ class VoiceBridge(phone_bridge.TurnBridge):
                 alive = True
             if not alive:
                 self._cannot_hear("receiving stopped and could not be restarted")
-        gap = now - self.fed_until
-        if gap >= 0.04:
+        gap = now - self.heard_until
+        if gap >= (TAIL_STEP if self.tail_filled else TAIL_GRACE):
             await self._feed_silence(gap)
-            self.fed_until = now
+            self.heard_until = now
+            self.tail_filled += gap
         if self.phase == "idle" and not self.endpointer.active and now - self.last_activity > self.idle_seconds:
             self.end("idle")
 
@@ -211,7 +225,8 @@ class VoiceBridge(phone_bridge.TurnBridge):
             return
         self.begun = True
         self.arrived.set()
-        self.last_activity = self.fed_until = self.checked_receiving = self.clock()
+        self.last_activity = self.heard_until = self.checked_receiving = self.clock()
+        self.tail_filled = 0.0
         if self.on_begin is not None:
             try:
                 self.on_begin()
@@ -230,9 +245,17 @@ class VoiceBridge(phone_bridge.TurnBridge):
             self.opening_render = asyncio.ensure_future(self._render_opening())
 
     async def _render_opening(self) -> list:
+        """The greeting in frames. Rendering it at join is also what warms the voice (Kokoro loads and runs once)
+        before the person's first turn."""
         sentences, rest = phone_bridge.split_sentences(self.opening)
         if rest.strip():
             sentences.append(rest)
+        began = time.perf_counter()
+        rendered = await self._render_sentences(sentences)
+        logger.info("discord voice: greeting rendered ahead in %d ms (the voice is warm)", (time.perf_counter() - began) * 1000)
+        return rendered
+
+    async def _render_sentences(self, sentences: list) -> list:
         rendered = []
         for sentence in sentences:
             converter, frames = None, []
@@ -366,18 +389,30 @@ class VoiceBridge(phone_bridge.TurnBridge):
         if count:
             await self._push(np.zeros(count, dtype=np.float32))
 
-    async def _audio(self, pcm_stereo: bytes) -> None:
+    async def _audio(self, pcm_stereo: bytes, timestamp: Optional[int] = None) -> None:
+        """One of their frames (48 kHz stereo PCM16), with its RTP timestamp when the connection gives it."""
         self.frames_in += 1
         if self.frames_in % 50 == 0:
             self.pipeline.touch()
         now = self.clock()
-        gap = now - self.fed_until
-        if gap > SILENCE_FILL_GAP:
-            await self._feed_silence(gap)
-        self.fed_until = max(self.fed_until, now)
-        samples = phone_audio.pcm16_to_float(self.inbound.feed(pcm_stereo))
-        self.fed_until += len(samples) / phone_audio.SPEECH_RATE
-        await self._push(samples)
+        seconds = len(pcm_stereo) / (audio.CHANNELS * 2 * audio.DISCORD_RATE) or audio.FRAME_SECONDS
+        missing = self._missing(now, seconds, timestamp)
+        if missing > 0:
+            await self._feed_silence(missing)
+        self.heard_until, self.tail_filled = now, 0.0      # this frame ends now: never ahead of the clock
+        if timestamp is not None:
+            self.last_timestamp, self.last_frame_seconds = int(timestamp), seconds
+        await self._push(phone_audio.pcm16_to_float(self.inbound.feed(pcm_stereo)))
+
+    def _missing(self, now: float, seconds: float, timestamp: Optional[int]) -> float:
+        """Silence they did not send between their last frame and this one, less what the tail already fed."""
+        if timestamp is not None and self.last_timestamp is not None:
+            step = ((int(timestamp) - self.last_timestamp) % RTP_WRAP) / audio.DISCORD_RATE
+            between = step - self.last_frame_seconds
+            if 0 <= between <= MAX_FILL_SECONDS:
+                return max(0.0, between - self.tail_filled)
+        between = (now - seconds) - self.heard_until
+        return between if between > SILENCE_FILL_GAP else 0.0
 
     def _speech_started(self) -> None:
         self.last_activity = self.clock()
@@ -579,12 +614,15 @@ async def join(account: str, bot: dict, agent: dict, reason: str = "", *, user_s
         queue: asyncio.Queue = asyncio.Queue()
         session = Session(bot_id=bot_id, account=account, agent=agent, user_id=user_id, channel_id=str(channel.id),
                           channel_name=name, loop=loop, queue=queue, transport=None, task=None, bridge=None,
-                          client=client)
+                          client=client, warming=None)
         transport = HOST.transport(client, channel, user_id)
         await transport.connect(session.post)
         session.transport = transport
         with accounts.as_account(account):
             pipeline = await (PIPELINE_FACTORY or _live_pipeline)(account, agent, bot)
+            # While the person is still clicking the link: load the conversation model, speech-to-text and Smart Turn,
+            # as an app call does when it starts (the first Discord turn paid all of it, 2026-11-11).
+            session.warming = asyncio.ensure_future(_warm(pipeline))
             from core import turn_detect
             smart = turn_detect.ready()[0] if PIPELINE_FACTORY is None else False
             name_for_speech = agent.get("name") or "Kairos"
@@ -642,6 +680,17 @@ async def join(account: str, bot: dict, agent: dict, reason: str = "", *, user_s
     if ring:
         return await _wait_for_person(session, name)
     return f"Joined #{name} and sent you the link. Carry on there."
+
+
+async def _warm(pipeline) -> Optional[dict]:
+    try:
+        warmed = await pipeline.warm()
+    except Exception:
+        logger.warning("discord voice: warming up for the call failed; the first turn may be slower", exc_info=True)
+        return None
+    if warmed:
+        logger.info("discord voice: warmed for the call (ms): %s", warmed)
+    return warmed
 
 
 async def _wait_for_person(session: Session, name: str) -> str:

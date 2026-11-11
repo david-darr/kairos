@@ -221,13 +221,17 @@ class RealTransport:
         try:
             if self._user_id(user, data) != self.linked_user:
                 return                         # anyone but the linked person: dropped before anything else happens
+            # The frame's RTP timestamp goes with it: the call measures the gaps in their speech by it, not by when
+            # frames happen to arrive (network jitter would otherwise delay the end of each turn).
+            timestamp = getattr(getattr(data, "packet", None), "timestamp", None)
+            timestamp = timestamp if type(timestamp) is int else None
             frame = getattr(data, "opus", None)
             if frame:
-                self.on_event(("opus", self.linked_user, bytes(frame)))
+                self.on_event(("opus", self.linked_user, bytes(frame), timestamp))
                 return
             pcm = getattr(data, "pcm", None)   # a sink that decodes (not used now): already PCM
             if pcm:
-                self.on_event(("audio", self.linked_user, bytes(pcm)))
+                self.on_event(("audio", self.linked_user, bytes(pcm), timestamp))
         except Exception:
             self.sink_errors += 1
             if self.sink_errors == 1:

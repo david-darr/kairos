@@ -63,24 +63,26 @@ class DiscordToSpeech:
 
 class SpeechToDiscord:
     """Outbound: mono PCM16 at the voice's own rate -> exact 20 ms frames of 48 kHz stereo PCM16 (FRAME_BYTES each).
-    The last short piece is held back until `final` and padded with silence."""
+    The last short piece is held back until `final` and padded with silence. Each piece of the voice's audio comes
+    out as soon as it arrives (nothing waits for the whole sentence), and only the part of a frame not yet full is kept."""
 
     def __init__(self, source_rate: int):
         self.resampler = phone_audio.Resampler(source_rate, DISCORD_RATE)
         self.source = int(source_rate)
-        self.pending = b""
+        self.pending = bytearray()
 
     def frames(self, pcm16: bytes, final: bool = False) -> list[bytes]:
         mono = self.resampler.process(phone_audio.pcm16_to_float(pcm16))
         stereo = np.repeat(mono, CHANNELS)
         self.pending += (np.clip(stereo, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
-        out = []
-        while len(self.pending) >= FRAME_BYTES:
-            out.append(self.pending[:FRAME_BYTES])
-            self.pending = self.pending[FRAME_BYTES:]
+        whole = len(self.pending) - len(self.pending) % FRAME_BYTES
+        view = memoryview(self.pending)
+        out = [bytes(view[at:at + FRAME_BYTES]) for at in range(0, whole, FRAME_BYTES)]
+        view.release()
+        del self.pending[:whole]
         if final and self.pending:
-            out.append(self.pending + b"\x00" * (FRAME_BYTES - len(self.pending)))
-            self.pending = b""
+            out.append(bytes(self.pending) + b"\x00" * (FRAME_BYTES - len(self.pending)))
+            self.pending.clear()
         return out
 
 
