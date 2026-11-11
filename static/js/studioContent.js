@@ -64,18 +64,10 @@ const selectOf = (label, options, value) => {
   return node;
 };
 
-// The Add the team button deep-links to the Bots templates dialog on its Explore tab, then points at the team card.
+// The Add the team button opens the Bots templates dialog straight on the Content Studio team's preview.
 async function openTeamTemplate() {
   const templates = await import('./botsTemplates.js');
-  await templates.openTemplates({ tab: 'explore' });
-  let tries = 0;
-  const timer = setInterval(() => {
-    const card = [...document.querySelectorAll('.bots-lifecycle-card')].find(c => c.querySelector('h3')?.textContent === 'Content Studio');
-    if (card || ++tries > 40) {
-      clearInterval(timer);
-      card?.scrollIntoView({ block: 'center' }); card?.querySelector('button')?.focus();
-    }
-  }, 100);
+  await templates.openTemplates({ tab: 'explore', preview: 'Content Studio' });
 }
 
 export async function mountContent(host, { signal } = {}) {

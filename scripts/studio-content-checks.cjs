@@ -256,7 +256,9 @@ async function serve(req, res) {
     if (p === '/api/tab-studio/looks') return json(res, { default: 'sport', looks: [{ id: 'sport', name: 'Sport' }] });
     if (p === '/api/videos/ffmpeg') return json(res, { found: true, message: '' });
     if (p === '/api/videos') return json(res, []);
-    if (p === '/api/bot-lifecycle/templates') return json(res, { teams: [{ id: 'content-studio', name: 'Content Studio', description: 'A seven-bot team.', package: {} }], ready: [] });
+    if (p === '/api/bot-lifecycle/templates') return json(res, { teams: [{ id: 'research-desk', name: 'Research desk', description: 'A small research team.', package: {} }, { id: 'content-studio', name: 'Content Studio', description: 'A seven-bot team.', package: {} }],
+      ready: ['Juno', 'Compass', 'Pantry', 'Harbor', 'Brief', 'Lookout', 'Cairn', 'Ferry', 'Inkwell', 'Plain', 'Orchard', 'Wayfarer', 'Loom', 'Tally', 'Trellis'].map(name => ({ name })) });
+    if (p === '/api/bot-lifecycle/packages/inspect') return json(res, { token: 'tok', preview: { name: 'Content Studio', bots: [{ key: 'producer', name: 'Producer', role: 'Leads the team' }], sections: ['departments'] } });
     if (p === '/api/chat/live/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
       res.write(`data: ${JSON.stringify({ type: 'snapshot', sessions: [] })}\n\n`);
@@ -330,11 +332,46 @@ app.whenReady().then(async () => {
     await capture('desktop-empty'); await noOverflow(); await labels();
     win.setContentSize(390, 900); await pause(350); await noOverflow(); await capture('phone-empty');
     win.setContentSize(1440, 1000); await pause(350);
-    await click('.sc-empty button', 'Add the Content Studio team');
-    await wait("!!document.querySelector('.bots-lifecycle-dialog') && document.querySelector('.bots-lifecycle-tabs [aria-selected=true]')?.dataset.tab==='explore'");
-    await wait("[...document.querySelectorAll('.bots-lifecycle-card h3')].some(h=>h.textContent==='Content Studio')");
-    await js("document.querySelector('.bots-lifecycle-dialog .modal-close-btn').click()");
-    await wait("!document.querySelector('.bots-lifecycle-dialog')");
+    // The Templates popup opened from Studio looks exactly like the one opened from Bots (it once rendered unstyled, because the
+    // Bots look is scoped to [data-app-mode="bots"]) and opens straight on the Content Studio team's preview, in both themes.
+    const tplShots = process.env.STUDIO_TEMPLATES_SHOTS;   // also keep the popup's screenshots there (for David)
+    const keepShot = async name => { await capture(name); if (tplShots) { fs.mkdirSync(tplShots, { recursive: true }); fs.copyFileSync(path.join(output, name + '.png'), path.join(tplShots, name + '.png')); } };
+    const popupStyle = () => js(`(() => { const pick = (n, props) => Object.fromEntries(props.map(k => [k, getComputedStyle(n)[k]]));
+      const tabs = document.querySelector('.bots-lifecycle-tabs'), tab = document.querySelector('.bots-lifecycle-tabs button');
+      return { tabs: pick(tabs, ['display', 'backgroundColor', 'borderRadius', 'padding', 'gap']),
+        tab: pick(tab, ['backgroundColor', 'color', 'borderRadius', 'borderTopWidth', 'paddingLeft', 'fontFamily', 'fontSize', 'minHeight']),
+        selected: pick(document.querySelector('.bots-lifecycle-tabs [aria-selected=true]'), ['backgroundColor']),
+        tabCount: tabs.querySelectorAll('button').length }; })()`);
+    const waitPopup = async () => { await wait("!!document.querySelector('.bots-lifecycle-dialog') && !!document.querySelector('.bots-lifecycle-tabs button')"); await pause(300); };
+    const closePopup = async () => { await js("document.querySelector('.bots-lifecycle-dialog .modal-close-btn').click()"); await wait("!document.querySelector('.bots-lifecycle-dialog')"); };
+    for (const [theme, color] of [['light', '#f3eadb'], ['dark', '#15171d']].filter(([t]) => !process.env.STUDIO_TEMPLATES_THEME || process.env.STUDIO_TEMPLATES_THEME === t)) {
+      await js(`import('/static/js/appearance.js').then(m => m.updateAppearance({ mode: 'color', color: ${T(color)} }))`); await pause(300);
+      assert.notEqual(await js("document.documentElement.dataset.appMode"), 'bots', 'Studio is not in Bots mode');
+      await click('.sc-empty button', 'Add the Content Studio team');
+      await waitPopup(); await keepShot('templates-popup-studio-opened-' + theme);
+      await wait("[...document.querySelectorAll('.bots-package-preview h3')].some(h=>h.textContent==='Content Studio')");
+      assert.equal(await js("document.querySelector('.bots-lifecycle-dialog').textContent.includes('Their teams')"), true, theme + ': the Content Studio team preview is shown');
+      const fromStudio = await popupStyle();
+      await keepShot('templates-popup-studio-preview-' + theme);
+      await js("[...document.querySelectorAll('.bots-lifecycle-tabs button')].find(b=>b.textContent==='Explore').click()");
+      await wait("document.querySelectorAll('.bots-lifecycle-card').length===2 && document.querySelectorAll('.bots-lifecycle-content > button').length===15");
+      const chipsStudio = await js("(() => { const b=document.querySelector('.bots-lifecycle-content > button'), c=getComputedStyle(b); return [c.backgroundColor, c.borderRadius, c.paddingLeft, c.fontFamily, c.minHeight]; })()");
+      await keepShot('templates-popup-studio-explore-' + theme);
+      await closePopup();
+      // The same popup from Bots mode, the reference.
+      await js("document.documentElement.dataset.appMode='bots'");
+      await js("import('/static/js/botsTemplates.js').then(m => m.openTemplates({ tab: 'explore' }).then(() => 0))");
+      await waitPopup(); await wait("document.querySelectorAll('.bots-lifecycle-content > button').length===15");
+      const fromBots = await popupStyle();
+      const chipsBots = await js("(() => { const b=document.querySelector('.bots-lifecycle-content > button'), c=getComputedStyle(b); return [c.backgroundColor, c.borderRadius, c.paddingLeft, c.fontFamily, c.minHeight]; })()");
+      await keepShot('templates-popup-bots-explore-' + theme);
+      await closePopup();
+      await js("delete document.documentElement.dataset.appMode");
+      assert.deepEqual(fromStudio, fromBots, theme + ': the popup tabs look the same from Studio as from Bots');
+      assert.deepEqual(chipsStudio, chipsBots, theme + ': the popup name chips look the same from Studio as from Bots');
+      assert.notEqual(fromStudio.tab.borderRadius, '0px', theme + ': tabs are styled, not default buttons');
+    }
+    await js("import('/static/js/appearance.js').then(m => m.updateAppearance({ mode: 'default' }))"); await pause(300);
 
     // 2. Add a channel with a new niche. Kairos says it never creates accounts.
     await click('.sc-empty button', 'Add a channel');

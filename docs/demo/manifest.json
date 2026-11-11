@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "cd6a9f727bcf08466282c8c2c6d60ebf9abd5e22e2ce32ba05b762855b7d31b8",
+  "app.js": "7d1d3605d82119df1be825bc582b7cb9433617940c2f38dc1aa7e527ce0c6077",
   "fixtures.js": "98682c9314d850ddd7d6b9cdeeb72562f295069b0d681eaf7e5f81ae22b61414",
   "index.html": "c2d216301aae8fa4b2c0bd67aa81b0bedd2fc114251448f7c1de1e54cf4a143a",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -1386,7 +1386,7 @@
   "static/js/botsTeamMemory.js": "25220ac2b1d684a1e45d37f087578e4106a4aa1a23d416ddb68f0b98bb8a890d",
   "static/js/botsTeamSettings.js": "d8d57d1f412c63b61defcc6d974d32baf990862e7e7d9d953bd88771be161931",
   "static/js/botsTeamSetupCard.js": "2dd6651353d9ef6a51231825e2c8152d438c3ef76b5fe6b29a32107e1c8a58eb",
-  "static/js/botsTemplates.js": "b93fe0d8bf2f1094f6005920045ea7b751acfe579ed777f14767c04410883b8a",
+  "static/js/botsTemplates.js": "8142f8d8872e8ccbfdbb13520f06b6d49026e3b7ea9e42608e3a93537be5062d",
   "static/js/botsThreadMenu.js": "e67da90b4ee2681780c4a45f00c2b16be91cbe61b6aafd21c2bc0df565deddb5",
   "static/js/botsTour.js": "c6b6d4b44293f8191c5702df7b2e2d9d1eeba994820c94c36dd60ee1fecc4ca0",
   "static/js/botsTraceView.js": "b6b6fb4e6e3a6b61edf0ac5805884e28f38228949ca64501b034795402b92874",
@@ -1560,7 +1560,7 @@
   "static/js/speechSegments.js": "b76625563cb913b6bba00a3f5a8c2284b0ee62c76a59615bd2e82b0d7e75032d",
   "static/js/storePublish.js": "58ddd702fef6e0bc429428ff7ee635cb19e5ba11c56f1c70aa71dcaacaeb4cf7",
   "static/js/studioClipForm.js": "8663c92b792fad63262d21bca9295a07797a2f426a41117deebb17b5fd3dfe6f",
-  "static/js/studioContent.js": "022bec8085397793af7b43fe0a353500f740c17558856bf0980f3d3d45b61b36",
+  "static/js/studioContent.js": "529a1f2d6e0bacda2ae9fcb980c105d3724480df3460cb373830c26c0b8ae1f9",
   "static/js/studioContentModel.js": "1e9a084113731ffe07ff19c97c0337870f9c209112e1bea97b0df426d6275e43",
   "static/js/studioEditorModel.js": "fb36a40ea089afd6dc0af16f0def2aea0f963d04edeea3aacd4057f4a4b06ac0",
   "static/js/studioSceneForm.js": "e3d974840668bd9a1bd1c2b889fecca92377e0ad33b68590fa47950b50663dd3",

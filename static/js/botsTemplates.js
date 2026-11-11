@@ -64,6 +64,7 @@ export function mount(host, ctx = {}) {
       if (tab === 'explore') {
         const data = await api(BASE + '/templates', { signal }); if (signal.aborted) return;
         content.replaceChildren(el('h2', { text: 'A team for your work' }));
+        let autoPreview = null; // openTemplates({ preview: 'Name' }) opens straight to that team's preview, once.
         for (const team of data.teams || []) {
           const status = el('p', { role: 'status' });
           const load = Button({ label: `Preview ${team.name}`, onClick: () => act(load, async () => {
@@ -71,6 +72,7 @@ export function mount(host, ctx = {}) {
             showImport(await uploadFile('/packages/inspect', file, signal));
           }, status) });
           content.append(el('section', { class: 'bots-lifecycle-card' }, [el('h3', { text: team.name }), el('p', { text: team.description }), load, status]));
+          if (ctx.preview && team.name === ctx.preview) autoPreview = load;
         }
         const ready = Array.isArray(data.ready) ? data.ready : data.ready?.bots || [];
         for (const persona of ready) content.append(Button({ label: persona.name, onClick: async () => {
@@ -78,6 +80,7 @@ export function mount(host, ctx = {}) {
           catch (e) { showError(e); }
         } }));
         if (!(data.teams || []).length && !ready.length) content.append(el('p', { text: 'No templates yet. Import a package to begin.' }));
+        if (autoPreview) { ctx.preview = null; autoPreview.click(); }
       } else if (tab === 'import') {
         const input = el('input', { type: 'file', accept: '.json,.md', 'aria-label': 'Package file' });
         const status = el('p', { role: 'status' });
@@ -122,9 +125,10 @@ export function mount(host, ctx = {}) {
   refresh(); return { destroy, refresh, flush: async () => {} };
 }
 
-export async function openTemplates({ tab = 'explore' } = {}) {
+export async function openTemplates({ tab = 'explore', preview = null } = {}) {
   await Promise.all([loadBotsCss('/static/css/bots.css'), loadBotsCss('/static/css/bots-lifecycle.css')]);
-  const body = el('div', { 'data-bots-surface': '' }); let mounted;
+  // The Bots look is scoped to [data-app-mode="bots"]. Opened from Studio the page is not in Bots mode, so the dialog carries the scope itself.
+  const body = el('div', { 'data-app-mode': 'bots' }); let mounted;
   const dialog = openPanelDialog({ title: 'Templates', body, className: 'bots-lifecycle-dialog', onClose: () => mounted?.destroy() });
-  mounted = mount(body, { tab }); return { ...dialog, destroy: () => dialog.close() };
+  mounted = mount(body, { tab, preview }); return { ...dialog, destroy: () => dialog.close() };
 }
