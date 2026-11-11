@@ -57,6 +57,21 @@ class EnvelopeTests(unittest.TestCase):
         self.assertEqual(goals.parse('<kairos-goal>{"status": "weird"}</kairos-goal>')[1], None)
         self.assertEqual(goals.parse("half <kairos-goal>{")[0], "half")
 
+    def test_a_control_line_written_without_its_tags_still_counts_and_never_shows(self):
+        # David, 2026-11-11: a reply ended with the control line as bare JSON, which the chat then showed.
+        bare = '{"status": "needs-input", "instruction": "Wait for the answer.", "detail": "Asked whether to ring."}'
+        visible, envelope = goals.parse("Shall I ring you now?\n" + bare)
+        self.assertEqual((visible, envelope["status"], envelope["detail"]), ("Shall I ring you now?", "needs-input",
+                                                                              "Asked whether to ring."))
+        self.assertEqual(goals.parse(bare), ("", envelope), "in a goal turn a reply of only the line is only the line")
+        for size in (1, 3, 11, 500):
+            filt = goals.EnvelopeFilter()
+            text = "Shall I ring you now?\n" + bare
+            shown = "".join(filt.feed(text[i:i + size]) for i in range(0, len(text), size)) + filt.flush()
+            self.assertEqual(shown, "Shall I ring you now?\n", size)
+        self.assertIsNone(goals.parse('Result:\n{"status": "needs-input", "extra": 1}')[1], "only the exact shape")
+        self.assertIsNone(goals.parse('{"status": "done", "detail": "x"} trailing words')[1])
+
 
 class GoalCase(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):

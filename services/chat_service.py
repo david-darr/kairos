@@ -27,7 +27,7 @@ from claude_agent_sdk import CLIJSONDecodeError
 
 from core import attachments, chat_files, cli_env, file_checkpoints, helpers, logs as log_files, mcp_oauth, model_catalog, model_endpoints, model_marks, permissions, runs, token_usage
 from core import brain as brain_module
-from core import voice_style
+from core import goal_block, voice_style
 from core.brain import Brain
 from core.codex_brain import CodexBrain
 from core.antigravity_brain import AntigravityBrain
@@ -659,6 +659,8 @@ async def _send_message(session_id: str, text: str, attachment_ids: list[str] | 
                                                  bot=bool(session.get("agent_id"))):
             outcome = await runs.complete(brain, full_text, context)
         reply, usage = outcome.text, outcome.usage
+        if not _goal_turn(text):
+            reply = goal_block.strip(reply)      # Discord, Telegram and other channel replies (core/goal_block.py)
     except CLIJSONDecodeError:
         logger.error("chat %s: a CLI response exceeded the %d-byte transport buffer%s", session_id,
                      brain_module.MAX_CLI_LINE_BYTES, _oversized_file_note(session_id) or " (no oversized file found)")
@@ -679,6 +681,17 @@ async def _send_message(session_id: str, text: str, attachment_ids: list[str] | 
     _reply_hook(session_id, endpoint, text, reply)
     prepare_compaction_ahead(session_id)
     return reply
+
+
+def _goal_turn(text, turn_note: str = "") -> bool:
+    """A "Work until done" step: its prompt or private note carries the goal control line's format."""
+    return goal_block.OPEN in (text if isinstance(text, str) else "") or goal_block.OPEN in (turn_note or "")
+
+
+def _reply_text(parts: list[str], goal_turn: bool) -> str:
+    """The reply as saved: without any goal block, except in a goal turn, whose runner reads and removes its own."""
+    reply = "".join(parts)
+    return reply if goal_turn else goal_block.strip(reply)
 
 
 def _reply_hook(session_id: str, endpoint: dict, message: str, reply: str) -> None:
@@ -855,6 +868,10 @@ async def _stream_message(session_id: str, text: str, attachment_ids: list[str] 
         return
 
     reply_parts: list[str] = []
+    # A goal turn's control line is read from the saved reply (services/bot_goal_runs.py) and kept out of the live
+    # text by its own filter; any other turn never shows or saves a goal block (core/goal_block.py).
+    goal_turn = _goal_turn(text, turn_note)
+    shown = None if goal_turn else goal_block.StreamFilter()
     tally = runs.Tally()
     brain = None
     provider_started = False
@@ -880,7 +897,14 @@ async def _stream_message(session_id: str, text: str, attachment_ids: list[str] 
                 async for item in stream:
                     if isinstance(item, str):
                         reply_parts.append(item)
+                        if shown is not None:
+                            item = shown.feed(item)
+                            if not item:
+                                continue
                     yield item
+                tail = shown.flush() if shown is not None else ""
+                if tail:
+                    yield tail
     except CLIJSONDecodeError:
         provider_failed = True
         # Which attachment overflowed the transport, if one did; recorded once
@@ -904,7 +928,7 @@ async def _stream_message(session_id: str, text: str, attachment_ids: list[str] 
         extra["run_id"] = context.run_id
         # Helpers this turn handed work to stop with it (core/helpers.py).
         helpers.stop_parent(f"chat:{session_id}")
-        session_manager.append_message(session_id, "assistant", "".join(reply_parts),
+        session_manager.append_message(session_id, "assistant", _reply_text(reply_parts, goal_turn),
                                        status="failed" if failed else "interrupted", extra=extra)
         _remember_claude_session(session_id, brain, succeeded=False,
                                  cancelled=isinstance(exc, (asyncio.CancelledError, GeneratorExit)))
@@ -916,7 +940,7 @@ async def _stream_message(session_id: str, text: str, attachment_ids: list[str] 
         runs.record(context, tally, "failed" if failed else "stopped", stop=stop,
                     detail=f"{type(exc).__name__}: {exc}" if failed else "")
         runs.leave(context)
-        _turn_done(scope, context, "failed" if failed else "stopped", text, "".join(reply_parts))
+        _turn_done(scope, context, "failed" if failed else "stopped", text, _reply_text(reply_parts, goal_turn))
         await close_session_brain(session_id)
         raise
 
@@ -926,15 +950,16 @@ async def _stream_message(session_id: str, text: str, attachment_ids: list[str] 
                         + oversized_note.replace("\n\n", " ")) if provider_failed else "")
     endpoint = getattr(brain, "endpoint", endpoint)
     _record_turn_telemetry(session_id, endpoint, brain, tally.usage)
-    session_manager.append_message(session_id, "assistant", "".join(reply_parts),
+    reply = _reply_text(reply_parts, goal_turn)
+    session_manager.append_message(session_id, "assistant", reply,
                                    status="failed" if provider_failed else None,
                                    extra={**(_tool_rounds(brain, endpoint) or {}), "run_id": context.run_id, **_recovery_extra(brain),
                                           **({"failure_kind": "model_error", "failure_model_endpoint_id": endpoint["id"],
                                               "failure_model_name": endpoint["name"]} if provider_failed else {})})
     _remember_claude_session(session_id, brain)
-    _turn_done(scope, context, "failed" if provider_failed else "done", text, "".join(reply_parts))
+    _turn_done(scope, context, "failed" if provider_failed else "done", text, reply)
     if not provider_failed:
-        _reply_hook(session_id, endpoint, text, "".join(reply_parts))
+        _reply_hook(session_id, endpoint, text, reply)
         prepare_compaction_ahead(session_id)
 
 

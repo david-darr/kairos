@@ -110,7 +110,7 @@ export async function renderReachMePanel(content) {
       group({ title: 'Messages and calls from bots' }, [pauseRow]),
       group({ title: 'Message me', description: 'For results and things to look at soon. The first way here that is set up and takes it wins.' },
         [orderEditor('message', state, state.message_channels, save)]),
-      group({ title: 'Call me', description: 'For something urgent, or when you asked a bot to call. A daily limit or a busy line is reported to the bot, not worked around on another way.' },
+      group({ title: 'Call me', description: 'For something urgent, or when you asked a bot to call. The first way here is also "When a bot calls you" on a Discord bot page. When you name a way yourself ("call me on Discord"), the bot tries that one first. A daily limit or a busy line is reported to the bot, not worked around on another way.' },
         [orderEditor('call', state, state.call_channels, save)]),
       group({ title: 'Quiet hours', description: 'In your own time zone. Messages wait until quiet hours end; calls are not made.' }, [
         row({ title: 'Quiet hours', description: state.quiet_now ? 'It is quiet hours now.' : '', control: toggle({ checked: quiet.enabled, label: 'Quiet hours', onChange: (on) => saveQuiet(on) }) }),

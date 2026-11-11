@@ -212,7 +212,8 @@ class AskByCall(Base):
     async def test_the_tool_is_a_send_with_no_address_argument(self):
         from core import bot_policy, tool_registry
         spec = next(item for item in phone_tools.TOOLS if item["name"] == "ask_me_by_call")
-        self.assertEqual(sorted(spec["schema"]["properties"]), ["question", "wait_seconds"])
+        self.assertEqual(sorted(spec["schema"]["properties"]), ["question", "via", "wait_seconds"])
+        self.assertIn("enum", spec["schema"]["properties"]["via"], "a kind of way to the person, never an address")
         self.assertFalse(spec["schema"]["additionalProperties"])
         self.assertIn("ask_me_by_call", tool_registry._REGISTRY)
         self.assertEqual(bot_policy.classify("ask_me_by_call", {"question": "x"}).kind, bot_policy.OUTBOUND)
@@ -458,6 +459,28 @@ class TypedIntoCall(Base):
             call["ended"] = True
             with self.assertRaises(HTTPException):
                 await call_routes.typed(call["id"], call_routes.Typed(text="hi"), user="alice")
+
+
+class GoalBlockNotSpoken(Base):
+    """A goal control block is never said aloud on a call, tagged or bare (core/goal_block.py, 2026-11-11)."""
+
+    async def spoken(self, reply):
+        call = new_call()
+        self.conversation.reply = reply
+        events = await self.run_turn(call, "Can you ring me later?")
+        return "".join(e.get("delta", "") for e in events if e["type"] == "text").strip(), call["messages"][-1]["content"].strip()
+
+    async def test_a_bare_goal_block_is_not_spoken_or_kept(self):
+        said, kept = await self.spoken('Sure, I can do that. {"status": "needs-input", "instruction": "Wait.", "detail": "Asked."}')
+        self.assertEqual((said, kept), ("Sure, I can do that.", "Sure, I can do that."))
+
+    async def test_a_tagged_goal_block_is_not_spoken(self):
+        said, _ = await self.spoken('Done. <kairos-goal>{"status": "completed", "detail": "d"}</kairos-goal>')
+        self.assertEqual(said, "Done.")
+
+    async def test_other_braces_are_still_spoken(self):
+        said, _ = await self.spoken('The set {"a": 1} is fine.')
+        self.assertEqual(said, 'The set {"a": 1} is fine.')
 
 
 class Latency(Base):

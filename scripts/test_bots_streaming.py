@@ -157,6 +157,95 @@ class BotStreaming(unittest.TestCase):
         self.assertNotIn("chat_live", source)
 
 
+# David, 2026-11-11: Kip's reply ended with a raw {"status": "needs-input", ...} line.
+LEAK = ('Do you want me to ring you now anyway?\n{"status": "needs-input", "instruction": "Wait for the user to say '
+        'whether to ring now.", "detail": "Asked whether to ring anyway."}')
+SHOWN = "Do you want me to ring you now anyway?"
+
+
+class GoalBlockNeverShows(unittest.TestCase):
+    """A goal block (tagged, or bare JSON of exactly its shape at the end) is never shown or saved outside a goal turn:
+    the Bots chat and classic chat stream (chat_service.stream_message) and Discord, Telegram and other channel replies
+    (chat_service.send_message). JSON the person asked for stays."""
+
+    def stream(self, chunks, turn_note=""):
+        from core import runs
+        from core.session_manager import session_manager
+        session = session_manager.create_session("Goal block", owner_user="david")
+        self.addCleanup(session_manager.delete_session, session["id"])
+        index = session_manager.append_message(session["id"], "user", "call me on discord")
+        endpoint = {"id": "e", "name": "E", "kind": "claude_cli"}
+
+        class Brain:
+            async def events(self, prompt, stream=True):
+                for chunk in chunks:
+                    yield runs.text(chunk)
+                yield runs.result(True)
+
+        async def drive():
+            with patch.object(chat_service, "_get_brain", AsyncMock(return_value=(Brain(), False))), \
+                 patch.object(chat_service, "_resolve_endpoint", return_value=endpoint), \
+                 patch.object(chat_service, "_compact_if_nearly_full", AsyncMock()), \
+                 patch.object(chat_service, "_reply_hook"), patch.object(chat_service, "_record_turn_telemetry"):
+                async with chat_service.session_operation(session["id"]):
+                    return [c async for c in chat_service._stream_message(
+                        session["id"], "call me on discord", None, True, "", None, accepted_index=index, turn_note=turn_note)]
+
+        shown = "".join(c for c in asyncio.run(drive()) if isinstance(c, str))
+        return shown, session_manager.get_session(session["id"])["messages"][-1]["content"]
+
+    def split(self, text, size):
+        return [text[i:i + size] for i in range(0, len(text), size)]
+
+    def test_a_bare_goal_block_at_the_end_is_never_streamed_or_saved(self):
+        for size in (1, 4, 17, len(LEAK)):
+            shown, saved = self.stream(self.split(LEAK, size))
+            self.assertEqual(shown.rstrip(), SHOWN, size)
+            self.assertEqual(saved, SHOWN, size)
+
+    def test_a_tagged_block_in_an_ordinary_turn_is_never_shown(self):
+        tagged = 'Done.\n<kairos-goal>{"status": "completed", "instruction": "", "detail": "d"}</kairos-goal>'
+        shown, saved = self.stream(self.split(tagged, 5))
+        self.assertEqual((shown.rstrip(), saved), ("Done.", "Done."))
+
+    def test_json_the_person_asked_for_is_kept(self):
+        for reply in ('Here it is:\n{"name": "Kip", "status": "needs-input"}',
+                      'Here:\n```json\n{"status": "blocked", "detail": "d"}\n```',
+                      '{"status": "needs-input", "instruction": "x", "detail": "y"}',
+                      'Mid {"status": "blocked", "detail": "d"} and more text after it.'):
+            shown, saved = self.stream(self.split(reply, 3))
+            self.assertEqual((shown, saved), (reply, reply))
+
+    def test_a_goal_turn_keeps_its_control_line_for_the_goal_runner(self):
+        from services import bot_goal_runs
+        shown, saved = self.stream([LEAK], turn_note=bot_goal_runs.NOTE)
+        self.assertEqual(saved, LEAK, "the runner reads it from the saved reply, then removes it")
+        self.assertEqual(bot_goal_runs.parse(saved)[1]["status"], "needs-input")
+
+    def test_discord_and_telegram_replies_never_carry_it(self):
+        from core.session_manager import session_manager
+        session = session_manager.create_session("Channel", owner_user="david")
+        self.addCleanup(session_manager.delete_session, session["id"])
+        endpoint = {"id": "e", "name": "E", "kind": "claude_cli"}
+
+        class Brain:
+            pass
+
+        async def drive(reply):
+            with patch.object(chat_service, "_get_brain", AsyncMock(return_value=(Brain(), False))), \
+                 patch.object(chat_service, "_resolve_endpoint", return_value=endpoint), \
+                 patch.object(chat_service, "_compact_if_nearly_full", AsyncMock()), \
+                 patch.object(chat_service.runs, "complete", AsyncMock(return_value=MagicMock(text=reply, usage=None))), \
+                 patch.object(chat_service, "_reply_hook"), patch.object(chat_service, "_record_turn_telemetry"), \
+                 patch.object(chat_service, "_prime_with_history", side_effect=lambda sid, created, ep, text, brain: text):
+                return await chat_service.send_message(session["id"], "call me on discord")
+
+        self.assertEqual(asyncio.run(drive(LEAK)), SHOWN)
+        self.assertEqual(session_manager.get_session(session["id"])["messages"][-1]["content"], SHOWN)
+        asked = 'Sure:\n{"name": "Kip"}'
+        self.assertEqual(asyncio.run(drive(asked)), asked)
+
+
 def cleanup():
     shutil.rmtree(fixture_path, ignore_errors=True)
 

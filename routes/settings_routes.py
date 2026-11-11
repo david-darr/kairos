@@ -75,8 +75,14 @@ async def get_settings(user: str = Depends(require_user)) -> dict:
         "computer_steps_days": raw.get("computer_steps_days", 7),
         "helper_endpoint_id": raw["helper_endpoint_id"],
         "helper_endpoint": _helper_summary(),
-        "ring_preference": raw.get("ring_preference") or "app",
+        "ring_preference": _first_call(),
     }
+
+
+def _first_call():
+    """The first way in Settings > Reach me's call order, which "When a bot calls you" shows and sets. None: calls off."""
+    from core import reach_me
+    return reach_me.first_call()
 
 
 def _helper_summary() -> dict | None:
@@ -85,24 +91,19 @@ def _helper_summary() -> dict | None:
     return {"id": endpoint["id"], "name": endpoint["name"], "kind": endpoint["kind"]} if endpoint else None
 
 
-RING_PREFERENCES = ("app", "discord", "phone")
-
-
 class SetRingPreferenceRequest(BaseModel):
     preference: str
 
 
 @router.post("/ring-preference")
 async def set_ring_preference(body: SetRingPreferenceRequest, user: str = Depends(require_user)) -> dict:
-    """How a bot reaching you by call does it: inside Kairos, in a Discord voice channel, or on your phone."""
-    if body.preference not in RING_PREFERENCES:
-        raise HTTPException(status_code=422, detail=f"preference must be one of {list(RING_PREFERENCES)}")
-    settings_store.update_settings(ring_preference=body.preference)
+    """Which way bot calls try first: the first way in Settings > Reach me's call order, the one place that decides it
+    (core/reach_me.py). The rest of the order keeps its places."""
     from core import reach_me
-    saved = reach_me.load()
-    if saved["saved"]:       # Settings > Reach me holds the call order now; this choice goes first in it
-        reach_me.save({"call": [body.preference] + [c for c in saved["call"] if c != body.preference]})
-    return {"ok": True, "ring_preference": body.preference}
+    if body.preference not in reach_me.CALL_CHANNELS:
+        raise HTTPException(status_code=422, detail=f"preference must be one of {list(reach_me.CALL_CHANNELS)}")
+    reach_me.set_first_call(body.preference)
+    return {"ok": True, "ring_preference": reach_me.first_call()}
 
 
 class SetAutoCompactRequest(BaseModel):

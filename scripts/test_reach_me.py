@@ -259,6 +259,213 @@ class CallOrder(ReachCase):
         self.assertIn("Discord voice channel:", result)
 
 
+class NamedWay(ReachCase):
+    """`via` (2026-11-11): the person named a way in their own words ("call me on Discord"). It goes first; their
+    order follows only when it is not set up or fails, and the result says so. Same limits, quiet hours and STOP."""
+
+    def discord(self, outcome="They joined #voice. The call is open now, so carry on there.", ready=True):
+        from services import discord_voice as dv
+        joined = []
+
+        async def call_user(account, bot_id, reason, ident):
+            joined.append(reason)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        def pick_bot(account):
+            if not ready:
+                raise dv.VoiceRefused("Voice in Discord is off. Choose a voice channel for the Discord bot in Settings, Channels.",
+                                      unavailable=True)
+            return {"id": "discord-bot"}
+        return joined, [patch.object(dv, "call_user", call_user), patch.object(dv, "pick_bot", pick_bot)]
+
+    async def named_call(self, via, ask=False):
+        try:
+            return await reach.call_me(A1, "bot-kip", "Your deploy failed.", self.inv(), ask=ask, via=via)
+        except reach.ReachRefused as error:
+            return f"Not sent: {error}"
+
+    async def test_call_me_on_discord_goes_to_discord_first_whatever_the_order(self):
+        self.order(call=["phone", "app", "discord"])
+        joined, patches = self.discord()
+        phoned = AsyncMock(return_value="phoned")
+        with patches[0], patches[1], patch.object(reach, "_phone_ready", lambda account: True), \
+                patch.object(phone_calls, "call_user", phoned):
+            result = await self.named_call("discord")
+        self.assertEqual(result, "They joined #voice. The call is open now, so carry on there.")
+        self.assertEqual(joined, ["Your deploy failed."])
+        phoned.assert_not_called()
+        log = reach_me.load(A1)["log"][-1]
+        self.assertEqual((log["channel"], log["via"], log["ok"]), ("discord", "discord", True))
+        self.assertEqual(reach_me.load(A1)["call"], ["phone", "app", "discord"], "the person's order is not changed")
+
+    async def test_discord_not_set_up_falls_to_their_order_and_says_so(self):
+        self.order(call=["phone", "app", "discord"])
+        joined, patches = self.discord(ready=False)
+        with patches[0], patches[1], patch.object(reach, "_phone_ready", lambda account: True), \
+                patch.object(phone_calls, "call_user", AsyncMock(return_value="Calling your phone now.")):
+            result = await self.named_call("discord")
+        self.assertEqual(joined, [], "nothing is spent on a way that is not set up")
+        self.assertTrue(result.startswith("They asked for Discord voice channel, but it did not work (Voice in Discord is off"), result)
+        self.assertIn("so it went by their Reach me order instead. Calling your phone now.", result)
+        self.assertEqual(reach_me.load(A1)["log"][-1]["channel"], "phone")
+
+    async def test_nobody_joining_discord_falls_to_their_order(self):
+        from services import discord_voice as dv
+        self.order(call=["app", "discord"])
+        joined, patches = self.discord(outcome=dv.VoiceRefused("Nobody joined #voice within a minute.", missed=True))
+        with patches[0], patches[1], patch("services.rings.ring_user", AsyncMock(return_value="They answered.")):
+            result = await self.named_call("discord")
+        self.assertIn("Nobody joined #voice within a minute", result)
+        self.assertTrue(result.endswith("They answered."), result)
+
+    async def test_a_limit_on_the_named_way_is_reported_not_worked_around(self):
+        from services import discord_voice as dv
+        self.order(call=["app", "discord"])
+        joined, patches = self.discord(outcome=dv.VoiceRefused("Today's limit for voice calls to you (6 per account) is used up."))
+        ring = AsyncMock(return_value="They answered.")
+        with patches[0], patches[1], patch("services.rings.ring_user", ring):
+            result = await self.named_call("discord")
+        self.assertEqual(result, "Not sent: Today's limit for voice calls to you (6 per account) is used up.")
+        ring.assert_not_called()
+
+    async def test_a_way_that_cannot_take_a_call_falls_to_their_order(self):
+        self.order(call=["app"])
+        with patch("services.rings.ring_user", AsyncMock(return_value="They answered.")):
+            result = await self.named_call("whatsapp")
+        self.assertEqual(result, "They asked for WhatsApp, but that way cannot take a call from Kairos, so it went by their "
+                                 "Reach me order instead. They answered.")
+
+    async def test_ask_by_call_carries_the_named_way(self):
+        self.order(call=["phone", "discord"])
+        joined, patches = self.discord()
+        with patches[0], patches[1]:
+            placed = await self.named_call("discord", ask=True)
+        self.assertEqual((placed["ok"], placed["channel"]), (True, "discord"))
+
+    async def test_quiet_hours_a_turned_off_bot_stop_and_unknown_ways_still_hold(self):
+        joined, patches = self.discord()
+        with patches[0], patches[1]:
+            self.assertIn("Unknown way to reach the person", await self.named_call("carrier pigeon"))
+            self.order(call=["discord"], bots={"bot-kip": {"call": []}})
+            self.assertIn("turned off calls from this bot", await self.named_call("discord"))
+            self.order(bots={})
+            QuietHours.window(self)
+            self.assertIn("quiet hours", await self.named_call("discord"))
+            self.order(quiet={"enabled": False})
+            reach_me.pause("settings", "settings", A1)
+            self.assertIn("paused", await self.named_call("discord"))
+            reach_me.resume("settings", "settings", A1)
+        self.assertEqual(joined, [])
+
+    async def test_message_me_on_telegram_goes_there_first(self):
+        self.order(message=["whatsapp", "telegram"])
+        result = await reach.message_me(A1, "bot-kip", "Build done.", self.inv(), via="telegram")
+        self.assertEqual(result, "Sent to the person: Telegram.")
+        self.assertEqual(self.api.to("graph.facebook.com"), [])
+        self.assertEqual(self.outbox_rows()[-1]["channel"], "reach:bot-kip@via:telegram")
+
+    async def test_message_me_named_way_failing_falls_to_their_order_and_says_so(self):
+        self.order(message=["whatsapp", "telegram"])
+        self.api.fail.add("api.telegram.org")
+        result = await reach.message_me(A1, "bot-kip", "Build done.", self.inv(), via="telegram")
+        self.assertTrue(result.startswith("Sent to the person: WhatsApp. They asked for Telegram, but it did not work"), result)
+        self.assertIn("so it went by their Reach me order instead.", result)
+
+    async def test_text_me_on_my_phone_is_an_sms_and_a_retry_keeps_the_named_way(self):
+        self.order(message=["telegram"])
+        self.api.fail.add("api.telegram.org")
+        result = await reach.message_me(A1, "bot-kip", "Later.", self.inv(), via="phone")
+        self.assertTrue(result.startswith("Not delivered yet"), result)
+        self.assertIn("SMS text", result)
+        self.assertEqual(self.outbox_rows()[-1]["channel"], "reach:bot-kip@via:phone")
+        self.api.fail.clear()
+        with accounts.as_account(A1):
+            self.assertEqual(await outbox.send_due(now=time.time() + 120), 1)
+        self.assertEqual(reach_me.load(A1)["log"][-1]["via"], "sms")
+
+    async def test_the_tools_take_via_and_stay_self_only(self):
+        from core import bot_policy, tool_registry
+        specs = {spec["name"]: spec for spec in phone_tools.TOOLS}
+        for name in ("message_me", "ring_me", "ask_me_by_call", "notify_me_by_call"):
+            via = specs[name]["schema"]["properties"]["via"]
+            self.assertEqual(via["enum"], ["app", "discord", "phone", "telegram", "whatsapp", "imessage", "signal", "sms"], name)
+            self.assertIn("Only when the person named a way", via["description"])
+            self.assertNotIn("via", specs[name]["schema"]["required"])
+            self.assertIn(name, bot_policy.SELF_ONLY_TOOLS)
+            self.assertIn("via", tool_registry._REGISTRY[name].schema["properties"], name)
+        self.assertNotIn("via", specs["notify_me_by_text"]["schema"]["properties"])
+        called = []
+
+        async def call_me(account, bot_id, text, ident, ask=False, via=None):
+            called.append(via)
+            return "rang"
+        with accounts.as_account(A1), patch("core.tool_registry._bot_scope", lambda ctx: {"bot_id": "bot-kip"}), \
+                patch.object(reach, "call_me", call_me):
+            ctx = tool_registry.ToolContext(agent_id="bot-kip", invocation_id="v1")
+            await phone_tools.tool_ring({"reason": "r", "via": "discord"}, ctx)
+            await phone_tools.tool_call({"message": "m"}, ctx)
+        self.assertEqual(called, ["discord", None])
+        agent = {"id": "bot-kip", "outbound": {"policy": "allow", "daily_cap": 2}}
+        policy = SimpleNamespace(mode="edits", source="bot", reason="", revision=1)
+        with patch.object(bot_policy, "_agent", lambda bot_id: agent), \
+                patch.object(bot_policy, "effective_policy", lambda *a, **k: policy), \
+                patch.object(bot_policy, "_owner_for", lambda *a: "alice"), \
+                patch.object(bot_policy, "run_context", lambda *a: None):
+            decision = bot_policy.authorize_operation(bot_id="bot-kip", tool="ring_me", arguments={"reason": "x", "via": "discord"},
+                                                      invocation_id="via-1")
+        self.assertEqual((decision.action, decision.source), ("allow", "self-only"))
+
+
+class OneCallOrder(ReachCase):
+    """"When a bot calls you" (the Discord bot page) and Settings > Reach me's call order are one setting (2026-11-11)."""
+
+    async def test_the_discord_page_choice_is_the_first_way_in_reach_me_and_back(self):
+        from routes import settings_routes as routes
+        with accounts.as_account(A1):
+            self.order(call=["phone", "app", "discord", "telegram"])
+            saved = await routes.set_ring_preference(routes.SetRingPreferenceRequest(preference="discord"), user="u")
+            self.assertEqual(saved["ring_preference"], "discord")
+            self.assertEqual(reach_me.load(A1)["call"], ["discord", "phone", "app", "telegram"])
+            self.order(call=["telegram", "app"])
+            self.assertEqual((await routes.get_settings(user="u"))["ring_preference"], "telegram")
+            self.order(call=[])
+            self.assertIsNone((await routes.get_settings(user="u"))["ring_preference"], "calls off shows as off")
+            await routes.set_ring_preference(routes.SetRingPreferenceRequest(preference="app"), user="u")
+            self.assertEqual(reach_me.load(A1)["call"], ["app", "phone", "discord", "telegram"])
+            with self.assertRaises(Exception):
+                await routes.set_ring_preference(routes.SetRingPreferenceRequest(preference="carrier pigeon"), user="u")
+
+    async def test_an_unsaved_reach_me_takes_the_old_choice_once_and_it_never_decides_again(self):
+        from core import settings as settings_store
+        from routes import settings_routes as routes
+        with accounts.as_account(A1):
+            self.assertFalse(os.path.exists(reach_me._file(A1)))
+            settings_store.update_settings(ring_preference="discord")       # David's saved value, 2026-11-11 17:05
+            try:
+                self.assertEqual(reach_me.load(A1)["call"][0], "discord")
+                self.assertEqual(json.loads(Path(reach_me._file(A1)).read_text())["call"][0], "discord", "written in once")
+                settings_store.update_settings(ring_preference="phone")
+                self.assertEqual(reach_me.first_call(A1), "discord", "the old setting no longer decides anything")
+                self.assertEqual((await routes.get_settings(user="u"))["ring_preference"], "discord")
+                await routes.set_ring_preference(routes.SetRingPreferenceRequest(preference="app"), user="u")
+                self.assertEqual(settings_store.get_setting("ring_preference"), "phone", "the route writes Reach me only")
+                self.assertEqual(reach_me.first_call(A1), "app")
+            finally:
+                settings_store.update_settings(ring_preference="app")
+
+    def test_the_default_preference_writes_nothing(self):
+        self.assertEqual(reach_me.load(A1)["call"], reach_me.DEFAULT_CALL)
+        self.assertFalse(os.path.exists(reach_me._file(A1)))
+
+    def test_the_tool_descriptions_say_the_same_thing_as_the_settings(self):
+        text = " ".join(spec["description"] for spec in phone_tools.TOOLS if spec["name"] in ("ring_me", "notify_me_by_call", "ask_me_by_call"))
+        self.assertIn("When a bot calls you", text)
+        self.assertIn("first way in that same order", text)
+        self.assertIn("pass it as via", text)
+
+
 def sine_pcm(seconds=0.6, rate=24000):
     t = np.arange(int(seconds * rate)) / rate
     return (np.sin(2 * np.pi * 220 * t) * 0.3 * 32767).astype("<i2").tobytes()

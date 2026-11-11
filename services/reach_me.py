@@ -12,6 +12,11 @@ number), an in-app ring, a Discord voice channel, or a Telegram voice message (T
 not set up, or whose provider refused, falls to the next; a daily limit, a pause between calls or one call already
 ringing is reported to the bot and never worked around on another channel.
 
+A way the person named (`via`, 2026-11-11: David asked Kip "call me on Discord" and Kip could not choose): when the
+person asks in their own words for a channel, the bot passes it and that way is tried first, then the rest of their
+order, only if it is not set up or does not work. The result says so. Quiet hours, limits, STOP and a bot turned off in
+Reach me are the same as without it.
+
 Limits: message_me counts against the same daily "texts to you" allowance as notify_me_by_text (services/phone_calls.py
 CAPS, per bot and per account); each call way keeps its own. The approval levels (core/bot_policy.py) treat every one
 of these tools as a send. STOP on any channel (core/reach_me.py) refuses all of it until START.
@@ -30,6 +35,8 @@ logger = logging.getLogger(__name__)
 MAX_MESSAGE = phone_calls.MAX_MESSAGE
 PRESENCE_SECONDS = 15 * 60
 CONNECTOR_KINDS = {"telegram": "telegram", "whatsapp": "whatsapp", "imessage": "bluebubbles", "signal": "signal"}
+VIA_CHANNELS = ("app", "discord", "phone", "telegram", "whatsapp", "imessage", "signal", "sms")
+VIA_SEPARATOR = "@via:"       # the outbox channel of a message with a named way: reach:<bot id>@via:<way>
 _result: contextvars.ContextVar = contextvars.ContextVar("reach_result", default=None)
 
 
@@ -203,6 +210,48 @@ def call_status(account: Optional[str] = None) -> list:
     return rows
 
 
+# -- a way the person named ---------------------------------------------------------------------------------------
+
+def _clean_via(via) -> Optional[str]:
+    value = str(via or "").strip().lower()
+    if not value:
+        return None
+    if value not in VIA_CHANNELS:
+        raise ReachRefused(f"Unknown way to reach the person: {value!r}. Use one of: {', '.join(VIA_CHANNELS)}.")
+    return value
+
+
+def _via_order(kind: str, via: Optional[str], order: list) -> tuple:
+    """(the order to walk, the named way as used for this kind or None, why it cannot be used or '').
+    A message to "phone" is an SMS; a call cannot go by a message-only app, so that way falls to the order."""
+    if not via:
+        return list(order), None, ""
+    if kind == "message":
+        way = "sms" if via == "phone" else via
+        allowed = settings.MESSAGE_CHANNELS
+    else:
+        way = via
+        allowed = settings.CALL_CHANNELS
+    if way not in allowed:
+        return list(order), None, f"{settings.MESSAGE_LABELS.get(via, via)} cannot take a call from Kairos"
+    return [way] + [c for c in order if c != way], way, ""
+
+
+def _via_note(kind: str, via: Optional[str], way: Optional[str], unusable: str, channel: Optional[str],
+              tried: list) -> str:
+    """The sentence the bot gets when the named way was not the one used. '' when it was, or none was named."""
+    if not via or (way and channel == way):
+        return ""
+    labels = settings.MESSAGE_LABELS if kind == "message" else settings.CALL_LABELS
+    if unusable:
+        why = "that way cannot take a call from Kairos"
+    else:
+        reason = next((t["reason"] for t in tried if t["channel"] == way), "")
+        why = "it did not work" + (f" ({reason.rstrip('.')})" if reason else "")
+    asked = labels.get(way, "") or settings.MESSAGE_LABELS.get(via, via)
+    return f"They asked for {asked}, but {why}, so it went by their Reach me order instead. "
+
+
 # -- messages -----------------------------------------------------------------------------------------------------
 
 async def _send_on(account: str, channel: str, bot: dict, text: str) -> str:
@@ -266,10 +315,12 @@ def _leave_in_app(account: str, bot: dict, text: str) -> None:
             logger.exception("reach me: the push was not queued")
 
 
-async def deliver(account: str, bot_id: str, text: str) -> dict:
-    """Walk the bot's message order now. {ok, channel, note, tried: [{channel, reason}]}; logged without the text."""
+async def deliver(account: str, bot_id: str, text: str, via: Optional[str] = None) -> dict:
+    """Walk the bot's message order now, the way the person named first. {ok, channel, note, via, tried: [{channel,
+    reason}]}; logged without the text."""
     bot = _bot(account, bot_id)
-    order = settings.order_for(bot_id, "message", account)
+    base = settings.order_for(bot_id, "message", account)
+    order, way, unusable = _via_order("message", via, base) if base else ([], None, "")
     tried, result = [], None
     with accounts.as_account(account):
         for channel in order:
@@ -284,14 +335,18 @@ async def deliver(account: str, bot_id: str, text: str) -> dict:
             result = {"ok": True, "channel": "app", "note": "left in the app; nothing else in the order took it"}
     result = result or {"ok": False, "channel": None, "note": ""}
     result["tried"] = tried
+    result["via"] = _via_note("message", via, way, unusable, result["channel"], tried) if result["ok"] else ""
     settings.log({"kind": "message", "bot_id": bot_id, "bot_name": bot.get("name") or "", "ok": result["ok"],
-                  "channel": result["channel"], "note": result["note"], "tried": tried}, account)
+                  "channel": result["channel"], "note": result["note"], "tried": tried,
+                  **({"via": way or via} if via else {})}, account)
     return result
 
 
 async def outbox_send(bot_id: str, text: str) -> bool:
-    """The outbox's sender for channel "reach:<bot id>" (core/channels/registry.py), as the row's account."""
+    """The outbox's sender for channel "reach:<bot id>" or "reach:<bot id>@via:<way>" (core/channels/registry.py), as
+    the row's account."""
     account = accounts.effective_account()
+    bot_id, _, via = bot_id.partition(VIA_SEPARATOR)
     box = _result.get()
     if settings.paused(account):
         # STOP came after it was queued: it is dropped, not sent and not retried.
@@ -301,7 +356,7 @@ async def outbox_send(bot_id: str, text: str) -> bool:
             box.update({"ok": False, "paused": True})
         return True
     try:
-        result = await deliver(account, bot_id, text)
+        result = await deliver(account, bot_id, text, via or None)
     except ReachRefused as error:
         result = {"ok": False, "channel": None, "tried": [{"channel": "", "reason": str(error)}]}
     if box is not None:
@@ -317,15 +372,18 @@ def _skipped(tried: list) -> str:
     return "; ".join(f"{_channel_label(t['channel']) or 'Kairos'}: {t['reason']}" for t in tried)
 
 
-async def message_me(account: str, bot_id: str, message, invocation_id: str) -> str:
-    """A bot's message_me: through the person's Reach me order, now or after quiet hours."""
+async def message_me(account: str, bot_id: str, message, invocation_id: str, via=None) -> str:
+    """A bot's message_me: through the person's Reach me order, now or after quiet hours. `via`: the way the person
+    named, tried first."""
     from core import outbox
     settings.refuse_if_paused(account, ReachRefused)
     text = _clean(message)
+    via = _clean_via(via)
     bot = _bot(account, bot_id)
     order = settings.order_for(bot_id, "message", account)
     if not order:
         raise ReachRefused("The person turned off messages from this bot in Settings > Reach me.")
+    order, way, _ = _via_order("message", via, order)
     ready = {row["id"]: row for row in message_status(account)}
     if not any(ready[c]["ready"] for c in order) and "app" not in order:
         raise ReachRefused("None of the ways the person chose in Settings > Reach me is set up: "
@@ -336,14 +394,16 @@ async def message_me(account: str, bot_id: str, message, invocation_id: str) -> 
         raise ReachRefused(str(error).replace("texts to you", "messages to you")) from None
     held = settings.quiet_until(account)
     with accounts.as_account(account):
-        delivery = outbox.enqueue(f"reach:{bot_id}:{invocation_id}", f"reach:{bot_id}", text,
+        channel = f"reach:{bot_id}{VIA_SEPARATOR}{via}" if via else f"reach:{bot_id}"
+        delivery = outbox.enqueue(f"reach:{bot_id}:{invocation_id}", channel, text,
                                   label=f"{bot.get('name') or 'A bot'}'s message to you", not_before=held, send=False)
     phone_calls._settle(account, taken, invocation_id, bot_outbound.COMMITTED)     # queued durably: it will be sent
     if held:
         settings.log({"kind": "message", "bot_id": bot_id, "bot_name": bot.get("name") or "", "ok": True, "channel": None,
                       "note": f"held for quiet hours until {settings.clock(held, account)}", "tried": []}, account)
+        first = f"{settings.MESSAGE_LABELS[way]} first, then " if way else ""
         return (f"Queued. It is the person's quiet hours, so it goes at {settings.clock(held, account)} their time, "
-                "the first way in their Reach me order that works.")
+                f"{first}the first way in their Reach me order that works.")
     box = {}
     token = _result.set(box)
     try:
@@ -354,7 +414,8 @@ async def message_me(account: str, bot_id: str, message, invocation_id: str) -> 
     if box.get("ok"):
         note = f" ({box['note']})" if box.get("note") else ""
         skipped = f" Skipped first: {_skipped(box['tried'])}." if box.get("tried") else ""
-        return f"Sent to the person: {_channel_label(box['channel'])}{note}.{skipped}"
+        named = f" {box['via'].strip()}" if box.get("via") else ""
+        return f"Sent to the person: {_channel_label(box['channel'])}{note}.{named}{skipped}"
     if box.get("paused"):
         return "Not sent: the person paused messages from bots."
     if not box and row and row.get("status") == "delivered":
@@ -434,19 +495,22 @@ async def _telegram_voice(account: str, bot: dict, reason: str, invocation_id: s
             "You will not hear back unless they reply.")
 
 
-async def call_me(account: str, bot_id: str, reason, invocation_id: str, ask: bool = False):
-    """ring_me and notify_me_by_call: the bot's call order. Raises ReachRefused. A way that rang but was not picked up
-    (a missed ring, nobody joining the Discord channel) falls to the next way, like one that is not set up; when the
-    order runs out after one of those, the bot is told they did not answer.
+async def call_me(account: str, bot_id: str, reason, invocation_id: str, ask: bool = False, via=None):
+    """ring_me and notify_me_by_call: the bot's call order, the way the person named (`via`) first. Raises ReachRefused.
+    A way that rang but was not picked up (a missed ring, nobody joining the Discord channel) falls to the next way, like
+    one that is not set up; when the order runs out after one of those, the bot is told they did not answer.
 
     `ask` (services/call_ask.py) returns a dict instead: {ok, message, channel, label, one_way}, where `one_way` marks a
     way that cannot carry a spoken answer back (a Telegram voice message)."""
     settings.refuse_if_paused(account, ReachRefused)
     text = _clean(reason)
+    via = _clean_via(via)
     bot = _bot(account, bot_id, strict=False)
     order = settings.order_for(bot_id, "call", account)
     if not order:
         raise ReachRefused("The person turned off calls from this bot in Settings > Reach me.")
+    order, way, unusable = _via_order("call", via, order)
+    named = {"via": way or via} if via else {}
     held = settings.quiet_until(account)
     if held:
         raise ReachRefused(f"It is the person's quiet hours until {settings.clock(held, account)} their time, so no "
@@ -466,24 +530,25 @@ async def call_me(account: str, bot_id: str, reason, invocation_id: str, ask: bo
             except Final as why:
                 tried.append({"channel": channel, "reason": str(why)})
                 settings.log({"kind": "call", "bot_id": bot_id, "bot_name": bot.get("name") or "", "ok": False,
-                              "channel": channel, "note": "", "tried": tried}, account)
+                              "channel": channel, "note": "", "tried": tried, **named}, account)
                 raise ReachRefused(str(why)) from None
             settings.log({"kind": "call", "bot_id": bot_id, "bot_name": bot.get("name") or "", "ok": True,
-                          "channel": channel, "note": "", "tried": tried}, account)
+                          "channel": channel, "note": "", "tried": tried, **named}, account)
+            outcome = _via_note("call", via, way, unusable, channel, tried) + outcome
             if ask:
                 return {"ok": True, "message": outcome, "channel": channel, "label": settings.CALL_LABELS[channel],
                         "one_way": channel == "telegram"}
             return outcome
     settings.log({"kind": "call", "bot_id": bot_id, "bot_name": bot.get("name") or "", "ok": False, "channel": None,
-                  "note": "not answered" if missed else "", "tried": tried}, account)
+                  "note": "not answered" if missed else "", "tried": tried, **named}, account)
     if missed:
         ways = ", ".join(settings.CALL_LABELS[c] for c in missed)
-        message = (f"They did not answer ({ways}). A missed-call note with your reason is in their inbox. Do not call "
-                   "again unless they ask.")
+        message = (_via_note("call", via, way, unusable, None, tried) + f"They did not answer ({ways}). A missed-call "
+                   "note with your reason is in their inbox. Do not call again unless they ask.")
         if ask:
             return {"ok": False, "message": message, "channel": None, "label": "", "one_way": False}
         return message
-    raise ReachRefused("No way to call the person worked: " + "; ".join(
+    raise ReachRefused((f"{unusable}. " if unusable else "") + "No way to call the person worked: " + "; ".join(
         f"{settings.CALL_LABELS[t['channel']]}: {t['reason']}" for t in tried))
 
 

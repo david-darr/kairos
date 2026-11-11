@@ -10,6 +10,11 @@ What lives here is the account's own choice and state, nothing that sends:
   call from this account's bots until it is turned back on here, or the person replies START.
 
 Everything is per account, in the account's own folder (reach_me.json). Sending is services/reach_me.py.
+
+The call order is the one place that decides where calls go first. The Discord bot page's "When a bot calls you" reads
+and sets its first way (first_call, set_first_call); the old ring_preference setting it used to keep on its own only
+seeds an order that was never saved, and is written into reach_me.json the first time it is read (2026-11-11: the two
+disagreed, and a bot believed only this one).
 """
 import re
 import threading
@@ -64,6 +69,19 @@ def _legacy_call_order(account: Optional[str]) -> list:
     return list(DEFAULT_CALL)
 
 
+def _migrated_call(account: Optional[str]) -> list:
+    """The call order of an account that never saved one: from the old ring preference, written here once when that
+    preference was not the default, so the old setting never decides anything again."""
+    order = _legacy_call_order(account)
+    if order != DEFAULT_CALL:
+        with _LOCK:
+            fresh = read_json(_file(account, create=False), {})
+            fresh = fresh if isinstance(fresh, dict) else {}
+            if not isinstance(fresh.get("call"), list):
+                write_json_atomic(_file(account), {**fresh, "call": order})
+    return order
+
+
 def _clean_order(value, allowed: tuple, what: str) -> list:
     if not isinstance(value, list):
         raise ValueError(f"The {what} order must be a list.")
@@ -93,7 +111,7 @@ def load(account: Optional[str] = None) -> dict:
     quiet = stored.get("quiet") if isinstance(stored.get("quiet"), dict) else {}
     return {
         "message": list(stored["message"]) if isinstance(stored.get("message"), list) else list(MESSAGE_CHANNELS),
-        "call": list(stored["call"]) if isinstance(stored.get("call"), list) else _legacy_call_order(account),
+        "call": list(stored["call"]) if isinstance(stored.get("call"), list) else _migrated_call(account),
         "quiet": {"enabled": bool(quiet.get("enabled")), "start": quiet.get("start") or "22:00", "end": quiet.get("end") or "07:00"},
         "bots": dict(stored.get("bots") or {}) if isinstance(stored.get("bots"), dict) else {},
         "paused": stored.get("paused") if isinstance(stored.get("paused"), dict) else None,
@@ -140,6 +158,22 @@ def save(patch: dict, account: Optional[str] = None) -> dict:
             data["bots"] = cleaned
         _write(account, data)
         return load(account)
+
+
+def first_call(account: Optional[str] = None) -> Optional[str]:
+    """The first way calls try ("When a bot calls you"), or None when calls are off."""
+    order = load(account)["call"]
+    return order[0] if order else None
+
+
+def set_first_call(channel: str, account: Optional[str] = None) -> dict:
+    """Put one way first in the call order; the rest keep their places (all of them, if calls were off)."""
+    if channel not in CALL_CHANNELS:
+        raise ValueError(f"Unknown way to call you: {channel!r}.")
+    account = account or accounts.effective_account()
+    with _LOCK:
+        current = load(account)["call"] or list(DEFAULT_CALL)
+        return save({"call": [channel] + [c for c in current if c != channel]}, account)
 
 
 def order_for(bot_id: str, kind: str, account: Optional[str] = None) -> list:

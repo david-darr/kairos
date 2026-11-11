@@ -52,9 +52,19 @@ export function highlightCode(code, raw, language = 'text') {
   if (raw.length < 100000 && hljs.getLanguage(language)) code.innerHTML = hljs.highlight(raw, { language, ignoreIllegals: true }).value;
 }
 
+// A goal control block (<kairos-goal>{...}</kairos-goal>, core/goal_block.py) is never shown. The server keeps it
+// out of new replies; this covers a reply saved before that, where the sanitizer would drop the tags and show the
+// JSON between them (David, 2026-11-11).
+const GOAL_BLOCK = /<kairos-goal>[\s\S]*?<\/kairos-goal>|<kairos-goal>[\s\S]*$/g;
+export function withoutGoalBlocks(text) {
+  if (typeof text !== 'string' || !text.includes('<kairos-goal>')) return text;
+  return text.replace(GOAL_BLOCK, '').trimEnd();
+}
+
 // `remoteImage(url, alt)`: a caller that wants remote images offered rather
 // than dropped (the Vault reader's click-to-load) returns the node to show.
 export function renderMessageBody(body, text, sessionId, rich = true, { live = false, remoteImage = null } = {}) {
+  text = withoutGoalBlocks(text);
   body._rawText = text;
   body.classList.toggle('chat-prose', rich);
   if (!rich) { body.textContent = text; return; }

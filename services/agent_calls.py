@@ -15,7 +15,7 @@ from fastapi import HTTPException
 from core.atomic_io import read_json, write_json_atomic
 from core.constants import DATA_DIR
 from core.session_manager import session_manager
-from core import model_endpoints, task_scheduler
+from core import goal_block, model_endpoints, task_scheduler
 from core.voice_dialogue import Conversation, SpeechFilter, VOICE_PROMPT
 from core import cli_dialogue
 from services import chat_live
@@ -292,7 +292,7 @@ async def turn(call, text, request_id, work_update=False, opening=False):
         _save(call)
         if speaker: yield {'type':'speaker', 'id':speaker, 'name':_name(speaker)}
         _turns[ident] = asyncio.current_task(); mine = call['revision']; started = time.perf_counter()
-        parts = []; filter = SpeechFilter(); completed = False; first = None
+        parts = []; filter = SpeechFilter(); goal = goal_block.StreamFilter(); completed = False; first = None
         try:
             context = _context(call, speaker)
             if opening: context.append({'role':'system','content':'You rang the person and they just picked up. Say hello and give the reason in one or two short sentences, then stop and let them answer: ' + text})
@@ -301,13 +301,13 @@ async def turn(call, text, request_id, work_update=False, opening=False):
             async with contextlib.aclosing(_conversation(call).stream(context)) as stream:
                 async for delta in stream:
                     if call['ended'] or mine != call['revision']: break
-                    spoken = filter.feed(delta)
+                    spoken = goal.feed(filter.feed(delta))   # never a goal block aloud (core/goal_block.py)
                     if spoken:
                         parts.append(spoken)
                         if first is None: first = round((time.perf_counter()-started)*1000)
                         yield {'type':'text','delta':spoken,'first_output_ms':first}
             if call['ended'] or mine != call['revision']: return
-            tail = filter.finish()
+            tail = goal.feed(filter.finish()) + goal.flush()
             if tail: parts.append(tail); yield {'type':'text','delta':tail}
             work = filter.work()
             if work and not work_update and not call.get('room_id') and not ''.join(parts).strip():

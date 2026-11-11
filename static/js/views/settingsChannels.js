@@ -13,7 +13,8 @@ const STATE = {
   error: ["Problem", "error"], off: ["Off", "muted"],
 };
 const POLL_MS = 5000;
-const RING_PREFERENCES = { app: "In Kairos (default)", discord: "In my Discord voice channel", phone: "On my phone" };
+// The first way in Settings > Reach me's call order (core/reach_me.py): this page reads and sets that one order.
+const RING_PREFERENCES = { phone: "On my phone", app: "In the Kairos app", discord: "In my Discord voice channel", telegram: "As a Telegram voice message" };
 const DISCORD_MODES = { normal: "Normal (allow list applies)", open: "Open: anyone can talk", silent: "Silent: never replies" };
 
 const errorText = (problem) => (problem?.message || String(problem)).replace(/^\d+: /, "");
@@ -287,11 +288,14 @@ export async function renderChannelsPanel(body, _status, page) {
         await reload();
       } catch (problem) { voiceErr.textContent = errorText(problem); }
     } });
-    const ringPref = customSelect({}, Object.entries(RING_PREFERENCES).map(([v, t]) => el("option", { value: v, ...(v === "app" ? { selected: "" } : {}) }, t)));
-    api("/api/settings").then((settings) => { ringPref.value = settings.ring_preference || "app"; }).catch(() => {});
+    const ringPref = customSelect({}, [el("option", { value: "", disabled: "", selected: "" }, "Calls are off"),
+      ...Object.entries(RING_PREFERENCES).map(([v, t]) => el("option", { value: v }, t))]);
+    api("/api/settings").then((settings) => { ringPref.value = settings.ring_preference || ""; }).catch(() => {});
     const saveRingPref = el("button", { class: "btn", text: "Save", onclick: async () => {
-      await api("/api/settings/ring-preference", { method: "POST", body: JSON.stringify({ preference: ringPref.value }) });
-      toast("Saved", "success");
+      if (!ringPref.value) { toast("Pick a way to call you first.", "error"); return; }
+      const saved = await api("/api/settings/ring-preference", { method: "POST", body: JSON.stringify({ preference: ringPref.value }) });
+      ringPref.value = saved.ring_preference || "";
+      toast("Saved. It is first in Settings > Reach me now.", "success");
     } });
 
     // Named channels (David's ask 2026-09-10): "open" answers anyone there
@@ -341,7 +345,7 @@ export async function renderChannelsPanel(body, _status, page) {
           ? `Joins channel ${bot.voice_channel_id} only. Needs an allowed user above, and the voice add-ons installed.`
           : "Off. Paste a voice channel's ID (Copy Channel ID) from a server this bot is in.", control: [voiceId, saveVoice] }),
         voiceErr,
-        row({ title: "When a bot calls you", description: "Which way bot calls try first. The whole order, quiet hours and STOP are in Settings > Reach me.", control: [ringPref, saveRingPref] }),
+        row({ title: "When a bot calls you", description: "Which way bot calls try first. It is the first way in Settings > Reach me, where the rest of the order, quiet hours and STOP are. Changing one changes the other.", control: [ringPref, saveRingPref] }),
       ]),
       group({ title: "Channel overrides", description: "Per-channel behaviour, and extra delivery targets for tasks." },
         [...(overrideRows.length ? overrideRows : [empty("No overrides. The bot follows its allow list everywhere.")])]),

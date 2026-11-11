@@ -92,8 +92,9 @@ def clamp_wait(value) -> int:
     return max(WAIT_MIN, min(WAIT_MAX, seconds))
 
 
-async def ask_me(account: str, bot_id: str, question, invocation_id: str, wait_seconds=None) -> str:
-    """The ask_me_by_call tool: call through the Reach me order with the question, wait for the spoken answer."""
+async def ask_me(account: str, bot_id: str, question, invocation_id: str, wait_seconds=None, via=None) -> str:
+    """The ask_me_by_call tool: call through the Reach me order (the way the person named first) with the question,
+    wait for the spoken answer."""
     from services import reach_me
     text = " ".join(str(question or "").replace("\x00", " ").split())[:MAX_QUESTION]
     if not text:
@@ -104,7 +105,7 @@ async def ask_me(account: str, bot_id: str, question, invocation_id: str, wait_s
     ident = create(account, bot_id, text)
     token = ASK.set(ident)
     try:
-        placed = await reach_me.call_me(account, bot_id, text, invocation_id, ask=True)
+        placed = await reach_me.call_me(account, bot_id, text, invocation_id, ask=True, via=via)
     finally:
         ASK.reset(token)
     ask = _asks[ident]

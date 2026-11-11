@@ -164,9 +164,10 @@ class SafetyTests(RingCase):
             self.assertEqual(caught.exception.status_code, 404)
         with self.assertRaises(ValueError):
             rings.claim_opening("acct1", "bob", made["id"], "bot-kip")
-        # there is no address argument at all
+        # there is no address argument at all: `via` only names a kind of way to the same person (a fixed list)
         schema = next(spec for spec in phone_tools.TOOLS if spec["name"] == "ring_me")["schema"]
-        self.assertEqual(list(schema["properties"]), ["reason"])
+        self.assertEqual(list(schema["properties"]), ["reason", "via"])
+        self.assertEqual(set(schema["properties"]["via"]), {"type", "enum", "description"})
         self.assertFalse(schema["additionalProperties"])
 
     async def test_a_ring_never_goes_to_another_users_devices(self):

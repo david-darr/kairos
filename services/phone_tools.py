@@ -6,12 +6,22 @@ outbound send (core/bot_policy.py). The five that only reach the person themselv
 ask_me_by_call, notify_me_by_call, notify_me_by_text) are on bot_policy.SELF_ONLY_TOOLS and go ahead without asking,
 bounded by the daily limits, quiet hours and cooldowns applied here and in services/phone_calls.py; dial_someone
 still asks.
+
+`via` (message_me, ring_me, ask_me_by_call, notify_me_by_call): a way the person named in their own words ("call me on
+Discord"). It is a way to reach the same person, never another recipient, so these stay self-only. That way is tried
+first and the person's order follows only if it is not set up or fails; the result says so.
 """
 from core import phone_connection  # noqa: F401  (tests patch phone_tools.phone_connection)
 from services import call_ask, outbound_calls, phone_calls, reach_me, rings  # noqa: F401
 
+_VIA = {"type": "string", "enum": list(reach_me.VIA_CHANNELS),
+        "description": ("Only when the person named a way in their own words, such as \"call me on Discord\", \"text me "
+                        "on Telegram\" or \"ring me in the app\": that way is tried first, then their Reach me order if "
+                        "it is not set up or does not work. Leave it out otherwise.")}
+
 _MESSAGE = {"type": "object", "additionalProperties": False, "required": ["message"],
             "properties": {"message": {"type": "string", "minLength": 1, "maxLength": phone_calls.MAX_MESSAGE}}}
+_MESSAGE_VIA = {**_MESSAGE, "properties": {**_MESSAGE["properties"], "via": _VIA}}
 
 
 def _scope(ctx, args, prefix: str):
@@ -33,27 +43,36 @@ async def _run(args, ctx, action):
         return f"Not sent: {error}"
 
 
+def _via(action, args):
+    """The action with the way the person named (`via`), when there is one."""
+    via = args.get("via")
+
+    async def run(account, bot_id, text, ident):
+        return await (action(account, bot_id, text, ident, via=via) if via else action(account, bot_id, text, ident))
+    return run
+
+
 async def tool_call(args, ctx):
     """notify_me_by_call: the person's call order in Reach me (a phone call, an in-app ring, Discord voice, a
-    Telegram voice message), the first that is set up."""
-    return await _run(args, ctx, reach_me.call_me)
+    Telegram voice message), the first that is set up; the way they named first."""
+    return await _run(args, ctx, _via(reach_me.call_me, args))
 
 
 async def tool_ring(args, ctx):
     """ring_me: the same call order as notify_me_by_call."""
-    return await _run(args, ctx, reach_me.call_me)
+    return await _run(args, ctx, _via(reach_me.call_me, args))
 
 
 async def tool_ask(args, ctx):
     """ask_me_by_call: one question by call through the Reach me call order; the spoken answer comes back as text."""
-    async def action(account, bot_id, text, ident):
-        return await call_ask.ask_me(account, bot_id, text, ident, args.get("wait_seconds"))
-    return await _run({"reason": args.get("question")}, ctx, action)
+    async def action(account, bot_id, text, ident, via=None):
+        return await call_ask.ask_me(account, bot_id, text, ident, args.get("wait_seconds"), via=via)
+    return await _run({"reason": args.get("question")}, ctx, _via(action, args))
 
 
 async def tool_message(args, ctx):
     """message_me: the person's message order in Reach me, with fallback, through the durable outbox."""
-    return await _run(args, ctx, reach_me.message_me)
+    return await _run(args, ctx, _via(reach_me.message_me, args))
 
 
 async def tool_text(args, ctx):
@@ -96,23 +115,27 @@ _DIAL = {"type": "object", "additionalProperties": False, "required": ["to", "wh
                                  "description": "Your private brief: what to get done, the details you may share, and what to ask the person about."}}}
 
 _REASON = {"type": "object", "additionalProperties": False, "required": ["reason"],
-           "properties": {"reason": {"type": "string", "minLength": 1, "maxLength": rings.MAX_REASON}}}
+           "properties": {"reason": {"type": "string", "minLength": 1, "maxLength": rings.MAX_REASON}, "via": _VIA}}
 
 _ASK = {"type": "object", "additionalProperties": False, "required": ["question"],
         "properties": {"question": {"type": "string", "minLength": 1, "maxLength": call_ask.MAX_QUESTION,
                                     "description": "The one question to ask, as you would say it."},
                        "wait_seconds": {"type": "integer", "minimum": call_ask.WAIT_MIN, "maximum": call_ask.WAIT_MAX,
-                                        "description": f"How long to wait for the answer, {call_ask.WAIT_MIN} to {call_ask.WAIT_MAX} seconds (default {call_ask.WAIT_DEFAULT})."}}}
+                                        "description": f"How long to wait for the answer, {call_ask.WAIT_MIN} to {call_ask.WAIT_MAX} seconds (default {call_ask.WAIT_DEFAULT})."},
+                       "via": _VIA}}
 
-_CALLS_FOLLOW = ("It goes the way the person chose in Settings > Reach me, in their order: a real phone call to their own "
-                 "mobile, a ring inside Kairos, their Discord voice channel, or a Telegram voice message (Telegram bots "
-                 "cannot call). ")
+_CALLS_FOLLOW = ("It goes the way the person chose in Settings > Reach me, in their call order (the Discord bot's \"When a "
+                 "bot calls you\" setting is the first way in that same order): a real phone call to their own mobile, a "
+                 "ring inside Kairos, their Discord voice channel, or a Telegram voice message (Telegram bots cannot "
+                 "call). When the person names a way themselves (\"call me on Discord\"), pass it as via and it is "
+                 "tried first; their order follows only if it is not set up or fails, and the result says so. ")
 
 TOOLS = [
-    {"name": "message_me", "effect": "external", "handler": tool_message, "schema": _MESSAGE,
+    {"name": "message_me", "effect": "external", "handler": tool_message, "schema": _MESSAGE_VIA,
      "description": ("Send the person a short message where they want bots to reach them: the apps they chose in "
                      "Settings > Reach me, in their order (the Kairos app, Telegram, Discord, WhatsApp, iMessage, Signal "
-                     "or SMS), falling back to the next one that works. Use it for a finished job, something they asked "
+                     "or SMS), falling back to the next one that works. When the person names an app themselves (\"text "
+                     "me on Telegram\"), pass it as via and it is tried first. Use it for a finished job, something they asked "
                      "to hear about, or anything they should see soon but that is not urgent enough for a call. One or "
                      "two plain sentences; it is signed with your name. During their quiet hours it waits until they end. "
                      "Only the person themselves can be messaged, with a daily limit. The result says where it went; do "
@@ -129,7 +152,7 @@ TOOLS = [
                      "and asks the question; the first thing they say is the answer, transcribed, and the call then ends. "
                      "The tool waits for it (2 minutes by default). Not answered: you are told, and should ask by "
                      "message_me instead. Counts as a call to them: no calls during quiet hours, a few a day.")},
-    {"name": "notify_me_by_call", "effect": "external", "handler": tool_call, "schema": _MESSAGE,
+    {"name": "notify_me_by_call", "effect": "external", "handler": tool_call, "schema": _MESSAGE_VIA,
      "description": ("Call the person about something urgent or time-sensitive, or because they asked 'call me when it's "
                      "ready'. " + _CALLS_FOLLOW + "Say in the message what the call is about, in one or two sentences; a "
                      "call opens by saying who you are and that you are an AI assistant, then the message. No calls "

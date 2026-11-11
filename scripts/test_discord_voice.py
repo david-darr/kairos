@@ -18,7 +18,7 @@ import unittest
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -723,6 +723,22 @@ class RingRouting(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.startswith("They did not answer (Discord voice channel, Ring in the Kairos app)"), result)
         self.assertIn("Do not call again", result)
 
+    async def test_call_me_on_discord_goes_to_discord_first(self):
+        # David, 2026-11-11: "call me on discord" and the bot could not choose. Now it passes via.
+        self.phone_ready = True
+        self.assertEqual(await phone_tools.tool_ring({"reason": "r", "via": "discord"}, self.ctx), "joined")
+        self.assertEqual(await phone_tools.tool_call({"message": "m", "via": "discord"}, self.ctx), "joined")
+        self.assertEqual(await phone_tools.tool_call({"message": "m"}, self.ctx), "phoned", "without via, the order")
+        self.assertEqual([c[0] for c in self.calls], ["discord", "discord", "phone"])
+
+    async def test_call_me_on_discord_when_it_is_not_set_up_uses_the_order_and_says_so(self):
+        self.phone_ready = True
+        with patch.object(dv, "pick_bot", MagicMock(side_effect=dv.VoiceRefused("No Discord bot is set up for voice.", unavailable=True))):
+            result = await phone_tools.tool_ring({"reason": "r", "via": "discord"}, self.ctx)
+        self.assertEqual(result, "They asked for Discord voice channel, but it did not work (No Discord bot is set up for voice), "
+                                 "so it went by their Reach me order instead. phoned")
+        self.discord.assert_not_called()
+
     async def test_a_discord_limit_is_reported_not_worked_around(self):
         self.order = ["discord", "phone", "app"]
         self.discord.side_effect = dv.VoiceRefused("Today's limit is used up.")
@@ -884,8 +900,9 @@ class Settings(unittest.IsolatedAsyncioTestCase):
         with patch.object(dv, "leave", leave):
             await routes.set_discord_voice(self.bot["id"], routes.SetDiscordVoiceRequest(voice_channel_id=""), user="u")
         self.assertEqual(left, [self.bot["id"]], "turning voice off ends a call in progress")
+        from core import reach_me as reach_settings
         self.assertEqual((await routes.set_ring_preference(routes.SetRingPreferenceRequest(preference="discord"), user="u"))["ring_preference"], "discord")
-        self.assertEqual(settings_store.get_setting("ring_preference"), "discord")
+        self.assertEqual(reach_settings.first_call(), "discord", "the choice is the first way in Reach me's call order")
         self.assertEqual((await routes.get_settings(user="u"))["ring_preference"], "discord")
         with self.assertRaises(HTTPException):
             await routes.set_ring_preference(routes.SetRingPreferenceRequest(preference="carrier pigeon"), user="u")

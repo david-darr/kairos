@@ -89,9 +89,9 @@ DEFAULTS: dict[str, Any] = {
     # systems > Use as default). None: models pick a look per brief with
     # creative_direction; a design made by hand starts in Kairos.
     "design_default_look": None,
-    # How a bot reaching you by call does it (ring_me, notify_me_by_call): "app" rings inside Kairos (the free
-    # default, and the phone when one is connected for notify_me_by_call), "discord" joins the Discord bot's voice
-    # channel, "phone" uses the Phone connection. See services/phone_tools.py.
+    # Before Settings > Reach me: which way bot calls tried first ("app", "discord" or "phone"). Now only the seed of a
+    # call order that was never saved, moved into reach_me.json the first time it is read (core/reach_me.py). Nothing
+    # writes it any more; "When a bot calls you" reads and sets Reach me's first call way.
     "ring_preference": "app",
 }
 

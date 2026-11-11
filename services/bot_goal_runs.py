@@ -16,26 +16,24 @@ runner: `begin_custom` takes a runner whose `settle` runs one coordinator turn a
 the control line and `public` are shared, so a goal looks the same wherever it runs.
 """
 import asyncio
-import json
 import logging
-import re
 import time
 import uuid
 
 from fastapi import HTTPException
 
-from core import bot_chat_store as store, events, logs
+from core import bot_chat_store as store, events, goal_block, logs
 from core.session_manager import session_manager
 from services import chat_live
 
 logger = logging.getLogger(__name__)
 
-OPEN, CLOSE = "<kairos-goal>", "</kairos-goal>"
+OPEN, CLOSE = goal_block.OPEN, goal_block.CLOSE
 MAX_STEPS = 13
 REPEAT_LIMIT = 3
 FRAME_GAP = 0.4  # progress frames at most this often
 ADMISSION_WAIT = 60.0
-STATUSES = ("continue", "completed", "needs-input", "blocked")
+STATUSES = goal_block.STATUSES
 FINAL_LABELS = {"completed": "Done", "needs-input": "Needs your answer", "blocked": "Blocked",
                 "stopped": "Stopped", "failed": "Failed", "limit-reached": "Step limit reached"}
 NOTE = (
@@ -45,78 +43,30 @@ NOTE = (
     "completed (the goal is met), needs-input (you must ask the person something first), blocked (you cannot "
     "go on). The person never sees this line, so also say plainly in your reply what you did.]"
 )
-_ENVELOPE = re.compile(re.escape(OPEN) + r"(.*?)" + re.escape(CLOSE), re.DOTALL)
 
 _RUNS: dict[str, dict] = {}  # session id -> the newest goal there (kept after it ends)
 _TASKS: set = set()
 
 
-class EnvelopeFilter:
-    """Keeps the control line out of live text, even when its tags arrive split
-    across stream chunks. Anything that could still turn into the opening tag
-    is held until the next chunk shows what it is."""
+class EnvelopeFilter(goal_block.StreamFilter):
+    """Keeps the control line out of live text in a goal turn, even when its tags arrive split across stream chunks,
+    and when the model wrote it bare, without its tags (core/goal_block.py)."""
 
     def __init__(self):
-        self.held = ""
-        self.inside = False
-
-    def feed(self, chunk: str) -> str:
-        text, out = self.held + chunk, ""
-        self.held = ""
-        while text:
-            if self.inside:
-                end = text.find(CLOSE)
-                if end >= 0:
-                    text, self.inside = text[end + len(CLOSE):], False
-                    continue
-                keep = _tail_prefix(text, CLOSE)
-                self.held = text[len(text) - keep:] if keep else ""
-                break
-            start = text.find(OPEN)
-            if start >= 0:
-                out += text[:start]
-                text, self.inside = text[start + len(OPEN):], True
-                continue
-            keep = _tail_prefix(text, OPEN)
-            out += text[:len(text) - keep]
-            self.held = text[len(text) - keep:] if keep else ""
-            break
-        return out
-
-    def flush(self) -> str:
-        """Whatever is still held when the reply ends. An unfinished control line is dropped."""
-        held, self.held = ("" if self.inside else self.held), ""
-        return held
-
-
-def _tail_prefix(text: str, tag: str) -> int:
-    """Length of the longest tail of `text` that begins `tag` (but is not all of it)."""
-    for size in range(min(len(tag) - 1, len(text)), 0, -1):
-        if tag.startswith(text[-size:]):
-            return size
-    return 0
+        super().__init__(goal=True)
 
 
 def parse(text: str) -> tuple[str, dict | None]:
     """(visible text, the control line) of a finished reply. The last complete
-    line wins; None when it is missing or not valid."""
-    matches = list(_ENVELOPE.finditer(text or ""))
-    visible = _ENVELOPE.sub("", text or "")
-    cut = visible.find(OPEN)  # an opening tag that never closed
-    if cut >= 0:
-        visible = visible[:cut]
-    if not matches:
-        return visible.strip(), None
-    try:
-        data = json.loads(matches[-1].group(1))
-    except ValueError:
-        return visible.strip(), None
+    line wins, tagged or bare at the end; None when it is missing or not valid."""
+    visible, data = goal_block.split(text or "", goal=True)
+    visible = visible.strip()
     if not isinstance(data, dict) or data.get("status") not in STATUSES:
-        return visible.strip(), None
+        return visible, None
     instruction, detail = data.get("instruction"), data.get("detail")
-    return visible.strip(), {"status": data["status"],
-                             "instruction": instruction.strip()[:4000] if isinstance(instruction, str) else "",
-                             "detail": detail.strip()[:500] if isinstance(detail, str) else ""}
+    return visible, {"status": data["status"],
+                     "instruction": instruction.strip()[:4000] if isinstance(instruction, str) else "",
+                     "detail": detail.strip()[:500] if isinstance(detail, str) else ""}
 
 
 # -- public view ------------------------------------------------------------------
