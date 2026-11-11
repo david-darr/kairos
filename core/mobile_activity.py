@@ -290,7 +290,10 @@ def enqueue(run_id, kind, permission=None):
                        (event_id, device["id"], run_id, kind, (permission or {}).get("id"), json.dumps(payload), expiry, now))
 
 
-BOT_KINDS = {"bot_needs_you", "bot_results", "bot_call"}
+BOT_KINDS = {"bot_needs_you", "bot_results", "bot_call", "bot_call_end"}
+# A ring buzzes again at these seconds while nobody has answered (the existing minute is the timeout).
+RING_REPEATS = (0, 20, 40)
+RING_END_SECONDS = 600
 
 
 def enqueue_bot(kind, agent_id, allowed_owner):
@@ -299,7 +302,7 @@ def enqueue_bot(kind, agent_id, allowed_owner):
     Pushes coalesce: one pending push per device, bot and kind per minute,
     held ten seconds for the burst to settle, so six results are one push.
     The text is generic, as for chats: nothing a lock screen should not show."""
-    if kind not in BOT_KINDS:
+    if kind not in BOT_KINDS - {"bot_call_end"}:
         raise ValueError(kind)
     now = time.time()
     bucket = int(now // 60)
@@ -313,27 +316,57 @@ def enqueue_bot(kind, agent_id, allowed_owner):
                        (event_id, device["id"], "", kind, None, json.dumps(payload), now + 3600, now + 10))
 
 
+def ring_payload(ring):
+    """What a ringing call's push carries (2026-11-10, call-style): who is calling as the title, never why; the bot's own
+    picture when it has one (the service worker falls back to its Kip, then the app icon); a deep link that answers this
+    ring once and stops working when the ring does (`exp`)."""
+    name = str(ring.get("bot_name") or "A bot")[:60]
+    expiry = float(ring["expires_at"])
+    payload = {"kind": "bot_call", "title": f"{name} is calling", "body": "Tap to answer.",
+               "url": f"/?agent={ring['agent_id']}&ring={ring['id']}&exp={int(expiry)}", "tag": "kairos-ring-" + ring["id"],
+               "ring_id": ring["id"], "agent_id": ring["agent_id"], "bot_name": name, "expires_at": expiry}
+    if ring.get("avatar"):
+        payload["avatar"] = ring["avatar"]
+    return payload
+
+
 def enqueue_ring(owner, ring):
-    """A bot is ringing the person (services/rings.py): one high-urgency push to each of that person's devices, sent at once and
-    good only while it rings. The lock screen says who is calling, never why. The URL answers it: the app opens the call screen.
-    Only the ring's own user is ever reached, whatever else is enrolled."""
+    """A bot is ringing the person (services/rings.py): a high-urgency push to each of that person's devices, sent at
+    once and again at RING_REPEATS while nobody answers, good only while it rings. The lock screen says who is calling,
+    never why. The URL answers it: the app opens the call screen. Only the ring's own user is ever reached."""
     now = time.time()
     expiry = float(ring["expires_at"])
-    payload = {"kind": "bot_call", "url": f"/?agent={ring['agent_id']}&ring={ring['id']}", "tag": "kairos-ring-" + ring["id"],
-               "ring_id": ring["id"], "body": f"{ring['bot_name'][:60]} is calling you.", "expires_at": expiry}
+    payload = json.dumps(ring_payload(ring))
     with database() as db:
         for device in db.execute("SELECT * FROM devices WHERE owner=?", (owner,)).fetchall():
             if not json.loads(device["preferences"]).get("bot_calls", True):
                 continue
-            event_id = hashlib.sha256(f"{device['id']}:ring:{ring['id']}".encode()).hexdigest()
-            db.execute("INSERT OR IGNORE INTO outbox(id,device_id,run_id,kind,permission_id,payload,expires,next_attempt) VALUES(?,?,?,?,?,?,?,?)",
-                       (event_id, device["id"], ring["id"], "bot_call", None, json.dumps(payload), expiry, now))
+            for number, delay in enumerate(RING_REPEATS):
+                if now + delay >= expiry:
+                    break
+                suffix = f":{number}" if number else ""
+                event_id = hashlib.sha256(f"{device['id']}:ring:{ring['id']}{suffix}".encode()).hexdigest()
+                db.execute("INSERT OR IGNORE INTO outbox(id,device_id,run_id,kind,permission_id,payload,expires,next_attempt) VALUES(?,?,?,?,?,?,?,?)",
+                           (event_id, device["id"], ring["id"], "bot_call", None, payload, expiry, now + delay))
 
 
-def close_ring(ring_id):
-    """The ring ended (answered, declined or missed): anything not yet sent is dropped."""
+def close_ring(ring_id, outcome="", bot_name=""):
+    """The ring ended (answered, declined or missed): anything not yet sent is dropped, and each device that was rung
+    gets one quiet push that takes the ringing notification down (a missed call stays as "Missed call from ...")."""
+    now = time.time()
     with database() as db:
         db.execute("UPDATE outbox SET status='expired' WHERE run_id=? AND kind='bot_call' AND status='pending'", (ring_id,))
+        if not outcome:
+            return
+        rung = [row[0] for row in db.execute("SELECT DISTINCT device_id FROM outbox WHERE run_id=? AND kind='bot_call' "
+                                             "AND status='sent'", (ring_id,))]
+        name = str(bot_name or "A bot")[:60]
+        payload = json.dumps({"kind": "bot_call_end", "ring_id": ring_id, "tag": "kairos-ring-" + ring_id, "outcome": outcome,
+                              "bot_name": name, "url": "/", "expires_at": now + RING_END_SECONDS})
+        for device_id in rung:
+            event_id = hashlib.sha256(f"{device_id}:ring-end:{ring_id}".encode()).hexdigest()
+            db.execute("INSERT OR IGNORE INTO outbox(id,device_id,run_id,kind,permission_id,payload,expires,next_attempt) VALUES(?,?,?,?,?,?,?,?)",
+                       (event_id, device_id, ring_id, "bot_call_end", None, payload, now + RING_END_SECONDS, now))
 
 
 def due():

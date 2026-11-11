@@ -233,7 +233,7 @@ class CallOrder(ReachCase):
     async def test_a_provider_refusal_falls_to_the_next_way_and_a_limit_does_not(self):
         rang = []
 
-        async def ring(account, bot_id, reason, ident):
+        async def ring(account, bot_id, reason, ident, **_how):
             rang.append(reason)
             return "They answered."
 

@@ -1,4 +1,4 @@
-"""Native calls use their own transcript; only their summary enters chat."""
+"""Native calls use their own transcript; after the call its summary, latency and transcript enter the bot's chat."""
 import asyncio
 import contextlib
 import json
@@ -38,17 +38,32 @@ class Speak(BaseModel):
     voice: str = Field(min_length=1, max_length=160)
 
 class Timing(BaseModel):
-    end_to_audio_ms: int = Field(ge=0,le=600000)
-    first_audio_ms: int = Field(ge=0,le=600000)
+    end_to_audio_ms: int | None = Field(default=None,ge=0,le=600000)
+    first_audio_ms: int | None = Field(default=None,ge=0,le=600000)
+    since_start_ms: int | None = Field(default=None,ge=0,le=3600000)   # the call's first audio after it opened
     trace: dict[str, int | list[int]] | None = None
 
 @router.post('/{ident}/timing')
 async def timing(ident: str, body: Timing, user: str = Depends(require_user)):
+    """One measured turn from the call screen. Kept per call (agent_calls.record_latency) and shown in More."""
     call=calls.require(ident,user)
-    call['last_audio_timing']=body.model_dump(exclude={'trace'});calls._save(call)
+    if body.end_to_audio_ms is not None or body.first_audio_ms is not None:
+        call['last_audio_timing']=body.model_dump(exclude={'trace','since_start_ms'})
     if body.trace and len(body.trace)<=16:calls.logger.debug('call voice trace call=%s %s',ident,json.dumps(body.trace))
     calls.logger.info('call audio timing call=%s speech_end_to_audio_ms=%s first_audio_ms=%s',ident,body.end_to_audio_ms,body.first_audio_ms)
-    return {'ok':True}
+    latency=calls.record_latency(call,gap_ms=body.end_to_audio_ms,first_audio_ms=body.since_start_ms)
+    return {'ok':True,'latency':latency,'line':calls.latency_line(latency)}
+
+class Typed(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+
+@router.post('/{ident}/typed')
+async def typed(ident: str, body: Typed, user: str = Depends(require_user)):
+    """Text the person typed in the bot's chat while this call is live: read into the call (Hermes audit)."""
+    call=calls.require(ident,user)
+    if call['ended']:raise HTTPException(409,'This call has ended.')
+    if call.get('room_id'):raise HTTPException(409,'Type in the room; group calls do not read texts.')
+    return {'ok':calls.text_into_call(call,body.text)}
 
 @router.get('/realtime-choices')
 async def realtime_choices(user: str = Depends(require_user)):

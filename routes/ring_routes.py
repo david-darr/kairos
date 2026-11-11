@@ -27,8 +27,9 @@ async def pending(user: str = Depends(require_user)):
 
 
 @router.post("/{ring_id}/answer")
-async def answer(ring_id: str = _ID, user: str = Depends(require_user)):
-    return rings.answer(accounts.effective_account(), user, ring_id)
+async def answer(ring_id: str = _ID, via: str = "", user: str = Depends(require_user)):
+    """`via=link`: the push notification's Answer or its deep link, which answers only a call still ringing."""
+    return rings.answer(accounts.effective_account(), user, ring_id, via_link=via == "link")
 
 
 @router.post("/{ring_id}/decline")

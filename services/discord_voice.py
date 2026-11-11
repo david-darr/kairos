@@ -34,7 +34,8 @@ from services import phone_bridge, phone_calls
 logger = logging.getLogger(__name__)
 
 IDLE_SECONDS = 5 * 60          # quiet this long (nobody talking, nothing being said) and the bot leaves
-JOIN_WAIT_SECONDS = 2 * 60     # how long it waits in the channel for the person to arrive
+JOIN_WAIT_SECONDS = 2 * 60     # how long it waits in the channel for the person to arrive (a call they asked for)
+RING_WAIT_SECONDS = 60         # a bot calling them: like a ring, about a minute, then Reach me's next way
 MAX_SECONDS = 30 * 60
 TICK_SECONDS = 0.05
 SILENCE_FILL_GAP = 0.06        # Discord sends audio only while someone talks; gaps longer than this are fed as silence
@@ -57,9 +58,10 @@ class VoiceRefused(Exception):
     `unavailable` means the feature is not set up or cannot run here (the caller may fall back to a ring),
     as opposed to a limit or a conflict (which it must not work around)."""
 
-    def __init__(self, message: str, unavailable: bool = False):
+    def __init__(self, message: str, unavailable: bool = False, missed: bool = False):
         super().__init__(message)
         self.unavailable = unavailable
+        self.missed = missed            # rang (joined and DMed) but nobody came in time: Reach me tries the next way
 
 
 def is_call_request(text) -> bool:
@@ -99,6 +101,7 @@ class VoiceBridge(phone_bridge.TurnBridge):
         self.fed_until = self.started
         self.ended: Optional[str] = None
         self.done = asyncio.Event()
+        self.arrived = asyncio.Event()         # the person is in the channel and the opening has started
 
     # -- the loop --------------------------------------------------------------------------------------
 
@@ -152,6 +155,8 @@ class VoiceBridge(phone_bridge.TurnBridge):
         """Time passing with no audio: silence for the endpointer, and the reasons to leave."""
         if self.done.is_set():
             return
+        if self.end_requested and self.phase == "idle" and (self.turn is None or self.turn.done()):
+            return self.end("done")
         now = self.clock()
         if not self.begun and now - self.started > self.join_wait_seconds:
             return self.end("nobody joined")
@@ -170,6 +175,7 @@ class VoiceBridge(phone_bridge.TurnBridge):
         if self.begun or not self.present:
             return
         self.begun = True
+        self.arrived.set()
         self.last_activity = self.fed_until = self.clock()
         if self.opening:
             self.turn = asyncio.create_task(self._open())
@@ -248,6 +254,14 @@ class DiscordHost:
     async def dm(self, client, user_id: str, text: str) -> None:
         user = await client.fetch_user(int(user_id))
         await user.send(text)
+
+    async def user_name(self, client, user_id: str) -> str:
+        user = client.get_user(int(user_id)) or await client.fetch_user(int(user_id))
+        return getattr(user, "global_name", None) or getattr(user, "display_name", None) or getattr(user, "name", "") or ""
+
+    async def mention(self, channel, text: str) -> None:
+        """A message in the voice channel's own text chat (Discord voice channels have one)."""
+        await channel.send(text)
 
 
 HOST = DiscordHost()
@@ -349,9 +363,13 @@ async def _live_pipeline(account: str, agent: dict, bot: dict):
 
 async def join(account: str, bot: dict, agent: dict, reason: str = "", *, user_started: bool = False,
                invocation_id: str = "", clock: Callable[[], float] = time.monotonic,
-               sleep: Callable = asyncio.sleep, pace: bool = True) -> str:
+               sleep: Callable = asyncio.sleep, pace: bool = True, ring: bool = False, ask_id: Optional[str] = None) -> str:
     """Join the Discord bot's voice channel for a call with the account's own person, and DM them the link.
-    Raises VoiceRefused with the reason in words. Returns what to tell the caller."""
+    Raises VoiceRefused with the reason in words. Returns what to tell the caller.
+
+    `ring` (a bot calling them, 2026-11-10): the DM is worded like a call ("<Bot> is calling you. Tap to join: <link>")
+    and mentions them, the bot greets them by name the moment they join, and this waits RING_WAIT_SECONDS for them;
+    nobody joining leaves the channel and raises VoiceRefused(missed=True), so Reach me tries its next way."""
     with accounts.as_account(account):
         problem = _eligible(bot)
     if problem:
@@ -385,20 +403,40 @@ async def join(account: str, bot: dict, agent: dict, reason: str = "", *, user_s
             name_for_speech = agent.get("name") or "Kairos"
             opening = (f"{disclosure(name_for_speech)} {reason}".strip() if reason
                        else f"{disclosure(name_for_speech)} How can I help?")
+            if ring:
+                try:
+                    person = clean_name(await HOST.user_name(client, user_id))
+                except Exception:
+                    person = ""
+                opening = f"Hi {person}. {opening}" if person else f"Hi. {opening}"
+            if ask_id and isinstance(getattr(pipeline, "call", None), dict):
+                from services import call_ask
+                call_ask.attach(pipeline.call, ask_id)
             session.bridge = VoiceBridge(pipeline, linked_user=user_id, send=transport.send, clear=transport.clear,
                                          codec=CODEC_FACTORY(), opening=opening, smart_turn=smart,
-                                         present=user_id in transport.members(), clock=clock, sleep=sleep, pace=pace)
+                                         present=user_id in transport.members(), clock=clock, sleep=sleep, pace=pace,
+                                         **({"join_wait_seconds": RING_WAIT_SECONDS} if ring else {}))
             session.task = asyncio.create_task(_run(session))
         _sessions[bot_id] = session
         _last_join[account] = now
         link = f"https://discord.com/channels/{guild_id}/{channel.id}"
-        text = f"I'm in #{name}. Join me: {link}"
+        if ring:
+            caller = agent.get("name") or "Kairos"
+            text = f"<@{user_id}> **{caller} is calling you.** Tap to join: {link}"
+        else:
+            text = f"I'm in #{name}. Join me: {link}"
         if reason:
             text += f"\n{reason}"
         try:
             await HOST.dm(client, user_id, text)
         except Exception:
             logger.exception("discord voice: could not DM the link")
+            if ring:
+                # No DM (the person blocks DMs from server members): the mention goes in the voice channel's own chat.
+                try:
+                    await HOST.mention(channel, text)
+                except Exception:
+                    logger.exception("discord voice: could not mention them in the channel either")
     except BaseException:
         _settle(account, taken, invocation_id, bot_outbound.RELEASED)
         if transport is not None:
@@ -410,7 +448,31 @@ async def join(account: str, bot: dict, agent: dict, reason: str = "", *, user_s
     finally:
         _joining.discard(bot_id)
     _settle(account, taken, invocation_id, bot_outbound.COMMITTED)
+    if ring:
+        return await _wait_for_person(session, name)
     return f"Joined #{name} and sent you the link. Carry on there."
+
+
+async def _wait_for_person(session: Session, name: str) -> str:
+    """A bot's call: about a minute for the person to join. Nobody: leave, and tell Reach me to try the next way."""
+    bridge = session.bridge
+    waiting = asyncio.ensure_future(bridge.arrived.wait())
+    ending = asyncio.ensure_future(bridge.done.wait())
+    try:
+        await asyncio.wait({waiting, ending}, timeout=RING_WAIT_SECONDS, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for task in (waiting, ending):
+            task.cancel()
+    if bridge.arrived.is_set():
+        return f"They joined #{name}. The call is open now, so carry on there."
+    await leave(session.bot_id)
+    raise VoiceRefused(f"Nobody joined #{name} within a minute.", missed=True)
+
+
+def clean_name(value) -> str:
+    """A display name fit to say aloud: letters, digits, spaces and a few marks, at most 40 characters."""
+    text = re.sub(r"[^\w .'-]", " ", str(value or ""))
+    return " ".join(text.split())[:40]
 
 
 async def _run(session: Session) -> None:
@@ -444,6 +506,17 @@ async def leave_all() -> None:
         await leave(bot_id)
 
 
+def typed_into_call(bot_id: str, text: str) -> bool:
+    """The person texted this Discord bot while they are in its voice call: the text is answered in the call, as their
+    next turn (Hermes audit: texts during a call go into the call). False when no call is live with them."""
+    session = _sessions.get(bot_id)
+    said = " ".join(str(text or "").split())[:2000]
+    if not session or not session.bridge or not session.bridge.begun or session.bridge.done.is_set() or not said:
+        return False
+    session.loop.call_soon_threadsafe(session.bridge.typed, f"(typed) {said}")
+    return True
+
+
 def notify_voice_state(bot_id: str, user_id: str, before_channel_id, after_channel_id) -> None:
     """A member's voice state changed (the gateway's on_voice_state_update). Only the session's linked person matters."""
     session = _sessions.get(bot_id)
@@ -470,7 +543,8 @@ async def call_user(account: str, agent_id: str, reason, invocation_id: str) -> 
     if not agent:
         raise VoiceRefused("That bot is not one of yours.")
     bot = pick_bot(account)
-    return await join(account, bot, agent, text, invocation_id=invocation_id)
+    from services import call_ask
+    return await join(account, bot, agent, text, invocation_id=invocation_id, ring=True, ask_id=call_ask.ASK.get())
 
 
 async def handle_call_request(account: str, bot: dict) -> Optional[str]:

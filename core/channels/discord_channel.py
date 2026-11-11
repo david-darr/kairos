@@ -239,6 +239,10 @@ def _build_client(discord, bot: dict):
                 if refusal:
                     await _send_reply(discord, message, refusal, bot)
                 return
+            # In a voice call with this bot right now: what they type is answered in the call.
+            if message.content.strip() and discord_voice.typed_into_call(bot["id"], message.content):
+                await _send_reply(discord, message, "Reading that into our call.", bot)
+                return
         addressed = agent_routing.match_agent(message.content) if trusted else None
         if addressed:
             agent, rest = addressed

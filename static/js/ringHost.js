@@ -21,9 +21,10 @@ export function takePendingRing(agentId) {
 
 export const copyFor = ring => ({ title: `${ring.bot_name} is calling`, body: ring.reason });
 
-// Answer: tell the server, remember the ring for the call screen, and go to the bot.
-export async function answerRing(id, doc = document) {
-  const answered = await api(`/api/rings/${id}/answer`, { method: 'POST', toast: false });
+// Answer: tell the server, remember the ring for the call screen, and go to the bot. `via` 'link' (a push notification's
+// Answer or its deep link) answers only a ring that is still ringing; it never turns into a call back.
+export async function answerRing(id, doc = document, via = '') {
+  const answered = await api(`/api/rings/${id}/answer${via === 'link' ? '?via=link' : ''}`, { method: 'POST', toast: false });
   const ring = { id: answered.ring_id, agentId: answered.agent_id, reason: answered.reason, name: answered.bot_name };
   setPendingRing(ring);
   doc.dispatchEvent(new CustomEvent('jarvis:navigate', { detail: answered.target }));
@@ -33,11 +34,26 @@ export async function answerRing(id, doc = document) {
 
 export const declineRing = id => api(`/api/rings/${id}/decline`, { method: 'POST', toast: false }).catch(() => {});
 
-// A push notification or link: /?agent=..&ring=<id>. Returns true when the link was a ring (answered or not).
-export async function answerRingFromLink(id, notify = message => toast(message)) {
-  try { await answerRing(id); } catch { notify('That call has ended. Check your inbox for the missed call.'); }
+// A deep link is used once (2026-11-10): the rings it answered are remembered on this device, so a reload, Back or a
+// second tap on an old notification never answers again; and it carries when the ring stops (`exp`), after which it
+// does nothing but say the call ended.
+const USED_KEY = 'kairos:answered-rings';
+function usedRings(storage) { try { const list = JSON.parse(storage?.getItem(USED_KEY) || '[]'); return Array.isArray(list) ? list : []; } catch { return []; } }
+export function linkUsed(id, storage = globalThis.localStorage) { return usedRings(storage).some(item => item?.id === id); }
+function markUsed(id, storage, now) {
+  try { storage?.setItem(USED_KEY, JSON.stringify([...usedRings(storage).filter(item => item?.id !== id && now - (item?.at || 0) < 86400000), { id, at: now }].slice(-20))); } catch { /* lasts this page */ }
+}
+
+// A push notification or link: /?agent=..&ring=<id>&exp=<unix seconds>. Answers once, with no extra tap: the call screen
+// opens and picks up (agentCall.js takes the pending ring). Returns true when it answered; false sends the caller on to
+// open the bot as an ordinary link.
+export async function answerRingFromLink(id, notify = message => toast(message), { exp = null, storage = globalThis.localStorage, now = Date.now(), answer = ringId => answerRing(ringId, document, 'link') } = {}) {
   try { history.replaceState(null, '', '/'); } catch { /* optional */ }
-  return true;
+  if (linkUsed(id, storage)) return false;
+  markUsed(id, storage, now);
+  if (exp != null && Number.isFinite(Number(exp)) && Number(exp) * 1000 < now) { notify('That call has ended. Check your inbox for the missed call.'); return false; }
+  try { await answer(id); return true; }
+  catch { notify('That call has ended. Check your inbox for the missed call.'); return false; }
 }
 
 // A short two-pulse ring, repeated while the sheet is up. Browsers may refuse audio before the person has touched the page.

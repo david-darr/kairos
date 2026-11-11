@@ -175,8 +175,8 @@ class SafetyTests(RingCase):
         made = self.ring("acct1")
         with push.database() as db:
             rows = [dict(r) for r in db.execute("SELECT o.*, d.owner FROM outbox o JOIN devices d ON d.id=o.device_id WHERE o.kind='bot_call'")]
-        self.assertEqual([r["owner"] for r in rows], ["alice"])
-        self.assertEqual(rows[0]["run_id"], made["id"])
+        self.assertEqual({r["owner"] for r in rows}, {"alice"})
+        self.assertEqual({r["run_id"] for r in rows}, {made["id"]})
 
     async def test_limits_one_at_a_time_a_pause_and_a_daily_cap_per_bot_and_account(self):
         first = self.ring(inv="i1")
@@ -237,8 +237,9 @@ class PushTests(RingCase):
                 await mobile_notifications.deliver_due(client)
         self.assertEqual(len(sent), 1)
         body = json.loads(sent[0].content)
-        self.assertEqual(body, {"kind": "bot_call", "url": f"/?agent=bot-kip&ring={made['id']}", "tag": f"kairos-ring-{made['id']}",
-                                "ring_id": made["id"], "body": "Kip is calling you.", "expires_at": made["expires_at"]})
+        self.assertEqual(body, {"kind": "bot_call", "title": "Kip is calling", "body": "Tap to answer.",
+                                "url": f"/?agent=bot-kip&ring={made['id']}&exp={int(made['expires_at'])}", "tag": f"kairos-ring-{made['id']}",
+                                "ring_id": made["id"], "agent_id": "bot-kip", "bot_name": "Kip", "expires_at": made["expires_at"]})
         self.assertNotIn("build", json.dumps(body), "the lock screen says who, never why")
         self.assertEqual(sent[0].headers["Urgency"], "high")
         self.assertEqual(sent[0].headers["Authorization"], "vapid fake")
@@ -267,6 +268,121 @@ class PushTests(RingCase):
             self.assertFalse(mobile_notifications._still_ringing(item))
 
 
+class CallStyleTests(RingCase):
+    """The call-style ring (2026-11-10): who calls, the bot's picture, repeats, a deep link answered once, and every
+    device stopped when the ring ends."""
+
+    def outbox(self, kind="bot_call"):
+        with push.database() as db:
+            return [dict(r) for r in db.execute("SELECT * FROM outbox WHERE kind=? ORDER BY next_attempt", (kind,))]
+
+    def mark_sent(self):
+        with push.database() as db:
+            db.execute("UPDATE outbox SET status='sent', attempts=1 WHERE kind='bot_call' AND next_attempt<=?", (time.time() + 1,))
+
+    async def test_the_payload_names_the_caller_and_carries_their_picture(self):
+        picture = {"asset_id": "a" * 32, "shape": "circle"}
+        with patch.object(rings, "_bot", lambda account, bot_id, owner: {**BOT, "avatar_image": picture}):
+            made = self.ring(now=time.time())
+        self.assertEqual(made["avatar"], f"/api/agents/bot-kip/avatar-image/{'a' * 32}")
+        payload = push.ring_payload(made)
+        self.assertEqual((payload["title"], payload["body"], payload["avatar"]), ("Kip is calling", "Tap to answer.", made["avatar"]))
+        self.assertNotIn("build", json.dumps(payload), "the lock screen says who, never why")
+        with patch.object(rings, "_bot", lambda account, bot_id, owner: {**BOT, "avatar_image": {**picture, "draft": True}}):
+            self.assertNotIn("avatar", self.ring("acct2", now=time.time()))   # a draft picture is never shown
+
+    async def test_an_unanswered_ring_buzzes_again_and_ends_with_the_ring(self):
+        self.enroll("alice", "https://web.push.apple.com/alice")
+        now = time.time()
+        made = self.ring(now=now)
+        rows = self.outbox()
+        self.assertEqual([round(r["next_attempt"] - now) for r in rows], [0, 20, 40])
+        self.assertTrue(all(r["expires"] == made["expires_at"] for r in rows))
+        rings.answer("acct1", "alice", made["id"], now=now + 5)
+        self.assertEqual([r["status"] for r in self.outbox()], ["expired"] * 3, "answering drops the repeats not yet sent")
+
+    async def test_answering_stops_the_ring_on_every_device_that_was_rung(self):
+        self.enroll("alice", "https://web.push.apple.com/phone")
+        self.enroll("alice", "https://fcm.googleapis.com/fcm/send/desktop")
+        self.enroll("bob", "https://web.push.apple.com/bob")
+        made = self.ring(now=time.time())
+        self.mark_sent()
+        rings.answer("acct1", "alice", made["id"])
+        ends = self.outbox("bot_call_end")
+        self.assertEqual(len(ends), 2, "one stop per device that rang, none for anyone else")
+        body = json.loads(ends[0]["payload"])
+        self.assertEqual((body["ring_id"], body["outcome"], body["tag"], body["bot_name"]), (made["id"], "answered", f"kairos-ring-{made['id']}", "Kip"))
+        rings.decline  # noqa: B018 - the same path runs for declines and misses (below)
+
+    async def test_declining_tells_the_bot_and_stops_every_device(self):
+        self.enroll("alice", "https://web.push.apple.com/phone")
+        made = self.ring(now=time.time())
+        self.mark_sent()
+        rings.decline("acct1", "alice", made["id"])
+        self.assertEqual(rings.outcome("acct1", made["id"]), "declined")
+        self.assertEqual([json.loads(r["payload"])["outcome"] for r in self.outbox("bot_call_end")], ["declined"])
+
+    async def test_a_ring_never_sent_needs_no_stop_and_a_missed_ring_stops_with_a_note(self):
+        self.enroll("alice", "https://web.push.apple.com/phone")
+        made = self.ring(now=T0)
+        self.assertEqual(rings.pending("acct1", "alice", now=T0 + rings.RING_SECONDS + 1), [])
+        self.assertEqual(self.outbox("bot_call_end"), [], "nothing was delivered, so nothing to take down")
+        second = self.ring(inv="again", now=T0 + 1000)
+        self.mark_sent()
+        rings.pending("acct1", "alice", now=T0 + 1000 + rings.RING_SECONDS + 1)
+        ends = [json.loads(r["payload"]) for r in self.outbox("bot_call_end")]
+        self.assertEqual([(e["ring_id"], e["outcome"]) for e in ends], [(second["id"], "missed")])
+
+    async def test_the_deep_link_answers_once_and_never_calls_back(self):
+        made = self.ring()
+        went = rings.answer("acct1", "alice", made["id"], now=T0 + 2, via_link=True)
+        self.assertEqual(went["ring_id"], made["id"])
+        with self.assertRaises(HTTPException) as caught:
+            rings.answer("acct1", "alice", made["id"], now=T0 + 3, via_link=True)
+        self.assertEqual(caught.exception.status_code, 409)
+        missed = self.ring(inv="m", now=T0 + 500)
+        rings.pending("acct1", "alice", now=T0 + 500 + rings.RING_SECONDS + 1)
+        with self.assertRaises(HTTPException):
+            rings.answer("acct1", "alice", missed["id"], now=T0 + 700, via_link=True)     # a stale notification
+        self.assertTrue(rings.answer("acct1", "alice", missed["id"], now=T0 + 700)["callback"])   # Call back still works
+
+    async def test_the_answer_route_reads_via_link(self):
+        from routes import ring_routes
+        made = self.ring(now=time.time())
+        with patch.object(accounts, "effective_account", lambda: "acct1"):
+            await ring_routes.answer(made["id"], via="link", user="alice")
+            with self.assertRaises(HTTPException):
+                await ring_routes.answer(made["id"], via="link", user="alice")
+
+    async def test_a_missed_ring_escalates_and_a_decline_does_not(self):
+        with patch.object(rings, "RING_SECONDS", 0.3):
+            with self.assertRaises(rings.RingUnanswered):
+                await rings.ring_user("acct1", "bot-kip", "Look", "esc-1", escalate=True)
+
+        async def decline_soon():
+            await asyncio.sleep(0.2)
+            rings.decline("acct1", "alice", rings.pending("acct1", "alice")[0]["id"])
+        with patch.object(rings, "COOLDOWN_SECONDS", 0):
+            task = asyncio.create_task(decline_soon())
+            result = await rings.ring_user("acct1", "bot-kip", "Look again", "esc-2", escalate=True)
+            await task
+        self.assertIn("declined", result)
+
+    async def test_a_ring_placed_by_an_ask_carries_it_to_the_call(self):
+        from services import call_ask
+        token = call_ask.ASK.set("f" * 32)
+        try:
+            made = self.ring()
+        finally:
+            call_ask.ASK.reset(token)
+        self.assertEqual(made["ask_id"], "f" * 32)
+        rings.answer("acct1", "alice", made["id"], now=T0 + 1)
+        self.assertEqual(rings.claim_opening("acct1", "alice", made["id"], "bot-kip", with_ask=True), ("The build finished.", "f" * 32))
+        plain = self.ring(inv="plain", now=T0 + 500)
+        rings.answer("acct1", "alice", plain["id"], now=T0 + 501)
+        self.assertEqual(rings.claim_opening("acct1", "alice", plain["id"], "bot-kip", with_ask=True)[1], None)
+
+
 class ToolTests(RingCase):
     def ctx(self, inv):
         from core import tool_registry
@@ -281,7 +397,7 @@ class ToolTests(RingCase):
     async def test_notify_me_by_call_rings_in_the_app_when_there_is_no_phone_connection(self):
         started = []
 
-        async def fake_ring(account, bot_id, reason, ident, wait=True):
+        async def fake_ring(account, bot_id, reason, ident, wait=True, escalate=False):
             started.append((account, bot_id, reason))
             return "They answered."
         with patch.object(accounts, "effective_account", lambda: "acct1"), \

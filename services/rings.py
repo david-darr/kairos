@@ -39,6 +39,10 @@ class RingRefused(Exception):
     """A ring Kairos will not place; the message is shown to the bot as-is."""
 
 
+class RingUnanswered(Exception):
+    """The ring ran out with nobody answering. Reach me then tries the next way in the person's call order."""
+
+
 def _file(account: str) -> str:
     return os.path.join(accounts.account_dir(account), "rings.json")
 
@@ -86,6 +90,15 @@ def _reserve(account: str, bot_id: str, invocation_id: str) -> list:
     return taken
 
 
+def _avatar(agent: dict) -> str:
+    """The bot's own picture for the call notification, when it has one (else the service worker uses its Kip)."""
+    image = agent.get("avatar_image") if isinstance(agent, dict) else None
+    asset = str((image or {}).get("asset_id") or "") if isinstance(image, dict) else ""
+    if len(asset) == 32 and all(c in "0123456789abcdef" for c in asset) and not (image or {}).get("draft"):
+        return f"/api/agents/{agent.get('id')}/avatar-image/{asset}"
+    return ""
+
+
 def _view(ring: dict, now: float) -> dict:
     return {"id": ring["id"], "agent_id": ring["agent_id"], "bot_name": ring["bot_name"], "reason": ring["reason"],
             "created_at": ring["created_at"], "expires_at": ring["expires_at"], "status": ring["status"],
@@ -107,10 +120,12 @@ def _missed_item(account: str, ring: dict, how: str) -> None:
         logger.exception("rings: could not leave the missed-call item")
 
 
-def _close_push(ring_id: str) -> None:
+def _close_push(ring: dict, status: str) -> None:
+    """Nothing more rings for it: unsent pushes are dropped, and every device that was rung is told it ended, so the
+    ringing notification stops there too (answered, declined or missed, on any device)."""
     try:
         from core import mobile_activity
-        mobile_activity.close_ring(ring_id)
+        mobile_activity.close_ring(ring["id"], status, ring.get("bot_name") or "")
     except Exception:
         logger.exception("rings: could not withdraw the push")
 
@@ -118,7 +133,7 @@ def _close_push(ring_id: str) -> None:
 def _settle_locked(account: str, rings: list, ring: dict, status: str, now: float) -> None:
     ring["status"], ring["resolved_at"] = status, now
     _save(account, rings)
-    _close_push(ring["id"])
+    _close_push(ring, status)
     if status in (DECLINED, MISSED):
         _missed_item(account, ring, status)
 
@@ -149,9 +164,11 @@ def create(account: str, bot_id: str, reason, invocation_id: str, now: Optional[
         if now - last < COOLDOWN_SECONDS:
             raise RingRefused("A call to you was placed a moment ago. Wait a minute or two before ringing again.")
         taken = _reserve(account, bot_id, invocation_id)
+        from services import call_ask
         ring = {"id": uuid.uuid4().hex, "bot_id": bot_id, "agent_id": bot_id, "bot_name": str(agent.get("name") or "A bot")[:60],
                 "owner": owner, "reason": text, "created_at": now, "expires_at": now + RING_SECONDS, "status": RINGING,
-                "invocation_id": invocation_id}
+                "invocation_id": invocation_id, **({"avatar": _avatar(agent)} if _avatar(agent) else {}),
+                **({"ask_id": call_ask.ASK.get()} if call_ask.ASK.get() else {})}
         rings.append(ring)
         _save(account, rings)
     for who in taken:
@@ -180,8 +197,10 @@ def _find(rings: list, ring_id: str, user: str) -> dict:
     return ring
 
 
-def answer(account: str, user: str, ring_id: str, now: Optional[float] = None) -> dict:
-    """Pick up a ringing call, or call back a missed one. Returns where to go: the bot, its conversation, the reason."""
+def answer(account: str, user: str, ring_id: str, now: Optional[float] = None, via_link: bool = False) -> dict:
+    """Pick up a ringing call, or call back a missed one. Returns where to go: the bot, its conversation, the reason.
+    `via_link` (the push notification's Answer, or its deep link): only a call that is still ringing is answered; a stale
+    notification never turns into a call back."""
     from services import bot_attention
     now = time.time() if now is None else now
     with _lock:
@@ -190,6 +209,8 @@ def answer(account: str, user: str, ring_id: str, now: Optional[float] = None) -
         ring = _find(rings, ring_id, user)
         if ring["status"] == RINGING:
             _settle_locked(account, rings, ring, ANSWERED, now)
+        elif via_link:
+            raise HTTPException(409, "That call has ended.")
         elif ring["status"] in (MISSED, DECLINED) and now - ring["resolved_at"] <= MISSED_KEEP_SECONDS:
             ring["callback"] = True
             _save(account, rings)
@@ -213,14 +234,17 @@ def decline(account: str, user: str, ring_id: str, now: Optional[float] = None) 
     return {"ok": True}
 
 
-def claim_opening(account: str, user: str, ring_id: str, agent_id: str) -> str:
-    """The reason a call opens with: only for the person's own answered (or called-back) ring with this bot."""
+def claim_opening(account: str, user: str, ring_id: str, agent_id: str, with_ask: bool = False):
+    """The reason a call opens with: only for the person's own answered (or called-back) ring with this bot.
+    `with_ask` returns (reason, ask id or None): an answered ring placed by ask_me_by_call carries its question."""
     with _lock:
         rings = _load(account)
         ring = next((r for r in rings if r["id"] == ring_id), None)
         if (not ring or ring["owner"] != user or ring["agent_id"] != agent_id
                 or not (ring["status"] == ANSWERED or ring.get("callback"))):
             raise ValueError("That call is no longer available.")
+        if with_ask:
+            return ring["reason"], (ring.get("ask_id") if ring["status"] == ANSWERED and not ring.get("callback") else None)
         return ring["reason"]
 
 
@@ -233,8 +257,9 @@ def outcome(account: str, ring_id: str, now: Optional[float] = None) -> str:
         return ring["status"] if ring else MISSED
 
 
-async def ring_user(account: str, bot_id: str, reason, invocation_id: str, wait: bool = True) -> str:
-    """What the bot's ring_me tool does: ring, then tell the bot how it ended."""
+async def ring_user(account: str, bot_id: str, reason, invocation_id: str, wait: bool = True, escalate: bool = False) -> str:
+    """What the bot's ring_me tool does: ring, then tell the bot how it ended. `escalate` (Reach me's call order): a ring
+    nobody answered raises RingUnanswered so the next way is tried; a decline is the person's answer and is final."""
     ring = create(account, bot_id, reason, invocation_id)
     if not wait:
         return "Ringing you now."
@@ -245,6 +270,8 @@ async def ring_user(account: str, bot_id: str, reason, invocation_id: str, wait:
         await asyncio.sleep(0.5)
     if state == ANSWERED:
         return "They answered. The call is open now, so carry on there."
+    if state == MISSED and escalate:
+        raise RingUnanswered("Nobody answered the ring in the Kairos app within a minute.")
     if state == DECLINED:
         return "They declined the call. A missed-call note with your reason is in their inbox. Do not ring again unless they ask."
     return "They did not answer. A missed-call note with your reason is in their inbox. Do not ring again unless they ask."

@@ -176,6 +176,13 @@ class Pipeline:
         return None
     def touch(self) -> None: ...
     async def close(self) -> None: ...
+    def record_latency(self, gap_ms=None, first_audio_ms=None) -> None:
+        """How long after the person stopped the bot's voice began (each turn), and the call's first audio."""
+    def on_typed(self, callback) -> None:
+        """Texts the person types during the call reach `callback(text)` (agent_calls.text_into_call)."""
+    def end_requested(self) -> bool:
+        """The bot asked to end the call (an ask answered), past the hang-up guard (agent_calls.request_end)."""
+        return False
 
 
 class TurnBridge:
@@ -204,6 +211,16 @@ class TurnBridge:
         self.sent_frames = 0
         self.heard: list[str] = []
         self.frames_in = 0
+        # Latency (Hermes audit): when the person last stopped, waiting for the bot's first frame; the call's start.
+        self.call_started = clock()
+        self.awaiting_since: Optional[float] = None
+        self.segment_at: Optional[float] = None
+        self.first_audio_done = False
+        self.typed_waiting: list[str] = []
+        try:
+            pipeline.on_typed(self.typed)
+        except Exception:
+            logger.info("%s: typed texts will not reach this call", self.LABEL)
 
     # -- what a subclass provides ---------------------------------------------------------------------
 
@@ -244,6 +261,7 @@ class TurnBridge:
             elif event[0] == "pause":
                 self._spawn(self._ask(event[1], event[2]))
             elif event[0] == "segment":
+                self.segment_at = self.clock()
                 during, self.during = self.during, False
                 if self.backchannel:
                     self.backchannel = False    # a short "mm-hm" over the bot's voice is not a turn
@@ -304,13 +322,44 @@ class TurnBridge:
         finally:
             self.phase = "idle"
             self._turn_over()
+            self._next_typed()
+
+    # -- text typed during the call -------------------------------------------------------------
+
+    @property
+    def end_requested(self) -> bool:
+        """Pipeline.end_requested(); a pipeline that keeps its own end flag (outbound calls) is left to its own flow."""
+        check = getattr(self.pipeline, "end_requested", None)
+        if not callable(check):
+            return False
+        try:
+            return bool(check())
+        except Exception:
+            return False
+
+    def typed(self, text: str) -> None:
+        """The person typed this in the bot's chat during the call: it is answered as their next turn (Hermes audit)."""
+        if not str(text or "").strip():
+            return
+        self.typed_waiting.append(str(text))
+        self._next_typed()
+
+    def _next_typed(self) -> None:
+        busy = self.turn is not None and not self.turn.done() and self.turn is not asyncio.current_task()
+        if not self.typed_waiting or self.phase != "idle" or busy or self.endpointer.active:
+            return
+        text = self.typed_waiting.pop(0)
+        self.turn = asyncio.ensure_future(self._respond(None, False, text, measure=False))
 
     @staticmethod
     async def _once(text: str):
         yield text
 
-    async def _respond(self, samples, during: bool = False, text: Optional[str] = None) -> None:
+    async def _respond(self, samples, during: bool = False, text: Optional[str] = None, measure: bool = True) -> None:
         self.phase = "thinking"
+        started = (self.segment_at if self.segment_at is not None else self.clock()) if measure else None
+        self.segment_at = None
+        self.awaiting_since = started
         try:
             if text is None:
                 text = (await self.pipeline.transcribe(phone_audio.float_to_pcm16(samples))).strip()
@@ -329,7 +378,10 @@ class TurnBridge:
             logger.exception("%s: a turn failed", self.LABEL)
         finally:
             self.phase = "idle"
+            if self.awaiting_since is not None and self.awaiting_since == started:
+                self.awaiting_since = None        # no audio came of it: nothing to measure
             self._turn_over()
+            self._next_typed()
 
     def _converted(self, converter, rate: int):
         if converter is not None and self._converter_rate(converter) == rate:
@@ -430,7 +482,21 @@ class TurnBridge:
         except Exception:
             logger.warning("%s: a sentence could not be spoken", self.LABEL)
 
+    def _first_frame(self) -> None:
+        now = self.clock()
+        try:
+            if not self.first_audio_done:
+                self.first_audio_done = True
+                self.pipeline.record_latency(first_audio_ms=round((now - self.call_started) * 1000))
+            if self.awaiting_since is not None:
+                gap, self.awaiting_since = now - self.awaiting_since, None
+                self.pipeline.record_latency(gap_ms=round(gap * 1000))
+        except Exception:
+            logger.info("%s: latency not recorded", self.LABEL)
+
     async def _send_frames(self, frames: list) -> None:
+        if frames and (self.awaiting_since is not None or not self.first_audio_done):
+            self._first_frame()
         for frame in frames:
             now = self.clock()
             if self.pace and self.play_end - now > LEAD_SECONDS:
@@ -495,6 +561,8 @@ class PhoneBridge(TurnBridge):
                     await self._audio(data)
                 elif kind == "stop":
                     break
+                if self.end_requested and self.phase == "idle" and (self.turn is None or self.turn.done()):
+                    break           # asked and answered: the goodbye has played, the call ends
         finally:
             await self._shutdown()
 

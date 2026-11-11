@@ -11,6 +11,11 @@ const CORNER_KEY = 'kairos:call-pill-corner';
 const CORNERS = ['bottom-right', 'bottom-left', 'top-right', 'top-left'];
 // What the pill keeps clear of when it sits at the bottom.
 const BOTTOM_THINGS = '.bots-composer, .chat-input-bar, .side-chat-composer, .forge-composer, .bots-call-avoid';
+// Modal sheets (2026-11-10): the pill stays visible over them, never on their panel. A page-level sheet (Settings'
+// .modal-backdrop) is outranked by z-index; a modal <dialog> sits in the browser's top layer, so the pill moves inside it
+// while it is open (anything outside a modal dialog cannot be clicked), and back when it closes.
+const MODAL_PANELS = '.modal-backdrop:not(.hidden) > *';
+const overlaps = (a, b) => !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
 
 export function mountCallBar({ agent, members = null, snapshot, mute, hangup, restore, openChat }) {
   const styled = loadBotsCss('/static/css/bots-voice.css');
@@ -38,14 +43,15 @@ export function mountCallBar({ agent, members = null, snapshot, mute, hangup, re
   let corner = (() => { try { const saved = localStorage.getItem(CORNER_KEY); return CORNERS.includes(saved) ? saved : 'bottom-right'; } catch { return 'bottom-right'; } })();
   const phone = () => innerWidth < 768;
 
-  // Where the pill goes: its corner, lifted above anything at the bottom it would cover.
-  function place() {
-    if (root.hidden || root.hasAttribute('data-dragging')) return;
-    const r = root.getBoundingClientRect(), gap = phone() ? 12 : 16, safeBottom = safe.offsetHeight;
-    root.dataset.corner = phone() ? 'bottom' : corner;
-    const left = phone() ? gap : corner.endsWith('left') ? gap : innerWidth - r.width - gap;
+  // The topmost open modal <dialog> other than the call screen itself, if any.
+  const topDialog = () => [...document.querySelectorAll('dialog[open]')].filter(node => !node.classList.contains('agent-call') && !root.contains(node)
+    && (() => { try { return node.matches(':modal'); } catch { return false; } })()).at(-1) || null;
+  // Where the pill goes: its corner, lifted above anything at the bottom it would cover; over a modal sheet, the first
+  // corner that keeps it off the sheet's panel.
+  function spot(at, r, gap, safeBottom) {
+    const left = phone() ? gap : at.endsWith('left') ? gap : innerWidth - r.width - gap;
     let top;
-    if (!phone() && corner.startsWith('top')) top = 72;
+    if (!phone() && at.startsWith('top')) top = 72;
     else {
       top = innerHeight - r.height - gap - safeBottom;
       for (const node of document.querySelectorAll(BOTTOM_THINGS)) {
@@ -56,8 +62,40 @@ export function mountCallBar({ agent, members = null, snapshot, mute, hangup, re
       }
       top = Math.max(8, top);
     }
-    root.style.left = `${Math.round(Math.max(gap, Math.min(left, innerWidth - r.width - gap)))}px`; root.style.top = `${Math.round(top)}px`;
+    return { left: Math.round(Math.max(gap, Math.min(left, innerWidth - r.width - gap))), top: Math.round(top) };
   }
+  function place() {
+    if (root.hasAttribute('data-dragging')) return;
+    const host = topDialog() || document.body;
+    if (root.parentNode !== host) host.append(root);
+    const panels = [...document.querySelectorAll(MODAL_PANELS)].filter(node => !root.contains(node) && node.getClientRects().length).map(node => node.getBoundingClientRect());
+    if (host !== document.body) panels.push(host.getBoundingClientRect());
+    root.toggleAttribute('data-over-modal', host !== document.body || panels.length > 0);
+    if (root.hidden) return;
+    const r = root.getBoundingClientRect(), gap = phone() ? 12 : 16, safeBottom = safe.offsetHeight;
+    root.dataset.corner = phone() ? 'bottom' : corner;
+    let chosen = spot(corner, r, gap, safeBottom);
+    if (panels.length && !phone()) {
+      const clear = at => { const p = spot(at, r, gap, safeBottom), box = { left: p.left, top: p.top, right: p.left + r.width, bottom: p.top + r.height }; return panels.some(panel => overlaps(box, panel)) ? null : p; };
+      const free = [corner, ...CORNERS.filter(at => at !== corner)].map(clear).find(Boolean);
+      if (free) chosen = free;
+      else {
+        // No free corner (a sheet as wide as the window): sit just above the sheet's top edge, else at the very top.
+        const sheetTop = Math.min(...panels.map(panel => panel.top));
+        chosen = { left: chosen.left, top: Math.round(Math.max(8, sheetTop - r.height - 8)) };
+      }
+    }
+    root.style.left = `${chosen.left}px`; root.style.top = `${chosen.top}px`;
+  }
+  // A sheet opening or closing re-places the pill at once (Settings toggles its scrim's class; dialogs their open).
+  let queued = false;
+  const watched = { attributes: true, attributeFilter: ['open', 'class'] };
+  const watch = new MutationObserver(records => {
+    for (const record of records) for (const node of record.addedNodes || []) if (node.matches?.('.modal-backdrop, dialog')) watch.observe(node, watched);
+    if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; place(); });
+  });
+  watch.observe(document.body, { childList: true, attributes: true, attributeFilter: ['open', 'class'], subtree: false });
+  for (const node of document.querySelectorAll('body > .modal-backdrop, body > dialog')) watch.observe(node, watched);
   function refresh() {
     const state = snapshot();
     const seconds = Math.max(0, Math.floor((Date.now() - state.startedAt) / 1000));
@@ -105,7 +143,7 @@ export function mountCallBar({ agent, members = null, snapshot, mute, hangup, re
   return {
     root, refresh, place,
     level(name, value) { root.style.setProperty(name, value); },
-    destroy() { clearInterval(timer); document.removeEventListener('keydown', key); removeEventListener('resize', place); root.remove(); },
+    destroy() { clearInterval(timer); watch.disconnect(); document.removeEventListener('keydown', key); removeEventListener('resize', place); root.remove(); },
   };
 }
 

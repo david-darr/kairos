@@ -29,6 +29,7 @@ import { createSpeaker, isSpeechOutputSupported } from './voiceOutput.js';
 import { loadSkillCommands } from './botsSkillCommands.js';
 import { currentDataContext } from './botsDataModel.js';
 import { list as pointedList, clearPointed, mountPointChips } from './botsPoint.js';
+import { routeTyped } from './callTyped.js';
 
 const CSS = ['/static/css/bots-chat.css', '/static/css/bots-composer.css'];
 const PAGE = 200, FIRST_PAGE = 50, PRESENCE_MS = 60000, QUEUE_POLL_MS = 5000, SEND_KEY = 'kairos:bots-send-key';
@@ -171,6 +172,8 @@ export async function mountBotsChat(host, options) {
     draft, getLeaf: () => state.leaf,
     flushSettings: options.flushSettings || (async () => { const mod = await import('./botsPatchQueue.js'); return mod.flushBotEdits ? mod.flushBotEdits(agent.id) : { ok: true }; }),
     request: async payload => {
+      // A call with this bot is live in this conversation: a plain message is read into the call (callTyped.js).
+      if (!payload.attachment_ids?.length && (!payload.mode || payload.mode === 'chat') && await routeTyped(sid, payload.text)) return { in_call: true };
       if (payload.attachment_ids?.length) await call('/api/chat/validate-attachments', { method: 'POST', body: { session_id: sid, attachment_ids: payload.attachment_ids } });
       // The draft calls an ordinary message 'chat'; the server's modes are none, 'goal' and 'spoken' (bot_chat_service.MODES).
       return call(`/api/bot-chat/${enc(sid)}/send`, { method: 'POST', body: { ...payload, mode: payload.mode === 'chat' ? null : payload.mode } });
@@ -179,6 +182,7 @@ export async function mountBotsChat(host, options) {
     extras: () => ({ data_context: currentDataContext(agent.id), pointed: pointedList().map(({ tag, label }) => ({ tag, label })) }),
     onAccepted: async (result, ticket) => {
       if (ticket.payload.pointed?.length) clearPointed();  // the chips went with this message
+      if (result?.in_call) { transcript.announce('Read into your call. It is in the call transcript saved here afterwards.'); return; }
       if (result?.queued || result?.queue_id) { await refreshState(); transcript.announce('Queued. It sends when the reply finishes.'); return; }
       if (result?.message) { transcript.append(result.message); state.leaf = result.message.id; }
       if (result?.turn_id) beginLive(result.turn_id, ticket.payload.text);

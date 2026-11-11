@@ -115,9 +115,10 @@
 .agent-call:not([data-live]) .agent-call-clock { display: none; }
 /* Who is speaking: five bars, your colour while you talk (--level), the bot's gold while it speaks (--word). */
 .agent-call-meter { --v: 0; display: flex; align-items: center; justify-content: center; gap: 4px; height: 24px; }
-.agent-call-meter i { width: 4px; height: calc(4px + var(--v) * var(--k,1) * 20px); border-radius: 2px; background: var(--call-ink-dim); opacity: .35; transition: height .1s ease-out, opacity .2s, background-color .2s; }
-.agent-call-meter i:nth-child(1), .agent-call-meter i:nth-child(5) { --k: .45; }
-.agent-call-meter i:nth-child(2), .agent-call-meter i:nth-child(4) { --k: .8; }
+/* At rest the bars keep a short, stepped height so they read as bars, not dots (2026-11-10); the level adds to it. */
+.agent-call-meter i { --rest: 12px; width: 4px; height: calc(var(--rest) + var(--v) * var(--k,1) * 12px); border-radius: 2px; background: var(--call-ink-dim); opacity: .5; transition: height .1s ease-out, opacity .2s, background-color .2s; }
+.agent-call-meter i:nth-child(1), .agent-call-meter i:nth-child(5) { --k: .45; --rest: 6px; }
+.agent-call-meter i:nth-child(2), .agent-call-meter i:nth-child(4) { --k: .8; --rest: 9px; }
 .agent-call-meter[data-who=you] { --v: var(--level); }
 .agent-call-meter[data-who=bot] { --v: var(--word); }
 .agent-call-meter[data-who=you] i { background: var(--call-ink); opacity: .9; }
@@ -148,9 +149,10 @@
 .agent-call .agent-call-action:hover:not(:disabled) { background: var(--call-line); }
 .agent-call .agent-call-action[aria-pressed=true] { background: var(--call-key); color: var(--call-key-ink); }
 .agent-call .agent-call-hold { touch-action: none; user-select: none; }
-.agent-call-hold-hint, .agent-call-engine, .agent-call-timing, .agent-call-privacy, .agent-call-members, .agent-call-work, .agent-call-summary { margin: 0; font-size: 12px; line-height: 1.5; color: var(--call-ink-dim); overflow-wrap: anywhere; }
+.agent-call-hold-hint, .agent-call-engine, .agent-call-timing, .agent-call-latency, .agent-call-privacy, .agent-call-members, .agent-call-work, .agent-call-summary { margin: 0; font-size: 12px; line-height: 1.5; color: var(--call-ink-dim); overflow-wrap: anywhere; }
 .agent-call-engine:empty, .agent-call-timing:empty, .agent-call-work:empty, .agent-call-summary:empty, .agent-call-members:empty { display: none; }
-.agent-call-timing { font-variant-numeric: tabular-nums; }
+.agent-call-timing, .agent-call-latency { font-variant-numeric: tabular-nums; }
+.agent-call-latency[hidden] { display: none; }
 .agent-call-transcript { display: grid; gap: 6px; }
 .agent-call-transcript h2, .agent-call-output > span { margin: 0; font-size: 11px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase; color: var(--call-ink-dim); }
 .agent-call-heard { max-height: 120px; overflow-y: auto; margin: 0; font-size: 14px; line-height: 1.5; color: var(--call-ink); overflow-wrap: anywhere; }
@@ -214,7 +216,7 @@
 @media (prefers-reduced-motion: reduce) {
   .agent-call-orb,.agent-call-orb-core,.agent-call-orb::before { animation: none !important; transition: none !important; transform: none !important; }
   .agent-call-avatar { transition: none; box-shadow: 0 0 0 5px rgba(var(--accent-rgb),.2), 0 18px 50px rgba(var(--shade-rgb),.5); }
-  .agent-call-meter i { transition: none; height: 10px; }
+  .agent-call-meter i { transition: none; height: var(--rest); }
   .agent-call-key-disc { transition: none; transform: none !important; }
 }
 @media(max-width: 1000px) {

@@ -389,7 +389,15 @@ class FakeHost:
         return self.transport_made
 
     async def dm(self, client, user_id, text):
+        if getattr(self, "fail_dm", False):
+            raise RuntimeError("DMs closed")
         self.dms.append((user_id, text))
+
+    async def user_name(self, client, user_id):
+        return "David <3"
+
+    async def mention(self, channel, text):
+        self.mentions = getattr(self, "mentions", []) + [text]
 
 
 class Lifecycle(unittest.IsolatedAsyncioTestCase):
@@ -559,6 +567,63 @@ class Lifecycle(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(dv.VoiceRefused, "not one of yours"):
                 await dv.call_user("local", "bot-other", "x", "inv-2")
 
+    async def test_a_bot_call_is_worded_like_a_call_waits_and_greets_them_by_name(self):
+        """2026-11-10: "<Bot> is calling you, tap to join", a mention, then a greeting by name the moment they join."""
+        with patch("services.agent_service.agent_service.get", lambda ident: AGENT if ident == "bot-kip" else None):
+            task = asyncio.create_task(dv.call_user("local", "bot-kip", "The deploy is done", "inv-ring"))
+            for _ in range(50):
+                if self.host.dms:
+                    break
+                await asyncio.sleep(0.01)
+            link = f"https://discord.com/channels/777/{VOICE_CHANNEL}"
+            self.assertEqual(self.host.dms, [(OWNER, f"<@{OWNER}> **Kip is calling you.** Tap to join: {link}\nThe deploy is done")])
+            self.assertFalse(task.done(), "it waits for them, like a ring")
+            self.assertEqual(self.pipeline.spoken, [], "nothing is said to an empty channel")
+            dv.notify_voice_state(self.bot["id"], OWNER, None, VOICE_CHANNEL)
+            told = await asyncio.wait_for(task, 2)
+            self.assertIn("They joined #voice-room", told)
+            await asyncio.sleep(0.2)
+            self.assertTrue(self.pipeline.announced[0].startswith("Hi David 3. This is Kip, an AI assistant from Kairos."),
+                            self.pipeline.announced)
+            self.assertIn("The deploy is done", self.pipeline.announced[0])
+
+    async def test_nobody_joining_a_bot_call_leaves_and_says_missed(self):
+        with patch("services.agent_service.agent_service.get", lambda ident: AGENT), patch.object(dv, "RING_WAIT_SECONDS", 0.3):
+            with self.assertRaises(dv.VoiceRefused) as caught:
+                await dv.call_user("local", "bot-kip", "Ping", "inv-missed")
+        self.assertTrue(caught.exception.missed)
+        self.assertFalse(caught.exception.unavailable)
+        self.assertIsNone(dv.session_for(self.bot["id"]), "it left the channel")
+        self.assertTrue(self.host.transport_made.disconnected)
+
+    async def test_no_dm_means_a_mention_in_the_voice_channel_chat(self):
+        self.host.members, self.host.fail_dm = {OWNER}, True
+        with patch("services.agent_service.agent_service.get", lambda ident: AGENT):
+            told = await dv.call_user("local", "bot-kip", "Ping", "inv-mention")
+        self.assertIn("They joined", told)
+        self.assertEqual(len(self.host.mentions), 1)
+        self.assertTrue(self.host.mentions[0].startswith(f"<@{OWNER}> **Kip is calling you.**"))
+
+    async def test_a_person_asked_call_keeps_its_plain_wording(self):
+        self.host.members = {OWNER}
+        await self.join(user_started=True)
+        self.assertTrue(self.host.dms[0][1].startswith("I'm in #voice-room. Join me:"))
+
+    async def test_text_typed_during_the_call_is_answered_in_it(self):
+        self.host.members = {OWNER}
+        await self.join()
+        await asyncio.sleep(0.3)
+        heard = []
+        session = dv.session_for(self.bot["id"])
+
+        async def respond(samples, during=False, text=None, measure=True):
+            heard.append(text)
+        session.bridge._respond = respond
+        self.assertTrue(dv.typed_into_call(self.bot["id"], "  is the build green?  "))
+        await asyncio.sleep(0.2)
+        self.assertEqual(heard, ["(typed) is the build green?"])
+        self.assertFalse(dv.typed_into_call("another-bot", "hi"))
+
     async def test_no_bot_with_voice_means_unavailable(self):
         bots.set_voice_channel(self.bot["id"], None)
         with patch("services.agent_service.agent_service.get", lambda ident: AGENT):
@@ -589,7 +654,7 @@ class RingRouting(unittest.IsolatedAsyncioTestCase):
         self.order = ["phone", "app", "discord", "telegram"]
         self.phone_ready = False
 
-        async def ring_user(account, bot_id, reason, ident):
+        async def ring_user(account, bot_id, reason, ident, **_how):
             self.calls.append(("ring", reason))
             return "rang"
 
@@ -630,6 +695,24 @@ class RingRouting(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await phone_tools.tool_ring({"reason": "r"}, self.ctx), "rang")
         self.phone_ready = True
         self.assertEqual(await phone_tools.tool_call({"message": "m"}, self.ctx), "phoned")
+
+    async def test_nobody_joining_discord_falls_to_the_next_way(self):
+        self.order = ["discord", "app"]
+        self.discord.side_effect = dv.VoiceRefused("Nobody joined #voice-room within a minute.", missed=True)
+        self.assertEqual(await phone_tools.tool_ring({"reason": "r"}, self.ctx), "rang")
+        self.assertEqual([c[0] for c in self.calls], ["ring"])
+
+    async def test_every_way_missed_tells_the_bot_they_did_not_answer(self):
+        from services import rings
+        self.order = ["discord", "app"]
+        self.discord.side_effect = dv.VoiceRefused("Nobody joined.", missed=True)
+
+        async def missed(*args, **kwargs):
+            raise rings.RingUnanswered("Nobody answered the ring.")
+        with patch.object(phone_tools.rings, "ring_user", missed):
+            result = await phone_tools.tool_ring({"reason": "r"}, self.ctx)
+        self.assertTrue(result.startswith("They did not answer (Discord voice channel, Ring in the Kairos app)"), result)
+        self.assertIn("Do not call again", result)
 
     async def test_a_discord_limit_is_reported_not_worked_around(self):
         self.order = ["discord", "phone", "app"]

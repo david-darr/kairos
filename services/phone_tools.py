@@ -5,7 +5,7 @@ anyone else. The names carry a send word ("message", "notify", "ring") so the ap
 outbound send (core/bot_policy.py), on top of the daily limits services/phone_calls.py applies itself.
 """
 from core import phone_connection  # noqa: F401  (tests patch phone_tools.phone_connection)
-from services import outbound_calls, phone_calls, reach_me, rings  # noqa: F401
+from services import call_ask, outbound_calls, phone_calls, reach_me, rings  # noqa: F401
 
 _MESSAGE = {"type": "object", "additionalProperties": False, "required": ["message"],
             "properties": {"message": {"type": "string", "minLength": 1, "maxLength": phone_calls.MAX_MESSAGE}}}
@@ -39,6 +39,13 @@ async def tool_call(args, ctx):
 async def tool_ring(args, ctx):
     """ring_me: the same call order as notify_me_by_call."""
     return await _run(args, ctx, reach_me.call_me)
+
+
+async def tool_ask(args, ctx):
+    """ask_me_by_call: one question by call through the Reach me call order; the spoken answer comes back as text."""
+    async def action(account, bot_id, text, ident):
+        return await call_ask.ask_me(account, bot_id, text, ident, args.get("wait_seconds"))
+    return await _run({"reason": args.get("question")}, ctx, action)
 
 
 async def tool_message(args, ctx):
@@ -88,6 +95,12 @@ _DIAL = {"type": "object", "additionalProperties": False, "required": ["to", "wh
 _REASON = {"type": "object", "additionalProperties": False, "required": ["reason"],
            "properties": {"reason": {"type": "string", "minLength": 1, "maxLength": rings.MAX_REASON}}}
 
+_ASK = {"type": "object", "additionalProperties": False, "required": ["question"],
+        "properties": {"question": {"type": "string", "minLength": 1, "maxLength": call_ask.MAX_QUESTION,
+                                    "description": "The one question to ask, as you would say it."},
+                       "wait_seconds": {"type": "integer", "minimum": call_ask.WAIT_MIN, "maximum": call_ask.WAIT_MAX,
+                                        "description": f"How long to wait for the answer, {call_ask.WAIT_MIN} to {call_ask.WAIT_MAX} seconds (default {call_ask.WAIT_DEFAULT})."}}}
+
 _CALLS_FOLLOW = ("It goes the way the person chose in Settings > Reach me, in their order: a real phone call to their own "
                  "mobile, a ring inside Kairos, their Discord voice channel, or a Telegram voice message (Telegram bots "
                  "cannot call). ")
@@ -104,9 +117,15 @@ TOOLS = [
     {"name": "ring_me", "effect": "external", "handler": tool_ring, "schema": _REASON,
      "description": ("Call the person, for something urgent or time-sensitive, or when they asked 'call me when it's ready'. "
                      + _CALLS_FOLLOW + "The reason is one short line they see or hear first. An in-app ring lasts a "
-                     "minute and the result tells you if they answered, declined or missed it; if not answered, they get a "
-                     "missed-call note, so do not call again. No calls during their quiet hours. Only the person "
-                     "themselves can be called, a few times a day.")},
+                     "minute and the result tells you if they answered, declined or missed it; a missed ring tries the next way "
+                     "in their order, and if nothing is answered they get a missed-call note, so do not call again. No calls "
+                     "during their quiet hours. Only the person themselves can be called, a few times a day.")},
+    {"name": "ask_me_by_call", "effect": "external", "handler": tool_ask, "schema": _ASK,
+     "description": ("Ask the person one short question by call and get their spoken answer back as text, for a quick "
+                     "decision or approval you cannot wait on. " + _CALLS_FOLLOW + "The call opens by saying who you are "
+                     "and asks the question; the first thing they say is the answer, transcribed, and the call then ends. "
+                     "The tool waits for it (2 minutes by default). Not answered: you are told, and should ask by "
+                     "message_me instead. Counts as a call to them: no calls during quiet hours, a few a day.")},
     {"name": "notify_me_by_call", "effect": "external", "handler": tool_call, "schema": _MESSAGE,
      "description": ("Call the person about something urgent or time-sensitive, or because they asked 'call me when it's "
                      "ready'. " + _CALLS_FOLLOW + "Say in the message what the call is about, in one or two sentences; a "

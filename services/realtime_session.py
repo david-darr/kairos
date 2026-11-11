@@ -103,6 +103,9 @@ class RealtimeSession:
         self.last_audio: Optional[float] = None
         self.billed_seconds: Optional[float] = None
         self._final = asyncio.Event()
+        # Latency (Hermes audit): when the person's words last arrived, waiting for the model's next audio.
+        self.user_at: Optional[float] = None
+        self.first_audio_done = False
 
     # -- lifecycle -------------------------------------------------------------------------------------------
 
@@ -235,6 +238,8 @@ class RealtimeSession:
                 elif not still_playing:
                     self.assistant, self.item_ms, self.item_started = None, 0.0, None     # that reply is over
             self._user_text(event["delta"])
+            if event["delta"].strip():
+                self.user_at = self.clock()
             await self.sink({"type": "user_text", "delta": event["delta"]})
         elif kind == "delegation":
             if event["delegation_id"] not in self.seen_calls:
@@ -260,6 +265,8 @@ class RealtimeSession:
             self.responding = False
             self.assistant = None
             self.item_id, self.item_ms, self.item_started = None, 0.0, None
+            if self.call.get("end_requested") and not self.queue:
+                self._spawn(self._end_after_goodbye())
             await self._flush()
         elif kind == "tool_call":
             if event["call_id"] not in self.seen_calls:
@@ -280,6 +287,7 @@ class RealtimeSession:
             self.item_id, self.item_ms, self.item_started = event["item_id"], 0.0, self.clock()
         elif self.item_started is None:
             self.item_started = self.clock()
+        self._measure()
         self.last_audio = self.clock()
         self.responding = True
         self.item_ms += len(pcm) / 2 / self.adapter.rate_out * 1000
@@ -332,6 +340,26 @@ class RealtimeSession:
             message["interrupted"] = True
             calls._save(self.call)
 
+    def _measure(self) -> None:
+        """The model's voice began: the gap since the person's words, and the call's first audio."""
+        now = self.clock()
+        self.call["silent_tools"] = 0
+        try:
+            if not self.first_audio_done and self.ready_at is not None:
+                self.first_audio_done = True
+                calls.record_latency(self.call, first_audio_ms=round((now - self.ready_at) * 1000))
+            if self.user_at is not None:
+                gap, self.user_at = now - self.user_at, None
+                calls.record_latency(self.call, gap_ms=round(gap * 1000))
+        except Exception:
+            logger.info("realtime latency not recorded call=%s", self.call["id"])
+
+    async def _end_after_goodbye(self, seconds: float = 2.5) -> None:
+        """Asked and answered (services/call_ask.py): let the goodbye finish playing, then close."""
+        await asyncio.sleep(seconds)
+        if not self.closed and not calls.asked_last(self.call):
+            await self.close()
+
     # -- transcript ------------------------------------------------------------------------------------------
 
     def _size_ok(self, extra: int) -> bool:
@@ -355,8 +383,17 @@ class RealtimeSession:
         if not delta or not self._size_ok(len(delta)):
             return
         if self.assistant is None:
+            previous = self.call["messages"][-1] if self.call["messages"] else None
+            if previous and previous["role"] == "user" and not previous.get("typed"):
+                from services import call_ask
+                if call_ask.heard(self.call, previous["content"]):
+                    note = call_ask.wrap_up_note(self.call)
+                    if note:
+                        self.call["end_requested"] = "answered"
+                        self._spawn(self._send_when_idle(self.adapter.inject(note)))
             self.assistant = {"role": "assistant", "content": "", "interrupted": False}
             self.call["messages"].append(self.assistant)
+        self.call["silent_tools"] = 0
         self.assistant["content"] += delta
         calls._save(self.call)
 

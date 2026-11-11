@@ -11,6 +11,7 @@ import { createSpeaker, isSpeechOutputSupported, whenVoicesReady, resolveVoice }
 import { createMascot } from './mascot.js';
 import { createVoiceTrace } from './voiceTrace.js';
 import { takePendingRing } from './ringHost.js';
+import { registerTyped } from './callTyped.js';
 import { createFillerGate, fetchFillerClip } from './voiceFiller.js';
 import { isBackchannel, endsInQuestion } from './backchannel.js';
 import { callIcon } from './callIcons.js';
@@ -145,7 +146,15 @@ export function agentCall(agent, controller) {
     if(active&&callMode.value==='local')for(const job of record.jobs)if(!['ready','running'].includes(job.status))announceWork(job.task_id);
     if(record.ended&&active)hangup();
     if(record.ended) { summaryStatus.textContent = record.summary_state==='saved'?`Call summary saved in ${savedIn}.`:record.summary_state==='failed'?record.summary_error:'Saving call summary?'; }
-  }, event => { if (event.type === 'work' && event.task_id) { announceWork(event.task_id); transport.refresh(); } });
+    if (record.latency) drawLatency(record.latency);
+  }, event => {
+    if (event.type === 'work' && event.task_id) { announceWork(event.task_id); transport.refresh(); }
+    // Text typed in this conversation during the call (callTyped.js): answered aloud as the next turn.
+    else if (event.type === 'typed' && typeof event.text === 'string' && active && callMode.value === 'local') { texts.push(event.text.slice(0, 2000)); heard.textContent = `You typed: ${event.text.replace(/^\(typed\) /, '')}`; scheduleFlush(); }
+    // The bot asked to end the call (an ask_me_by_call answered; the server already refused it after a question).
+    else if (event.type === 'end' && active) { endWhenQuiet = true; if (state !== 'speaking' && !voiceBusy) setTimeout(() => { if (endWhenQuiet && active && state !== 'speaking' && !voiceBusy) hangup(); }, 1200); }
+  });
+  let endWhenQuiet = false, typedUndo = null, firstAudioPending = false, callStartedAt = 0;
   const callMode=el('select',{'aria-label':'Call mode'},[el('option',{value:'local',text:'Local recognition + conversation model'}),...(room?[]:[el('option',{value:'realtime',text:'Realtime speech-to-speech (your OpenAI, GPT-Live, Grok or Gemini key)'})])]);
   const liveEndpoint=el('select',{'aria-label':'Cloud voice API connection'});
   const liveVoiceChoice=el('select',{'aria-label':'Cloud voice'});
@@ -316,8 +325,10 @@ export function agentCall(agent, controller) {
     outputs.replaceChildren(el('option', { value: '', text: 'System default' }), ...found.map(d => el('option', { value: d.id, text: d.label })));
     outputs.value = found.some(d => d.id === chosenOutput()) ? chosenOutput() : '';
   }
-  const transcript = el('section', { class: 'agent-call-transcript', 'aria-label': 'Live transcript' }, [el('h2', { text: 'Live transcript' }), heard, timing, engineStatus]);
-  const privacy = el('p', { class: 'agent-call-privacy', text: `Recognition stays on this device. Dialogue goes to your selected conversation model. Only a summary is saved in ${savedIn} after the call.` });
+  // Per-call latency (Hermes audit): first audio after pick-up, and how soon replies began, as the server keeps them.
+  const latencyLine = el('p', { class: 'agent-call-latency', role: 'status', hidden: true });
+  const transcript = el('section', { class: 'agent-call-transcript', 'aria-label': 'Live transcript' }, [el('h2', { text: 'Live transcript' }), heard, timing, latencyLine, engineStatus]);
+  const privacy = el('p', { class: 'agent-call-privacy', text: `Recognition stays on this device. Dialogue goes to your selected conversation model. A summary and the transcript are saved in ${savedIn} after the call.` });
   const sheet = el('section', { class: 'agent-call-sheet', id: sheetId, hidden: true, 'aria-label': 'More call options' }, [
     el('div', { class: 'agent-call-sheet-grab', 'aria-hidden': 'true' }),
     el('div', { class: 'agent-call-sheet-actions' }, [chat, interruptButton, hold, settingsToggle]), holdHint, outputBox,
@@ -327,6 +338,15 @@ export function agentCall(agent, controller) {
   dialog.append(el('header', { class: 'agent-call-top' }, [minimizer, kind, moreToggle]), scene, sheet, controls);
   if (room) drawMembers();
   document.body.append(dialog);
+  // The bot's face for its ring notifications (ringFaces.js keeps a small picture of its Kip on this device).
+  if (!room) import('./ringFaces.js').then(module => module.rememberFace(agent)).catch(() => {});
+  function drawLatency(view) {
+    if (!view) return;
+    const parts = [];
+    if (view.first_audio_ms != null) parts.push(`First audio ${view.first_audio_ms} ms after pick-up`);
+    if (view.turns) parts.push(`replies began ${view.median_gap_ms} ms after you stopped (median of ${view.turns}), slowest ${view.longest_gap_ms} ms`);
+    latencyLine.textContent = parts.length ? `Call latency: ${parts.join('; ')}.` : ''; latencyLine.hidden = !parts.length;
+  }
   function openSheet(open) {
     sheet.hidden = !open; moreToggle.setAttribute('aria-expanded', String(open));
     if (open) { dialog.dataset.sheet = 'open'; drawOutputs(); } else delete dialog.dataset.sheet;
@@ -446,8 +466,12 @@ export function agentCall(agent, controller) {
       const at = Math.max(0, room.memberIds().indexOf(speaking.id)), base = Math.max(0, voices.indexOf(chosen));
       return voices[(base + at) % voices.length];
     },
-    onStart: () => { if (active) { setState('speaking', `${who()} is speaking. Interrupt to speak.`); if (fillerOn) { if (response && response.filler_ms == null) { response.filler_ms = Math.round(performance.now() - response.submitted); drawTiming(); } } else if (response && response.first_audio_ms == null) { response.first_audio_ms=Math.round(performance.now()-response.submitted); response.end_to_audio_ms=utteranceEnded?Math.round(performance.now()-utteranceEnded):null; drawTiming();if(transport.record&&response.end_to_audio_ms!=null)api(`/api/agent-calls/${transport.record.id}/timing`,{method:'POST',toast:false,body:JSON.stringify({end_to_audio_ms:response.end_to_audio_ms,first_audio_ms:response.first_audio_ms,trace:voiceTrace.offsets(currentTrace)})}).catch(()=>{}); } } },
-    onEnd: () => { voiceTrace.report(currentTrace); if (readingTyped) { readingTyped = false; if (isCloud()) live.muteMicrophone(microphoneMuted); } if (active && state === 'speaking') { if(voiceBusy)setState('thinking',`${who()} is finishing the reply...`);else listen(); scheduleFlush(); } },
+    onStart: () => { if (active) { setState('speaking', `${who()} is speaking. Interrupt to speak.`);
+      const sinceStart = firstAudioPending ? Math.round(performance.now() - callStartedAt) : null; firstAudioPending = false;
+      let report = sinceStart != null ? { since_start_ms: sinceStart } : null;
+      if (fillerOn) { if (response && response.filler_ms == null) { response.filler_ms = Math.round(performance.now() - response.submitted); drawTiming(); } } else if (response && response.first_audio_ms == null) { response.first_audio_ms=Math.round(performance.now()-response.submitted); response.end_to_audio_ms=utteranceEnded?Math.round(performance.now()-utteranceEnded):null; drawTiming();if(response.end_to_audio_ms!=null)report={...(report||{}),end_to_audio_ms:response.end_to_audio_ms,first_audio_ms:response.first_audio_ms,trace:voiceTrace.offsets(currentTrace)}; }
+      if(transport.record&&report)api(`/api/agent-calls/${transport.record.id}/timing`,{method:'POST',toast:false,body:JSON.stringify(report)}).then(reply=>drawLatency(reply?.latency)).catch(()=>{}); } },
+    onEnd: () => { voiceTrace.report(currentTrace); if (readingTyped) { readingTyped = false; if (isCloud()) live.muteMicrophone(microphoneMuted); } if (active && state === 'speaking') { if(voiceBusy)setState('thinking',`${who()} is finishing the reply...`);else listen(); scheduleFlush(); } if (endWhenQuiet && active && !voiceBusy) setTimeout(() => { if (endWhenQuiet && active && state !== 'speaking' && !voiceBusy) hangup(); }, 400); },
     onBoundary: () => {
       // OS speech exposes word timing, not its PCM amplitude. This pulse
       // follows real word events; microphone energy is measured separately.
@@ -550,7 +574,7 @@ export function agentCall(agent, controller) {
     const free=realtimeChoice()?.free_tier;
     freeVoice.hidden=!(callMode.value==='realtime'&&!liveEndpoint.value);
     consentText.textContent=free?'Use realtime voice for this call. Audio is sent to Google on your free Gemini key: no charge within Google\'s free-tier limits, and Google may use it to improve its products.':realtimeChoice()?.provider==='openai_live'?'Use GPT-Live for this call. Audio is sent to OpenAI on your key: about $0.05 a minute, billed per second, and the work it hands to this agent is billed by the agent\'s own model.':'Use realtime voice for this call. Audio is sent to the provider you chose and billed to your API account.';
-    if(privacy)privacy.textContent=callMode.value==='realtime'&&free?'Realtime voice sends your audio, through Kairos, to Google on your free Gemini key. Real work still goes to this agent. Dialogue stays out of chat; a summary is saved afterwards.':callMode.value==='realtime'?'Realtime voice sends your audio, through Kairos, to the provider you chose and incurs API charges on your key. Real work still goes to this agent. Dialogue stays out of chat; a summary is saved afterwards.':`Recognition stays on this device. Dialogue goes to your selected conversation model. Only a summary is saved in ${savedIn} afterwards.`;
+    if(privacy)privacy.textContent=callMode.value==='realtime'&&free?'Realtime voice sends your audio, through Kairos, to Google on your free Gemini key. Real work still goes to this agent. A summary and the transcript are saved in chat afterwards.':callMode.value==='realtime'?'Realtime voice sends your audio, through Kairos, to the provider you chose and incurs API charges on your key. Real work still goes to this agent. A summary and the transcript are saved in chat afterwards.':`Recognition stays on this device. Dialogue goes to your selected conversation model. A summary and the transcript are saved in ${savedIn} afterwards.`;
     neural.node.hidden=cloud;preview.hidden=cloud;
     inputMode.closest('label').hidden=cloud;acceleration.closest('label').hidden=cloud;
     modelBox.hidden=cloud||!speech?.engine_available;runtimeSetup.hidden=cloud||!speech?.acceleration?.supported;
@@ -765,6 +789,7 @@ export function agentCall(agent, controller) {
           if(speechActive||transcribing||audioQueue.length||texts.length){deferred=true;stopPlayback();}
           if(!assistantMuted&&!deferred)speaker.feed(event.delta);
         }
+        if(event.type==='notice') { error.textContent=String(event.message||''); return; }
         if(event.type==='done') { response.reply_ms=event.reply_ms; drawTiming(); }
       };
       if(workId==='ring-opening')await transport.opening(consume);else if(workId)await transport.update(workId,consume);else await transport.turn(text,consume);
@@ -827,6 +852,8 @@ export function agentCall(agent, controller) {
       await openMicrophone();
       if (!active || epoch !== token) return;
       }
+      firstAudioPending = true; callStartedAt = performance.now(); endWhenQuiet = false;
+      if (!room) { typedUndo?.(); typedUndo = registerTyped(controller.sessionId(), async text => { if (!active || !transport.record) return false; const sent = await api(`/api/agent-calls/${transport.record.id}/typed`, { method: 'POST', toast: false, body: JSON.stringify({ text }) }); return sent?.ok === true; }); }
       showSettings(false); openSheet(false); settingsToggle.textContent = 'End call and change settings'; hold.hidden = holdHint.hidden = isCloud()||inputMode.value !== 'hold'; button.classList.add('is-call-active'); startedAt = lastActivity = Date.now(); ongoingCall = { isActive: () => active, restore }; listen();
       if (ringOpening && callMode.value === 'local') { ringOpening = null; workUpdates.push('ring-opening'); scheduleFlush(); }
       timer = setInterval(() => { const seconds = Math.floor((Date.now() - startedAt) / 1000); clock.textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`; drawRealtimeCost(seconds); if (Date.now() - lastActivity > livePrefs.idle_minutes * 60000 && !voiceBusy && !speechActive) hangup(); }, 1000);
@@ -848,7 +875,8 @@ export function agentCall(agent, controller) {
     cancelHold(); partials.cancel(); recorder?.close(); recorder = null; speechActive = false; pending?.abort(); pending = null; stopPlayback();
     live.stop();transport.end();voiceBusy=false;paid.checked=false;
     showSettings(false); openSheet(false); clearLines(); clock.textContent = '00:00'; model.disabled = false; unread = false; unreadBase = undefined; clearInterval(unreadTimer); unreadTimer = null;
-    response = null; recognitionTiming = {}; timing.textContent = ''; heard.textContent = '';
+    response = null; recognitionTiming = {}; timing.textContent = ''; heard.textContent = ''; latencyLine.textContent = ''; latencyLine.hidden = true;
+    endWhenQuiet = false; firstAudioPending = false; typedUndo?.(); typedUndo = null;
     engineStatus.textContent = ''; hold.hidden = holdHint.hidden = true;
     setState('setup', 'Ready when you are'); if (!keepOpen) dialog.close(); button.classList.remove('is-call-active');
     minimized = false; ongoingCall = null; speaking = null; delete dialog.dataset.speaker; callBar?.destroy(); callBar = null; emitState();

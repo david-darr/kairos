@@ -53,7 +53,7 @@ async def deliver_due(client):
                 "Authorization": web_push.authorization(config["private"], subscription["endpoint"], config["subject"]),
                 "Content-Encoding": "aes128gcm", "Content-Type": "application/octet-stream",
                 "TTL": str(max(0, int(item["expires"] - time.time()))),
-                "Urgency": "high" if item["kind"] in ("permission", "bot_call") else "normal",
+                "Urgency": "high" if item["kind"] in ("permission", "bot_call", "bot_call_end") else "normal",
                 "Topic": web_push.b64(bytes.fromhex(item["id"])[:24]),
             })
             try:

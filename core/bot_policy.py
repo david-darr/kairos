@@ -521,8 +521,9 @@ class Operation:
 
 SEND_TOKENS = frozenset("send reply forward post publish invite share pay transfer tweet broadcast notify ring "
                         "announce dm sms dial".split())
-# Sends whose names carry no send word (Reach me's message_me reaches the person on their chosen channels).
-SEND_TOOLS = frozenset({"message_me"})
+# Sends whose names carry no send word (Reach me's message_me reaches the person on their chosen channels;
+# ask_me_by_call calls them through the same call order).
+SEND_TOOLS = frozenset({"message_me", "ask_me_by_call"})
 DESTRUCTIVE_TOKENS = frozenset("delete remove drop destroy purge wipe erase revoke trash kill uninstall reset clear "
                                "truncate".split())
 DRAFT_TOKENS = frozenset({"draft", "drafts"})

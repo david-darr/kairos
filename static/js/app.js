@@ -719,9 +719,13 @@ async function startApp() {
   notificationRegistration().catch(() => {});
   const openNotificationChat = async url => {
     // A ringing bot (push notification or link): answer it, which opens that bot's call screen (ringHost.js).
+    // It answers once and only while it rings; a used or ended link opens that bot like any bot link.
     try {
-      const ringId = new URL(url, location.origin).searchParams.get('ring');
-      if (/^[0-9a-f]{32}$/.test(ringId || '')) return await (await import('./ringHost.js')).answerRingFromLink(ringId);
+      const link = new URL(url, location.origin), ringId = link.searchParams.get('ring');
+      if (/^[0-9a-f]{32}$/.test(ringId || '')) {
+        if (await (await import('./ringHost.js')).answerRingFromLink(ringId, undefined, { exp: link.searchParams.get('exp') })) return true;
+        link.searchParams.delete('ring'); link.searchParams.delete('exp'); url = link.href;
+      }
     } catch (_) { /* a malformed link falls through to the ordinary handling */ }
     // A bot link opens that bot, and its conversation when it names one (2026-10-14);
     // botsNavigation.js refuses another origin or a malformed id.

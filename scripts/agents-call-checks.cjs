@@ -124,6 +124,10 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   assert.ok(screen.avatar&&screen.round==='50%','The bot\'s mascot sits in a round avatar');
   assert.equal(screen.bars,5,'Level bars show who is speaking');
   assert.equal(screen.who,'you','and while the call listens they follow you');
+  // At rest the bars keep a stepped height so they read as bars, not dots (2026-11-10).
+  const rest=await js("(()=>{const m=document.querySelector('.agent-call-meter');m.style.setProperty('--level','0');m.style.setProperty('--word','0');return new Promise(r=>setTimeout(()=>r([...m.querySelectorAll('i')].map(i=>{const b=i.getBoundingClientRect();return [Math.round(b.height),Math.round(b.width)]})),250))})()");
+  assert.deepEqual(rest.map(([h])=>h),[6,9,12,9,6],`The resting bars step up to the middle (${JSON.stringify(rest)})`);
+  assert.ok(rest.every(([h,w])=>h>=w+2),'every resting bar is taller than it is wide');
   assert.deepEqual(screen.keys,['speaker','mute','hangup'],'Three round keys: speaker, mute, hang up');
   assert.deepEqual(screen.labels,['Speaker','Mute','End call']);
   assert.ok(screen.discs.every(w=>w>=44),`The keys are at least 44 px (${screen.discs})`);
@@ -194,7 +198,7 @@ module.exports = async ({js,waitFor,delay,navigate,win,capture,writes,demoState,
   win.setContentSize(1440,900);await delay(100);
   await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
   assert.ok(await js("getComputedStyle(document.querySelector('.agent-call-orb-core')).animationName==='none'&&getComputedStyle(document.querySelector('.agent-call-orb')).transform==='none'"),'Reduced motion disables orb movement');
-  assert.ok(await js("(()=>{const bar=getComputedStyle(document.querySelector('.agent-call-meter i')),ring=getComputedStyle(document.querySelector('.agent-call-avatar'));return bar.transitionDuration==='0s'&&bar.height==='10px'&&ring.transitionDuration==='0s'&&getComputedStyle(document.querySelector('.agent-call-orb kairos-mascot svg *')).animationName==='none'})()"),'Reduced motion stills the level bars, the avatar ring and the mascot');
+  assert.ok(await js("(()=>{const bar=getComputedStyle(document.querySelector('.agent-call-meter i')),ring=getComputedStyle(document.querySelector('.agent-call-avatar'));return bar.transitionDuration==='0s'&&bar.height==='6px'&&ring.transitionDuration==='0s'&&getComputedStyle(document.querySelector('.agent-call-orb kairos-mascot svg *')).animationName==='none'})()"),'Reduced motion stills the level bars, the avatar ring and the mascot');
   await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[]});
   await js('window.__callTest.holdTranscription=true;window.__callTest.level=.02');await delay(160);
   await js('window.__callTest.level=.5'); await delay(300); await js('window.__callTest.level=0');

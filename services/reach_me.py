@@ -45,6 +45,11 @@ class Final(Exception):
     """A limit or conflict on this way: report it, do not try another."""
 
 
+class Unanswered(Skip):
+    """The call reached the person but nobody picked up in time (a missed ring, an empty Discord channel): the next way
+    in the order is tried, and if none picks up the bot is told they did not answer."""
+
+
 def _owner(account: str) -> str:
     return settings.owner_of(account)
 
@@ -375,7 +380,9 @@ async def _call_on(account: str, channel: str, bot: dict, reason: str, invocatio
             raise Skip(str(error)) from None
     if channel == "app":
         try:
-            return await rings.ring_user(account, bot["id"], reason, invocation_id)
+            return await rings.ring_user(account, bot["id"], reason, invocation_id, escalate=True)
+        except rings.RingUnanswered as error:
+            raise Unanswered(str(error)) from None        # missed: the next way in the order (2026-11-10)
         except rings.RingRefused as error:
             raise Final(str(error)) from None
     if channel == "discord":
@@ -386,6 +393,8 @@ async def _call_on(account: str, channel: str, bot: dict, reason: str, invocatio
         try:
             return await discord_voice.call_user(account, bot["id"], reason, invocation_id)
         except discord_voice.VoiceRefused as error:
+            if error.missed:
+                raise Unanswered(str(error)) from None
             if error.unavailable:
                 raise Skip(str(error)) from None
             raise Final(str(error)) from None
@@ -425,8 +434,13 @@ async def _telegram_voice(account: str, bot: dict, reason: str, invocation_id: s
             "You will not hear back unless they reply.")
 
 
-async def call_me(account: str, bot_id: str, reason, invocation_id: str) -> str:
-    """ring_me and notify_me_by_call: the bot's call order. Raises ReachRefused."""
+async def call_me(account: str, bot_id: str, reason, invocation_id: str, ask: bool = False):
+    """ring_me and notify_me_by_call: the bot's call order. Raises ReachRefused. A way that rang but was not picked up
+    (a missed ring, nobody joining the Discord channel) falls to the next way, like one that is not set up; when the
+    order runs out after one of those, the bot is told they did not answer.
+
+    `ask` (services/call_ask.py) returns a dict instead: {ok, message, channel, label, one_way}, where `one_way` marks a
+    way that cannot carry a spoken answer back (a Telegram voice message)."""
     settings.refuse_if_paused(account, ReachRefused)
     text = _clean(reason)
     bot = _bot(account, bot_id, strict=False)
@@ -437,11 +451,15 @@ async def call_me(account: str, bot_id: str, reason, invocation_id: str) -> str:
     if held:
         raise ReachRefused(f"It is the person's quiet hours until {settings.clock(held, account)} their time, so no "
                            "calls. Use message_me instead; it waits until then.")
-    tried = []
+    tried, missed = [], []
     with accounts.as_account(account):
         for channel in order:
             try:
                 outcome = await _call_on(account, channel, bot, text, invocation_id)
+            except Unanswered as why:
+                tried.append({"channel": channel, "reason": str(why)})
+                missed.append(channel)
+                continue
             except Skip as why:
                 tried.append({"channel": channel, "reason": str(why)})
                 continue
@@ -452,9 +470,19 @@ async def call_me(account: str, bot_id: str, reason, invocation_id: str) -> str:
                 raise ReachRefused(str(why)) from None
             settings.log({"kind": "call", "bot_id": bot_id, "bot_name": bot.get("name") or "", "ok": True,
                           "channel": channel, "note": "", "tried": tried}, account)
+            if ask:
+                return {"ok": True, "message": outcome, "channel": channel, "label": settings.CALL_LABELS[channel],
+                        "one_way": channel == "telegram"}
             return outcome
     settings.log({"kind": "call", "bot_id": bot_id, "bot_name": bot.get("name") or "", "ok": False, "channel": None,
-                  "note": "", "tried": tried}, account)
+                  "note": "not answered" if missed else "", "tried": tried}, account)
+    if missed:
+        ways = ", ".join(settings.CALL_LABELS[c] for c in missed)
+        message = (f"They did not answer ({ways}). A missed-call note with your reason is in their inbox. Do not call "
+                   "again unless they ask.")
+        if ask:
+            return {"ok": False, "message": message, "channel": None, "label": "", "one_way": False}
+        return message
     raise ReachRefused("No way to call the person worked: " + "; ".join(
         f"{settings.CALL_LABELS[t['channel']]}: {t['reason']}" for t in tried))
 

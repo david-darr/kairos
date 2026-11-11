@@ -64,6 +64,21 @@ module.exports = async ({ js, waitFor, delay, navigate, win, demoState, base, ca
     }
     assert.ok(Object.values(demoState.botsVoice.calls).some(c => !c.ended), 'the call record is still open');
     await capture?.('call-pill-other-tab');
+    // Over a modal sheet (2026-11-10): the pill stays visible and usable on top of Settings, and off its panel.
+    const onTop = `(()=>{const p=${pill},r=p.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return !p.hidden&&!!hit&&p.contains(hit)})()`;
+    await js("import('/static/js/views/settings.js').then(m=>m.openSettingsWindow('appearance')).then(()=>true)");
+    await waitFor("!!document.querySelector('.modal-backdrop:not(.hidden) .settings-window')");
+    await waitFor(`${pill}.hasAttribute('data-over-modal') && ${onTop}`);
+    assert.ok(await js(`(()=>{const r=${pill}.getBoundingClientRect(),s=document.querySelector('.modal-backdrop:not(.hidden) .settings-window').getBoundingClientRect();return r.right<=s.left||r.left>=s.right||r.bottom<=s.top||r.top>=s.bottom})()`), 'the pill never sits on the Settings panel');
+    await capture?.('call-pill-over-settings');
+    await js("document.querySelector('.modal-backdrop:not(.hidden) .settings-titlebar-btn[title=Close]').click()");
+    await waitFor(`!document.querySelector('.modal-backdrop:not(.hidden) .settings-window') && !${pill}.hasAttribute('data-over-modal')`);
+    // A modal dialog sits in the browser's top layer: the pill moves inside it while it is open, and back after.
+    await js("(()=>{const d=document.createElement('dialog');d.id='pill-check-dialog';d.style.cssText='width:300px;height:200px';d.textContent='A modal sheet';document.body.append(d);d.showModal();return true})()");
+    await waitFor(`${pill}.parentNode?.id==='pill-check-dialog' && ${onTop}`);
+    await js("(()=>{const d=document.getElementById('pill-check-dialog');d.close();return true})()");
+    await waitFor(`${pill}.parentNode===document.body && !${pill}.hidden`);
+    await js("document.getElementById('pill-check-dialog').remove()");
     // The bot posts in its chat while the call is minimized and the chat is not on screen: a dot, which opens the chat.
     require('./fixtures/bots-chat-backend.cjs').latest.seed(sid, [{ role: 'assistant', content: 'Your report is ready.' }]);
     await waitFor(`!${pill}.querySelector('.call-pill-unread').hidden`, 15000);

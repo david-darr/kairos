@@ -371,7 +371,7 @@ class ControlFilter:
     """Takes the control lines out of what the bot says, even when a network chunk splits one."""
 
     def __init__(self):
-        self.buffer, self.asks, self.end = "", [], False
+        self.buffer, self.asks, self.end, self.forced = "", [], False, False
 
     def feed(self, text: str) -> str:
         self.buffer += text
@@ -507,14 +507,20 @@ class OtherPipeline(phone_calls.LivePipeline):
             logger.warning("outbound call: the conversation model failed")
             sorry = "Sorry, I'm having trouble on my end. I'll have them call you back. Goodbye."
             turn["parts"].append(sorry)
-            control.end = True
+            control.end = control.forced = True
             yield sorry
         finally:
             self._save_turn(turn)
             for question in control.asks[:1]:
                 self._ask(question)
             if control.end:
-                self.end_requested = True
+                # The hang-up guard (Hermes call repos audit): a reply that ends in a question is not a goodbye, so
+                # the other party gets to answer before the bot hangs up.
+                said = "".join(turn["parts"]).strip()
+                if said.endswith("?") and not control.forced:
+                    logger.info("outbound call: an end after a question was held")
+                else:
+                    self.end_requested = True
 
     def _save_turn(self, turn: dict) -> None:
         if turn["saved"]:

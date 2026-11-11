@@ -140,7 +140,7 @@ def _xml(body: bytes):
 
 # -- inbound and outbound-answered webhooks -------------------------------------------------------
 
-async def _session(account: str, record: dict, mode: str, message: str = "") -> dict:
+async def _session(account: str, record: dict, mode: str, message: str = "", ask: Optional[str] = None) -> dict:
     """Check the call can be held at all, then mint its stream token. {'say': text} when it cannot."""
     bot = bot_for(account, record)
     if not bot:
@@ -148,7 +148,7 @@ async def _session(account: str, record: dict, mode: str, message: str = "") -> 
     problem = await live_problem(account, record, bot)
     if problem:
         return {"say": problem if mode == "inbound" else f"{disclosure(bot.get('name'))} {message}".strip()}
-    return {"token": mint("stream", account, STREAM_TTL, mode=mode, message=message, bot_id=bot["id"]), "bot": bot}
+    return {"token": mint("stream", account, STREAM_TTL, mode=mode, message=message, bot_id=bot["id"], ask=ask), "bot": bot}
 
 
 def realtime_choice(account: str, bot: dict) -> Optional[dict]:
@@ -212,7 +212,7 @@ async def twilio_voice(headers: dict, query: str, body: bytes):
         intent = redeem(dict(parse_qsl(query)).get("out", ""), "outbound")
         if not intent or intent["account"] != account or not connection.same_number(params.get("To"), record["user_number"]):
             return _xml(twiml_say(REFUSAL))
-        session = await _session(account, record, "outbound", intent["message"])      # a call Kairos placed needs no PIN
+        session = await _session(account, record, "outbound", intent["message"], intent.get("ask"))      # a call Kairos placed needs no PIN
     else:
         if not connection.same_number(params.get("From"), record["user_number"]) or \
                 params.get("StirVerstat", "").startswith("TN-Validation-Failed"):
@@ -311,7 +311,7 @@ async def telnyx_event(headers: dict, body: bytes):
             elif state.startswith("out:"):
                 intent = redeem(state[4:], "outbound")
                 if intent and intent["account"] == account and connection.same_number(payload.get("to"), record["user_number"]):
-                    session = await _session(account, record, "outbound", intent["message"])
+                    session = await _session(account, record, "outbound", intent["message"], intent.get("ask"))
                     if "say" in session:
                         await provider.action(ccid, "speak", {"payload": session["say"], "voice": "female", "language": "en-US",
                                                                "client_state": _encode_state("hangup")})
@@ -489,7 +489,11 @@ class LivePipeline(phone_bridge.Pipeline):
         owner = owner_of(account)
         parent = _thread_for(bot, owner)
         started = agent_calls.start(parent, bot["id"], record["conversation_endpoint_id"], record["conversation_model"], owner)
-        return cls(account, owner, record, bot, agent_calls.require(started["id"], owner))
+        call = agent_calls.require(started["id"], owner)
+        if session.get("ask"):
+            from services import call_ask
+            call_ask.attach(call, session["ask"])      # a call placed by ask_me_by_call: its first reply is the answer
+        return cls(account, owner, record, bot, call)
 
     async def transcribe(self, pcm16: bytes) -> str:
         from core import phone_audio, speech
@@ -570,8 +574,22 @@ class LivePipeline(phone_bridge.Pipeline):
     def touch(self) -> None:
         self.call["last_seen"] = time.time()
 
+    def record_latency(self, gap_ms=None, first_audio_ms=None) -> None:
+        from services import agent_calls
+        agent_calls.record_latency(self.call, gap_ms=gap_ms, first_audio_ms=first_audio_ms)
+
+    def on_typed(self, callback) -> None:
+        from services import agent_calls
+        self._typed_undo = agent_calls.on_typed(self.call["id"], callback)
+
+    def end_requested(self) -> bool:
+        return bool(self.call.get("end_requested"))
+
     async def close(self) -> None:
         from services import agent_calls
+        undo = getattr(self, "_typed_undo", None)
+        if undo:
+            undo()
         agent_calls.end(self.call)
 
 
@@ -634,7 +652,8 @@ async def call_user(account: str, bot_id: str, message, invocation_id: str) -> s
         raise PhoneLimit("A call to you was placed a moment ago. Wait a few minutes before calling again.")
     taken = _reserve(owner, bot_id, "call", invocation_id)
     provider = provider_for(account, record)
-    token = mint("outbound", account, OUTBOUND_TTL, message=text, bot_id=bot_id)
+    from services import call_ask
+    token = mint("outbound", account, OUTBOUND_TTL, message=text, bot_id=bot_id, ask=call_ask.ASK.get())
     try:
         if record["provider"] == "twilio":
             await provider.place_call(record["user_number"], record["number"], provider.voice_url("out=" + token))
