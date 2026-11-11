@@ -1,11 +1,10 @@
-"""Conversational voice (Fluid Voice, track B): the spoken style and its text clean-up, instant acknowledgements,
+"""Conversational voice (Fluid Voice, track B): the spoken style and its text clean-up, no thinking fillers,
 interruption memory and backchannels. Fakes only: no model, no microphone, no voice engine, no network.
 Run: python scripts/test_voice_conversational.py
 """
 import asyncio
 import json
 import os
-import random
 import sys
 import tempfile
 import unittest
@@ -22,11 +21,11 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 import httpx  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 
-from core import call_voices, voice_backchannel, voice_dialogue, voice_fillers, voice_style  # noqa: E402
+from core import accounts, call_voices, realtime_voice, voice_backchannel, voice_dialogue, voice_style  # noqa: E402
 from core.middleware import require_user  # noqa: E402
 from core.session_manager import session_manager  # noqa: E402
 from routes.call_routes import router  # noqa: E402
-from services import agent_calls as calls, chat_service, phone_bridge  # noqa: E402
+from services import agent_calls as calls, chat_service, phone_bridge, realtime_session  # noqa: E402
 from services.agent_service import agent_service  # noqa: E402
 
 FIXTURES = ROOT / 'scripts' / 'fixtures'
@@ -82,84 +81,43 @@ class Backchannels(unittest.TestCase):
                 self.assertEqual(voice_backchannel.is_backchannel(case['text'], case['asked']), case['expect'])
 
 
-class Fillers(unittest.IsolatedAsyncioTestCase):
-    def test_only_a_slow_answer_gets_one(self):
-        quick = dict(first_sentence_ready=True)
-        self.assertFalse(voice_fillers.should_play(900, **quick), 'a sentence is ready: the answer was quick')
-        self.assertFalse(voice_fillers.should_play(300, first_sentence_ready=False), 'not yet half a second')
-        self.assertTrue(voice_fillers.should_play(voice_fillers.FILLER_AFTER_MS, first_sentence_ready=False))
-        self.assertFalse(voice_fillers.should_play(2000, first_sentence_ready=False, work_update=True), 'work updates never')
-        self.assertFalse(voice_fillers.should_play(2000, first_sentence_ready=False, muted=True), 'a muted assistant never')
-        self.assertFalse(voice_fillers.should_play(2000, first_sentence_ready=False, user_speaking=True), 'not over the user')
+class NoFillers(unittest.IsolatedAsyncioTestCase):
+    """David, 2026-11-11: calls said "Ok, let me think" and "Mmm ok" while thinking. No voice surface plays a filler now,
+    and every voice prompt tells the model to answer directly."""
 
-    def test_never_the_same_phrase_twice_in_a_row_and_it_varies(self):
-        rng = random.Random(7)
-        last, seen = None, set()
-        for _ in range(300):
-            ident, text = voice_fillers.pick(last, 'what is the capital of france', rng)
-            self.assertNotEqual(ident, last)
-            self.assertEqual(text, voice_fillers.text_of(ident))
-            seen.add(ident)
-            last = ident
-        self.assertGreaterEqual(len(seen), 4, 'a call hears several different acknowledgements')
+    def test_every_voice_prompt_says_answer_directly(self):
+        for prompt in (voice_style.VOICE_STYLE, voice_dialogue.VOICE_PROMPT, chat_service.OPEN_MIC_DISCIPLINE,
+                       realtime_voice.REALTIME_PROMPT, realtime_session.LIVE_PROMPT):
+            self.assertIn(voice_style.NO_FILLER, prompt)
+        self.assertIn('let me think', voice_style.NO_FILLER)
+        for prompt in (voice_dialogue.VOICE_PROMPT, realtime_voice.REALTIME_PROMPT, realtime_session.LIVE_PROMPT,
+                       realtime_voice.TOOL_DESCRIPTION):
+            self.assertNotIn('acknowledge', prompt.lower(), 'no prompt asks for an acknowledgement')
 
-    def test_a_plain_question_never_gets_a_request_phrase(self):
-        rng = random.Random(3)
-        for _ in range(200):
-            ident, _ = voice_fillers.pick(None, 'why is the sky blue', rng)
-            self.assertNotEqual(voice_fillers._BY_ID[ident][2], 'request')
-        self.assertEqual(voice_fillers.kind_of('Can you remind me to call Sam'), 'request')
-        self.assertEqual(voice_fillers.kind_of('hey, set a timer for ten minutes'), 'request')
-        self.assertEqual(voice_fillers.kind_of('how far is the moon'), 'question')
-
-    async def test_a_voices_phrases_render_lazily_once_and_are_kept(self):
-        rendered = []
-
-        async def fake_pcm(text, model, voice):
-            rendered.append((text, model, voice))
-            yield {'sample_rate': 24000}
-            yield {'audio': b'\x01\x00' * 2400}
-
-        with patch.object(call_voices, 'pcm', fake_pcm):
-            self.assertIsNone(voice_fillers.cached('eng', 'voiceA', 'okay'))
-            self.assertTrue(await voice_fillers.render('eng', 'voiceA', 'okay'))
-            self.assertTrue(await voice_fillers.render('eng', 'voiceA', 'okay'))
-            self.assertEqual(len(rendered), 1, 'rendered once, then served from the kept copy')
-            rate, pcm = voice_fillers.cached('eng', 'voiceA', 'okay')
-            self.assertEqual((rate, len(pcm)), (24000, 4800))
-            self.assertIsNone(voice_fillers.cached('eng', 'voiceB', 'okay'), 'each voice has its own')
-            await asyncio.gather(voice_fillers.render('eng', 'voiceB', 'okay'), voice_fillers.render('eng', 'voiceB', 'okay'))
-            self.assertEqual(len(rendered), 2, 'two asks at once render once')
-            self.assertFalse(await voice_fillers.render('eng', 'voiceB', 'not-a-phrase'))
-
-    async def test_events_give_text_to_a_device_voice_and_audio_only_when_cached(self):
-        device = [json.loads(line) for line in voice_fillers.event_lines('okay', '', '')]
-        self.assertEqual(device, [{'filler': {'id': 'okay', 'text': 'Okay.'}}])
-        cold = [json.loads(line) for line in voice_fillers.event_lines('see', 'eng', 'never-rendered')]
-        self.assertEqual(cold[-1], {'cached': False})
-        voice_fillers.store('eng', 'warm', 'see', 22050, b'\x02\x00' * 100)
-        warm = [json.loads(line) for line in voice_fillers.event_lines('see', 'eng', 'warm')]
-        self.assertEqual(warm[1], {'sample_rate': 22050})
-        self.assertEqual(len(warm), 3)
-
-    async def test_the_route_picks_without_repeating_and_warms_in_the_background(self):
+    async def test_the_filler_routes_are_gone(self):
         app = FastAPI(); app.include_router(router); app.dependency_overrides[require_user] = lambda: 'david'
-        started = []
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+            self.assertIn((await client.post('/api/agent-calls/filler', json={'text': 'hi'})).status_code, (404, 405))
+            self.assertIn((await client.post('/api/agent-calls/filler/warm', json={'model': 'm', 'voice': 'v'})).status_code, (404, 405))
 
-        async def fake_render(model, voice, ident):
-            started.append((model, voice, ident))
-            return True
-
-        with patch.object(voice_fillers, 'render', fake_render):
-            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
-                lines = (await client.post('/api/agent-calls/filler', json={'last': 'okay', 'text': 'what time is it'})).text.splitlines()
-                first = json.loads(lines[0])['filler']
-                self.assertNotEqual(first['id'], 'okay')
-                cold = await client.post('/api/agent-calls/filler', json={'text': 'hi', 'model': 'eng', 'voice': 'uncached'})
-                self.assertIn('"cached": false', cold.text)
-                await asyncio.sleep(0.05)
-                self.assertTrue(started and started[0][:2] == ('eng', 'uncached'), 'an uncached phrase starts rendering for next time')
-                self.assertEqual((await client.post('/api/agent-calls/filler/warm', json={'model': 'eng', 'voice': 'v'})).json(), {'ok': True})
+    def test_old_cached_clips_are_swept_and_nothing_else(self):
+        folder = accounts.path('voice_fillers')
+        os.makedirs(folder, exist_ok=True)
+        for name in ('a.pcm', 'b.pcm.tmp'):
+            Path(folder, name).write_bytes(b'z' * 8)
+        Path(folder, 'keep.txt').write_text('not ours', encoding='utf-8')
+        outside = Path(folder).parent / 'beside.pcm'
+        outside.write_bytes(b'z')
+        try:
+            self.assertEqual(call_voices.sweep_old_filler_cache(), 2)
+            self.assertEqual(sorted(os.listdir(folder)), ['keep.txt'], 'only the cached clips go')
+            self.assertTrue(outside.exists(), 'nothing outside the folder is touched')
+            os.remove(Path(folder, 'keep.txt'))
+            self.assertEqual(call_voices.sweep_old_filler_cache(), 0)
+            self.assertFalse(os.path.isdir(folder), 'an empty folder is removed')
+            self.assertEqual(call_voices.sweep_old_filler_cache(), 0, 'no folder: nothing to do')
+        finally:
+            outside.unlink(missing_ok=True)
 
 
 class FakeConversation:
@@ -266,7 +224,7 @@ class InterruptionMemory(unittest.IsolatedAsyncioTestCase):
         self.assertIn('before they heard any of it', chat_service._apply_open_mic_discipline(session, 'Hi'))
 
 
-# -- the phone bridge: nods, what was heard, and the acknowledgement -------------------------------------------------
+# -- the phone bridge: nods, what was heard, and quiet until the answer ----------------------------------------------
 import test_phone_calls as phone  # noqa: E402
 
 
@@ -369,44 +327,24 @@ class PhoneConversation(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await phone.Settled.until(lambda: self.pipeline.spoken == ['Here is the answer.']))
         await self.finish()
 
-    async def test_a_slow_answer_gets_one_acknowledgement_and_a_quick_one_gets_none(self):
-        async def filler(text, last):
-            async def parts():
-                yield 24000, b'\x10\x00' * 2400
-            return 'okay', parts()
-        self.pipeline.filler = filler
+    async def test_a_slow_answer_is_preceded_by_silence_not_a_filler(self):
         release = asyncio.Event()
 
         async def slow(text, request_id):
             await release.wait()
             yield 'The slow answer is here.'
         self.pipeline.converse = slow
-        with patch.object(phone_bridge.voice_fillers, 'FILLER_AFTER_MS', 120):
-            await self.start()
-            await self.say()
-            await self.feed(phone.silence(900))
-            self.assertTrue(await phone.Settled.until(lambda: len(self.socket.media_sent()) > 3), 'the acknowledgement played while the model was still working')
-            self.assertEqual(self.pipeline.spoken, [], 'no sentence of the answer yet')
-            release.set()
-            self.assertTrue(await phone.Settled.until(lambda: self.pipeline.spoken == ['The slow answer is here.']))
-            self.assertEqual(self.bridge.last_filler, 'okay')
-            await self.finish()
-
-        quick = phone.FakePipeline(); quick.filler_calls = 0
-
-        async def never(text, last):
-            quick.filler_calls += 1
-            return None
-        quick.filler = never
-        self.pipeline, self.socket, self.inbound = quick, phone.FakeSocket(), asyncio.Queue()
-        with patch.object(phone_bridge.voice_fillers, 'FILLER_AFTER_MS', 800):
-            await self.start()
-            await self.say()
-            await self.feed(phone.silence(900))
-            self.assertTrue(await phone.Settled.until(lambda: quick.spoken))
-            await self.finish()
-        self.assertEqual(quick.filler_calls, 0, 'the answer was ready first: the acknowledgement was never even looked up')
-
+        self.assertFalse(hasattr(phone_bridge.Pipeline, 'filler'), 'the pipeline has no filler hook any more')
+        await self.start()
+        await self.say()
+        await self.feed(phone.silence(900))
+        self.assertTrue(await phone.Settled.until(lambda: self.bridge.phase == 'thinking'))
+        await asyncio.sleep(0.8)                      # well past the old half-second filler
+        self.assertEqual(self.socket.media_sent(), [], 'nothing is played while the answer is being written')
+        release.set()
+        self.assertTrue(await phone.Settled.until(lambda: self.pipeline.spoken == ['The slow answer is here.']))
+        self.assertTrue(self.socket.media_sent(), 'the answer itself is the first thing heard')
+        await self.finish()
 
 if __name__ == '__main__':
     unittest.main()

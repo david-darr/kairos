@@ -60,9 +60,6 @@ class TestPipeline(oc.OtherPipeline):
     async def end_of_turn(self, pcm16):
         return None
 
-    async def filler(self, user_text, last):
-        return None
-
 
 class LineSocket:
     """A media stream the test feeds by hand; the call ends when the bridge stops or the test closes it."""

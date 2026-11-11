@@ -15,8 +15,7 @@ export const CHOICE_COPY = {
 };
 export const APPLIES = 'Calls, Open Mic, replies read aloud, voice notes, phone calls and Discord voice all use this. A bot can still have its own voice or call mode: open the bot, then Voice.';
 export const ELEVENLABS_COST = 'Cost: ElevenLabs bills your account by characters spoken. At its API rates Flash costs about $0.04 per '
-  + '1,000 characters, roughly 4 cents a minute of speech, and Multilingual v2 about twice that; credits in your plan are used first. '
-  + 'Kairos also renders a few short acknowledgements once per voice and keeps them.';
+  + '1,000 characters, roughly 4 cents a minute of speech, and Multilingual v2 about twice that; credits in your plan are used first.';
 export const ELEVENLABS_PRIVACY = 'Privacy: every sentence Kairos speaks is sent to ElevenLabs, which keeps it in your history under '
   + 'its own terms. Listening stays on this computer. For private calls use Kairos Voice.';
 export const GPT_LIVE_NOTE = 'GPT-Live hears you and answers in its own voice, and hands real work to your bot. OpenAI bills about $0.05 a '

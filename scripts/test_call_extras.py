@@ -284,13 +284,26 @@ class ToolRunCap(Base):
         self.assertEqual(call["silent_tools"], 0)
         agent_calls.delegate(call, "after", "do it", "k-after")
 
-    async def test_a_reply_that_only_hands_off_work_still_says_something(self):
+    async def test_a_reply_that_only_hands_off_work_still_says_what_started(self):
         call = new_call()
         self.conversation.reply = '<kairos-work>{"title":"Check the build","request":"look at CI"}</kairos-work>'
         events = await self.run_turn(call, "Check the build")
         spoken = "".join(e.get("delta", "") for e in events if e["type"] == "text")
-        self.assertEqual(spoken, agent_calls.WORKING_LINE)
+        self.assertEqual(spoken, "Started: Check the build. I'll tell you when it's done.")
         self.assertEqual([e["type"] for e in events if e["type"] == "job"], ["job"])
+
+    async def test_a_normal_turn_never_gets_the_working_line(self):
+        # David, 2026-11-11: no "On it." or "let me think" on ordinary turns. Only the model's own answer is spoken.
+        call = new_call()
+        self.conversation.reply = "It is sunny and twelve degrees."
+        events = await self.run_turn(call, "What's the weather?")
+        spoken = "".join(e.get("delta", "") for e in events if e["type"] == "text")
+        self.assertEqual(spoken.strip(), "It is sunny and twelve degrees.")
+        self.assertFalse([e for e in events if e["type"] == "job"])
+        self.conversation.reply = 'Checking the build now. <kairos-work>{"title":"Check the build","request":"look at CI"}</kairos-work>'
+        events = await self.run_turn(call, "Check the build")
+        spoken = "".join(e.get("delta", "") for e in events if e["type"] == "text")
+        self.assertEqual(spoken.strip(), "Checking the build now.", "the model said what started: no extra line")
 
     async def test_the_realtime_voice_hears_the_refusal(self):
         call = new_call(silent_tools=agent_calls.TOOL_RUN_CAP)

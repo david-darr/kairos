@@ -138,11 +138,13 @@ async def lifespan(_app: FastAPI):
     # was full of them). See core/vault_sync.py.
     from core import tool_access
     from core import image_gen
+    from core import call_voices
     from core import accounts as _startup_accounts
     for _account in _startup_accounts.all_accounts():  # each account's own folders
         with _startup_accounts.as_account(_account):
             tool_access.sweep_screens()
             image_gen.sweep_scratch()
+            call_voices.sweep_old_filler_cache()   # thinking fillers were removed (2026-11-11): drop their cached clips
     vault_sync.sync_on_startup()
     if _RESTORED:  # a backup swapped in before the imports (core/backup.py)
         from core import events

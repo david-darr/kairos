@@ -19,7 +19,7 @@ from typing import AsyncIterator, Callable, Optional
 
 import numpy as np
 
-from core import phone_audio, voice_fillers, voice_style
+from core import phone_audio, voice_style
 from core.voice_backchannel import is_backchannel
 from core.phone_providers import Provider
 
@@ -171,9 +171,6 @@ class Pipeline:
     def interrupt(self, spoken: bool) -> None: ...
     def note_heard(self, sentences: list) -> None:
         """Before an interrupt(): the sentences the caller had begun to hear (so the history keeps only those)."""
-    async def filler(self, user_text: str, last: Optional[str]):
-        """An acknowledgement to play while the answer is written: (id, async iterator of (rate, pcm16)) or None."""
-        return None
     def touch(self) -> None: ...
     async def close(self) -> None: ...
     def record_latency(self, gap_ms=None, first_audio_ms=None) -> None:
@@ -189,9 +186,10 @@ class TurnBridge:
     """The turn-taking both voice bridges share (a phone line here, a Discord voice channel in
     services/discord_voice.py): the endpointer's events become turns, a turn is transcribed, answered and spoken a
     sentence at a time, speech over a reply is a barge-in (long), a nod (short) or a real interjection (checked by
-    transcribing it), and a quick acknowledgement plays if the answer is slow. A subclass says how audio leaves:
-    `_new_converter` / `_converter_rate` (speech audio to its frames), `_emit` (one frame out), `_frame_seconds` and
-    `_clear_output` (drop what is queued); `_turn_over` and `_speech_started` are hooks."""
+    transcribing it). Nothing is said while the answer is being written: the line stays quiet until its first
+    sentence (no filler). A subclass says how audio leaves: `_new_converter` / `_converter_rate` (speech audio to its
+    frames), `_emit` (one frame out), `_frame_seconds` and `_clear_output` (drop what is queued); `_turn_over` and
+    `_speech_started` are hooks."""
     LABEL = "phone"
     REQUEST_PREFIX = "phone"
 
@@ -206,7 +204,6 @@ class TurnBridge:
         self.backchannel = False
         self.during = False                    # the person started speaking while the bot was thinking or speaking
         self.played: list = []                 # (sentence, when it starts to play) of the reply being spoken
-        self.last_filler: Optional[str] = None
         self.dropped_backchannels = 0
         self.sent_frames = 0
         self.heard: list[str] = []
@@ -371,7 +368,7 @@ class TurnBridge:
             self.played = []
             self.heard.append(text)
             request_id = self.REQUEST_PREFIX + ":" + uuid.uuid4().hex
-            await self._say(self.pipeline.converse(text, request_id), filler_for=text)
+            await self._say(self.pipeline.converse(text, request_id))
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -388,12 +385,11 @@ class TurnBridge:
             return converter
         return self._new_converter(rate)
 
-    async def _say(self, deltas, filler_for: Optional[str] = None) -> None:
+    async def _say(self, deltas) -> None:
         """Speak a stream of text: each finished sentence is rendered while the one before it is still playing.
-        With `filler_for` (what the person just said), a short acknowledgement plays if no sentence is ready within
-        half a second; `self.played` records when each sentence starts so a barge-in knows what was heard."""
+        Nothing plays before the first sentence (no filler); `self.played` records when each sentence starts so a
+        barge-in knows what was heard."""
         queue: asyncio.Queue = asyncio.Queue(maxsize=4)
-        first_sentence = asyncio.Event()
         self.played = []
 
         async def render(number: int, sentence: str) -> None:
@@ -416,45 +412,13 @@ class TurnBridge:
                     sentences, buffer = split_sentences(buffer)
                     for sentence in sentences:
                         count += 1
-                        first_sentence.set()
                         await self._guarded(render, count, sentence)
                 if buffer.strip():
-                    first_sentence.set()
                     await self._guarded(render, count + 1, buffer)
             finally:
-                first_sentence.set()
                 await queue.put(None)
 
-        async def filler() -> None:
-            try:
-                await asyncio.wait_for(first_sentence.wait(), voice_fillers.FILLER_AFTER_MS / 1000)
-                return                            # the answer was quick: no acknowledgement
-            except asyncio.TimeoutError:
-                pass
-            try:
-                found = await self.pipeline.filler(filler_for, self.last_filler)
-                if not found or first_sentence.is_set():
-                    return
-                ident, parts = found
-                self.last_filler = ident
-                converter = None
-                async for rate, pcm in parts:
-                    if first_sentence.is_set():
-                        return                    # the answer got there first
-                    converter = self._converted(converter, rate)
-                    frames = converter.frames(pcm)
-                    if frames:
-                        await queue.put((0, voice_fillers.text_of(ident) or "", frames))
-                tail = converter.frames(b"", final=True) if converter else None
-                if tail and not first_sentence.is_set():
-                    await queue.put((0, voice_fillers.text_of(ident) or "", tail))
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.info("%s: no acknowledgement this time", self.LABEL)
-
         producer = asyncio.create_task(produce())
-        helper = asyncio.create_task(filler()) if filler_for else None
         playing = None
         try:
             while (item := await queue.get()) is not None:
@@ -462,17 +426,14 @@ class TurnBridge:
                 self.phase = "speaking"
                 if number != playing:
                     playing = number
-                    if number:                    # an acknowledgement is not part of the reply that gets remembered
-                        self.played.append((sentence, max(self.play_end, self.clock())))
+                    self.played.append((sentence, max(self.play_end, self.clock())))
                 await self._send_frames(frames)
             await producer
             if self.pace and self.phase == "speaking":
                 await self.sleep(max(0.0, self.play_end - self.clock()))
         finally:
-            for task in (producer, helper):
-                if task:
-                    task.cancel()
-            await asyncio.gather(producer, *([helper] if helper else []), return_exceptions=True)
+            producer.cancel()
+            await asyncio.gather(producer, return_exceptions=True)
 
     async def _guarded(self, render, number: int, sentence: str) -> None:
         try:

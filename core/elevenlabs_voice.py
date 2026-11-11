@@ -1,7 +1,7 @@
 """ElevenLabs as a voice (text-to-speech) engine in the local pipeline, on the person's own ElevenLabs key.
 
 It answers the same two questions as every engine in core/call_voices.py (which voices exist, give me PCM for this
-sentence), so calls, Open Mic, bots reading aloud, voice notes, fillers and phone calls (to the person and to others)
+sentence), so calls, Open Mic, bots reading aloud, voice notes and phone calls (to the person and to others)
 use it unchanged. The speaker already cuts replies into sentences and fetches the next one while one plays; each
 sentence here is one streaming request, so the first audio arrives while ElevenLabs is still rendering.
 

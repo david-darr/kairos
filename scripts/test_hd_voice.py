@@ -11,8 +11,8 @@ download, a server that ignores Range, an unsafe wheel refused, not enough disk,
 lifecycle (load on first use while Kokoro speaks, warm at call start, one queue in order, cancel when a sentence is
 dropped, stop when idle) and the fallback to Kokoro (missing, still loading, crashed, an error, too slow, stopped
 three times); edge trim; pronunciations as respellings; the routes (state, quality refused until installed, admin-only
-install and remove, preview WAV); and that calls, read-aloud, voice notes, phone calls (bot_voice) and fillers speak
-through HD when it is chosen.
+install and remove, preview WAV); and that calls, read-aloud, voice notes, phone calls (bot_voice) speak through HD when
+it is chosen.
 Run: python scripts/test_hd_voice.py
 """
 import asyncio
@@ -453,7 +453,7 @@ class SidecarTests(HDCase):
         self.assertFalse(hd_voice._sidecar.running())
         self.assertEqual(self.ops()[-1]["op"], "quit")
 
-    async def test_calls_read_aloud_voice_notes_phone_and_fillers_use_hd(self):
+    async def test_calls_read_aloud_voice_notes_and_phone_use_hd(self):
         call_voices.set_hd_voice("aiden")
         with self.sidecar():
             await hd_voice.warm("aiden")
@@ -464,9 +464,6 @@ class SidecarTests(HDCase):
             self.assertEqual(await bot_voice.selection("af_heart"), (hd_voice.NAME, "aiden"))
             spoken = await self.collect(bot_voice.audio_events("A phone sentence.", "af_heart"))
             self.assertEqual(spoken[0], {"sample_rate": 24000})
-            from core import voice_fillers
-            with patch.object(voice_fillers, "store", lambda *a: None), patch.object(voice_fillers, "cached", lambda *a: False):
-                self.assertTrue(await voice_fillers.render(hd_voice.NAME, "aiden", voice_fillers.FILLERS[0][0]))
         texts = [op["text"] for op in self.ops() if op["op"] == "say"]
         self.assertIn("A phone sentence.", texts)
         self.assertTrue(all(op["voice"] == "aiden" for op in self.ops() if op["op"] == "say"))

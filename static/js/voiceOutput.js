@@ -216,21 +216,20 @@ export function createSpeaker({ onStart, onEnd, onBoundary, onError, getVoice, o
   let paused = false;
   let heardSentences = [];   // the sentences that actually began to play, raw, in order (what a barge-in leaves in the history)
 
-  // `filler` is an acknowledgement ("Mm, let me think."): it plays like a sentence but is not part of the reply.
-  const enqueue = (text, filler = false) => {
+  const enqueue = text => {
     const clean = forSpeech(text);
     if (!clean || cancelled || !isSpeechOutputSupported()) return;
     queued += 1;
     const utterance = new SpeechSynthesisUtterance(clean);
     const mine = generation;
-    const index = filler ? -1 : sentences++;
-    if (!filler) onSentenceReady?.(index);
+    const index = sentences++;
+    onSentenceReady?.(index);
     const voice = getVoice ? getVoice() : pickVoice();
     if (voice) { utterance.voice = voice; utterance.lang = voice.lang; }
     utterance.rate = 1.02;
     utterance.addEventListener('start', () => {
       if (cancelled || mine !== generation) return;
-      if (!filler) { heardSentences.push(text); onSentenceStart?.(index); }
+      heardSentences.push(text); onSentenceStart?.(index);
       if (!speaking) { speaking = true; onStart?.(); }
     });
     utterance.addEventListener('boundary', event => { if (!cancelled && mine === generation) onBoundary?.(event); });
@@ -263,7 +262,6 @@ export function createSpeaker({ onStart, onEnd, onBoundary, onError, getVoice, o
     pause() { if (!cancelled && speaking && !paused && isSpeechOutputSupported()) { paused = true; try { window.speechSynthesis.pause(); } catch { paused = false; } } },
     resume() { if (paused) { paused = false; try { window.speechSynthesis.resume(); } catch { /* nothing to resume */ } } },
     get paused() { return paused; },
-    filler(clip) { if (!cancelled && clip?.text) enqueue(clip.text, true); },
     feed(deltaText) { if (!cancelled) chunker.feed(deltaText); },
     flushSentence() { if (!cancelled) chunker.flushSentence(); },
     finish() {

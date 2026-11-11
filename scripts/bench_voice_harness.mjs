@@ -4,7 +4,6 @@
 //                        real speech audio at real-time pace, exactly as the worklet feeds it 128-sample blocks
 //   rolling transcript   static/js/partialTranscript.js (the call's rolling partials and final pass)
 //   chunker              static/js/voiceOutput.js createChunker (first clause / first sentence release, 100 ms flush)
-//   acknowledgement      static/js/voiceFiller.js createFillerGate (the half-second rule)
 //   barge-in             static/js/speechSegments.js BargeIn (pause after 120 ms of voice, interrupt after 320 ms)
 //   end of turn          static/js/turnEndpoint.js createTurnEndpoint (smart_turn "real": the app's 700 ms ask timeout and
 //                        latch-off, posting to the Python side's core/turn_detect.py), or a perfect stand-in ("oracle")
@@ -27,7 +26,6 @@ const load = async (file, prefix = '') => import('data:text/javascript;base64,' 
 const { SpeechSegments, BargeIn, BARGE_DUCK_MS, BARGE_VOICE_MS } = await load('static/js/speechSegments.js');
 const { createChunker } = await load('static/js/voiceOutput.js');
 const { createPartialTranscriber } = await load('static/js/partialTranscript.js');
-const { createFillerGate } = await load('static/js/voiceFiller.js', 'const readEvents=null;\n');
 const { createTurnEndpoint } = await load('static/js/turnEndpoint.js');
 
 const RATE = 16000;
@@ -99,13 +97,6 @@ async function runTurn(fixture, repeat) {
 
   const partials = createPartialTranscriber({ send: async (wav) => { marks.partialSent++; return sttPartial(wav, fixture.name); }, encode: encodeWav });
   if (cfg.backend !== 'cuda' || !cfg.partials) partials.disable('cpu');
-  // The filler gate: the real half-second rule. The clip is pre-rendered (a cached filler); playing it is a scheduled buffer.
-  const fillerClip = cfg.filler_clip;
-  const gate = createFillerGate({
-    fetchClip: async () => fillerClip ? { id: 'okay', text: 'Okay.' } : null,
-    blocked: () => speechActive,
-    play: () => { result.filler_start_wall = now() + LEAD_MS; },
-  });
 
   // End of turn by meaning. "real": the app's own path (agentCall.js onPause): the segmenter hands out the utterance so far
   // at a 200 ms pause, turnEndpoint.ask posts it to core/turn_detect.py (the real Smart Turn model), and a verdict that
@@ -157,11 +148,10 @@ async function runTurn(fixture, repeat) {
   async function dispatch() {
     dispatchedAt = now(); result.transcript = transcripts.join(' ').trim();
     const ttft = Math.max(20, cfg.ttft_ms * (0.85 + 0.3 * random()));
-    gate.arm({ text: result.transcript });
     const chunker = createChunker(async sentence => {
       const readyAt = now();
       if (result.first_sentence_wall == null) {
-        result.first_sentence_wall = readyAt; gate.sentenceReady();
+        result.first_sentence_wall = readyAt;
         const asked = now();
         const spoken = await tts(sentence);
         result.first_audio_wall = asked + spoken.overhead_ms + spoken.first_write_ms + LEAD_MS;
@@ -170,7 +160,7 @@ async function runTurn(fixture, repeat) {
       }
     });
     const began = now(); await sleepUntil(began + ttft);
-    result.first_token_wall = now(); gate.sentenceReady();   // the answer has started: no acknowledgement
+    result.first_token_wall = now();
     const words = cfg.reply.split(/(?<=\s)/);
     const gap = 1000 / cfg.tokens_per_s;
     let flushTimer = null, due = now();
@@ -195,7 +185,6 @@ async function runTurn(fixture, repeat) {
   }
   // Silence runs out before the reply is ready only in a broken run; give the reply time to finish.
   let giveUp; await Promise.race([done, new Promise(resolve => { giveUp = setTimeout(resolve, 30000); })]); clearTimeout(giveUp);
-  gate.cancel();
   result.speech_end_wall = speechEndWall; result.segments = marks.segments;
   const rel = value => (value == null ? null : Math.round(value - result.last_endpoint_wall));
   if (result.endpoint_ms == null) return { ...result, failed: 'no endpoint' };
@@ -213,13 +202,6 @@ async function runTurn(fixture, repeat) {
     tts_first_write_ms: result.tts_first_write_ms,
   };
   if (cfg.smart_turn === 'real') out.smart = smart;
-  if (result.filler_start_wall != null) {
-    out.filler_ms = since(result.filler_start_wall);
-    const fillerEnd = result.filler_start_wall + (cfg.filler_ms || 0);
-    // The answer queues behind the acknowledgement: it cannot start before the filler ends.
-    out.first_sound_ms = Math.min(out.filler_ms, out.first_audio_ms);
-    out.first_audio_after_filler_ms = since(Math.max(result.first_audio_wall, fillerEnd));
-  } else out.first_sound_ms = out.first_audio_ms;
   out.tts_audio = result.tts_audio;
   return out;
 }

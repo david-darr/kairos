@@ -11,11 +11,17 @@ import re
 
 CODE_LINE = "I've put the code in the chat."
 
+# No thinking aloud (David, 2026-11-11: calls kept saying "Ok, let me think" and "Mmm ok"). The app no longer plays any
+# filler of its own while an answer is written, and the model is told not to make one up: the line stays quiet until
+# the answer itself starts. The realtime voices (core/realtime_voice.py, services/realtime_session.py) get it too.
+NO_FILLER = ("Answer directly. Never open with filler such as \"let me think\", \"okay so\", \"hmm\", \"good question\" "
+             "or \"one moment\", and never think aloud: your first words are the answer.")
+
 # The instruction itself. One text for every kind of voice turn; callers add what is specific to them (the call's
 # delegation tag, Open Mic's "the other person is waiting").
 VOICE_STYLE = (
     "Spoken-voice mode: your words are read aloud to someone who is listening and waiting to answer. "
-    "Speak in short, plain spoken sentences. Answer first, then add detail only if it helps. "
+    "Speak in short, plain spoken sentences. Answer first, then add detail only if it helps. " + NO_FILLER + " "
     "Never read out markdown, lists, tables, links or code: say what they contain in a sentence and offer to put "
     "the details in the chat. Ask one question at a time, then stop and let them answer."
 )

@@ -1,6 +1,6 @@
-// Conversational voice (Fluid Voice, track B), the browser half: the spoken-style clean-up, backchannels, the
-// acknowledgement gate and clip decoding, and what both speakers remember (the sentences actually heard), pause and
-// resume, and play an acknowledgement ahead of the answer. The server half is scripts/test_voice_conversational.py;
+// Conversational voice (Fluid Voice, track B), the browser half: the spoken-style clean-up, backchannels, what both
+// speakers remember (the sentences actually heard), pause and resume, and that neither plays a thinking filler (removed
+// 2026-11-11: the first thing heard is the answer). The server half is scripts/test_voice_conversational.py;
 // the shared tables in scripts/fixtures keep the two from drifting. Plain node: fake AudioContext, fake speech synthesis.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -21,51 +21,10 @@ const table = name => JSON.parse(fs.readFileSync('scripts/fixtures/' + name, 'ut
   assert.equal(bc.endsInQuestion(['Do you want it?', 'Okay then.']), false);
   assert.equal(bc.endsInQuestion([]), false);
 
-  // ---- clip decoding ---------------------------------------------------------------------------------------------
   globalThis.__tr = { readEvents: async () => {} };
-  const vf = await load('static/js/voiceFiller.js', 'const {readEvents}=globalThis.__tr;\n');
-  const pcm = Buffer.alloc(8); pcm.writeInt16LE(16384, 0); pcm.writeInt16LE(-16384, 2);
-  const clip = vf.clipFromEvents([{ filler: { id: 'okay', text: 'Okay.' } }, { sample_rate: 24000 }, { audio: pcm.toString('base64') }]);
-  assert.equal(clip.rate, 24000); assert.equal(clip.samples.length, 4); assert.equal(clip.samples[0], .5); assert.equal(clip.samples[1], -.5);
-  assert.deepEqual(vf.clipFromEvents([{ filler: { id: 'okay', text: 'Okay.' } }]), { id: 'okay', text: 'Okay.' }, 'a device voice gets the text only');
-  assert.equal(vf.clipFromEvents([{ filler: { id: 'okay', text: 'Okay.' } }, { cached: false }]), null, 'a neural phrase not cached yet is skipped');
-  assert.equal(vf.clipFromEvents([]), null);
+  assert.equal(fs.existsSync('static/js/voiceFiller.js'), false, 'the filler gate is gone');
 
-  // ---- the acknowledgement gate: timing rules with a manual clock -------------------------------------------------
-  const clock = () => {
-    const timers = []; let id = 0;
-    return { setTimer: (fn, ms) => { timers.push({ id: ++id, fn, ms }); return id; }, clearTimer: handle => { const at = timers.findIndex(t => t.id === handle); if (at >= 0) timers.splice(at, 1); }, timers,
-      fire: async () => { const t = timers.shift(); if (t) await t.fn(); await tick(); } };
-  };
-  const make = (options = {}) => {
-    const c = clock(), played = [], asked = []; let n = 0;
-    const gate = vf.createFillerGate({ setTimer: c.setTimer, clearTimer: c.clearTimer, blocked: () => !!options.blocked,
-      fetchClip: async (last, text) => { asked.push([last, text]); return options.none ? null : { id: 'f' + (++n), text: 'Okay.' }; }, play: clip => played.push(clip.id) });
-    return { gate, c, played, asked };
-  };
-  assert.equal(vf.FILLER_AFTER_MS, 500);
-  {
-    const { gate, c, played, asked } = make();
-    assert.equal(gate.arm({ text: 'what time is it' }), true); assert.equal(c.timers[0].ms, 500, 'it waits half a second');
-    await tick(); assert.deepEqual(asked, [[null, 'what time is it']], 'the clip is fetched at once so it is in hand when the time is up');
-    await c.fire(); assert.deepEqual(played, ['f1'], 'no sentence by then: the acknowledgement plays');
-    gate.arm({ text: 'and now' }); await tick(); assert.equal(asked.at(-1)[0], 'f1', 'the last phrase is passed so the server never repeats it');
-    await c.fire(); assert.deepEqual(played, ['f1', 'f2']);
-  }
-  { // a quick answer
-    const { gate, c, played } = make(); gate.arm({ text: 'hi' }); await tick(); gate.sentenceReady(); await c.fire();
-    assert.deepEqual(played, [], 'the first sentence was ready in time: nothing plays'); assert.equal(c.timers.length, 0);
-  }
-  { // cancel, work updates, muted, blocked, nothing playable
-    const a = make(); a.gate.arm({ text: 'x' }); await tick(); a.gate.cancel(); await a.c.fire(); assert.deepEqual(a.played, [], 'an interruption cancels it');
-    const b = make(); assert.equal(b.gate.arm({ text: 'x', workUpdate: true }), false); assert.equal(b.c.timers.length, 0);
-    const m = make(); assert.equal(m.gate.arm({ text: 'x', muted: true }), false);
-    const k = make({ blocked: true }); k.gate.arm({ text: 'x' }); await tick(); await k.c.fire(); assert.deepEqual(k.played, [], 'not while the user is talking again');
-    const none = make({ none: true }); none.gate.arm({ text: 'x' }); await tick(); await none.c.fire(); assert.deepEqual(none.played, [], 'no clip, no sound');
-    const again = make(); again.gate.arm({ text: 'x' }); again.gate.arm({ text: 'y' }); assert.equal(again.c.timers.length, 1, 'arming again replaces the earlier timer');
-  }
-
-  // ---- the call's neural speaker: what was heard, pause and resume, an acknowledgement ahead of the answer ----------
+  // ---- the call's neural speaker: what was heard, pause and resume, no filler -----------------------------------------
   const created = [], requests = [];
   class FakeContext {
     constructor() { this.currentTime = 0; this.destination = {}; this.state = 'running'; this.suspends = 0; this.resumes = 0; FakeContext.last = this; }
@@ -110,23 +69,15 @@ const table = name => JSON.parse(fs.readFileSync('scripts/fixtures/' + name, 'ut
     speaker.reset(); assert.deepEqual(speaker.heard(), [], 'and is forgotten when the next reply starts');
     speaker.dispose();
   }
-  { // an acknowledgement is queued ahead of the answer and is not part of what was heard
-    const { speaker, events, context } = await fresh();
-    speaker.filler({ id: 'okay', text: 'Okay.', rate: 24000, samples: new Float32Array(12000).fill(.1) }); await tick();
-    assert.equal(created.length, 1, 'the clip is scheduled at once'); assert.equal(created[0].buffer.length, 12000);
-    await wait(60); assert.deepEqual(events, ['start'], 'it is the first sound');
-    speaker.feed('The answer is here.'); speaker.finish(); await tick();
-    requests[0].send({ sample_rate: 24000 }); requests[0].audio(1); requests[0].finish(); await tick();
-    assert.equal(created.length, 2); assert.ok(created[1].at >= created[0].at + created[0].buffer.duration - 1e-9, 'the answer queues right behind the acknowledgement');
-    context.currentTime = created[1].at + .01;
-    assert.deepEqual(speaker.heard(), ['The answer is here.'], 'the acknowledgement is not part of the reply that is remembered');
-    speaker.cancel(); speaker.dispose();
-  }
-  { // an acknowledgement that ends while the reply is still being written reports the lull, so the owner keeps waiting
+  { // no filler: nothing is scheduled until the answer's first sentence has audio
     const { speaker, events } = await fresh();
-    speaker.filler({ id: 'okay', text: 'Okay.', rate: 24000, samples: new Float32Array(2400).fill(.1) }); await wait(50);
-    created[0].onended(); assert.deepEqual(events, ['start', 'end']);
-    speaker.dispose();
+    assert.equal(speaker.filler, undefined, 'the neural speaker has no filler to play');
+    speaker.feed('The answer is here.'); await tick();
+    assert.equal(created.length, 0, 'silence while the answer is being written'); assert.deepEqual(events, []);
+    speaker.finish(); await tick();
+    requests[0].send({ sample_rate: 24000 }); requests[0].audio(1); requests[0].finish(); await tick();
+    assert.equal(created.length, 1, 'the first sound is the answer'); await wait(60); assert.deepEqual(events.slice(0, 2).sort(), ['sentence0', 'start']);
+    speaker.cancel(); speaker.dispose();
   }
 
   // ---- the device (OS voice) speaker ------------------------------------------------------------------------------
@@ -138,22 +89,21 @@ const table = name => JSON.parse(fs.readFileSync('scripts/fixtures/' + name, 'ut
     const events = [];
     const speaker = vo.createSpeaker({ onStart: () => events.push('start'), onEnd: () => events.push('end'), onSentenceStart: i => events.push('sentence' + i), onSentenceReady: i => events.push('ready' + i) });
     speaker.reset();
-    speaker.filler({ text: 'Mm, let me think.' });
-    assert.equal(spoken.length, 1); assert.deepEqual(events, [], 'an acknowledgement is not a sentence of the reply');
-    spoken[0].handlers.start(); assert.deepEqual(events, ['start']); assert.deepEqual(speaker.heard(), []);
+    assert.equal(speaker.filler, undefined, 'the device speaker has no filler to say');
     speaker.feed('First one here. Second one here.'); speaker.finish();
-    assert.deepEqual(spoken.map(u => u.text), ['Mm, let me think.', 'First one here.', 'Second one here.']);
-    assert.deepEqual(events.filter(e => e.startsWith('ready')), ['ready0', 'ready1'], 'the answer\'s sentences are numbered from zero, the acknowledgement is not counted');
-    spoken[1].handlers.start(); assert.deepEqual(speaker.heard(), ['First one here.'], 'the sentences that began to play, raw, in order');
+    assert.deepEqual(spoken.map(u => u.text), ['First one here.', 'Second one here.'], 'only the answer is spoken');
+    assert.deepEqual(events.filter(e => e.startsWith('ready')), ['ready0', 'ready1'], 'the answer\'s sentences are numbered from zero');
+    spoken[0].handlers.start(); assert.deepEqual(events.slice(-2), ['sentence0', 'start']);
+    assert.deepEqual(speaker.heard(), ['First one here.'], 'the sentences that began to play, raw, in order');
     speaker.pause(); assert.equal(paused, 1); assert.equal(speaker.paused, true); speaker.resume(); assert.equal(resumed, 1);
     speaker.pause(); speaker.cancel(); assert.equal(cancelled, 1); assert.equal(resumed, 2, 'cancelling a paused voice resumes the queue so the next reply is not stuck');
     assert.deepEqual(speaker.heard(), ['First one here.'], 'still readable after the cancel');
     speaker.reset(); assert.deepEqual(speaker.heard(), []);
     // voices are chosen through the shared wrapper too
     const both = callVoice.createVoiceSpeaker({}, () => ({ provider: 'device' }), () => speaker);
-    both.reset(); assert.equal(typeof both.pause, 'function'); assert.equal(typeof both.heard, 'function'); assert.equal(typeof both.filler, 'function');
+    both.reset(); assert.equal(typeof both.pause, 'function'); assert.equal(typeof both.heard, 'function'); assert.equal(both.filler, undefined);
     both.cancel(); both.dispose();
   }
 
-  console.log('Conversational voice (spoken style, backchannels, acknowledgement gate, heard sentences, pause and resume): passed');
+  console.log('Conversational voice (spoken style, backchannels, no filler, heard sentences, pause and resume): passed');
 })().catch(error => { console.error(error); process.exit(1); });

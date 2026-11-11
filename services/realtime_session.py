@@ -19,7 +19,7 @@ from typing import Awaitable, Callable, Optional
 
 from fastapi import HTTPException
 
-from core import accounts, model_endpoints, phone_audio, realtime_usage, realtime_voice
+from core import accounts, model_endpoints, phone_audio, realtime_usage, realtime_voice, voice_style
 from services import agent_calls as calls
 
 logger = logging.getLogger(__name__)
@@ -44,9 +44,9 @@ BARGE_GAP = 0.25                      # GPT-Live: no audio for this long while t
 
 LIVE_PROMPT = ("You are the conversational voice of this Kairos agent, speaking aloud in real time. Keep answers short and "
                "natural, a sentence or two, no lists, no markdown. Anything that needs research, files, code, apps or other "
-               "actions is done by the application behind you: delegate it, say a brief acknowledgement, and never invent "
-               "results. Work continues when speech is interrupted; finished work is given to you and you then say the "
-               "outcome plainly.")
+               "actions is done by the application behind you: delegate it, say in one short sentence what you started, and "
+               "never invent results. Work continues when speech is interrupted; finished work is given to you and you then "
+               "say the outcome plainly. " + voice_style.NO_FILLER)
 
 
 def instructions_for(call: dict, adapter=None) -> str:
@@ -432,7 +432,7 @@ class RealtimeSession:
                 try:
                     job = calls.delegate(self.call, title, request, "rt:" + event["call_id"])
                     output = (f"Work started as task {job['task_id']}. Do not claim it is complete: you will be told when it is "
-                              "done. Say a short acknowledgement now.")
+                              "done. Tell the person in one short sentence what you started.")
                     await self.sink({"type": "work", "task_id": job["task_id"], "title": job["title"], "status": "running"})
                 except HTTPException as error:
                     output = f"The work could not be started: {error.detail}"

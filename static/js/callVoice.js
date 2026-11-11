@@ -70,23 +70,12 @@ export function neuralSpeaker(options, getSelection) {
   chunker=createChunker(enqueue);
   // Sentences whose audio has reached the output clock. The clock stops while paused, so this is what was really heard.
   const playedNow=()=>context?jobs.filter(job=>job.startAt!=null&&job.startAt<=context.currentTime+.001).map(job=>job.raw):[];
-  // An acknowledgement clip ({rate, samples}) goes onto the timeline ahead of the answer, which queues behind it.
-  const playClip=clip=>{
-    if(cancelled||!context||!clip?.samples?.length||!clip.rate)return;
-    const mine=generation, buffer=context.createBuffer(1,clip.samples.length,clip.rate);buffer.copyToChannel(clip.samples,0);
-    const node=context.createBufferSource();node.buffer=buffer;node.connect(analyser);
-    const at=Math.max(context.currentTime+.025,next);next=at+buffer.duration;sources.add(node);
-    node.onended=()=>{sources.delete(node);if(mine!==generation||cancelled)return;if(head>=jobs.length&&!sources.size&&!finished){speaking=false;cancelAnimationFrame(frame);options.onLevel?.(0);options.onEnd?.();}else settle();};
-    node.start(at);
-    if(!speaking){speaking=true;setTimeout(()=>{if(!cancelled&&mine===generation){options.onStart?.();measure();}},Math.max(0,(at-context.currentTime)*1000));}
-  };
   return {
     get speaking(){return speaking;},
     get paused(){return paused;},
     heard(){return jobs.length?playedNow():lastHeard.slice();},
     pause(){if(context&&speaking&&!paused&&!cancelled){paused=true;poke('suspend');}},
     resume(){if(paused){paused=false;poke('resume');}},
-    filler:playClip,
     async prepare(){this.unlock();await context.resume();},
     // Make the audio context and ask it to run, without waiting. Called inside a tap, this is what lets a phone (WebKit)
     // or a browser's autoplay rule start the bot's voice; outside one, resume() can wait for a tap that never comes.
@@ -118,7 +107,6 @@ export function createVoiceSpeaker(options, getSelection = () => ({ provider: 'd
     heard() { return current.heard(); },
     pause() { current.pause(); },
     resume() { current.resume(); },
-    filler(clip) { current.filler(clip); },
     // Creates (and resumes) the audio context a neural voice plays through; the OS voice needs nothing.
     async prepare() { if (pick() === neural) await neural.prepare(); },
     reset() { clearTimeout(timer); current = pick(); current.reset(); },

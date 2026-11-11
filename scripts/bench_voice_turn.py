@@ -22,7 +22,6 @@ What runs for real (full mode)
   speech-to-text   core/speech.py transcribe_call: pywhispercpp on CPU, or the whisper.cpp CUDA server (core/speech_acceleration)
   turn             a scripted stand-in model (no cloud call): first token after --ttft ms, then --tokens-per-s
   sentences        the app's own createChunker (first clause / first sentence release, 100 ms flush)
-  acknowledgement  the app's own createFillerGate (the half-second rule)
   end of turn      --smart-turn real: the app's static/js/turnEndpoint.js (700 ms ask timeout) posting the utterance so far to
                    core/turn_detect.py with the real Smart Turn model; oracle: a perfect verdict after 15 ms; off: silence only
   voice            Windows SAPI; "first audio" is the moment the engine first writes audio, plus the 25 ms scheduling lead.
@@ -72,7 +71,6 @@ SPEECH = [
 ]
 DIAGNOSTIC = {"pause_long"}
 BARGE = [("interrupt", "Actually can you say that again please?"), ("nod", "Yeah.")]
-FILLER_TEXT = "Okay."
 
 
 def say(message):
@@ -400,7 +398,7 @@ def summarize(result, fixtures, label):
     texts = {f["name"]: f["text"] for f in fixtures}
     diagnostic = [t for t in result["turns"] if t["fixture"] in DIAGNOSTIC]
     turns = [t for t in result["turns"] if not t.get("failed") and t["fixture"] not in DIAGNOSTIC]
-    metrics = ["endpoint_ms", "stt_ms", "transcript_final_ms", "first_token_ms", "first_sentence_ms", "first_audio_ms", "first_sound_ms"]
+    metrics = ["endpoint_ms", "stt_ms", "transcript_final_ms", "first_token_ms", "first_sentence_ms", "first_audio_ms"]
     summary = {"label": label, "turns": len(turns), "failed": sum(1 for t in result["turns"] if t.get("failed") and t["fixture"] not in DIAGNOSTIC),
                "splits": sum(1 for t in turns if t.get("segments", 1) > 1),
                "long_pause_splits": sum(1 for t in diagnostic if t.get("segments", 1) > 1), "long_pause_n": len(diagnostic)}
@@ -411,9 +409,6 @@ def summarize(result, fixtures, label):
     for metric in metrics:
         values = [t.get(metric) for t in whole]
         summary[metric] = {"p50": percentile(values, 0.5), "p95": percentile(values, 0.95), "n": sum(v is not None for v in values)}
-    fillers = [t for t in turns if t.get("filler_ms") is not None]
-    summary["filler"] = {"turns": len(fillers), "p50": percentile([t["filler_ms"] for t in fillers], 0.5),
-                         "after_filler_p50": percentile([t.get("first_audio_after_filler_ms") for t in fillers], 0.5)}
     summary["wer"] = statistics.mean(wer(texts.get(t["fixture"], ""), t.get("transcript", "")) for t in turns) if turns else None
     summary["stt_modes"] = {mode: sum(1 for t in turns if t.get("stt_mode") == mode) for mode in sorted({t.get("stt_mode") for t in turns if t.get("stt_mode")})}
     summary["by_fixture"] = {}
@@ -455,7 +450,7 @@ def fmt(value):
 
 def table(summaries, meta):
     rows = [("endpoint decided", "endpoint_ms"), ("transcript final", "transcript_final_ms"), ("first token", "first_token_ms"),
-            ("first sentence ready", "first_sentence_ms"), ("first audio (the answer)", "first_audio_ms"), ("first sound (ack or answer)", "first_sound_ms")]
+            ("first sentence ready", "first_sentence_ms"), ("first audio (the answer)", "first_audio_ms")]
     width, col = 42, 17
     cell = lambda a, b: f"{fmt(a)} / {fmt(b)}"   # noqa: E731
     lines = [f"Voice turn benchmark: {meta}", "", "all numbers: milliseconds after the user stops speaking, p50 / p95"]
@@ -469,8 +464,7 @@ def table(summaries, meta):
     lines.append("")
     for s in summaries:
         lines.append(f"{s['label']}: {s['turns']} turns, {s['timed']} timed ({s['failed']} failed; split by the 0.6 s mid-sentence pause {s['splits']}; a 1.0 s pause split {s['long_pause_splits']}/{s['long_pause_n']}), "
-                     f"word error {0 if s['wer'] is None else s['wer'] * 100:.0f}%, final pass {s['stt_modes']}, acknowledgement on {s['filler']['turns']} turns "
-                     f"(first sound p50 {fmt(s['filler']['p50'])} ms, answer behind it p50 {fmt(s['filler']['after_filler_p50'])} ms), "
+                     f"word error {0 if s['wer'] is None else s['wer'] * 100:.0f}%, final pass {s['stt_modes']}, "
                      f"interrupts heard {s['barge']['interrupts_heard']}/{s['barge']['interrupt_n']}, nods ignored {s['barge']['nods_ignored']}/{s['barge']['nod_n']}")
     lines.append("")
     lines.append("by fixture, first audio p50 / speech-to-text p50 (ms): " + "; ".join(
@@ -498,11 +492,11 @@ def light_pace(args, smart):
     return 4 if smart == "real" else 0
 
 
-def harness_config(services, fixtures, barge, backend, args, filler, ttft=None, smart=""):
+def harness_config(services, fixtures, barge, backend, args, ttft=None, smart=""):
     return {"service_url": services.url, "fixtures": fixtures, "barge": barge, "repeats": args.repeats, "barge_repeats": args.barge_repeats,
             "backend": backend, "partials": backend == "cuda", "pace": light_pace(args, smart), "silence_ms": 700,
             "ttft_ms": args.ttft if ttft is None else ttft, "tokens_per_s": args.tokens_per_s, "reply": REPLY, "leak_gain": args.leak_gain,
-            "filler_clip": filler is not None, "filler_ms": filler or 0, "smart_turn": smart or "", "smart_ms": 15}
+            "smart_turn": smart or "", "smart_ms": 15}
 
 
 def dev_profile():
@@ -659,7 +653,7 @@ def run_light(args, work):
         summaries = []
         runs = (("slow model", 900), ("fast model", 60)) if not (smart or kokoro) else (("fast model", 60),)
         for label, ttft in runs:
-            result = run_harness(harness_config(services, fixtures, barge, "cuda", args, filler=900, ttft=ttft, smart="real" if smart else ""), work)
+            result = run_harness(harness_config(services, fixtures, barge, "cuda", args, ttft=ttft, smart="real" if smart else ""), work)
             summaries.append(summarize(result, fixtures, label + (" +SmartTurn" if smart else "") + (" +Kokoro" if kokoro else "")))
         what = "fake speech-to-text 150 ms and voice 50 ms" + (", fake Smart Turn session" if smart else "") + (", fake Kokoro engine" if kokoro else "")
         return summaries, table(summaries, f"CI-light ({what}, synthetic audio)")
@@ -722,10 +716,6 @@ def run(args):
         sapi = SapiWorker(args.voice)
         say("rendering fixtures with the OS voice ...")
         fixtures, barge = build_fixtures(work / "fixtures", render=sapi.samples)
-        filler = sapi.render(FILLER_TEXT)
-        spoken_filler = pcm_to_float(filler["raw"])
-        first, last = edges(spoken_filler, 0.01)
-        filler_ms = round((last - first) / 16) + 40   # the clip as it would be cached: the voice's own padding trimmed
         summaries, hardware, active = [], [], None
         for label, backend, ttft, smart, engine in scenarios:
             if active != backend:
@@ -746,7 +736,7 @@ def run(args):
             services = Services(False, backend, "small.en", sapi=sapi, voice_engine=engine, kokoro_voice_name=args.kokoro_voice, hd_voice_name=args.hd_voice)
             try:
                 say(f"running {label} ({args.repeats} x {len(fixtures)} turns, real time) ...")
-                result = run_harness(harness_config(services, fixtures, barge, backend, args, filler=filler_ms, ttft=ttft, smart=smart), work)
+                result = run_harness(harness_config(services, fixtures, barge, backend, args, ttft=ttft, smart=smart), work)
                 summaries.append(summarize(result, fixtures, label))
                 if services.hd_first:
                     summaries[-1]["hd_first_audio"] = {"p50": percentile(services.hd_first, 0.5), "p95": percentile(services.hd_first, 0.95), "n": len(services.hd_first)}

@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from core.middleware import get_current_user, require_admin, require_user
 from services import agent_calls as calls
-from core import call_voices, voice_fillers
+from core import call_voices
 from services import realtime_session
 from core import realtime_settings, realtime_usage
 
@@ -156,37 +156,6 @@ async def speak(body: Speak, user: str = Depends(require_user)):
         except Exception:
             yield '{"error":"Voice playback failed. Check the local voice engine and selected profile."}\n'
     return StreamingResponse(events(),media_type='application/x-ndjson',headers={'Cache-Control':'no-store','X-Accel-Buffering':'no'})
-
-class FillerAsk(BaseModel):
-    last: str | None = Field(default=None, max_length=40)
-    text: str = Field(default='', max_length=6000)   # what the user just said, to choose a fitting phrase
-    model: str | None = Field(default=None, max_length=160)   # a neural voice's engine and profile; none = the device voice
-    voice: str | None = Field(default=None, max_length=160)
-
-_background = set()
-
-def _later(coroutine):
-    task = asyncio.ensure_future(coroutine); _background.add(task); task.add_done_callback(_background.discard)
-
-@router.post('/filler')
-async def filler(body: FillerAsk, user: str = Depends(require_user)):
-    """A short acknowledgement to play while the answer is still being written. A device voice gets the phrase's text
-    (the OS renders it at once); a neural voice gets cached audio, or nothing and a background render for next time."""
-    ident, _ = voice_fillers.pick(body.last, body.text)
-    if body.model and body.voice and not voice_fillers.cached(body.model, body.voice, ident):
-        _later(voice_fillers.render(body.model, body.voice, ident))
-    lines = voice_fillers.event_lines(ident, body.model or '', body.voice or '')
-    return StreamingResponse(iter([line + '\n' for line in lines]), media_type='application/x-ndjson', headers={'Cache-Control':'no-store'})
-
-class FillerWarm(BaseModel):
-    model: str = Field(min_length=1, max_length=160)
-    voice: str = Field(min_length=1, max_length=160)
-
-@router.post('/filler/warm')
-async def filler_warm(body: FillerWarm, user: str = Depends(require_user)):
-    """Render this voice's acknowledgements in the background (a call start asks once; they are kept on disk)."""
-    _later(voice_fillers.warm(body.model, body.voice))
-    return {'ok': True}
 
 @router.get('/choices')
 async def choices(user: str = Depends(require_user)):

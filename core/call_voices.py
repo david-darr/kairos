@@ -1,5 +1,5 @@
 """The account's Voice: the one place every speaker goes through (calls, Open Mic, bots reading aloud, voice notes,
-fillers, phone calls to the person and to others, Discord voice). Settings > Speech offers one choice (Locked shape,
+phone calls to the person and to others, Discord voice). Settings > Speech offers one choice (Locked shape,
 David 2026-11-10): Kairos Voice (the default: Kokoro on this computer, or the device voice until Kokoro is ready),
 GPT-Live (a realtime call mode; anything read aloud uses Kairos Voice), ElevenLabs (the person's own key,
 core/elevenlabs_voice.py), and under More options a Voicebox the person runs (core/voicebox_voice.py) or another local
@@ -209,9 +209,35 @@ async def catalog():
 
 FALLS_BACK = ('elevenlabs', 'voicebox', 'hd')
 
+
+def sweep_old_filler_cache() -> int:
+    """Calls no longer play thinking fillers ("Mm, let me think.", removed 2026-11-11), so the clips they cached per voice
+    are dead weight. Deletes only the .pcm files (and half-written .pcm.tmp) directly inside this account's
+    voice_fillers folder, then the folder if it is left empty. Never anything else. Returns how many files went."""
+    import os
+    folder = accounts.path('voice_fillers')
+    if not os.path.isdir(folder) or os.path.islink(folder):
+        return 0
+    removed = 0
+    try:
+        entries = list(os.scandir(folder))
+    except OSError:
+        return 0
+    for entry in entries:
+        if entry.name.endswith(('.pcm', '.pcm.tmp')) and entry.is_file(follow_symlinks=False):
+            try:
+                os.remove(entry.path); removed += 1
+            except OSError:
+                pass
+    try:
+        os.rmdir(folder)            # only succeeds when nothing else is in it
+    except OSError:
+        pass
+    return removed
+
 async def pcm(text, model, voice):
     # Whatever reaches a voice engine is plain words: markdown that slipped past the model is stripped here, once, for
-    # every caller (calls, bots, voice notes, fillers).
+    # every caller (calls, bots, voice notes).
     from core import voice_style
     text = voice_style.strip_for_speech(text)
     if not text: return

@@ -388,9 +388,8 @@ const load = async (file, prefix = '') => import('data:text/javascript;base64,' 
   {
     const pt = await load('static/js/partialTranscript.js', 'const encodeWav = pcm => pcm;\n');
     const vt = await load('static/js/voiceTrace.js');
-    const vf = await load('static/js/voiceFiller.js');
     const bc = await load('static/js/backchannel.js');
-    const deps = { filler: async () => null, transcribe: async () => '', partial: async () => ({ text: '', segments: [] }), status: async () => ({}), api: async () => ({}) };
+    const deps = { transcribe: async () => '', partial: async () => ({ text: '', segments: [] }), status: async () => ({}), api: async () => ({}) };
     const calls = { transcribe: [], partial: [], api: [] };
     globalThis.__omDeps = {
       createRecorder: () => { throw new Error('the loudness recorder is not expected here'); },
@@ -401,11 +400,11 @@ const load = async (file, prefix = '') => import('data:text/javascript;base64,' 
       getSpeechStatus: () => deps.status(),
       api: async (path, options) => { calls.api.push({ path, body: JSON.parse(options?.body || '{}') }); return deps.api(path, options); },
       createPartialTranscriber: pt.createPartialTranscriber, createVoiceSpeaker: callVoice.createVoiceSpeaker, createVoiceTrace: vt.createVoiceTrace,
-      createFillerGate: vf.createFillerGate, fetchFillerClip: (...args) => deps.filler(...args), isBackchannel: bc.isBackchannel, endsInQuestion: bc.endsInQuestion,
+      isBackchannel: bc.isBackchannel, endsInQuestion: bc.endsInQuestion,
       pickVoice: (await load('static/js/callDefaults.js')).pickVoice,
     };
-    const om = await load('static/js/openMic.js', 'const {createRecorder,createCallRecorder,isCallRecordingSupported,isSpeechOutputSupported,transcribeBlob,transcribePartial,getSpeechStatus,api,createPartialTranscriber,createVoiceSpeaker,createVoiceTrace,createFillerGate,fetchFillerClip,isBackchannel,endsInQuestion,pickVoice}=globalThis.__omDeps;\n');
-    const reset = () => { calls.transcribe.length = calls.partial.length = calls.api.length = 0; deps.transcribe = async () => ''; deps.partial = async () => ({ text: '', segments: [] }); deps.status = async () => ({}); deps.api = async () => ({}); deps.filler = async () => null; };
+    const om = await load('static/js/openMic.js', 'const {createRecorder,createCallRecorder,isCallRecordingSupported,isSpeechOutputSupported,transcribeBlob,transcribePartial,getSpeechStatus,api,createPartialTranscriber,createVoiceSpeaker,createVoiceTrace,isBackchannel,endsInQuestion,pickVoice}=globalThis.__omDeps;\n');
+    const reset = () => { calls.transcribe.length = calls.partial.length = calls.api.length = 0; deps.transcribe = async () => ''; deps.partial = async () => ({ text: '', segments: [] }); deps.status = async () => ({}); deps.api = async () => ({}); };
     const quiet = Float32Array.from({ length: 16000 }, () => .01);       // a clip: 1 s of 16 kHz samples
     const harness = (options = {}) => {
       const h = { sent: [], log: [], states: [], errors: [], enabled: [], closed: 0, speaker: null, finishTurn: null, turns: 0 };
@@ -477,16 +476,15 @@ const load = async (file, prefix = '') => import('data:text/javascript;base64,' 
       assert.deepEqual(h.sent.at(-1), 'yeah'); h.mic.stop();
     }
 
-    // 2c. Instant acknowledgement: after half a second with no sentence ready a clip plays; a quick answer never hears one.
+    // 2c. No thinking filler (removed 2026-11-11): a slow answer is preceded by silence, and its first words are the first sound.
     {
-      reset(); const h = harness({ slowStart: true }); deps.transcribe = async () => 'what is the capital of france'; const asked = [];
-      deps.filler = async ({ last, text }) => { asked.push([last, text]); return { id: 'okay', text: 'Okay.' }; };
+      reset(); const h = harness({ slowStart: true }); deps.transcribe = async () => 'what is the capital of france';
       await h.mic.start(); h.say(); await wait(5);
-      assert.equal(h.speaker.fillers.length, 0, 'nothing before the half second'); await wait(560);
-      assert.deepEqual(h.speaker.fillers, [{ id: 'okay', text: 'Okay.' }], 'a slow answer gets its acknowledgement'); assert.deepEqual(asked, [[null, 'what is the capital of france']]);
-      h.emit(); h.finishTurn(); h.speakerOptions.onEnd(); await tick(); h.say(); await wait(5); h.emit(); await wait(560);
-      assert.equal(h.speaker.fillers.length, 1, 'the second answer started within the half second: no acknowledgement'); assert.equal(asked.at(-1)[0], 'okay', 'the last phrase is passed so it is not repeated');
-      h.mic.stop();
+      assert.deepEqual(h.sent, ['what is the capital of france']); await wait(700);
+      assert.deepEqual(h.speaker.fillers, [], 'well past the old half second: no filler'); assert.deepEqual(h.speaker.feeds, [], 'nothing is spoken before the answer');
+      assert.equal(calls.api.some(c => c.path.includes('/filler')), false, 'no filler is asked for');
+      h.emit(); assert.deepEqual(h.speaker.feeds, ['Hello there. '], 'the answer is the first thing fed to the voice');
+      h.finishTurn(); h.mic.stop();
     }
 
     // 3. A pause that outlasts the endpoint but not the thought is ONE turn; noise and empty transcripts send nothing.

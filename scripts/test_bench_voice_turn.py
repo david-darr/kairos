@@ -1,5 +1,5 @@
 """The voice turn benchmark in CI-light mode (scripts/bench_voice_turn.py --light): fake speech-to-text and voice, synthetic
-audio, the app's real endpoint, rolling transcript, chunker, acknowledgement and barge-in modules driven by node. It checks
+audio, the app's real endpoint, rolling transcript, chunker and barge-in modules driven by node. It checks
 that the plumbing and the arithmetic are right, not how fast this machine is. Run: python scripts/test_bench_voice_turn.py
 """
 import shutil
@@ -68,13 +68,12 @@ class LightRun(unittest.TestCase):
         self.assertEqual(self.fast["splits"], 0, "the 0.6 s pause inside a sentence does not split the turn")
         self.assertEqual(self.fast["long_pause_splits"], self.fast["long_pause_n"], "a 1.0 s pause does split it (no Smart Turn here)")
 
-    def test_only_the_slow_model_gets_an_acknowledgement_after_half_a_second(self):
-        self.assertEqual(self.fast["filler"]["turns"], 0, "the first words arrive in time: no acknowledgement")
-        self.assertEqual(self.slow["filler"]["turns"], self.slow["turns"])
-        gap = self.slow["first_sound_ms"]["p50"] - self.slow["transcript_final_ms"]["p50"]
-        self.assertAlmostEqual(gap, 500 + 25, delta=60, msg="the acknowledgement is heard half a second (plus the 25 ms lead) after the turn went out")
-        self.assertLess(self.slow["first_sound_ms"]["p50"], self.slow["first_audio_ms"]["p50"])
-        self.assertEqual(self.fast["first_sound_ms"]["p50"], self.fast["first_audio_ms"]["p50"])
+    def test_no_filler_the_first_sound_is_the_answer(self):
+        # Thinking fillers were removed (2026-11-11): nothing is measured or played before the answer's first audio.
+        for summary in self.summaries:
+            self.assertNotIn("filler", summary)
+            self.assertNotIn("first_sound_ms", summary)
+        self.assertGreater(self.slow["first_audio_ms"]["p50"], self.fast["first_audio_ms"]["p50"], "a slow model is simply heard later")
 
     def test_barge_in_pauses_fast_and_a_nod_does_not_interrupt(self):
         for summary in self.summaries:

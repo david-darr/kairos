@@ -26,10 +26,13 @@ import base64
 import json
 from typing import Optional
 
+from core.voice_style import NO_FILLER
+
 TOOL_NAME = "do_work"
 TOOL_DESCRIPTION = ("Hand a task to the assistant's own full model and tools (research, files, code, apps, anything that "
                     "needs more than conversation). It returns at once; the result is announced to you when it is done. "
-                    "Say a short acknowledgement while it runs. Never claim the work is finished until it is announced.")
+                    "Tell the person in one short sentence what you started. Never claim the work is finished until it is "
+                    "announced.")
 TOOL_PARAMETERS = {"type": "object", "properties": {
     "title": {"type": "string", "description": "Three to six words naming the task."},
     "request": {"type": "string", "description": "What to do, with the details the person gave, in full sentences."}},
@@ -37,9 +40,9 @@ TOOL_PARAMETERS = {"type": "object", "properties": {
 
 REALTIME_PROMPT = ("You are the conversational voice of this Kairos agent, speaking aloud in real time. Keep answers short and "
                    "natural, a sentence or two, no lists, no markdown. You have one tool, do_work: call it for anything that "
-                   "needs research, files, code, apps or other actions, then say a brief acknowledgement. Never invent "
-                   "results. Work continues independently when speech is interrupted; finished work is announced to you "
-                   "and you then say the outcome plainly.")
+                   "needs research, files, code, apps or other actions, then say in one short sentence what you started. Never "
+                   "invent results. Work continues independently when speech is interrupted; finished work is announced to "
+                   "you and you then say the outcome plainly. " + NO_FILLER)
 
 BASE_OVERRIDE: dict = {}          # tests: provider name -> a ws://127.0.0.1:port base standing in for the real host
 
