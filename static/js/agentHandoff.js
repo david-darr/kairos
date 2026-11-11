@@ -4,6 +4,7 @@ import { api, el, toast } from './api.js';
 import { renderMessageBody } from './chatContent.js';
 import * as chatStream from './chatStream.js';
 import { agentAvatar as dotAvatar } from './agentAvatar.js';
+import { renderBotCreatedCard } from './botCreatedCard.js';
 
 const STATUS = { queued: 'Queued', working: 'Working', needs_you: 'Needs you', done: 'Done', failed: 'Failed' };
 
@@ -14,6 +15,8 @@ export function agentAvatar(name, color, id, spec, size = 28) {
 }
 
 export function renderAgentHandoff(message, sessionId) {
+  // A bot made from this conversation (core/bot_maker_tools.py) shares the handoff rows' history and refresh.
+  if (message.type === 'bot_created') return renderBotCreatedCard(message);
   if (message.type !== 'handoff' && !message.agent_id) return null;
   const key = message.type === 'handoff' ? message.id : message.handoff_message_id;
   const card = el('div', { class: 'msg assistant agent-message', 'data-handoff-key': key || '',
@@ -65,8 +68,9 @@ export function watchAgentHandoffs(messages, getSessionId, onChange = () => {}) 
     try {
       const session = await api(`/api/sessions/${encodeURIComponent(id)}`);
       if (disposed || id !== getSessionId() || !messages.isConnected) return;
-      for (const message of session.messages || []) {
-        const key = message.type === 'handoff' ? message.id : message.handoff_message_id;
+      const saved = session.messages || [];
+      for (const [index, message] of saved.entries()) {
+        const key = message.type === 'handoff' || message.type === 'bot_created' ? message.id : message.handoff_message_id;
         if (!key) continue;
         const existing = [...messages.children].find(node => node.dataset.handoffKey === key);
         if (existing?.dataset.handoffSignature === JSON.stringify(message)) continue;
@@ -78,7 +82,10 @@ export function watchAgentHandoffs(messages, getSessionId, onChange = () => {}) 
         if (existing) existing.replaceWith(node);
         else {
           messages.querySelector('.agent-chat-empty')?.remove();
-          messages.insertBefore(node, messages.querySelector(':scope > .msg[aria-busy="true"]'));
+          // A bot card is saved before its turn's reply; once that reply is on screen, it goes above it.
+          const replied = message.type === 'bot_created' && saved.slice(index + 1).some(m => m.role === 'assistant' && !m.type);
+          const reply = replied ? [...messages.querySelectorAll(':scope > .msg.assistant:not(.agent-message):not(.bot-made-card)')].at(-1) : null;
+          messages.insertBefore(node, messages.querySelector(':scope > .msg[aria-busy="true"]') || reply);
         }
         onChange();
         if (follow) messages.scrollTop = messages.scrollHeight;

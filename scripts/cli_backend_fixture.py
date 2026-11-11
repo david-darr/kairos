@@ -18,6 +18,7 @@ Prompts it understands (the first word decides):
     edit NAME TEXT   write NAME in a Forge session's folder (checkpointed)
     slow N           stream for N seconds, so a test can stop it
     fail             end the turn with an error
+    makebot NAME | ROLE   call the real create_bot tool, as a model asked for a bot would
     anything else    echo it back
 """
 import asyncio
@@ -181,6 +182,22 @@ async def fake_stream(session_id, text, attachment_ids=None, is_admin=False, ref
         while time.monotonic() < deadline:
             number += 1
             yield await say(f"tick {number}\n", 0.2)
+    elif command == "makebot":
+        from core import tool_registry
+        name, _, role = text.partition(" ", )[2].partition("|")
+        session = session_manager.get_session(session_id) or {}
+        ctx = tool_registry.ToolContext(session_id=session_id, is_admin=is_admin, agent_id=session.get("agent_id"),
+                                        owner_user=session.get("owner_user"))
+        now = time.time()
+        step_id = f"t{secrets.token_hex(3)}"
+        yield {"tool_step": {"phase": "started", "id": step_id, "name": "create_bot", "summary": name.strip(),
+                             "ok": None, "output": "", "at": now, "seconds": 0}}
+        result = await tool_registry.dispatch("create_bot", {"name": name.strip(), "role": role.strip() or "Helper",
+                                                             "color": "sage", "instructions": "Keep answers short."},
+                                              ctx, tool_registry.OPENAI)
+        yield {"tool_step": {"phase": "finished", "id": step_id, "name": "create_bot", "summary": name.strip(),
+                             "ok": not str(result).startswith("Not"), "output": str(result), "at": now, "seconds": 0.1}}
+        yield await say(("I made it. " if str(result).startswith("Made") else "") + str(result).split(". ")[0] + ".\n")
     elif command == "fail":
         yield await say("Starting, then failing.\n")
         raise RuntimeError("scripted failure")

@@ -559,12 +559,12 @@ def interrupt(owner: str, sid: str, turn_id: str) -> dict:
 # -- reading ---------------------------------------------------------------------
 
 _HIDDEN_KEYS = ("tool_rounds", "sent", "image_attachment_ids")
-_TYPED_ROWS = ("handoff", "fd_card")
+_TYPED_ROWS = ("handoff", "fd_card", "bot_created")
 
 
 def client_message(row: dict, owner: str, versions: dict | None = None) -> dict:
     message = {key: value for key, value in row.items() if key not in _HIDDEN_KEYS}
-    # Rows other services post with a `type` (a handoff, a front-desk card) draw as that kind (Bots Phases 4-5).
+    # Rows other services post with a `type` (a handoff, a front-desk card, a bot made from the chat) draw as that kind.
     if not message.get("kind") and row.get("type") in _TYPED_ROWS:
         message["kind"] = row["type"]
     message["id"] = row.get("bot_message_id")

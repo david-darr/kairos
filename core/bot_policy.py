@@ -530,6 +530,10 @@ SEND_TOOLS = frozenset({"message_me", "ask_me_by_call"})
 # list on purpose: a future tool with "ring" or "notify" in its name is a send like any other and still asks.
 # notify_me_by_text only texts the person's own number. dial_someone is not here.
 SELF_ONLY_TOOLS = frozenset({"ring_me", "message_me", "ask_me_by_call", "notify_me_by_call", "notify_me_by_text"})
+# Making a bot the person asked for in their own account (core/bot_maker_tools.py: Kip's create_bot and update_bot).
+# Below Full they never ask: the tool holds the limits itself (the new bot starts at Ask with paused routines, a cap an
+# hour, a live conversation only, never on a turn that read outside content) and refuses before this gate otherwise.
+PERSON_REQUESTED_TOOLS = frozenset({"create_bot", "update_bot"})
 DESTRUCTIVE_TOKENS = frozenset("delete remove drop destroy purge wipe erase revoke trash kill uninstall reset clear "
                                "truncate".split())
 DRAFT_TOKENS = frozenset({"draft", "drafts"})
@@ -953,6 +957,8 @@ def authorize_operation(*, bot_id: str, tool: str, arguments=None, mcp: Optional
     # inside the tool). The grant ceiling and a read-and-draft routine were judged before this point.
     if mode != "full" and op.kind == OUTBOUND and mcp is None and op.tool in SELF_ONLY_TOOLS:
         return remember(done("allow", "It only reaches you, within its daily limits.", "self-only"))
+    if mode != "full" and mcp is None and op.tool in PERSON_REQUESTED_TOOLS:
+        return remember(done("allow", "Making the bot you asked for, at the Ask level.", "person-requested"))
     # Sends: Full bypasses the allowance; below Full they draw on it or ask.
     if op.kind == OUTBOUND and mode != "full":
         outbound = (_agent(bot_id) or {}).get("outbound") or {}

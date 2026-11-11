@@ -227,6 +227,10 @@ def specs(surface: str, is_admin: bool = False, agent: bool = False, helper: boo
     hidden = _bot_hidden(bot_id, [s.name for s in _REGISTRY.values()], is_admin)
     if not accounts.has_machine_access():
         hidden = hidden | {s.name for s in _REGISTRY.values() if machine_tool(s.name)}
+    if bot_id and "create_bot" in _REGISTRY:
+        from core import bot_maker_tools  # Kairos's own chat and Kip make bots; other bots do not
+        if not bot_maker_tools.offered_to(bot_id):
+            hidden = hidden | bot_maker_tools.NAMES
     return [s for s in _REGISTRY.values() if addons.tool_available(s.name) and surface in s.surfaces and (is_admin or not s.admin_only)
             and s.name not in hidden
             and (agent or not s.agent_only) and (not helper or helper_tool(s))
@@ -295,7 +299,10 @@ async def call(name: str, args: dict, ctx: ToolContext, surface: str) -> str | T
     # The front desk's own limits (Bots Phase 5): a watch run only reads, suggests or saves a local draft,
     # and a tainted turn offers work through Up next instead of handing it on.
     from core import front_desk_tools, front_desk_watch_adapter
-    refusal = front_desk_watch_adapter.tool_refusal(name, ctx) or front_desk_tools.guard_call(name, ctx)
+    # A bot made from a chat (core/bot_maker_tools.py): only in a live conversation the person is in.
+    from core import bot_maker_tools
+    refusal = (front_desk_watch_adapter.tool_refusal(name, ctx) or front_desk_tools.guard_call(name, ctx)
+               or bot_maker_tools.guard(name, ctx))
     if refusal:
         return refusal
     from core import permissions
@@ -2100,6 +2107,7 @@ register_resource_tools()
 
 from core import bot_team_tools  # noqa: E402,F401
 from core import bot_content_studio_tools  # noqa: E402,F401
+from core import bot_maker_tools  # noqa: E402,F401  (create_bot, update_bot: a bot made from a chat)
 
 
 def _register_bots_tool_data() -> None:

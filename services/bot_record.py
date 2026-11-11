@@ -637,7 +637,7 @@ def _rollback(agent_id: Optional[str], routine_ids: list) -> list:
     return errors
 
 
-def create_configured(payload: dict, owner_user: Optional[str] = None) -> dict:
+def create_configured(payload: dict, owner_user: Optional[str] = None, *, enable_routines: bool = True) -> dict:
     """Make a bot, its notes and its routines as one step. Anything that goes
     wrong before the bot is verified undoes everything (a ConfiguredFailure,
     cleanup_errors empty when nothing is left over); a routine that cannot be
@@ -645,7 +645,8 @@ def create_configured(payload: dict, owner_user: Optional[str] = None) -> dict:
 
     Routines are made switched off and switched on one by one only after the
     bot is verified, so a routine can never run for a bot that is then rolled
-    back."""
+    back. enable_routines=False leaves them off for the person to turn on (a bot
+    made from a chat, core/bot_maker_tools.py)."""
     from services.agent_service import agent_service
     from services.task_service import task_service
     payload = dict(payload or {})
@@ -715,6 +716,9 @@ def create_configured(payload: dict, owner_user: Optional[str] = None) -> dict:
     routines_made = []
     for routine_id in created:
         task = task_service.get_task(routine_id)
+        if not enable_routines:
+            routines_made.append(task or {"id": routine_id})
+            continue
         try:
             routines_made.append(task_service.update_task(routine_id, enabled=True))
         except Exception as error:
