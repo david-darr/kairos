@@ -155,6 +155,7 @@ class AuditTests(unittest.TestCase):
             surface = next(iter(spec.surfaces))
             with patch.dict(tool_registry._REGISTRY, {spec.name: dataclasses.replace(spec, handler=handler)}), \
                    patch("core.addons.tool_available", return_value=True), \
+                   patch("core.bot_maker_tools.guard", return_value=None), \
                    patch.object(permissions, "gate_bot_call", AsyncMock(return_value=permissions.Decision("allow"))):
                 before = len(permissions.audit())
                 for _ in range(3):

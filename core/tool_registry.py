@@ -304,6 +304,8 @@ async def call(name: str, args: dict, ctx: ToolContext, surface: str) -> str | T
     refusal = (front_desk_watch_adapter.tool_refusal(name, ctx) or front_desk_tools.guard_call(name, ctx)
                or bot_maker_tools.guard(name, ctx))
     if refusal:
+        if name in bot_maker_tools.NAMES:
+            _audit(spec, args, ctx, refusal)  # a refused attempt to make a bot is on the record too
         return refusal
     from core import permissions
     gate = await permissions.gate_bot_call(ctx, name, args)
@@ -357,7 +359,8 @@ def _audit(spec: ToolSpec, args: dict, ctx: ToolContext, result: str | ToolResul
     service, in the permission audit. Never fails the call."""
     from core import permissions
     text = result.text if isinstance(result, ToolResult) else result
-    outcome = ("tool refused" if text.startswith(("Not saved:", "Not added:", "Not run:", "Not opened:", "Not pressed:", "Not typed:", "Stopped:", "Stopped before pressing")) else
+    outcome = ("tool refused" if text.startswith(("Not saved:", "Not added:", "Not run:", "Not opened:", "Not pressed:", "Not typed:", "Stopped:", "Stopped before pressing",
+                                         "Not made:", "Not changed:")) else
                "tool failed" if text.startswith("Tool error:") else "tool used")
     try:
         if spec.name == "computer":

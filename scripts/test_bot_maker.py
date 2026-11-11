@@ -201,6 +201,14 @@ class Safety(Base):
             await call("create_bot", {"name": "Nova", "role": "x"}, ctx(sid))
         self.assertEqual(audit.call_args.args[:3], ("tool used", "create_bot", "write"))
 
+    async def test_a_refused_attempt_is_in_the_audit_too(self):
+        with patch.object(permissions, "record_tool_use") as audit:
+            await call("create_bot", {"name": "Nova", "role": "x"}, ctx(None))
+        self.assertEqual(audit.call_args.args[:3], ("tool refused", "create_bot", "write"))
+        with patch.object(permissions, "record_tool_use") as audit:
+            await call("create_bot", {"name": "Nova", "role": "x", "color": "teal"}, ctx(chat()))
+        self.assertEqual(audit.call_args.args[:2], ("tool refused", "create_bot"))
+
 
 class WhereItRuns(Base):
     async def test_not_on_a_turn_that_read_outside_content(self):
