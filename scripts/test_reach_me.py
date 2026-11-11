@@ -326,7 +326,7 @@ class CapsAndPolicy(ReachCase):
             self.assertEqual(bot_policy.classify(name, args).kind, bot_policy.OUTBOUND, name)
         self.assertEqual(bot_outbound.outcome_for("Sent to the person: Telegram."), bot_outbound.COMMITTED)
 
-    async def test_below_full_message_me_asks_nothing_and_spends_no_send_allowance_but_a_text_does(self):
+    async def test_below_full_message_me_and_a_text_to_you_ask_nothing_and_spend_no_send_allowance(self):
         from core import bot_policy
         agent = {"id": "bot-kip", "outbound": {"policy": "allow", "daily_cap": 2}}
         policy = SimpleNamespace(mode="edits", source="bot", reason="", revision=1)
@@ -334,9 +334,12 @@ class CapsAndPolicy(ReachCase):
             mine = [bot_policy.authorize_operation(bot_id="bot-kip", tool="message_me", arguments={"message": "x"},
                                                    invocation_id=f"m{n}") for n in range(5)]
             texts = [bot_policy.authorize_operation(bot_id="bot-kip", tool="notify_me_by_text", arguments={"message": "x"},
-                                                    invocation_id=f"p{n}").action for n in range(3)]
+                                                    invocation_id=f"p{n}") for n in range(5)]
+            others = [bot_policy.authorize_operation(bot_id="bot-kip", tool="send_email", arguments={},
+                                                     invocation_id=f"e{n}").action for n in range(3)]
         self.assertEqual([(o.action, o.source) for o in mine], [("allow", "self-only")] * 5)
-        self.assertEqual(texts, ["allow", "allow", "ask"], "a text still draws on the bot's send allowance, untouched by message_me")
+        self.assertEqual([(o.action, o.source, o.reservation) for o in texts], [("allow", "self-only", None)] * 5)
+        self.assertEqual(others, ["allow", "allow", "ask"], "other sends still draw on the bot's send allowance, untouched by either")
 
     async def test_the_tool_runs_as_the_session_account_and_reports_plainly(self):
         from core import tool_registry

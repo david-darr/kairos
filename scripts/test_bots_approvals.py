@@ -229,10 +229,11 @@ class Levels(ApprovalCase):
 
 
 class SelfOnlyReach(ApprovalCase):
-    """ring_me, message_me, ask_me_by_call and notify_me_by_call reach only the person: no approval prompt below Full."""
-    SELF = ("ring_me", "message_me", "ask_me_by_call", "notify_me_by_call")
+    """ring_me, message_me, ask_me_by_call, notify_me_by_call and notify_me_by_text reach only the person: no approval
+    prompt below Full."""
+    SELF = ("ring_me", "message_me", "ask_me_by_call", "notify_me_by_call", "notify_me_by_text")
     ARGS = {"ring_me": {"reason": "x"}, "message_me": {"message": "x"}, "ask_me_by_call": {"question": "x"},
-            "notify_me_by_call": {"message": "x"}}
+            "notify_me_by_call": {"message": "x"}, "notify_me_by_text": {"message": "x"}}
 
     async def test_they_go_ahead_at_every_level_without_asking(self):
         bot = make_bot("SelfReach")
@@ -264,7 +265,7 @@ class SelfOnlyReach(ApprovalCase):
         bot = make_bot("SelfOthers")
         sid = make_thread(bot)
         dial = {"to": "+15551230000", "who": "Luigi's", "topic": "a table", "goal": "Table for two."}
-        lookalikes = (("dial_someone", dial), ("notify_me_by_text", {"message": "x"}), ("send_email", {}),
+        lookalikes = (("dial_someone", dial), ("notify_me_by_text_someone", {"message": "x"}), ("send_email", {}),
                       ("ring_someone_else", {"reason": "x"}), ("notify_team", {"message": "x"}), ("ring_me_now", {"reason": "x"}),
                       ("message_me_later", {"message": "x"}))
         for mode in ("ask", "edits", "auto"):

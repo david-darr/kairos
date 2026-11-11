@@ -602,7 +602,7 @@ function permissionsBasics(ctx) {
     RadioGroup({ label: 'Approval', value: facts.effective, options: APPROVAL_LEVELS.map(l => ({ value: l.value, title: l.title, hint: l.hint, disabled: !l.now })), onChange: v => ctx.update({ approval_mode: v }) }),
     note('Full acts without asking. Tool and account grants still limit what it can reach.'),
     Card({ label: 'Limits', children: [SwitchRow({ title: 'This bot is on', hint: 'Off, it takes no new work and its routines do not run.', checked: agent.enabled !== false, onChange: v => ctx.update({ enabled: v }) }), capRow] }),
-    Card({ label: 'Messages outside the app', children: [h('div', { class: 'bots-row bots-stack-row' }, [outbound, h('span', { class: 'bots-row-hint', text: 'Below Full, sending asks or uses this daily allowance. Ringing, calling or messaging you never asks.' })]), outCap] }),
+    Card({ label: 'Messages outside the app', children: [h('div', { class: 'bots-row bots-stack-row' }, [outbound, h('span', { class: 'bots-row-hint', text: 'Below Full, sending asks or uses this daily allowance. Ringing, calling, messaging or texting you never asks.' })]), outCap] }),
     Card({ label: 'Always allowed', children: [...allowed, note('Exact rules apply within the bot\'s grants.')] }),
   ]);
 }

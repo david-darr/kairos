@@ -91,7 +91,7 @@ export function mount(host, ctx) {
     const full = view.mode === 'full';
     return Card({ label: 'Messages outside the app', className: 'bots-permissions-outbound', children: [
       h('div', { class: 'bots-row bots-stack-row' }, [choice]), capRow,
-      note(full ? 'At Full it sends on its own, so the allowance does not apply.' : `${allowanceText(outbound)} Ringing, calling or messaging you never asks.`)] });
+      note(full ? 'At Full it sends on its own, so the allowance does not apply.' : `${allowanceText(outbound)} Ringing, calling, messaging or texting you never asks.`)] });
   }
 
   function commandsCard() {

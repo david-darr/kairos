@@ -528,8 +528,8 @@ SEND_TOOLS = frozenset({"message_me", "ask_me_by_call"})
 # a read-and-draft routine, but below Full they never ask: the person is the only one reached, and the daily
 # caps, quiet hours and cooldowns (services/rings.py, services/reach_me.py) already bound them. An explicit name
 # list on purpose: a future tool with "ring" or "notify" in its name is a send like any other and still asks.
-# dial_someone and notify_me_by_text are not here.
-SELF_ONLY_TOOLS = frozenset({"ring_me", "message_me", "ask_me_by_call", "notify_me_by_call"})
+# notify_me_by_text only texts the person's own number. dial_someone is not here.
+SELF_ONLY_TOOLS = frozenset({"ring_me", "message_me", "ask_me_by_call", "notify_me_by_call", "notify_me_by_text"})
 DESTRUCTIVE_TOKENS = frozenset("delete remove drop destroy purge wipe erase revoke trash kill uninstall reset clear "
                                "truncate".split())
 DRAFT_TOKENS = frozenset({"draft", "drafts"})
