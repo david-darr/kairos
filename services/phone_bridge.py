@@ -311,7 +311,7 @@ class TurnBridge:
         self.phase = "speaking"
         try:
             await self.pipeline.announce(self.opening, "open:" + uuid.uuid4().hex)
-            await self._say(self._once(self.opening))
+            await self._speak_opening()
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -320,6 +320,10 @@ class TurnBridge:
             self.phase = "idle"
             self._turn_over()
             self._next_typed()
+
+    async def _speak_opening(self) -> None:
+        """Say the opening line (a subclass may have it rendered ahead of time)."""
+        await self._say(self._once(self.opening))
 
     # -- text typed during the call -------------------------------------------------------------
 

@@ -21,6 +21,22 @@ FRAME_SAMPLES = 960                        # 20 ms at 48 kHz
 FRAME_SECONDS = FRAME_SAMPLES / DISCORD_RATE
 FRAME_BYTES = FRAME_SAMPLES * CHANNELS * 2  # 3840: 20 ms of 48 kHz stereo PCM16
 OPUS_SILENCE = b"\xf8\xff\xfe"             # a 20 ms Opus frame of silence
+# Discord's end-to-end voice encryption (DAVE, enforced on voice channels) wraps each Opus frame: the ciphertext, then a
+# supplemental block that ends with its own size (one byte) and this two-byte marker. A received frame still wrapped
+# this way is not Opus: handing it to libopus gives "corrupted stream" (David's test, 2026-11-11).
+DAVE_MAGIC = b"\xfa\xfa"
+DAVE_MIN_SUPPLEMENTAL = 11                 # 8-byte tag, a nonce of 1+ bytes, the size byte and the marker
+
+
+class Undecryptable(Exception):
+    """A received frame is end-to-end encrypted (DAVE) and could not be opened."""
+
+
+def is_dave_frame(payload: bytes) -> bool:
+    """Is this received payload still DAVE-encrypted, rather than plain Opus?"""
+    if not payload or len(payload) <= DAVE_MIN_SUPPLEMENTAL or payload[-2:] != DAVE_MAGIC:
+        return False
+    return DAVE_MIN_SUPPLEMENTAL <= payload[-3] <= len(payload)
 
 
 def to_mono_float(pcm_stereo: bytes) -> np.ndarray:
@@ -65,8 +81,9 @@ class SpeechToDiscord:
 
 def missing_requirements() -> list[str]:
     """What voice in a Discord channel needs that is not installed here (empty when it can work).
-    PyNaCl encrypts the voice connection, davey is Discord's end-to-end voice encryption, discord-ext-voice-recv
-    receives other people's audio (discord.py alone only sends), and libopus encodes and decodes it."""
+    PyNaCl encrypts the voice connection, davey is Discord's end-to-end voice encryption (discord.py uses it to send;
+    services/discord_voice_transport uses it to open what is received), discord-ext-voice-recv receives other people's
+    audio (discord.py alone only sends), and libopus encodes and decodes it."""
     missing = []
     for label, module in (("PyNaCl", "nacl"), ("davey", "davey"), ("discord-ext-voice-recv", "discord.ext.voice_recv")):
         try:

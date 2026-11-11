@@ -8,6 +8,8 @@ DMs a link, and talks there. The channel is a public-ish room, so the safety rul
   Anyone else's audio is dropped before it is decoded, buffered or transcribed.
 - The bot says "This is <bot>, an AI assistant from Kairos." as soon as the person is there.
 - It leaves when the person leaves, when nobody joined in time, after IDLE_SECONDS of quiet, and at MAX_SECONDS.
+- It never sits silent when it cannot hear them (their frames will not decode, or receiving stopped and would not
+  restart): it says CANT_HEAR_LINE, leaves, and DMs them to carry on in text. A single bad frame is only dropped.
 - A call to the person is rate limited like a ring (bot_outbound allowance, a pause between calls), per account.
 
 The conversation reuses the phone-call pipeline: the same endpointer (Smart Turn asked on a pause when available), the
@@ -46,6 +48,10 @@ BOT_COOLDOWN_SECONDS = 90
 USER_COOLDOWN_SECONDS = 20
 LEAD_SECONDS = phone_bridge.LEAD_SECONDS
 BARGE_VOICED_MS = phone_bridge.BARGE_VOICED_MS
+CANT_HEAR_PACKETS = 50         # this many of the person's frames in a row that cannot be opened (a second of talking)
+RECEIVE_CHECK_SECONDS = 1.0    # how often the connection is asked whether it is still receiving
+CANT_HEAR_LINE = "I can't hear you on Discord right now, so Kairos will message you instead."
+CANT_HEAR_DM = "I couldn't hear you in #{channel}, so I left the call. Message me here and I'll pick it up."
 
 # "call me", "/kairos call", "join me in voice": short and exact, so "call me when the build is done" is left alone.
 CALL_REQUEST = re.compile(
@@ -87,15 +93,25 @@ class VoiceBridge(phone_bridge.TurnBridge):
                  opening: str = "", present: bool = False, smart_turn: bool = False, pace: bool = True,
                  clock: Callable[[], float] = time.monotonic, sleep: Callable = asyncio.sleep,
                  idle_seconds: float = IDLE_SECONDS, join_wait_seconds: float = JOIN_WAIT_SECONDS,
-                 max_seconds: float = MAX_SECONDS):
+                 max_seconds: float = MAX_SECONDS, unwrap: Optional[Callable] = None,
+                 receiving: Optional[Callable] = None, on_begin: Optional[Callable] = None):
         self._init_turns(pipeline, opening=opening, smart_turn=smart_turn, pace=pace, clock=clock, sleep=sleep)
         self.linked_user, self.send, self.clear, self.codec = str(linked_user), send, clear, codec
         self.present = present
         self.idle_seconds, self.join_wait_seconds, self.max_seconds = idle_seconds, join_wait_seconds, max_seconds
+        # The connection's own steps (services/discord_voice_transport): open a received frame (DAVE), say whether it
+        # is still receiving, and hear that the person arrived. None: frames are plain Opus, receiving never stops.
+        self.unwrap, self.receiving, self.on_begin = unwrap, receiving, on_begin
         self.inbound = audio.DiscordToSpeech()
         self.decoder = None
         self.begun = False
         self.ignored = 0                       # events from anyone but the linked person
+        self.decoded = 0                       # the person's frames opened and decoded
+        self.bad_packets = 0                   # ... and those that could not be (dropped, the decoder reset)
+        self.bad_run = 0                       # bad ones in a row
+        self.cant_hear: Optional[str] = None   # why the bot cannot hear them (it says so and leaves)
+        self.checked_receiving = 0.0
+        self.opening_render: Optional[asyncio.Task] = None
         self.started = clock()
         self.last_activity = self.started
         self.fed_until = self.started
@@ -107,6 +123,7 @@ class VoiceBridge(phone_bridge.TurnBridge):
 
     async def run(self, queue: asyncio.Queue) -> str:
         self.started = self.last_activity = self.fed_until = self.clock()
+        self.prepare()
         try:
             if self.present:
                 await self._begin()
@@ -136,11 +153,13 @@ class VoiceBridge(phone_bridge.TurnBridge):
             if not self.present:
                 self.present = True
             await self._begin()
+            if self.cant_hear is not None:
+                return                       # it is saying so and leaving
             data = event[2]
             if kind == "opus":
-                if self.decoder is None:
-                    self.decoder = self.codec.new_decoder()
-                data = self.decoder.decode(data)
+                data = self._decode(data)
+                if data is None:
+                    return
             await self._audio(data)
         elif kind == "joined" and str(event[1]) == self.linked_user:
             self.present = True
@@ -164,6 +183,15 @@ class VoiceBridge(phone_bridge.TurnBridge):
             return self.end("time limit")
         if not self.begun:
             return
+        if self.receiving is not None and self.cant_hear is None and now - self.checked_receiving >= RECEIVE_CHECK_SECONDS:
+            self.checked_receiving = now
+            try:
+                alive = bool(self.receiving())
+            except Exception:
+                logger.exception("discord voice: could not check receiving")
+                alive = True
+            if not alive:
+                self._cannot_hear("receiving stopped and could not be restarted")
         gap = now - self.fed_until
         if gap >= 0.04:
             await self._feed_silence(gap)
@@ -176,9 +204,110 @@ class VoiceBridge(phone_bridge.TurnBridge):
             return
         self.begun = True
         self.arrived.set()
-        self.last_activity = self.fed_until = self.clock()
+        self.last_activity = self.fed_until = self.checked_receiving = self.clock()
+        if self.on_begin is not None:
+            try:
+                self.on_begin()
+            except Exception:
+                logger.exception("discord voice: the connection's arrival step failed")
         if self.opening:
+            self.prepare()
             self.turn = asyncio.create_task(self._open())
+
+    # -- the greeting, rendered while the bot waits ------------------------------------------------
+
+    def prepare(self) -> None:
+        """Start rendering the greeting now, before the person is there (David's test, 2026-11-11: the voice loaded
+        only when he joined, so the greeting came about four seconds late). Joining then plays it at once."""
+        if self.opening and self.opening_render is None:
+            self.opening_render = asyncio.ensure_future(self._render_opening())
+
+    async def _render_opening(self) -> list:
+        sentences, rest = phone_bridge.split_sentences(self.opening)
+        if rest.strip():
+            sentences.append(rest)
+        rendered = []
+        for sentence in sentences:
+            converter, frames = None, []
+            async for rate, pcm in self.pipeline.speak(phone_bridge.spoken_text(sentence)):
+                converter = self._converted(converter, rate)
+                frames += converter.frames(pcm)
+            if converter:
+                frames += converter.frames(b"", final=True)
+            if frames:
+                rendered.append((sentence, frames))
+        return rendered
+
+    async def _speak_opening(self) -> None:
+        rendered = None
+        if self.opening_render is not None:
+            try:
+                rendered = await self.opening_render
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning("discord voice: the greeting could not be rendered ahead; saying it now", exc_info=True)
+        if not rendered:
+            await super()._speak_opening()
+            return
+        self.played = []
+        self.phase = "speaking"
+        for sentence, frames in rendered:
+            self.played.append((sentence, max(self.play_end, self.clock())))
+            await self._send_frames(frames)
+        logger.info("discord voice: greeting sent (%d frames)", sum(len(frames) for _, frames in rendered))
+        if self.pace:
+            await self.sleep(max(0.0, self.play_end - self.clock()))
+
+    # -- not hearing them --------------------------------------------------------------------------
+
+    def _decode(self, frame: bytes) -> Optional[bytes]:
+        """One of the person's received frames -> 48 kHz stereo PCM, or None when it cannot be opened or decoded. A bad
+        frame is dropped and the decoder reset, so it never stops what follows (2026-11-11: one undecodable frame used
+        to end all receiving). A second of nothing but bad frames means the bot cannot hear them: it says so."""
+        try:
+            opus = self.unwrap(self.linked_user, frame) if self.unwrap is not None else frame
+            if not opus:
+                return None
+            if self.decoder is None:
+                self.decoder = self.codec.new_decoder()
+            pcm = self.decoder.decode(opus)
+        except Exception as error:
+            self.bad_packets += 1
+            self.bad_run += 1
+            self.decoder = None
+            if self.bad_packets == 1:
+                encrypted = " (end-to-end encrypted)" if audio.is_dave_frame(frame) else ""
+                logger.warning("discord voice: a received frame could not be decoded%s: %s: %s; dropped, decoder reset "
+                               "(later ones are logged only as a count)", encrypted, type(error).__name__, error)
+            if self.bad_run >= CANT_HEAR_PACKETS and self.cant_hear is None:
+                self._cannot_hear(f"{self.bad_run} frames in a row could not be decoded ({type(error).__name__}: {error})")
+            return None
+        self.bad_run = 0
+        self.decoded += 1
+        return pcm
+
+    def _cannot_hear(self, why: str) -> None:
+        """Say plainly that the bot cannot hear them, then leave; the session DMs them to carry on in text."""
+        self.cant_hear = why
+        logger.warning("discord voice: cannot hear the person (%s; %d decoded, %d bad); saying so and leaving",
+                       why, self.decoded, self.bad_packets)
+        previous, self.turn = self.turn, None
+        self.turn = asyncio.ensure_future(self._say_cannot_hear(previous))
+
+    async def _say_cannot_hear(self, previous) -> None:
+        try:
+            if previous is not None and not previous.done():
+                await asyncio.gather(previous, return_exceptions=True)     # let the greeting finish first
+            self.phase = "speaking"
+            await self._say(self._once(CANT_HEAR_LINE))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("discord voice: could not say that it cannot hear")
+        finally:
+            self.phase = "idle"
+            self.end("cannot hear")
 
     # -- inbound ---------------------------------------------------------------------------------------
 
@@ -226,6 +355,13 @@ class VoiceBridge(phone_bridge.TurnBridge):
         result = self.clear()
         if inspect.isawaitable(result):
             await result
+
+    async def _shutdown(self) -> None:
+        render = self.opening_render
+        if render is not None and not render.done():
+            render.cancel()
+            await asyncio.gather(render, return_exceptions=True)
+        await super()._shutdown()
 
 
 class DiscordHost:
@@ -392,7 +528,8 @@ async def join(account: str, bot: dict, agent: dict, reason: str = "", *, user_s
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue = asyncio.Queue()
         session = Session(bot_id=bot_id, account=account, agent=agent, user_id=user_id, channel_id=str(channel.id),
-                          channel_name=name, loop=loop, queue=queue, transport=None, task=None, bridge=None)
+                          channel_name=name, loop=loop, queue=queue, transport=None, task=None, bridge=None,
+                          client=client)
         transport = HOST.transport(client, channel, user_id)
         await transport.connect(session.post)
         session.transport = transport
@@ -415,6 +552,9 @@ async def join(account: str, bot: dict, agent: dict, reason: str = "", *, user_s
             session.bridge = VoiceBridge(pipeline, linked_user=user_id, send=transport.send, clear=transport.clear,
                                          codec=CODEC_FACTORY(), opening=opening, smart_turn=smart,
                                          present=user_id in transport.members(), clock=clock, sleep=sleep, pace=pace,
+                                         unwrap=getattr(transport, "decrypt", None),
+                                         receiving=getattr(transport, "receiving", None),
+                                         on_begin=getattr(transport, "joined", None),
                                          **({"join_wait_seconds": RING_WAIT_SECONDS} if ring else {}))
             session.task = asyncio.create_task(_run(session))
         _sessions[bot_id] = session
@@ -478,7 +618,13 @@ def clean_name(value) -> str:
 async def _run(session: Session) -> None:
     try:
         reason = await session.bridge.run(session.queue)
-        logger.info("discord voice: left #%s (%s)", session.channel_name, reason)
+        logger.info("discord voice: left #%s (%s; %d frames heard, %d could not be decoded)", session.channel_name,
+                    reason, session.bridge.decoded, session.bridge.bad_packets)
+        if reason == "cannot hear":
+            try:
+                await HOST.dm(session.client, session.user_id, CANT_HEAR_DM.format(channel=session.channel_name))
+            except Exception:
+                logger.exception("discord voice: could not DM them after not hearing them")
     except asyncio.CancelledError:
         raise
     except Exception:

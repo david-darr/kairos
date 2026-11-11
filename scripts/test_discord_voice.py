@@ -2,7 +2,8 @@
 no PyNaCl or libopus. A fake transport stands in for the voice connection, a fake codec for Opus, a fake pipeline for
 speech-to-text, the model and the voice, and a fake clock steps time by hand.
 MANUAL (needs the add-ons installed and a real server): a real bot joining a real voice channel, hearing the person's
-voice, speaking back in Opus, DAVE encryption, barge-in over real latency.
+voice, speaking back in Opus, DAVE encryption, barge-in over real latency. scripts/discord_voice_probe.py checks the
+real receive path (DAVE opened, Opus decoded) and plays beeps; David runs it himself.
 
     .venv\\Scripts\\python.exe -X utf8 scripts\\test_discord_voice.py
 """
@@ -366,6 +367,9 @@ class FakeTransport:
     async def disconnect(self):
         self.disconnected = True
 
+    def joined(self):
+        self.arrivals = getattr(self, "arrivals", 0) + 1
+
 
 class FakeHost:
     def __init__(self):
@@ -386,6 +390,9 @@ class FakeHost:
             async def boom(on_event):
                 raise RuntimeError("cannot connect")
             self.transport_made.connect = boom
+        for name in ("decrypt", "receiving"):          # a test gives the connection its DAVE step or receive check
+            if getattr(self, name, None) is not None:
+                setattr(self.transport_made, name, getattr(self, name))
         return self.transport_made
 
     async def dm(self, client, user_id, text):
@@ -453,11 +460,12 @@ class Lifecycle(unittest.IsolatedAsyncioTestCase):
 
     async def test_it_waits_silently_until_the_person_arrives_then_announces(self):
         await self.join(user_started=True)
-        await settle()
-        self.assertEqual(self.pipeline.spoken, [], "nothing is said to an empty channel")
+        await asyncio.sleep(0.15)
+        self.assertEqual(self.host.transport_made.sent, [], "nothing is said to an empty channel")
+        self.assertTrue(self.pipeline.spoken, "the greeting is rendered while it waits, so it plays the moment they join")
         dv.notify_voice_state(self.bot["id"], STRANGER, None, VOICE_CHANNEL)
         await asyncio.sleep(0.15)
-        self.assertEqual(self.pipeline.spoken, [])
+        self.assertEqual(self.host.transport_made.sent, [])
         dv.notify_voice_state(self.bot["id"], OWNER, None, VOICE_CHANNEL)
         await asyncio.sleep(0.2)
         self.assertTrue(self.pipeline.spoken[0].startswith("This is Kip, an AI assistant from Kairos."))
@@ -578,7 +586,7 @@ class Lifecycle(unittest.IsolatedAsyncioTestCase):
             link = f"https://discord.com/channels/777/{VOICE_CHANNEL}"
             self.assertEqual(self.host.dms, [(OWNER, f"<@{OWNER}> **Kip is calling you.** Tap to join: {link}\nThe deploy is done")])
             self.assertFalse(task.done(), "it waits for them, like a ring")
-            self.assertEqual(self.pipeline.spoken, [], "nothing is said to an empty channel")
+            self.assertEqual(self.host.transport_made.sent, [], "nothing is said to an empty channel")
             dv.notify_voice_state(self.bot["id"], OWNER, None, VOICE_CHANNEL)
             told = await asyncio.wait_for(task, 2)
             self.assertIn("They joined #voice-room", told)
@@ -899,6 +907,284 @@ class RealTransportFilter(unittest.IsolatedAsyncioTestCase):
         transport.send(b"b")
         transport.clear()
         self.assertEqual(len(transport._queue), 0)
+
+
+# -- receiving (David's test, 2026-11-11: Kip joined, the first DAVE-encrypted frame failed Opus, receiving died) --------
+
+def dave_wrapped(opus: bytes, tag=b"\x08" * 8) -> bytes:
+    """A frame as DAVE sends it: ciphertext (here the Opus itself), an 8-byte tag, a 1-byte nonce, no unencrypted
+    ranges, the supplemental size, the 0xFAFA marker."""
+    supplemental = tag + b"\x05" + bytes([len(tag) + 1 + 1 + 2])
+    return opus + supplemental + audio.DAVE_MAGIC
+
+
+def corrupt_dave_frame() -> bytes:
+    """What libopus was handed in David's test: a DAVE frame read as Opus. TOC code 1 (two equal frames) with an odd
+    length is invalid Opus, so the real decoder says "corrupted stream", as in the log."""
+    frame = dave_wrapped(b"\x01" + b"\x10" * 258)
+    return frame if (len(frame) - 1) % 2 else dave_wrapped(b"\x01" + b"\x10" * 259)
+
+
+def opus_of(index, amp=0.4) -> bytes:
+    """A fake Opus packet carrying 20 ms of a tone (the codec below decodes it back to that PCM)."""
+    return b"OPUS" + chunk(amp, start=index * audio.FRAME_SAMPLES)
+
+
+class BreakableCodec(FakeCodec):
+    """Opus stand-in whose decoder returns the whole PCM a packet carries, and fails like libopus on b'BAD...'."""
+    def __init__(self):
+        super().__init__()
+        self.decoders = 0
+
+    def new_decoder(self):
+        self.decoders += 1
+
+        class Decoder:
+            def decode(self, packet):
+                if packet.startswith(b"BAD"):
+                    raise RuntimeError("corrupted stream")
+                return packet[4:]
+        return Decoder()
+
+
+class Receiving(unittest.IsolatedAsyncioTestCase):
+    def rig(self, **options):
+        rig = Rig(**options)
+        rig.codec = rig.bridge.codec = BreakableCodec()
+        return rig
+
+    async def test_a_corrupted_frame_mid_call_is_dropped_and_the_turn_is_still_heard(self):
+        rig = self.rig()
+        await rig.begin()
+        await rig.quiet(0.3)
+        for index in range(40):                          # 0.8 s of talking with one broken frame in the middle
+            rig.clock.t += 0.02
+            await rig.bridge.handle(("opus", OWNER, b"BAD frame" if index == 20 else opus_of(index)))
+        await settle()
+        self.assertEqual((rig.bridge.decoded, rig.bridge.bad_packets), (39, 1))
+        self.assertEqual(rig.codec.decoders, 2, "the person's decoder is reset after a bad frame")
+        await rig.quiet(1.2)
+        self.assertEqual(len(rig.pipeline.transcribed), 1, "receiving carried on: the turn was heard and answered")
+        self.assertTrue(rig.sent)
+        self.assertIsNone(rig.bridge.cant_hear)
+        self.assertIsNone(rig.bridge.ended)
+
+    async def test_dave_frames_are_opened_before_they_are_decoded(self):
+        opened = []
+
+        def unwrap(user, frame):
+            opened.append(user)
+            self.assertTrue(audio.is_dave_frame(frame))
+            return frame[:-12]
+        rig = self.rig(unwrap=unwrap)
+        await rig.begin()
+        for index in range(10):
+            rig.clock.t += 0.02
+            await rig.bridge.handle(("opus", OWNER, dave_wrapped(opus_of(index))))
+        self.assertEqual(rig.bridge.decoded, 10)
+        self.assertEqual(rig.bridge.bad_packets, 0)
+        self.assertEqual(opened, [OWNER] * 10)
+
+    async def test_a_second_of_frames_it_cannot_open_says_so_and_leaves(self):
+        def unwrap(user, frame):
+            raise audio.Undecryptable("no DAVE session")
+        rig = self.rig(unwrap=unwrap)
+        await rig.begin()
+        for index in range(dv.CANT_HEAR_PACKETS - 1):
+            rig.clock.t += 0.02
+            await rig.bridge.handle(("opus", OWNER, dave_wrapped(opus_of(index))))
+        self.assertIsNone(rig.bridge.cant_hear, "a few bad frames are only dropped")
+        rig.clock.t += 0.02
+        await rig.bridge.handle(("opus", OWNER, dave_wrapped(opus_of(0))))
+        await settle()
+        self.assertIsNotNone(rig.bridge.cant_hear)
+        self.assertEqual(rig.pipeline.spoken, [dv.CANT_HEAR_LINE])
+        self.assertTrue(rig.sent, "it says it out loud rather than sitting silent")
+        self.assertEqual(rig.bridge.ended, "cannot hear")
+
+    async def test_a_good_frame_between_bad_ones_resets_the_count(self):
+        rig = self.rig()
+        await rig.begin()
+        for index in range(dv.CANT_HEAR_PACKETS * 2):
+            rig.clock.t += 0.02
+            await rig.bridge.handle(("opus", OWNER, opus_of(index) if index % 10 == 0 else b"BAD"))
+        self.assertIsNone(rig.bridge.cant_hear)
+
+    async def test_receiving_that_stopped_and_will_not_restart_says_so(self):
+        alive = [True]
+        rig = self.rig(receiving=lambda: alive[0])
+        await rig.begin()
+        await rig.quiet(2.0)
+        self.assertIsNone(rig.bridge.ended)
+        alive[0] = False
+        await rig.quiet(1.5)
+        self.assertEqual(rig.bridge.ended, "cannot hear")
+        self.assertIn("receiving stopped", rig.bridge.cant_hear)
+        self.assertEqual(rig.pipeline.spoken, [dv.CANT_HEAR_LINE])
+
+    async def test_the_cannot_hear_line_waits_for_the_greeting(self):
+        rig = self.rig(opening="This is Kip, an AI assistant from Kairos. How can I help?", receiving=lambda: False)
+        await rig.begin()
+        await rig.quiet(1.5)
+        self.assertEqual(rig.pipeline.spoken[:2], ["This is Kip, an AI assistant from Kairos.", "How can I help?"])
+        self.assertEqual(rig.pipeline.spoken[-1], dv.CANT_HEAR_LINE)
+        self.assertEqual(rig.bridge.ended, "cannot hear")
+
+    def test_the_real_extension_no_longer_decodes_or_dies(self):
+        """Against the installed discord-ext-voice-recv (skipped without it): the DAVE frame that raises "corrupted
+        stream" with a decoding sink (David's log) passes through untouched with decode=False."""
+        if importlib.util.find_spec("discord.ext.voice_recv") is None or not audio._opus_loadable():
+            self.skipTest("discord-ext-voice-recv or libopus is not installed")
+        import struct
+        from discord.ext.voice_recv import opus as recv_opus, rtp, sinks, utils
+        frame = corrupt_dave_frame()
+        self.assertTrue(audio.is_dave_frame(frame))
+        outcomes = {}
+        for decode in (True, False):
+            sink = sinks.BasicSink(lambda user, data: None, decode=decode)
+            sink._voice_client = SimpleNamespace(_get_id_from_ssrc=lambda ssrc: None)
+            decoder = recv_opus.PacketDecoder(SimpleNamespace(sink=sink, waiter=utils.MultiDataEvent()), 1486)
+            packet = rtp.decode_rtp(bytes([0x80, 0x78]) + struct.pack(">HII", 1, 960, 1486) + b"\x00" * 20)
+            packet.decrypted_data = frame
+            decoder.push_packet(packet)
+            try:
+                outcomes[decode] = decoder.pop_data().opus
+            except Exception as error:
+                outcomes[decode] = str(error)
+        self.assertEqual(outcomes[True], "corrupted stream", "the failure in David's log, reproduced")
+        self.assertEqual(outcomes[False], frame, "with decode=False the frame reaches the session as it came")
+
+
+class FakeDave:
+    def __init__(self, fail=False):
+        self.calls, self.fail = [], fail
+
+    def decrypt(self, user_id, media_type, frame):
+        self.calls.append((user_id, media_type, frame))
+        if self.fail:
+            raise RuntimeError("missing key")
+        return frame[:-12]
+
+
+class RealTransportReceive(unittest.IsolatedAsyncioTestCase):
+    def transport(self, mapping=None, session=None, version=1):
+        transport = discord_voice_transport.RealTransport(SimpleNamespace(members=[]), OWNER, asyncio.get_running_loop())
+        mapping = mapping if mapping is not None else {}
+        transport.vc = SimpleNamespace(_get_id_from_ssrc=mapping.get,
+                                       _connection=SimpleNamespace(dave_session=session, dave_protocol_version=version))
+        self.events = []
+        transport.on_event = self.events.append
+        return transport, mapping
+
+    async def test_an_unknown_stream_is_dropped_until_discord_says_it_is_theirs(self):
+        transport, mapping = self.transport()
+        frame = SimpleNamespace(opus=b"opus-1", packet=SimpleNamespace(ssrc=1486))
+        transport._on_voice(None, frame)                          # before Discord said whose stream 1486 is
+        self.assertEqual(self.events, [], "unknown audio is dropped, never held")
+        mapping[1486] = int(STRANGER)
+        transport._on_voice(None, frame)
+        self.assertEqual(self.events, [], "someone else's stream is dropped")
+        mapping[1486] = int(OWNER)
+        transport._on_voice(None, frame)                          # mapped, but no cached member: found by its stream
+        transport._on_voice(SimpleNamespace(id=int(OWNER)), SimpleNamespace(opus=b"opus-2", packet=None))
+        transport._on_voice(SimpleNamespace(id=int(OWNER)), SimpleNamespace(opus=b"", packet=None))   # a lost packet
+        self.assertEqual(self.events, [("opus", OWNER, b"opus-1"), ("opus", OWNER, b"opus-2")])
+
+    async def test_nothing_escapes_into_the_extensions_thread(self):
+        transport, _ = self.transport()
+
+        def boom(event):
+            raise RuntimeError("queue closed")
+        transport.on_event = boom
+        transport._on_voice(SimpleNamespace(id=int(OWNER)), SimpleNamespace(opus=b"x", packet=None))
+        transport._on_voice(SimpleNamespace(id=int(OWNER)), SimpleNamespace(opus=b"y", packet=None))
+        self.assertEqual(transport.sink_errors, 2)
+
+    async def test_dave_frames_are_opened_with_discord_pys_session(self):
+        if importlib.util.find_spec("davey") is None:
+            self.skipTest("davey is not installed")
+        import davey
+        dave = FakeDave()
+        transport, _ = self.transport(session=dave)
+        wrapped = dave_wrapped(b"opus-payload")
+        self.assertEqual(transport.decrypt(OWNER, wrapped), b"opus-payload")
+        self.assertEqual(dave.calls, [(int(OWNER), davey.MediaType.audio, wrapped)])
+        self.assertEqual(transport.decrypt(OWNER, audio.OPUS_SILENCE), audio.OPUS_SILENCE, "silence is never encrypted")
+
+    async def test_a_plain_frame_passes_and_an_encrypted_one_it_cannot_open_is_refused(self):
+        transport, _ = self.transport(session=FakeDave(fail=True))
+        self.assertEqual(transport.decrypt(OWNER, b"\x78plain-opus"), b"\x78plain-opus", "passthrough while keys change")
+        with self.assertRaises(audio.Undecryptable):
+            transport.decrypt(OWNER, dave_wrapped(b"opus"))
+        transport, _ = self.transport(session=None, version=0)
+        self.assertEqual(transport.decrypt(OWNER, b"\x78plain-opus"), b"\x78plain-opus", "a channel without DAVE")
+        with self.assertRaisesRegex(audio.Undecryptable, "no DAVE session"):
+            transport.decrypt(OWNER, dave_wrapped(b"opus"))
+
+    async def test_receiving_is_restarted_a_few_times_then_reported(self):
+        transport, _ = self.transport()
+        listening = [False]
+        listens = []
+        transport.vc.is_listening = lambda: listening[0]
+        transport.vc.is_connected = lambda: True
+        transport.vc.listen = lambda sink: listens.append(sink) or listening.__setitem__(0, True)
+        transport.SINK = lambda callback: ("sink", callback)
+        self.assertTrue(transport.receiving())
+        self.assertEqual(listens, [("sink", transport._on_voice)])
+        transport.vc.listen = lambda sink: listens.append(sink)       # restarting no longer helps
+        listening[0] = False
+        self.assertFalse(transport.receiving())
+        self.assertFalse(transport.receiving())
+        self.assertEqual(len(listens), discord_voice_transport.RESTARTS)
+        self.assertFalse(transport.receiving(), "it gives up after RESTARTS")
+        self.assertEqual(len(listens), discord_voice_transport.RESTARTS)
+
+    def test_dave_frames_are_recognised(self):
+        self.assertTrue(audio.is_dave_frame(dave_wrapped(b"\x78" * 40)))
+        self.assertFalse(audio.is_dave_frame(b"\x78" * 40))
+        self.assertFalse(audio.is_dave_frame(audio.OPUS_SILENCE))
+        self.assertFalse(audio.is_dave_frame(b""))
+        self.assertFalse(audio.is_dave_frame(b"\x78" * 12 + b"\x02\xfa\xfa"), "a size too small to be DAVE's")
+
+
+class LifecycleReceiving(Lifecycle):
+    """Lifecycle's setUp, these tests only (Lifecycle's own run once, in Lifecycle)."""
+
+    async def test_greeting_is_ready_before_they_join_and_plays_at_once(self):
+        slow = self.pipeline
+        real_speak = slow.speak
+
+        async def speak(text):                     # a voice that takes a while to load, like Kokoro on first use
+            await asyncio.sleep(0.3)
+            async for item in real_speak(text):
+                yield item
+        slow.speak = speak
+        await self.join(user_started=True)
+        await asyncio.sleep(0.9)                   # waiting for them: the greeting renders now
+        self.assertEqual(self.host.transport_made.sent, [])
+        dv.notify_voice_state(self.bot["id"], OWNER, None, VOICE_CHANNEL)
+        await asyncio.sleep(0.1)                   # far less than one sentence's render
+        self.assertTrue(self.host.transport_made.sent, "the greeting plays the moment they join")
+        self.assertEqual(getattr(self.host.transport_made, "arrivals", 0), 1, "the connection hears that they arrived")
+
+    async def test_not_hearing_them_is_said_then_they_get_a_dm(self):
+        def decrypt(user, frame):
+            raise audio.Undecryptable("no DAVE session")
+        self.host.decrypt = decrypt
+        self.host.members = {OWNER}
+        await self.join(user_started=True)
+        await asyncio.sleep(0.1)
+        for _ in range(dv.CANT_HEAR_PACKETS):
+            self.host.transport_made.on_event(("opus", OWNER, dave_wrapped(b"OPUS" + b"\x00" * 8)))
+        await asyncio.wait_for(self.wait_gone(), 3)
+        self.assertIn(dv.CANT_HEAR_LINE, self.pipeline.spoken)
+        self.assertEqual(self.host.dms[-1], (OWNER, dv.CANT_HEAR_DM.format(channel="voice-room")))
+        self.assertTrue(self.host.transport_made.disconnected)
+        self.assertTrue(self.pipeline.closed)
+
+
+for _name in [name for name in vars(Lifecycle) if name.startswith("test_")]:
+    setattr(LifecycleReceiving, _name, None)       # Lifecycle's own tests run once, in Lifecycle
 
 
 if __name__ == "__main__":
