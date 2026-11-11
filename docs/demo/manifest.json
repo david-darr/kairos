@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "7d1d3605d82119df1be825bc582b7cb9433617940c2f38dc1aa7e527ce0c6077",
+  "app.js": "7a8444c06c3f8d124fc7388375640bb75cedcd8e6751b6a7bac7baabb521644b",
   "fixtures.js": "98682c9314d850ddd7d6b9cdeeb72562f295069b0d681eaf7e5f81ae22b61414",
   "index.html": "c2d216301aae8fa4b2c0bd67aa81b0bedd2fc114251448f7c1de1e54cf4a143a",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -75,7 +75,7 @@
   "static/css/redesign.css": "d1485aae3a4ded144849698bd90ca04d1e310231485c63d5aeca6cb0e7fc1b87",
   "static/css/ring.css": "06a1a94a65022b46c5d199d26b9eb5c3636a20ef449e1a51fadfbc9274f35c9a",
   "static/css/settings.css": "8b17458227310ea14550d45fad8624fba94feb9a312329796fb713e63f4c6738",
-  "static/css/studio-content.css": "aab717aa2f0b9288c8ea355f81d75c19ad8e1db22567ca5f5e6dee1e148c4876",
+  "static/css/studio-content.css": "f3c1a44ba4b60167a5fe0e8e511a2478feffcead6a49ced318cb56389aa31a59",
   "static/css/studio-editor.css": "099fac9561191b1ea50714455444acbd67bb0f018f5bca801868f819b33b2b78",
   "static/css/style.css": "8f4c1b2a4e7d5498c82cc20a1065e2e7eca5cfe666bd551b6f2321c44f6b2e63",
   "static/css/swarm.css": "c5416a3f3d94b736f53563f341e61d10cc538766e6cf6809e3004e567c7ef93f",
@@ -1189,7 +1189,7 @@
   "static/css/redesign.css": "d1485aae3a4ded144849698bd90ca04d1e310231485c63d5aeca6cb0e7fc1b87",
   "static/css/ring.css": "06a1a94a65022b46c5d199d26b9eb5c3636a20ef449e1a51fadfbc9274f35c9a",
   "static/css/settings.css": "8b17458227310ea14550d45fad8624fba94feb9a312329796fb713e63f4c6738",
-  "static/css/studio-content.css": "aab717aa2f0b9288c8ea355f81d75c19ad8e1db22567ca5f5e6dee1e148c4876",
+  "static/css/studio-content.css": "f3c1a44ba4b60167a5fe0e8e511a2478feffcead6a49ced318cb56389aa31a59",
   "static/css/studio-editor.css": "099fac9561191b1ea50714455444acbd67bb0f018f5bca801868f819b33b2b78",
   "static/css/style.css": "0acb558bf9c4f15a7d7c25b14049b45c7d32f6c3eb36f50010463a334fc0e715",
   "static/css/swarm.css": "c5416a3f3d94b736f53563f341e61d10cc538766e6cf6809e3004e567c7ef93f",
@@ -1284,7 +1284,7 @@
   "static/js/botsAutomationEvents.js": "e9dd94a668365b2162b725df9f1fbb9e3cf548f3f1c96618f7819676da052cdd",
   "static/js/botsAutomationModel.js": "5e1b6cbfc002846ebe345cf93250bf7246b4bcdde4841f67b52b89405084174c",
   "static/js/botsAvatarEditor.js": "c531b8d187fb291e4282a2957ac701760442ea9067272af75dc6c69fe85888a8",
-  "static/js/botsBackup.js": "b2bc15a54969a53015b7e9587c6ae21f9031a97f716f1f55edc7e97aca314b92",
+  "static/js/botsBackup.js": "4f3a34a5cfa81df0ce268d0f7a8e9e8dc84fa0dffef3912a5746d60b4f3f8090",
   "static/js/botsBrowserProfiles.js": "232957019c7ffb41ee8ff8635512126983186685aaa92bf0547fa722855c35cb",
   "static/js/botsCallBar.js": "bf929918a124d43e49d80dd2adf9fb1b1ce6373f018d86d66dfe26720261132a",
   "static/js/botsChat.js": "cd11bd6c3f36576e1a6ef6e02f8138b97daa89cc56e1922edc62b24b4ed11561",
@@ -1325,8 +1325,8 @@
   "static/js/botsNewTask.js": "a30282eb87971fc86d489df79425b078e83aa521a7cafc8677214179b25cc892",
   "static/js/botsNotices.js": "47a298fe1734499a373f5bc6b4012eb19bf2e6978380d732dac468890488aa0e",
   "static/js/botsNotifications.js": "4bd180a59137bdba6f6b3c4b7dbe81233a2d21f2a478f764cc4f7130ba5f5589",
-  "static/js/botsPackageModel.js": "d415b24d0e365556eac76bcd7b072af94554675078253974b40c2b10066b3021",
-  "static/js/botsPackagePreview.js": "52f3501b1150ef4a17fbbb3130b563b2307e9893f0efd851a65f7cde368c4993",
+  "static/js/botsPackageModel.js": "7747c6be742272fbb190b8fbb45ae25303bb97a140e84c6f7de67d2eda5f5210",
+  "static/js/botsPackagePreview.js": "d59e43bf7507a2d2a3c0aa6ac4b6111f4dc60c1e8592b892bffff941608e7e9e",
   "static/js/botsPanel.js": "8c5333a233fc505784e48f219236f3a53c7fecf814be4dffe687ddbcc187fc74",
   "static/js/botsPanelHost.js": "c75f92f420ab73daccaf894ed6be8075dc25a933e84c3f22855be1bfcfcb67af",
   "static/js/botsPanelSections.js": "9e25d2c063656a22bc301a5b07b0672f70cd11b9f93baa7a2b45717ba5e4191e",
@@ -1386,7 +1386,7 @@
   "static/js/botsTeamMemory.js": "25220ac2b1d684a1e45d37f087578e4106a4aa1a23d416ddb68f0b98bb8a890d",
   "static/js/botsTeamSettings.js": "d8d57d1f412c63b61defcc6d974d32baf990862e7e7d9d953bd88771be161931",
   "static/js/botsTeamSetupCard.js": "2dd6651353d9ef6a51231825e2c8152d438c3ef76b5fe6b29a32107e1c8a58eb",
-  "static/js/botsTemplates.js": "8142f8d8872e8ccbfdbb13520f06b6d49026e3b7ea9e42608e3a93537be5062d",
+  "static/js/botsTemplates.js": "01839b9198a062fb4d4afa77b8398ed3cf4944aa4325996c7075048aa6ec3367",
   "static/js/botsThreadMenu.js": "e67da90b4ee2681780c4a45f00c2b16be91cbe61b6aafd21c2bc0df565deddb5",
   "static/js/botsTour.js": "c6b6d4b44293f8191c5702df7b2e2d9d1eeba994820c94c36dd60ee1fecc4ca0",
   "static/js/botsTraceView.js": "b6b6fb4e6e3a6b61edf0ac5805884e28f38228949ca64501b034795402b92874",
@@ -1560,8 +1560,8 @@
   "static/js/speechSegments.js": "b76625563cb913b6bba00a3f5a8c2284b0ee62c76a59615bd2e82b0d7e75032d",
   "static/js/storePublish.js": "58ddd702fef6e0bc429428ff7ee635cb19e5ba11c56f1c70aa71dcaacaeb4cf7",
   "static/js/studioClipForm.js": "8663c92b792fad63262d21bca9295a07797a2f426a41117deebb17b5fd3dfe6f",
-  "static/js/studioContent.js": "529a1f2d6e0bacda2ae9fcb980c105d3724480df3460cb373830c26c0b8ae1f9",
-  "static/js/studioContentModel.js": "1e9a084113731ffe07ff19c97c0337870f9c209112e1bea97b0df426d6275e43",
+  "static/js/studioContent.js": "371160d066e3420e9608eb3f08eada1b24d7193751ecf03fb6fbf76ae492634d",
+  "static/js/studioContentModel.js": "50ed9ac101a2ad5f1585f1aa795c1a287b9d501593e0c5d3114517bee26fc79a",
   "static/js/studioEditorModel.js": "fb36a40ea089afd6dc0af16f0def2aea0f963d04edeea3aacd4057f4a4b06ac0",
   "static/js/studioSceneForm.js": "e3d974840668bd9a1bd1c2b889fecca92377e0ad33b68590fa47950b50663dd3",
   "static/js/studioStageForm.js": "f434e4a71c99e91770096b569bb0ee9a203d275c53414a9cb3bb8d9d89a82364",
@@ -2614,6 +2614,6 @@
   "tabs/school/view.js": "ebdc4818f6ca446e2aae949af7ea3f08a7f46eaa6dc0320e7da1e4d1befc6399",
   "tabs/studio/tab.json": "28f1e091d41cb463851b41c3aeb27e8bf66adbcc98844f63423d09bada77b837",
   "tabs/studio/view.css": "8a0ccf87630e1d16eacdaa7dc9cc2d0ebcaae0aaabf9751b01a254a3de955c68",
-  "tabs/studio/view.js": "d668b76cc6e6a6a8dfb9c0d2af7f7baf3d0041c0ca06ff3420d15d349a6d957e"
+  "tabs/studio/view.js": "bf51620ef272f77e7e5767cf422e2ab97232f15b0ca742dff228eb81933bcd35"
  }
 }

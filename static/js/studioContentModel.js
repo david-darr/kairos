@@ -579,7 +579,9 @@ export function stateCounts(counts = {}) {
   return PUBLISH_STATES.filter(([id]) => counts[id]).map(([id, label]) => ({ id, label, count: counts[id] }));
 }
 
+// 'to_post' is both states that wait for the person to press Post (prepared, and filled on the page).
 export function filterItems(items, state) {
+  if (state === 'to_post') return items.filter(i => ['prepared', 'waiting_for_you'].includes(i.state));
   return state && state !== 'all' ? items.filter(i => i.state === state) : items;
 }
 
@@ -660,4 +662,122 @@ export function pageReadText(p) {
   if (p.paused === 'page_changed') return `Paused: several reads in a row found no numbers, so ${p.name} may have changed its page. Check a post's analytics page, then press Try again.`;
   const last = p.last ? ` Last read ${timeText(p.last.at)} (${READ_STATUS[p.last.status] || p.last.status}).` : ' Nothing read yet.';
   return `On. ${p.reads_today} of ${p.max_per_day} page reads today.${last}`;
+}
+
+// -- the channel dashboard (Studio > Content laid out like a creator studio, by channel) ---------------------------
+// The rail picks a scope: 'all' (every channel), one channel (its id), or a library ('lib:formats' and so on).
+export const OVERVIEW_TABS = [['dashboard', 'Dashboard'], ['approvals', 'Approvals'], ['pipeline', 'Pipeline'], ['calendar', 'Calendar'],
+  ['publishing', 'Publishing'], ['analytics', 'Analytics'], ['report', 'Report']];
+export const CHANNEL_TABS = [['dashboard', 'Dashboard'], ['pipeline', 'Pipeline'], ['calendar', 'Calendar'], ['approvals', 'Approvals'],
+  ['publishing', 'Publishing'], ['analytics', 'Analytics'], ['settings', 'Settings']];
+export const LIBRARIES = [['formats', 'Formats'], ['styles', 'Styles'], ['characters', 'Characters'], ['connections', 'Connections']];
+export const tabsFor = scope => scope === 'all' ? OVERVIEW_TABS : typeof scope === 'number' ? CHANNEL_TABS : [];
+
+// A channel's round avatar: the first letter of its handle, coloured from its look (the look id, else its style pack, else
+// the handle), so channels that share a look share a colour.
+export function avatarFor(channel) {
+  const letter = String(channel?.handle || '').replace(/^@/, '').slice(0, 1).toUpperCase() || '?';
+  return { letter, key: channel?.look || channel?.style_pack || channel?.handle || '' };
+}
+export const PLATFORM_SHORT = { youtube: 'YT', tiktok: 'TT', instagram: 'IG' };
+export const channelName = channel => channel ? `${platformName(channel.platform)} ${channel.handle}` : '';
+
+// The pipeline of one channel: its own posts, plus its niche's topics (a topic belongs to a niche until a post is made).
+export function channelItems(items, channel) {
+  if (!channel) return items || [];
+  return (items || []).filter(i => i.kind === 'topic' ? i.niche_id === channel.niche_id : i.channel_id === channel.id);
+}
+// Post id to channel id, from the publishing items (every post is one).
+export function postChannels(pubItems) {
+  return Object.fromEntries((pubItems || []).map(i => [i.post_id, i.channel_id]));
+}
+export const forChannel = (list, channelId, key = 'channel_id') => channelId == null ? (list || []) : (list || []).filter(x => x[key] === channelId);
+export const TO_POST = ['prepared', 'waiting_for_you'];
+
+// What needs the person, as rows to jump from: posts to approve, long video plans, prepared posts waiting for Post and failed
+// preparations; for every channel also character sheets, style packs and team decisions. channelId null means every channel.
+export function needsYou({ approvals = [], plans = [], pubItems = [], sheets = [], packs = [], decisions = [] } = {}, channelId = null) {
+  const owner = postChannels(pubItems);
+  const mine = channelId == null ? plans : plans.filter(p => owner[p.post_id] === channelId);
+  const pub = forChannel(pubItems, channelId);
+  const rows = [
+    { key: 'approvals', count: forChannel(approvals, channelId).length, one: 'post to approve', many: 'posts to approve', tab: 'approvals' },
+    { key: 'plans', count: mine.length, one: 'long video plan to approve', many: 'long video plans to approve', tab: 'approvals' },
+    { key: 'to_post', count: pub.filter(i => TO_POST.includes(i.state)).length, one: 'prepared post waiting for you to post it', many: 'prepared posts waiting for you to post them', tab: 'publishing', filter: 'to_post' },
+    { key: 'failed', count: pub.filter(i => i.state === 'failed').length, one: 'preparation that failed', many: 'preparations that failed', tab: 'publishing', filter: 'failed' },
+  ];
+  if (channelId == null) rows.push(
+    { key: 'sheets', count: sheets.length, one: 'character sheet to approve', many: 'character sheets to approve', tab: 'approvals' },
+    { key: 'packs', count: packs.length, one: 'style pack to approve', many: 'style packs to approve', tab: 'approvals' },
+    { key: 'decisions', count: decisions.filter(d => d.status === 'awaiting_user').length, one: 'team decision to confirm', many: 'team decisions to confirm', tab: 'analytics' });
+  return rows.filter(r => r.count > 0).map(r => ({ ...r, text: `${r.count} ${r.count === 1 ? r.one : r.many}` }));
+}
+export const needsCount = rows => rows.reduce((n, r) => n + r.count, 0);
+
+// The newest posted posts (newest first) and the next scheduled ones (soonest first).
+export function latestPosted(pubItems, n = 4, channelId = null) {
+  return forChannel(pubItems, channelId).filter(i => i.state === 'posted' && i.posted_at).sort((a, b) => b.posted_at - a.posted_at).slice(0, n);
+}
+export function upcoming(pubItems, now, n = 5, channelId = null) {
+  return forChannel(pubItems, channelId).filter(i => i.scheduled_at && i.scheduled_at >= now && !['posted', 'rejected'].includes(i.state))
+    .sort((a, b) => a.scheduled_at - b.scheduled_at).slice(0, n);
+}
+
+// A post's newest number set (its latest snapshot), or null before any numbers came in.
+export function latestNumbers(metrics) {
+  const s = [...(metrics || [])].sort((a, b) => (a.taken_at || 0) - (b.taken_at || 0)).at(-1);
+  if (!s) return null;
+  return { views: s.views || 0, avg: s.avg_view_duration_s ?? null, length: s.video_length_s ?? null, likes: s.likes || 0, comments: s.comments || 0,
+    shares: s.shares || 0, follows: s.follows_gained || 0, at: s.taken_at, source: s.source || '' };
+}
+// Totals over the posts whose numbers were read: views, follows, likes, comments, shares and the mean average view duration.
+export function numberTotals(list) {
+  const got = (list || []).filter(Boolean);
+  const sum = key => got.reduce((n, x) => n + (x[key] || 0), 0);
+  const avgs = got.map(x => x.avg).filter(v => typeof v === 'number');
+  return { posts: got.length, views: sum('views'), follows: sum('follows'), likes: sum('likes'), comments: sum('comments'), shares: sum('shares'),
+    avg: avgs.length ? avgs.reduce((a, b) => a + b, 0) / avgs.length : null };
+}
+// 950, 1.2K, 34K, 1.5M.
+export function compact(n) {
+  const v = Number(n) || 0, a = Math.abs(v);
+  if (a < 1000) return String(Math.round(v));
+  if (a < 1e6) return `${(v / 1e3).toFixed(a < 1e4 ? 1 : 0).replace(/\.0$/, '')}K`;
+  return `${(v / 1e6).toFixed(a < 1e7 ? 1 : 0).replace(/\.0$/, '')}M`;
+}
+export function durationText(seconds) {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds)) return 'no number yet';
+  const s = Math.round(seconds);
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
+}
+// How many items sit in each pipeline column, for the dashboard.
+export function pipelineCounts(items) {
+  return boardColumns(items).map(c => ({ id: c.id, title: c.title, count: c.items.length }));
+}
+const counted = (count, one, many = one + 's') => `${count} ${count === 1 ? one : many}`;
+// One channel's week in plain lines: posted, scheduled, waiting, and its niche on the scoreboard.
+export function channelWeek(channel, pubItems, now, niche = null) {
+  const week = now - 7 * 86400, mine = forChannel(pubItems, channel.id);
+  const lines = [
+    `Posted in the last 7 days: ${counted(mine.filter(i => i.state === 'posted' && (i.posted_at || 0) >= week).length, 'post')}.`,
+    `Scheduled from now on: ${counted(upcoming(mine, now, Infinity).length, 'post')}.`,
+    `Waiting for your approval: ${counted(mine.filter(i => i.state === 'awaiting_approval').length, 'post')}.`,
+    `Prepared and waiting for you to post: ${counted(mine.filter(i => TO_POST.includes(i.state)).length, 'post')}.`];
+  if (niche) lines.push(niche.eligible && niche.score != null ? `Its niche, ${niche.name}, scores ${niche.score.toFixed(1)} on the scoreboard.`
+    : `Its niche, ${niche.name}, is not scored yet: ${niche.not_yet || 'no posts yet'}.`);
+  return lines;
+}
+// The phone's channel picker: every channel (in niche order), then the libraries.
+export function pickerOptions(niches, channels) {
+  const out = [['all', 'All channels']];
+  for (const { niche, channels: list } of groupChannels(niches, channels)) {
+    for (const c of list) out.push([String(c.id), `${channelName(c)}, ${niche.name}${c.status === 'archived' ? ', archived' : ''}`]);
+  }
+  return [...out, ...LIBRARIES.map(([id, label]) => [`lib:${id}`, label])];
+}
+export function parseScope(value) {
+  if (value == null || value === 'all') return 'all';
+  if (/^lib:(formats|styles|characters|connections)$/.test(String(value))) return String(value);
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? id : 'all';
 }

@@ -25,7 +25,7 @@ const now = Date.now() / 1000;
 const customTab = { id: 'studio', label: 'Studio', user_tab: false, format: 'folder', view_url: '/tab-files/studio/view.js', style_url: '/tab-files/studio/view.css', icon_svg: '<svg viewBox="0 0 24 24"><path d="M3 6h18v15H3z"/></svg>' };
 
 // -- the mock Content Studio store ------------------------------------------------------------------------------
-const store = { forbidden: false, niches: [], channels: [], items: [], approvals: [], plans: [], findings: [], decisions: [], posted: [], team: [], pubItems: [], reads: { tiktok: false, instagram: false },
+const store = { forbidden: false, metrics: {}, niches: [], channels: [], items: [], approvals: [], plans: [], findings: [], decisions: [], posted: [], team: [], pubItems: [], reads: { tiktok: false, instagram: false },
   settings: { weights: { views: 0.4, watch: 0.4, engagement: 0.2 }, batch_approval: false },
   yt: { configured: true, connected: false, pending: false, google_account: null, needs_reconnect: false, last_sync: null, notice: 'Read only.' },
   ytPost: { configured: true, connected: true, pending: false, google_account: { id: 'g1', email: 'me@example.com' }, needs_reconnect: false, privacy: 'private',
@@ -39,7 +39,7 @@ const pageReadsData = () => ({ note: 'Read from your signed-in pages in the Kair
     tiktok: { on: store.reads.tiktok, name: 'TikTok', reads_today: 3, max_per_day: 40, last: { at: at(1, 20, 5), status: 'ok' }, paused: '', paused_until: null, posts: 3 },
     instagram: { on: store.reads.instagram, name: 'Instagram', reads_today: 2, max_per_day: 40, last: { at: at(1, 20, 6), status: 'parse_failed' }, paused: store.reads.instagram ? 'page_changed' : '', paused_until: null, posts: 2 } } });
 const pubItem = (post_id, title, platform, state, extra = {}) => ({ post_id, title, platform, platform_name: { youtube: 'YouTube', tiktok: 'TikTok', instagram: 'Instagram' }[platform],
-  handle: platform === 'instagram' ? 'sky.kairos' : '@sky.kairos', channel_id: 1, niche: 'Sky science', long_form: false, state, scheduled_at: null, posted_at: null, posted_url: null,
+  handle: { youtube: '@cooks', tiktok: '@cooks.tt', instagram: '@trips' }[platform], channel_id: { youtube: 1, tiktok: 2, instagram: 3 }[platform], niche: platform === 'instagram' ? 'Travel' : 'Cooking', long_form: false, state, scheduled_at: null, posted_at: null, posted_url: null,
   approved_at: at(0, 9), created_at: at(0, 8), prep_id: null, route: null, routes: [], problems: [], error: '', fill: {}, checklist: [], rejection_count: 0, ...extra,
   when: extra.when || extra.posted_at || extra.scheduled_at || extra.approved_at || at(0, 9) });
 const NEXT = { drafted: ['team', 'The Script Writer writes the script.'], awaiting_approval: ['you', 'Approve, edit or reject it in Approvals.'],
@@ -72,7 +72,7 @@ const board = () => ({ at: now, weights: { views: 0.4, watch: 0.4, engagement: 0
     { id: 2, name: 'Travel', status: 'live', slots: 1, eligible: true, score: 71.5, posts_posted: 14, posts_scored: 12, age_days: 30, not_yet: '' }],
   strategies: { script_writer: [{ id: 1, name: 'Hook first', status: 'active', is_default: true, eligible: false, score: null, posts_posted: 0, posts_scored: 0, age_days: 0, not_yet: '0 of 10 posts with 7 day numbers; 0 of 21 days' }], evaluator: [] },
   formats: [], style_packs: [{ id: 'motion-type', name: 'Motion type', available: true, eligible: false, score: null, posts_posted: 3, posts_scored: 1, age_days: 4, not_yet: '1 of 10 posts with 7 day numbers; 4 of 21 days' }],
-  top_posts: [], posts_scored: 14, posts_posted: 18 });
+  top_posts: [{ post_id: 35, title: 'Clouds weigh tons', platform: 'youtube', niche: 'Cooking', posted_url: 'https://www.youtube.com/watch?v=abcdefghijk', score: 64.2 }], posts_scored: 14, posts_posted: 18 });
 // Example format card and ports for this check only (example.test links, made-up numbers).
 const formatsData = () => ({
   formats: [{ id: 3, name: 'One person at a time', premise: 'An impossible ability applied to everyone, revealed one person at a time.',
@@ -129,7 +129,7 @@ function content(method, p, body) {
   if (p === '/settings') { if (method === 'PUT') Object.assign(store.settings, body); return [200, { ...store.settings, team_bot_ids: store.team }]; }
   if (p === '/posts' && method === 'GET') return [200, { posts: store.posted }];
   let found = store.approvals.find(x => x.id === id) || store.items.find(x => x.kind === 'post' && x.id === id) && post(id, { state: store.items.find(x => x.id === id).state });
-  if (/^\/posts\/\d+$/.test(p)) return [200, { ...found, metrics: [] }];
+  if (/^\/posts\/\d+$/.test(p)) return [200, { ...found, metrics: store.metrics[id] || [] }];
   if (/^\/posts\/\d+\/edit$/.test(p)) { Object.assign(found, body); return [200, found]; }
   if (/^\/posts\/\d+\/approve$/.test(p)) { store.approvals = store.approvals.filter(x => x.id !== id); return [200, { ...found, state: 'approved' }]; }
   if (/^\/posts\/\d+\/reject$/.test(p)) { store.approvals = store.approvals.filter(x => x.id !== id); return [200, { ...found, state: 'rejected' }]; }
@@ -160,19 +160,22 @@ const populate = () => {
       { id: 3, niche_id: 2, platform: 'instagram', handle: '@trips', status: 'archived', paused: 0, niche_name: 'Travel', archive_reason: 'archived by you' }],
     findings: [{ kind: 'platform_warning', severity: 'urgent', channel_id: 1, message: 'YouTube warned @cooks: Reused content notice. The channel is paused.' }],
     approvals: [post(11, { title: 'Five minute soup', format_id: 3, format_name: 'One person at a time', port_id: 2, style_pack: 'motion-type', thumbnail: 'A pot with a glowing number' }), post(12, { title: 'Pasta in one pan', platform: 'tiktok', handle: '@cooks.tt', channel_id: 2 }),
-      post(13, { title: 'Sauce basics', platform: 'instagram' }), post(14, { title: 'Bread at home' })],
-    items: [{ kind: 'topic', id: 1, title: 'Street food trends', niche_name: 'Travel', step: 'pick', owner: 'evaluator', status: 'candidate', age_h: 5, source: 'Search trends' },
-      { kind: 'post', id: 21, title: 'Scripting now', niche_name: 'Cooking', platform: 'youtube', step: 'script', owner: 'script_writer', status: 'working', age_h: 30, in_step_h: 30, window_h: 12, overdue: true, rejection_count: 0, state: 'drafted' },
-      { kind: 'post', id: 22, title: 'Render broke', niche_name: 'Cooking', platform: 'tiktok', step: 'render', owner: 'editor', status: 'failed', age_h: 8, in_step_h: 8, window_h: 6, overdue: false, rejection_count: 0, state: 'drafted' },
-      { kind: 'post', id: 11, title: 'Five minute soup', niche_name: 'Cooking', platform: 'youtube', step: 'approval', owner: 'user', status: 'waiting', age_h: 3, in_step_h: 3, rejection_count: 0, state: 'awaiting_approval' },
-      { kind: 'post', id: 23, title: 'Ready to post', niche_name: 'Travel', platform: 'instagram', step: 'publish', owner: 'publisher', status: 'waiting', age_h: 50, in_step_h: 20, rejection_count: 0, state: 'approved' },
-      { kind: 'post', id: 24, title: 'Already live', niche_name: 'Travel', platform: 'youtube', step: 'tracking', owner: 'executor', status: 'posted', age_h: 100, in_step_h: 90, rejection_count: 0, state: 'posted' },
-      { kind: 'post', id: 26, title: 'YouTube ready', niche_name: 'Cooking', platform: 'youtube', step: 'publish', owner: 'publisher', status: 'waiting', age_h: 4, in_step_h: 2, rejection_count: 0, state: 'approved' }],
+      post(13, { title: 'Sauce basics', platform: 'instagram', handle: '@trips', channel_id: 3, niche_id: 2, niche_name: 'Travel' }), post(14, { title: 'Bread at home' })],
+    items: [{ kind: 'topic', id: 1, title: 'Street food trends', niche_id: 2, channel_id: null, niche_name: 'Travel', step: 'pick', owner: 'evaluator', status: 'candidate', age_h: 5, source: 'Search trends' },
+      { kind: 'post', id: 21, title: 'Scripting now', niche_id: 1, channel_id: 1, niche_name: 'Cooking', platform: 'youtube', step: 'script', owner: 'script_writer', status: 'working', age_h: 30, in_step_h: 30, window_h: 12, overdue: true, rejection_count: 0, state: 'drafted' },
+      { kind: 'post', id: 22, title: 'Render broke', niche_id: 1, channel_id: 2, niche_name: 'Cooking', platform: 'tiktok', step: 'render', owner: 'editor', status: 'failed', age_h: 8, in_step_h: 8, window_h: 6, overdue: false, rejection_count: 0, state: 'drafted' },
+      { kind: 'post', id: 11, title: 'Five minute soup', niche_id: 1, channel_id: 1, niche_name: 'Cooking', platform: 'youtube', step: 'approval', owner: 'user', status: 'waiting', age_h: 3, in_step_h: 3, rejection_count: 0, state: 'awaiting_approval' },
+      { kind: 'post', id: 23, title: 'Ready to post', niche_id: 2, channel_id: 3, niche_name: 'Travel', platform: 'instagram', step: 'publish', owner: 'publisher', status: 'waiting', age_h: 50, in_step_h: 20, rejection_count: 0, state: 'approved' },
+      { kind: 'post', id: 24, title: 'Already live', niche_id: 2, channel_id: 3, niche_name: 'Travel', platform: 'instagram', step: 'tracking', owner: 'executor', status: 'posted', age_h: 100, in_step_h: 90, rejection_count: 0, state: 'posted' },
+      { kind: 'post', id: 26, title: 'YouTube ready', niche_id: 1, channel_id: 1, niche_name: 'Cooking', platform: 'youtube', step: 'publish', owner: 'publisher', status: 'waiting', age_h: 4, in_step_h: 2, rejection_count: 0, state: 'approved' }],
     decisions: [{ id: 1, kind: 'retire', subject_type: 'channel', subject_id: 1, subject_name: 'youtube:@cooks', status: 'awaiting_user', reason: 'Below half the team median two reviews running.', at: now - 3600,
       numbers: { score: 20.5, team_median: 71.5, posts_scored: 12, age_days: 30 } },
     { id: 2, kind: 'promote', subject_type: 'niche', subject_id: 2, subject_name: 'Travel', status: 'confirmed', reason: 'Takes the freed slot.', at: now - 86400, numbers: { score: 71.5, slots_after: 2 } },
     { id: 4, kind: 'add', subject_type: 'niche', subject_id: 0, subject_name: 'Deep sea', status: 'awaiting_user', reason: 'A replacement for Chess.', at: now - 7200,
       numbers: { live_niches: 2, cap: 5 }, payload: { name: 'Deep sea', source: 'https://trends.example.test/deep-sea', signal: 'up 40% in 30 days' } }],
+    metrics: { 35: [{ post_id: 35, taken_at: at(3, 20), views: 300, avg_view_duration_s: 18, likes: 10, comments: 1, shares: 0, follows_gained: 2, source: 'youtube' },
+      { post_id: 35, taken_at: at(4, 20), views: 1240, avg_view_duration_s: 21.4, likes: 84, comments: 6, shares: 3, follows_gained: 9, source: 'youtube' }],
+      34: [{ post_id: 34, taken_at: at(4, 21), views: 860, avg_view_duration_s: 14, likes: 40, comments: 2, shares: 5, follows_gained: 4, source: 'page-read' }] },
     posted: [{ id: 24, title: 'Already live', posted_url: 'https://youtu.be/LIVE1234567' }, { id: 25, title: 'Second live', posted_url: 'https://youtu.be/LIVE7654321' }] });
 };
 
@@ -312,13 +315,18 @@ app.whenReady().then(async () => {
       await js(`[...document.querySelectorAll(${T(selector)})].find(n=>n.textContent===${T(text)}||n.getAttribute('aria-label')===${T(text)}).click()`); await pause(120); };
     const fill = async (label, value) => js(`(() => { const n=document.querySelector('[aria-label=${T(label)}]'); n.value=${T(value)}; n.dispatchEvent(new Event('input',{bubbles:true})); n.dispatchEvent(new Event('change',{bubbles:true})); })()`);
     const last = (suffix, method = 'POST') => writes.filter(w => w.path.endsWith(suffix) && w.method === method).at(-1);
-    const capture = async name => { await pause(150); fs.writeFileSync(path.join(output, name + '.png'), (await win.webContents.capturePage()).toPNG()); };
+    const shotsDir = process.env.STUDIO_CONTENT_SHOTS;   // also keep every capture there (for David)
+    const capture = async name => { await pause(150); const png = (await win.webContents.capturePage()).toPNG(); fs.writeFileSync(path.join(output, name + '.png'), png);
+      if (shotsDir) { fs.mkdirSync(shotsDir, { recursive: true }); fs.writeFileSync(path.join(shotsDir, name + '.png'), png); } };
     const noOverflow = async () => assert.equal(await js("document.documentElement.scrollWidth > innerWidth + 2 || [...document.querySelectorAll('.studio-view,.sc')].some(n=>n.scrollWidth>n.clientWidth+2)"), false, 'No sideways scroll');
     const labels = async () => assert.deepEqual(await js(`[...document.querySelectorAll('.sc button,.sc input,.sc textarea,.sc select')].filter(n=>!(n.getAttribute('aria-label')||n.textContent.trim()||n.labels?.length)).map(n=>n.outerHTML)`), [], 'Every control has a label');
     // Wait for the tab first: right after Content opens (or a reload) the tab bar is still being drawn, and clicking at
     // once threw on a missing tab about 1 run in 3 (release gate, 2.3.0-beta.3).
     const tab = async name => { await wait(`!!document.querySelector('.sc-tab[data-tab=${T(name)}]')`);
       await js(`document.querySelector('.sc-tab[data-tab=${T(name)}]').click()`); await pause(150); };
+    const scopeTo = async value => { await wait(`!!document.querySelector('.sc-rail [data-scope=${T(String(value))}]')`);
+      await js(`document.querySelector('.sc-rail [data-scope=${T(String(value))}]').click()`); await wait(`document.querySelector('.sc-shell')?.dataset.scope===${T(String(value))}`); await pause(150); };
+    const bodyText = () => js("document.querySelector('.sc-body').textContent");
     let loads = 0;
     const openContent = async () => { await win.loadURL(base + '/?load=' + (++loads) + '#/studio'); await wait("!!document.querySelector('.studio-sections')");
       await js("document.getElementById('onboarding-overlay')?.classList.add('hidden')"); await click('.studio-sections button', 'Content'); };
@@ -386,20 +394,62 @@ app.whenReady().then(async () => {
       [['/niches', { name: 'Cooking' }], ['/channels', { niche_id: 1, platform: 'tiktok', handle: '@cooks.tt' }]]);
     await wait("!!document.querySelector('.sc-tabs')");
 
-    // 3. Populated data: warning shown prominently, resolved with a confirmation.
+    // 3. Populated data: the rail, the overview dashboard, the warning shown and resolved with a confirmation.
     populate();
     await openContent();
-    await wait("!!document.querySelector('.sc-alert')");
+    await wait("!!document.querySelector('.sc-alert') && !!document.querySelector('.sc-tile-needs')");
     assert.ok(await js("document.querySelector('.sc-alert').textContent.includes('Reused content notice')"), 'Warning text is shown at the top');
-    assert.equal(await js("document.querySelector('.sc-tab[aria-selected=true]').dataset.tab"), 'approvals', 'Opens on Approvals when posts wait');
-    assert.equal(await js("document.querySelector('.sc-tab[data-tab=approvals]').textContent"), 'Approvals 4');
-    if (process.env.SC_DEBUG) { console.log(await js(`(() => { const n=document.querySelector('.sc-tab[aria-selected=false]'); const out=[]; for (const sh of document.styleSheets) { let rules; try { rules=sh.cssRules } catch { continue } for (const r of rules) { let hit=false; try { hit = r.selectorText && n.matches(r.selectorText) } catch {} if (hit && /background|border/.test(r.cssText)) out.push((sh.href||'inline').split('/').pop()+' :: '+r.cssText.slice(0,230)); } } return out.join(' || '); })()`)); }
-    await tab('channels');
+    assert.equal(await js("document.querySelector('.sc-shell').dataset.scope"), 'all', 'Opens on All channels');
+    assert.equal(await js("document.querySelector('.sc-tab[aria-selected=true]').dataset.tab"), 'dashboard', 'Opens on the dashboard');
+    assert.deepEqual(await js("[...document.querySelectorAll('.sc-tab')].map(t=>t.textContent)"), ['Dashboard', 'Approvals 4', 'Pipeline', 'Calendar', 'Publishing', 'Analytics', 'Report']);
+    // The rail: All channels, each channel under its niche with its avatar and platform, Add channel, then the libraries.
+    assert.deepEqual(await js("[...document.querySelectorAll('.sc-rail-top > *')].map(n=>n.classList.contains('sc-rail-heading') ? '# '+n.textContent : n.dataset.scope ? n.dataset.scope+' '+n.querySelector('.sc-rail-name').textContent : n.textContent)"),
+      ['all All channels', '# Cooking', '1 @cooks', '2 @cooks.tt', '# Travel', '3 @trips', 'Add channel']);
+    assert.deepEqual(await js("[...document.querySelectorAll('.sc-rail-item[data-scope=\"1\"], .sc-rail-item[data-scope=\"3\"]')].map(n=>[n.querySelector('.sc-avatar').textContent, n.querySelector('.sc-rail-sub').textContent, n.getAttribute('aria-label')])"),
+      [['C', 'YouTube Paused', 'YouTube @cooks, paused, 3 waiting for you'], ['T', 'Instagram Archived', 'Instagram @trips, archived, 2 waiting for you']]);
+    assert.equal(await js("document.querySelector('.sc-rail-item[data-scope=all]').getAttribute('aria-current')"), 'page');
+    assert.deepEqual(await js("[...document.querySelectorAll('.sc-rail-lower button')].map(b=>b.textContent)"), ['Editor', 'Formats', 'Styles', 'Characters', 'Connections', 'Templates']);
+    // The overview dashboard's cards.
+    assert.deepEqual(await js("[...document.querySelectorAll('.sc-tile')].map(t=>t.dataset.tile)"), ['needs', 'latest', 'analytics', 'report', 'upcoming', 'pipeline', 'channels']);
+    assert.deepEqual(await js("[...document.querySelectorAll('.sc-tile-needs .sc-need')].map(b=>b.textContent)"),
+      ['4 posts to approve', '2 prepared posts waiting for you to post them', '1 preparation that failed', '2 team decisions to confirm']);
+    const latestText = await js("document.querySelector('.sc-tile-latest').textContent");
+    for (const part of ['Clouds weigh tons', 'YouTube @cooks', '1.2K views, 21 s average view, 84 likes', 'TikTok @cooks.tt', '860 views, 14 s average view, 40 likes']) assert.ok(latestText.includes(part), part);
+    assert.deepEqual(await js("[...document.querySelectorAll('.sc-tile-latest [data-latest]')].map(n=>n.dataset.latest)"), ['35', '34'], 'newest first');
+    const analyticsText = await js("document.querySelector('.sc-tile-analytics').textContent");
+    for (const part of ['18posts posted', '14with 7 day numbers', '71.5best niche, Travel', 'Judged after 3 weeks and 10 posts.']) assert.ok(analyticsText.includes(part), part);
+    assert.ok((await js("document.querySelector('.sc-tile-report').textContent")).includes('What won: Travel (71.5).'));
+    // Coming up: the posts scheduled from now on, soonest first (the mock's week is this week, so it depends on today).
+    const upcomingIds = channelId => store.pubItems.filter(i => i.scheduled_at && i.scheduled_at >= Date.now() / 1000 && !['posted', 'rejected'].includes(i.state) && (channelId == null || i.channel_id === channelId))
+      .sort((a, b) => a.scheduled_at - b.scheduled_at).map(i => String(i.post_id));
+    assert.deepEqual(await js("[...document.querySelectorAll('.sc-tile-upcoming [data-pub]')].map(n=>n.dataset.pub)"), upcomingIds(null), 'Coming up lists scheduled posts');
+    assert.ok((await js("document.querySelector('.sc-tile-pipeline').textContent")).includes('1Topic'));
+    assert.ok(!(await bodyText()).includes('—'), 'No em-dashes in the copy');
+    await capture('overview-dashboard'); await noOverflow(); await labels();
+    // A dashboard row jumps to its tab: the posts to approve.
+    await js("document.querySelector('.sc-need[data-need=approvals]').click()");
+    await wait("document.querySelector('.sc-tab[aria-selected=true]')?.dataset.tab==='approvals'");
+    // The tabs move with the arrow keys.
+    await js("document.querySelector('.sc-tab[aria-selected=true]').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))");
+    await wait("document.querySelector('.sc-tab[aria-selected=true]')?.dataset.tab==='pipeline' && document.activeElement?.dataset.tab==='pipeline'");
+
+    // 3a. A channel: its dashboard, then Settings with the warning, archive and restore, and its look.
+    await scopeTo(1);
+    await wait("!!document.querySelector('.sc-tile-latest')");
+    assert.deepEqual(await js("[...document.querySelectorAll('.sc-tab')].map(t=>t.textContent)"), ['Dashboard', 'Pipeline', 'Calendar', 'Approvals 2', 'Publishing', 'Analytics', 'Settings']);
+    assert.ok(await js("document.querySelector('.sc-head').textContent.includes('@cooks') && document.querySelector('.sc-head').textContent.includes('Niche Cooking') && document.querySelector('.sc-head').textContent.includes('Paused')"));
+    assert.equal(await js("document.querySelector('.sc-rail-item[data-scope=\"1\"]').getAttribute('aria-current')"), 'page');
+    assert.deepEqual(await js("[...document.querySelectorAll('.sc-tile')].map(t=>t.dataset.tile)"), ['latest', 'numbers', 'needs', 'upcoming', 'pipeline', 'look']);
+    const latestOne = await js("document.querySelector('.sc-tile-latest').textContent");
+    for (const part of ['Clouds weigh tons', '1.2Kviews', '21 saverage view', '84likes', '6comments', '3shares', '9follows gained', '(youtube)']) assert.ok(latestOne.includes(part), part);
+    assert.deepEqual(await js("[...document.querySelectorAll('.sc-tile-needs .sc-need')].map(b=>b.textContent)"), ['2 posts to approve', '1 prepared post waiting for you to post it']);
+    assert.ok((await js("document.querySelector('.sc-tile-numbers').textContent")).includes('1posts posted'));
+    assert.deepEqual(await js("[...document.querySelectorAll('.sc-tile-upcoming [data-pub]')].map(n=>n.dataset.pub)"), upcomingIds(1));
+    await capture('channel-dashboard'); await noOverflow(); await labels();
+    await tab('settings');
     await wait("!!document.querySelector('.sc-warning')");
-    assert.deepEqual(await js("[...document.querySelectorAll('[data-channel-id]:not(.sc-alert)')].map(r=>[r.querySelector('.set-row-title').textContent, r.querySelector('.set-pill').textContent])"),
-      [['@cooks', 'Paused'], ['@cooks.tt', 'Live'], ['@trips', 'Archived']]);
-    assert.ok(await js("document.querySelector('.sc-warning').textContent.includes('Reused content notice')"), 'Warning on the channel row');
-    await capture('desktop-channels');
+    assert.ok(await js("document.querySelector('.sc-warning').textContent.includes('Reused content notice')"), 'Warning on the channel');
+    assert.ok(await js("document.querySelector('[data-cadence]').textContent.includes('1 posting slot')"), 'Cadence names the niche slots');
     await js("document.querySelector('.sc-row-warning button[aria-label=\"Resolve warning for @cooks\"]').click()");
     await wait("!!document.querySelector('.confirm-panel')");
     await click('.confirm-panel button', 'Cancel');
@@ -409,25 +459,22 @@ app.whenReady().then(async () => {
     await click('.confirm-panel button', 'Resume channel');
     await wait("!document.querySelector('.sc-warning') && !document.querySelector('.sc-alert')");
     assert.ok(last('/channels/1/resume'));
+    assert.equal(await js("document.querySelector('.sc-tab[aria-selected=true]').dataset.tab"), 'settings', 'A reload keeps the channel and tab');
     // Archive asks first; restore does not.
+    await scopeTo(2); await tab('settings');
     await js("document.querySelector('button[aria-label=\"Archive TikTok @cooks.tt\"]').click()");
     await wait("!!document.querySelector('.confirm-panel')");
     await click('.confirm-panel button', 'Archive');
-    await wait("document.querySelector('[data-channel-id=\"2\"] .set-pill').textContent==='Archived'");
+    await wait("document.querySelector('[data-channel-id=\"2\"] .set-pill')?.textContent==='Archived'");
     assert.ok(last('/channels/2/archive'));
+    assert.ok(await js("document.querySelector('.sc-rail-item[data-scope=\"2\"]').textContent.includes('Archived')"), 'The rail says archived');
     await js("document.querySelector('button[aria-label=\"Restore TikTok @cooks.tt\"]').click()");
-    await wait("document.querySelector('[data-channel-id=\"2\"] .set-pill').textContent==='Live'");
+    await wait("document.querySelector('[data-channel-id=\"2\"] .set-pill')?.textContent==='Live'");
     assert.ok(last('/channels/2/restore'));
-    // The YouTube connections: analytics not connected offers Connect; posting is connected with its privacy.
-    assert.ok(await js("document.querySelector('[data-youtube=analytics]').textContent.includes('Not connected') && !!document.querySelector('button[aria-label=\"Connect YouTube analytics\"]')"));
-    assert.ok(await js("document.querySelector('[data-youtube=posting]').textContent.includes('As me@example.com') && document.querySelector('[data-youtube=posting]').textContent.includes('API audit')"));
-    await fill('Privacy of YouTube uploads', 'unlisted');
-    for (let n = 0; n < 100 && !last('/posting/youtube/privacy', 'PUT'); n++) await pause(50);
-    assert.deepEqual(last('/posting/youtube/privacy', 'PUT').body, { privacy: 'unlisted' });
     // A channel's look: the Editor and Script Writer follow it.
-    assert.ok(await js("document.querySelector('[data-channel-id=\"1\"]').textContent.includes('No look set')"));
-    await js("document.querySelector('button[aria-label=\"Look for YouTube @cooks\"]').click()");
+    await scopeTo(1); await tab('settings');
     await wait("!!document.querySelector('[aria-label=\"Look id\"]')");
+    assert.ok(await js("document.querySelector('[data-channel-id=\"1\"]').textContent.includes('No look set')"));
     assert.deepEqual(await js("[...document.querySelector('[aria-label=\"Style pack\"]').options].map(o=>o.textContent)"),
       ['Motion type (default)', 'Flat 2D explainer', 'Flat science explainer'], 'Only approved packs are offered');
     await fill('Look id', 'sport'); await fill('Aspect', '16:9'); await fill('Voice notes', 'Calm, curious.'); await fill('Narrator voice', 'af_heart');
@@ -442,21 +489,33 @@ app.whenReady().then(async () => {
     // Pack C: the channel says honestly whether its videos are made for kids (not set until the person answers).
     assert.deepEqual(await js("[...document.querySelector('[aria-label=\"Made for kids\"]').options].map(o=>o.value)"), ['', 'no', 'yes']);
     await js("(() => { const s = document.querySelector('[aria-label=\"Made for kids\"]'); s.value = 'yes'; s.dispatchEvent(new Event('change', { bubbles: true })); })()");
-    await click('.sc-dialog-panel button', 'Save look');
-    await wait("!document.querySelector('[aria-label=\"Look id\"]')");
+    await capture('channel-settings'); await noOverflow(); await labels();
+    await click('.sc button', 'Save the settings of YouTube @cooks');
+    await wait("document.querySelector('[data-channel-id=\"1\"]')?.textContent.includes('style Flat science explainer, look sport, 16:9, voice notes set')");
     assert.deepEqual(last('/channels/1/edit').body, { look: 'sport', aspect: '16:9', notes: 'Calm, curious.', voice: 'af_heart', style_pack: 'aaaaaaaaaaaa', renderer: '', fps: 60, made_for_kids: 'yes', long_per_week: 2 });
-    await wait("document.querySelector('[data-channel-id=\"1\"]').textContent.includes('style Flat science explainer, look sport, 16:9, voice notes set')");
+    assert.equal(await js("document.querySelector('[data-scope=\"1\"] .sc-avatar').style.getPropertyValue('--avatar-hue') !== document.querySelector('[data-scope=\"2\"] .sc-avatar').style.getPropertyValue('--avatar-hue')"), true, 'The avatar colour follows the look');
     await noOverflow(); await labels();
+    // The account's connections live in a library: YouTube analytics not connected offers Connect; posting is connected with its privacy.
+    await scopeTo('lib:connections');
+    await wait("!!document.querySelector('[data-youtube=analytics]')");
+    assert.equal(await js("!!document.querySelector('.sc-tabs')"), false, 'A library has no tabs');
+    assert.ok(await js("document.querySelector('[data-youtube=analytics]').textContent.includes('Not connected') && !!document.querySelector('button[aria-label=\"Connect YouTube analytics\"]')"));
+    assert.ok(await js("document.querySelector('[data-youtube=posting]').textContent.includes('As me@example.com') && document.querySelector('[data-youtube=posting]').textContent.includes('API audit')"));
+    assert.ok(await js("document.querySelector('[data-niche-id=\"1\"]').textContent.includes('1 posting slot. 2 channels.')"), 'The niches with their slots');
+    await fill('Privacy of YouTube uploads', 'unlisted');
+    for (let n = 0; n < 100 && !last('/posting/youtube/privacy', 'PUT'); n++) await pause(50);
+    assert.deepEqual(last('/posting/youtube/privacy', 'PUT').body, { privacy: 'unlisted' });
+    await capture('library-connections'); await noOverflow(); await labels();
 
-    // 4. The pipeline board: steps, owner, age, overdue flag; a click opens the details.
-    await tab('pipeline');
+    // 4. The pipeline board: steps, owner, age, overdue flag; a click opens the details. Every channel, then one.
+    await scopeTo('all'); await tab('pipeline');
     await wait("document.querySelectorAll('.sc-col').length===6");
     assert.deepEqual(await js("[...document.querySelectorAll('.sc-col-title')].map(t=>t.firstChild.textContent)"), ['Topic', 'Scripting', 'Rendering', 'Awaiting approval', 'Approved', 'Posted']);
     assert.ok(await js("document.querySelector('[data-column=scripting] .sc-item').textContent.includes('Script Writer') && document.querySelector('[data-column=scripting] .sc-item').textContent.includes('30h')"));
     assert.ok(await js("document.querySelector('[data-column=scripting] .sc-item').textContent.includes('Overdue')"));
     assert.ok(await js("document.querySelector('[data-column=rendering] .sc-item').textContent.includes('Render failed')"));
     assert.equal(await js("document.querySelectorAll('[data-column=topic] .sc-item').length"), 1);
-    await capture('desktop-pipeline'); await noOverflow(); await labels();
+    await capture('overview-pipeline'); await noOverflow(); await labels();
     await js("document.querySelector('[data-item=post-23]').click()");
     await wait("!!document.querySelector('.sc-dialog .sc-preview')");
     assert.ok(await js("document.querySelector('.sc-dialog').textContent.includes('Prepare post assembles it for its platform')"));
@@ -475,18 +534,30 @@ app.whenReady().then(async () => {
     await click('.confirm-panel button', 'Post to YouTube');
     await wait("!document.querySelector('.sc-dialog')");
     assert.ok(last('/posts/26/publish-youtube'));
+    // One channel's pipeline: its own posts only. The Travel channel also sees its niche's topics.
+    await scopeTo(1); await tab('pipeline');
+    await wait("!!document.querySelector('.sc-board')");
+    assert.deepEqual(await js("[...document.querySelectorAll('.sc-item')].map(n=>n.dataset.item).sort()"), ['post-11', 'post-21', 'post-26']);
+    await capture('channel-pipeline'); await noOverflow(); await labels();
+    await scopeTo(3); await tab('pipeline');
+    await wait("!!document.querySelector('.sc-board')");
+    assert.deepEqual(await js("[...document.querySelectorAll('.sc-item')].map(n=>n.dataset.item).sort()"), ['post-23', 'post-24', 'topic-1']);
 
-    // 5. Approvals: preview, then Approve / Edit / Reject with a note / Redraft call the right endpoints.
-    await tab('approvals');
+    // 5. Approvals: preview, then Approve / Edit / Reject with a note / Redraft call the right endpoints. One channel first.
+    await scopeTo(1); await tab('approvals');
+    await wait("document.querySelectorAll('.sc-post').length===2");
+    assert.deepEqual(await js("[...document.querySelectorAll('.sc-post')].map(n=>n.dataset.postId)"), ['11', '14'], 'only this channel\'s posts');
+    await capture('channel-approvals'); await noOverflow(); await labels();
+    await scopeTo('all'); await tab('approvals');
     await wait("document.querySelectorAll('.sc-post').length===4");
     const card = id => `.sc-post[data-post-id="${id}"]`;
     const text = await js(`document.querySelector(${T(card(11))}).textContent`);
-    for (const part of ['Five minute soup', 'A caption', 'Hook, three steps, ask', 'Open render', 'AI label', 'Required', 'you press Post yourself',
+    for (const part of ['Five minute soup', '@cooks', 'A caption', 'Hook, three steps, ask', 'Open render', 'AI label', 'Required', 'you press Post yourself',
       'Format: One person at a time (ported). Style pack: Motion type.', 'A pot with a glowing number']) assert.ok(text.includes(part), part);
     assert.equal(await js(`!!document.querySelector('.sc-post[data-post-id="12"] [data-post-format]')`), false, 'No format block without a format');
     assert.ok((await js(`document.querySelector(${T(card(13))}).textContent`)).includes('Not needed'), 'Instagram needs no AI label');
-    assert.ok((await js("document.querySelector('.sc-body').textContent")).includes('Nothing is posted by approving'));
-    await capture('desktop-approvals');
+    assert.ok((await bodyText()).includes('Nothing is posted by approving'));
+    await capture('overview-approvals');
     await js("document.querySelector('button[aria-label=\"Approve Five minute soup\"]').click()");
     await wait("document.querySelectorAll('.sc-post').length===3");
     assert.deepEqual(last('/posts/11/approve').body, {});
@@ -516,7 +587,7 @@ app.whenReady().then(async () => {
     // With batch approval on, one tap approves the posts shown, after a confirmation.
     store.settings.batch_approval = true;
     store.approvals.push(post(15, { title: 'Soup two' }));
-    await pause(1100); await tab('pipeline'); await openContent(); await tab('approvals');
+    await pause(1100); await openContent(); await tab('approvals');
     await wait("!!document.querySelector('button[aria-label=\"Approve all 2 posts\"]')");
     await js("document.querySelector('button[aria-label=\"Approve all 2 posts\"]').click()");
     await wait("!!document.querySelector('.confirm-panel')");
@@ -527,7 +598,7 @@ app.whenReady().then(async () => {
     store.plans = [{ video_id: 'abcabcabcabc', title: 'The Moon, in depth', seconds: 213, version: 3, submitted_by: 'Editor', post_id: 30,
       chapters: [{ title: 'Our nearest neighbour', start: 0 }, { title: 'Why the Moon changes shape', start: 61.2 }, { title: 'The pull behind the tides', start: 125 }],
       text: 'Chapter 1 at 0:00: Our nearest neighbour (61 s)\n  00:00.0-00:05.1 hook scene: says "Look up tonight."' }];
-    await pause(1100); await tab('pipeline'); await openContent(); await tab('approvals');
+    await pause(1100); await openContent(); await tab('approvals');
     await wait("!!document.querySelector('.sc-plan')");
     const ptext = await js("document.querySelector('.sc-plan').textContent");
     for (const part of ['Long video plan: The Moon, in depth', '3.6 min', '3 chapters', '00:00 Our nearest neighbour', '01:01 Why the Moon changes shape', 'renders only after you approve']) assert.ok(ptext.includes(part), part);
@@ -537,7 +608,7 @@ app.whenReady().then(async () => {
     await wait("!document.querySelector('.sc-plan')");
     assert.ok(last('/api/videos/abcabcabcabc/plan/approve'));
 
-    // 5a. Publishing: every post with its state, schedule, link and next action; a week calendar; the prepared post's
+    // 5a. Publishing: every post with its state, schedule, link and next action; the calendar; the prepared post's
     // checklist; Prepare post, Schedule, Open upload page (the desktop bridge stand-in) and Mark posted.
     const shots = process.env.STUDIO_PUBLISHING_SHOTS;   // also keep the dashboard's screenshots there (for David)
     const keep = async name => { await capture(name); if (shots) { fs.mkdirSync(shots, { recursive: true }); fs.copyFileSync(path.join(output, name + '.png'), path.join(shots, name + '.png')); } };
@@ -550,19 +621,22 @@ app.whenReady().then(async () => {
     assert.deepEqual(await js("[...document.querySelectorAll('.sc-pub')].map(n=>[n.dataset.pub, n.querySelector('.set-pill').textContent])"), [
       ['31', 'Waiting for you to press Post'], ['32', 'Prepared'], ['33', 'Failed'], ['34', 'Posted'], ['35', 'Posted'], ['26', 'Approved'],
       ['11', 'Waiting for your approval'], ['21', 'Drafted'], ['36', 'Rejected']], 'every state, labelled');
-    const pubText = await js("document.querySelector('.sc-body').textContent");
+    const pubText = await bodyText();
     for (const part of ['stops before Post, which you press yourself', 'You: Check the TikTok page and press Post yourself', 'Kairos filled: Video, Caption, AI label.',
       'Scheduled for', 'Posted ', 'https://www.tiktok.com/@sky.kairos/video/7350000000000000001', 'Team: The Publisher prepares it', 'You: Fix it and try again']) assert.ok(pubText.includes(part), part);
-    assert.ok(!pubText.includes('\u2014'), 'No em-dashes in the copy');
+    assert.ok(!pubText.includes('—'), 'No em-dashes in the copy');
+    assert.equal(await js("document.querySelector('.sc-routes')"), null, 'Routes are per channel');
     assert.equal(await js("document.querySelector('[data-pub=\"34\"] a').getAttribute('rel')"), 'noopener noreferrer');
     assert.deepEqual(await js("[...document.querySelectorAll('[data-pub=\"32\"] .sc-actions button')].map(b=>b.textContent)"), ['Post to YouTube', 'Open upload page', 'Checklist', 'Schedule', 'Mark posted']);
     assert.deepEqual(await js("[...document.querySelectorAll('[data-pub=\"33\"] .sc-actions button')].map(b=>b.textContent)"), ['Open upload page', 'Checklist', 'Schedule', 'Mark posted', 'Prepare again']);
     assert.equal(await js("[...document.querySelectorAll('.sc-filters button')].map(b=>b.textContent).join('|')"),
-      'All 9|Drafted 1|Waiting for your approval 1|Approved 1|Prepared 1|Waiting for you to press Post 1|Posted 2|Failed 1|Rejected 1');
+      'All 9|To post 2|Drafted 1|Waiting for your approval 1|Approved 1|Prepared 1|Waiting for you to press Post 1|Posted 2|Failed 1|Rejected 1');
     await keep('publishing-list'); await noOverflow(); await labels();
-    // Filter to one state.
+    // Filter to one state, and to both states that wait for Post.
     await click('.sc-filters button', 'Posted 2');
     await wait("document.querySelectorAll('.sc-pub').length===2");
+    await click('.sc-filters button', 'To post 2');
+    await wait("document.querySelectorAll('.sc-pub').length===2 && !!document.querySelector('.sc-pub[data-pub=\"31\"]') && !!document.querySelector('.sc-pub[data-pub=\"32\"]')");
     await click('.sc-filters button', 'All 9');
     await wait("document.querySelectorAll('.sc-pub').length===9");
     // The checklist of a prepared post: what Kairos fills and what you do, the text with Copy, the rules note.
@@ -604,12 +678,12 @@ app.whenReady().then(async () => {
     await wait("!document.querySelector('[aria-label=\"Link to the live post\"]')");
     assert.deepEqual(last('/posts/31/posted').body, { url: 'https://www.tiktok.com/@sky.kairos/video/7350000000000000002' });
     assert.equal(writes.filter(w => /\/(publish-youtube)$/.test(w.path) && w.path.includes('/32/')).length, 0, 'Nothing posts without the person');
-    // The week calendar.
-    await click('.sc-seg button', 'Week');
+    // The calendar of every channel.
+    await tab('calendar');
     await wait("document.querySelectorAll('.sc-day').length===7");
     assert.deepEqual(await js("[...document.querySelectorAll('.sc-day')].map(d=>d.querySelectorAll('.sc-cal').length)"), [1, 1, 1, 2, 1, 1, 1], 'posts on their days (the scheduled one moved to next week)');
     assert.match(await js("document.querySelector('.sc-week-title').textContent"), /^This week, /);
-    await keep('publishing-week'); await noOverflow(); await labels();
+    await keep('publishing-week'); await capture('overview-calendar'); await noOverflow(); await labels();
     await click('.sc-week-nav button', 'Next week');
     await wait("document.querySelector('.sc-week-title').textContent.startsWith('Week of')");
     assert.equal(await js("document.querySelectorAll('.sc-cal').length"), 1, 'the scheduled post moved to next week');
@@ -622,13 +696,27 @@ app.whenReady().then(async () => {
     if (await js("!!document.querySelector('.sc-checklist')")) await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
     await wait("!document.querySelector('.sc-checklist')");
     win.setContentSize(390, 1000); await pause(350); await noOverflow(); await labels(); await keep('publishing-week-phone');
-    await click('.sc-seg button', 'List'); await pause(200); await noOverflow(); await keep('publishing-list-phone');
+    await tab('publishing'); await pause(200); await noOverflow(); await keep('publishing-list-phone');
     win.setContentSize(1440, 1000); await pause(350);
-    // Channels: the TikTok and Instagram page-read switches, off until the person turns them on.
-    await tab('channels');
+    // One channel's calendar and publishing: its own posts, and how its posts go out (YouTube adds direct posting).
+    await scopeTo(1); await tab('calendar');
+    await wait("document.querySelectorAll('.sc-day').length===7");
+    assert.equal(await js("[...document.querySelectorAll('.sc-cal')].every(n=>n.getAttribute('aria-label').includes('YouTube @cooks'))"), true, 'only this channel on its calendar');
+    await capture('channel-calendar'); await noOverflow(); await labels();
+    await tab('publishing');
+    await wait("!!document.querySelector('.sc-routes')");
+    assert.deepEqual(await js("[...document.querySelectorAll('[data-publish-route]')].map(n=>n.dataset.publishRoute)"), ['prepare', 'youtube-api']);
+    assert.deepEqual(await js("[...document.querySelectorAll('.sc-pub')].map(n=>n.dataset.pub)"), ['32', '35', '26', '11', '21']);
+    assert.ok(await js("document.querySelector('[data-publish-route=prepare]').textContent.includes('You press Publish yourself')"));
+    await capture('channel-publishing'); await noOverflow(); await labels();
+    await scopeTo(2); await tab('publishing');
+    await wait("!!document.querySelector('.sc-routes')");
+    assert.deepEqual(await js("[...document.querySelectorAll('[data-publish-route]')].map(n=>n.dataset.publishRoute)"), ['prepare', 'page-reads']);
+    // Connections: the TikTok and Instagram page-read switches, off until the person turns them on.
+    await scopeTo('lib:connections');
     await wait("!!document.querySelector('[data-page-reads=tiktok]')");
     assert.ok(await js("document.querySelector('[data-page-reads=tiktok]').textContent.includes('Off. Turn it on')"));
-    assert.ok(await js("document.querySelector('.sc-body').textContent.includes('may stop working when TikTok or Instagram change their pages')"), 'labelled as page-read');
+    assert.ok((await bodyText()).includes('may stop working when TikTok or Instagram change their pages'), 'labelled as page-read');
     await js("document.querySelector('[aria-label=\"Read TikTok numbers from your signed-in pages\"]').click()");
     for (let n = 0; n < 100 && !last('/analytics/pages', 'PUT'); n++) await pause(50);
     assert.deepEqual(last('/analytics/pages', 'PUT').body, { tiktok: true });
@@ -642,7 +730,7 @@ app.whenReady().then(async () => {
     await keep('publishing-page-reads'); await noOverflow(); await labels();
 
     // 5b. Formats: cards with every number and its date, ports with what changes and the checks. It only reads.
-    await tab('formats');
+    await scopeTo('lib:formats');
     await wait("!!document.querySelector('.sc-format')");
     const ftext = await js("document.querySelector('.sc-format').textContent");
     for (const part of ['One person at a time', 'An impossible ability', '1 to 5 minutes', 'Glimpse Lab. 1,200,000 views, 12 days old when seen. Checked 2026-11-10.',
@@ -651,28 +739,28 @@ app.whenReady().then(async () => {
     assert.ok(await js("document.querySelector('[data-port-id=\"4\"]').textContent.includes('Cost to make: Refused') && document.querySelector('[data-port-id=\"4\"]').textContent.includes('Glossy 3D mascot')"), 'A refused port says why');
     assert.ok(await js("document.querySelector('[data-pack=\"glossy-3d\"]').textContent.includes('Not built yet')"));
     assert.equal(await js("document.querySelector('[data-evidence]').querySelector('a').getAttribute('rel')"), 'noopener noreferrer');
-    assert.ok(!(await js("document.querySelector('.sc-body').textContent")).includes('\u2014'), 'No em-dashes in the copy');
+    assert.ok(!(await bodyText()).includes('—'), 'No em-dashes in the copy');
     assert.equal(writes.filter(w => w.path.includes('/formats')).length, 0, 'Formats only reads');
-    await capture('desktop-formats'); await noOverflow(); await labels();
+    await capture('library-formats'); await noOverflow(); await labels();
 
     // 5c. Characters (Pack A): versions with their sheets; making a sheet sends it to Approvals, where only the person approves.
-    await tab('characters');
+    await scopeTo('lib:characters');
     await wait("!!document.querySelector('.sc-character')");
     const ctext = await js("document.querySelector('.sc-character').textContent");
     for (const part of ['Pip', 'Round family. Videos can cast version 1.', 'Version 2', 'Draft, no sheet yet', 'Warmer orange', 'Version 1', 'Approved']) assert.ok(ctext.includes(part), part);
     assert.ok(await js("!!document.querySelector('[data-character-version=\"abcdefabcdef-1\"] img.sc-sheet-thumb')"), 'An approved version shows its sheet');
-    await capture('desktop-characters'); await noOverflow(); await labels();
+    await capture('library-characters'); await noOverflow(); await labels();
     await click('.sc button', 'Make the sheet of Pip version 2');
-    await wait("document.querySelector('.sc-tab[data-tab=approvals]').textContent==='Approvals 1'");
-    assert.ok(last('/api/characters/abcdefabcdef/versions/2/sheet'));
-    await tab('approvals');
+    for (let n = 0; n < 100 && !last('/api/characters/abcdefabcdef/versions/2/sheet'); n++) await pause(50);
+    await click('.sc button', 'Review Pip version 2');
+    await wait("document.querySelector('.sc-tab[aria-selected=true]')?.dataset.tab==='approvals' && document.querySelector('.sc-tab[data-tab=approvals]').textContent==='Approvals 1'");
     await wait("!!document.querySelector('[data-sheet=\"abcdefabcdef-2\"]')");
     assert.ok(await js("document.querySelector('[data-sheet=\"abcdefabcdef-2\"] img').alt.includes('every view, expression and mouth shape')"));
     await capture('desktop-sheet-approval'); await labels();
     await click('.sc button', 'Approve Pip, version 2');
     await wait("!document.querySelector('[data-sheet]')");
     assert.ok(last('/api/characters/abcdefabcdef/versions/2/approve'));
-    await tab('characters');
+    await scopeTo('lib:characters');
     await wait("!!document.querySelector('.sc-character') && document.querySelector('.sc-character').textContent.includes('Videos can cast version 2.')");
     await click('.sc button', 'New version of Pip');
     await wait("!!document.querySelector('.sc-dialog [aria-label=Accessory]')");
@@ -688,33 +776,32 @@ app.whenReady().then(async () => {
     await click('.sc-dialog-panel button', 'Make character');
     await wait("!document.querySelector('.sc-dialog')");
     assert.deepEqual(last('/api/characters').body, { family: 'square', name: 'Bo' });
-    assert.ok(!(await js("document.querySelector('.sc-body').textContent")).includes('\u2014'), 'No em-dashes in the copy');
+    assert.ok(!(await bodyText()).includes('—'), 'No em-dashes in the copy');
     await pause(1100);
 
     // 5d. Styles: the account's own style packs. Make one from a brief, duplicate, edit the brief, import, render a sample,
     // and approve it in Approvals (only the person approves). Export and Share are offered on an approved pack.
-    await tab('styles');
+    await scopeTo('lib:styles');
     await wait("document.querySelectorAll('.sc-style-pack').length===2");
-    const stext = await js("document.querySelector('.sc-body').textContent");
+    const stext = await bodyText();
     for (const part of ['Flat science explainer', 'Starter pack. Channels and videos use version 1.', 'Night mode',
       'Made from a written brief (david). Not approved yet', 'Draft, no sample yet', 'Not approved yet, so no channel can use it.', 'Show the brief', 'Built into Kairos',
       'Flat 2D with characters, its own palette, glow light', 'You approve each pack from its sample']) assert.ok(stext.includes(part), part);
     assert.ok(!stext.includes('Add Flat science explainer'), 'The starter pack is offered only until it is added');
-    assert.ok(!stext.includes('\u2014'), 'No em-dashes in the copy');
+    assert.ok(!stext.includes('—'), 'No em-dashes in the copy');
     assert.equal(await js("document.querySelector('a[aria-label=\"Export Flat science explainer\"]').getAttribute('href')"), '/api/style-packs/aaaaaaaaaaaa/export?v=1');
     assert.deepEqual(await js("[...document.querySelectorAll('.sc-style-pack')].map(g=>[...g.querySelectorAll('button')].some(b=>b.textContent==='Share'))"), [true, false], 'Only an approved pack is shared');
-    await capture('desktop-styles'); await noOverflow(); await labels();
+    await capture('library-styles'); await noOverflow(); await labels();
     await click('.sc button', 'Make the sample of Night mode version 1');
-    await wait("document.querySelector('.sc-tab[data-tab=approvals]').textContent==='Approvals 1'");
-    assert.ok(last('/api/style-packs/cccccccccccc/versions/1/sample'));
-    await tab('approvals');
-    await wait("!!document.querySelector('[data-pack-approval=\"cccccccccccc-1\"] video')");
+    for (let n = 0; n < 100 && !last('/api/style-packs/cccccccccccc/versions/1/sample'); n++) await pause(50);
+    await scopeTo('all'); await tab('approvals');
+    await wait("document.querySelector('.sc-tab[data-tab=approvals]').textContent==='Approvals 1' && !!document.querySelector('[data-pack-approval=\"cccccccccccc-1\"] video')");
     assert.ok(await js("document.querySelector('[data-pack-approval=\"cccccccccccc-1\"] img').alt.includes('Contact sheet')"));
     await capture('desktop-pack-approval'); await labels();
     await click('.sc button', 'Approve Night mode, version 1');
     await wait("!document.querySelector('[data-pack-approval]')");
     assert.ok(last('/api/style-packs/cccccccccccc/versions/1/approve'));
-    await tab('styles');
+    await scopeTo('lib:styles');
     await wait("document.querySelectorAll('.sc-style-pack').length===2");
     await click('.sc button', 'New from a brief');
     await wait("!!document.querySelector('.sc-dialog [aria-label=Brief]')");
@@ -749,19 +836,20 @@ app.whenReady().then(async () => {
     await wait("!document.querySelector('.sc-dialog')");
     assert.deepEqual(last('/api/style-packs/import').body, { multipart: true });
     await noOverflow(); await labels();
-    assert.ok(!(await js("document.querySelector('.sc-body').textContent")).includes('\u2014'), 'No em-dashes in the copy');
+    assert.ok(!(await bodyText()).includes('—'), 'No em-dashes in the copy');
     await pause(1100);
 
-    // 6. Scoreboard: needs more data, scores, awaiting decisions with Confirm / Reject.
-    await tab('scoreboard');
+    // 6. Analytics: the scoreboard (needs more data, scores, top posts, decisions with Confirm / Reject, team settings), then one channel's.
+    await scopeTo('all'); await tab('analytics');
     await wait("!!document.querySelector('[data-score-row=Cooking]')");
     assert.ok(await js("document.querySelector('[data-score-row=Cooking]').textContent.includes('Needs more data')"));
     assert.ok(await js("document.querySelector('[data-score-row=Cooking]').textContent.includes('2 of 10 posts')"));
     assert.equal(await js("document.querySelector('[data-score-row=Travel] .sc-score').textContent"), '71.5');
     assert.ok(await js("document.querySelector('[data-score-row=\"Hook first\"]').textContent.includes('Needs more data')"));
-    assert.ok(await js("document.querySelector('.sc-body').textContent.includes('Judged after 3 weeks and 10 posts.')"));
+    assert.ok((await bodyText()).includes('Judged after 3 weeks and 10 posts.'));
     assert.ok(await js("document.querySelector('[data-score-row=\"Motion type\"]').textContent.includes('Needs more data')"), 'Style packs are ranked');
-    assert.ok(await js("document.querySelector('.sc-body').textContent.includes('views 40, watch time 40, follows and engagement 20')"));
+    assert.ok((await bodyText()).includes('views 40, watch time 40, follows and engagement 20'));
+    assert.ok(await js("document.querySelector('[data-top-post=\"35\"]').textContent.includes('Clouds weigh tons') && document.querySelector('[data-top-post=\"35\"] .sc-score').textContent==='64.2'"), 'Top posts');
     assert.ok(await js("document.querySelector('[data-decision-id=\"2\"]').textContent.includes('Promote niche Travel') && document.querySelector('[data-decision-id=\"2\"]').textContent.includes('score 71.5')"), 'Recent decision with numbers');
     assert.ok(await js("document.querySelector('[data-decision-id=\"1\"]').textContent.includes('team median 71.5')"), 'Awaiting decision with numbers');
     assert.ok(await js("document.querySelector('[data-decision-id=\"4\"]').textContent.includes('Add niche Deep sea') && document.querySelector('[data-decision-id=\"4\"]').textContent.includes('Source: https://trends.example.test/deep-sea')"), 'A proposed niche shows its evidence');
@@ -779,7 +867,7 @@ app.whenReady().then(async () => {
     await fill('One-tap batch approval', 'off');
     for (let n = 0; n < 100 && last('/settings', 'PUT').body.batch_approval !== false; n++) await pause(50);
     assert.deepEqual(last('/settings', 'PUT').body, { batch_approval: false });
-    await capture('desktop-scoreboard'); await noOverflow(); await labels();
+    await capture('overview-analytics'); await noOverflow(); await labels();
     await js("document.querySelector('button[aria-label=\"Confirm: Retire channel youtube:@cooks\"]').click()");
     await wait("!!document.querySelector('.confirm-panel')");
     assert.ok(await js("document.querySelector('.confirm-panel').textContent.includes('Nothing is deleted')"));
@@ -794,14 +882,25 @@ app.whenReady().then(async () => {
     assert.deepEqual(last('/decisions/4/confirm').body, { actor: 'user' });
     store.decisions.push({ id: 3, kind: 'retire', subject_type: 'channel', subject_id: 2, subject_name: 'tiktok:@cooks.tt', status: 'awaiting_user', reason: 'Behind.', at: now, numbers: {} });
     await pause(1100); // identical reads within a second share one request (api.js)
-    await tab('pipeline'); await tab('scoreboard');
+    await tab('pipeline'); await tab('analytics');
     await wait("!!document.querySelector('button[aria-label^=\"Reject: \"]')");
     await js("document.querySelector('button[aria-label^=\"Reject: \"]').click()");
     await wait("!document.querySelector('button[aria-label^=\"Reject: \"]')");
     assert.ok(last('/decisions/3/reject'));
+    // One channel's analytics: its numbers post by post, its niche on the scoreboard, its week, where its numbers come from.
+    await scopeTo(1); await tab('analytics');
+    await wait("!!document.querySelector('[data-post-numbers=\"35\"]')");
+    assert.ok(await js("document.querySelector('[data-post-numbers=\"35\"]').textContent.includes('1.2K views, 21 s average view, 84 likes')"));
+    assert.ok(await js("document.querySelector('[data-score-row=Cooking]').textContent.includes('Needs more data') && !!document.querySelector('[data-top-post=\"35\"]')"), 'its niche and its top post');
+    assert.ok(await js("document.querySelector('[data-channel-report]').textContent.includes('Posted in the last 7 days')"));
+    assert.ok(await js("document.querySelector('[data-numbers-source=youtube]').textContent.includes('Not connected')"));
+    await capture('channel-analytics'); await noOverflow(); await labels();
+    await scopeTo(2); await tab('analytics');
+    await wait("!!document.querySelector('[data-numbers-source=tiktok]')");
+    assert.ok(await js("document.querySelector('[data-post-numbers=\"34\"]').textContent.includes('860 views')"));
 
     // 7. Report and the numbers import.
-    await tab('report');
+    await scopeTo('all'); await tab('report');
     await wait("!!document.querySelector('[data-report]')");
     assert.ok(await js("document.querySelector('[data-report]').textContent.includes('What won: Travel (71.5)')"));
     await click('.sc button', 'Send to my Inbox');
@@ -813,7 +912,7 @@ app.whenReady().then(async () => {
     assert.equal(await js("document.querySelector('select[aria-label=\"Column for Average view duration\"]').selectedOptions[0].textContent"), 'Average view duration');
     assert.ok(await js("document.querySelector('.sc-import-count').textContent.includes('2 of 3 rows ready')"));
     assert.ok(await js("document.querySelector('.sc-problems').textContent.includes('Line 4: no posted post matches')"), 'Unmatched rows are named');
-    await capture('desktop-report'); await noOverflow(); await labels();
+    await capture('overview-report'); await noOverflow(); await labels();
     // Content keeps the Studio section bar and its own header; the editor hides them only while a video is open.
     assert.ok(await js("!document.querySelector('.studio-view').classList.contains('studio-editing') && !document.querySelector('.studio-sections').hidden && getComputedStyle(document.querySelector('.studio-view > .view-header')).display !== 'none'"), 'Content keeps its header and sections');
     await click('.sc-import button', 'Import 2 rows');
@@ -822,16 +921,38 @@ app.whenReady().then(async () => {
       { post_id: 24, views: 1200, avg_view_duration_s: 30, video_length_s: 45, likes: 12 },
       { post_id: 25, views: 800, avg_view_duration_s: 22, video_length_s: 45 }] });
 
-    // 8. Phone layout: nothing spills sideways and every control is at least 44px. The video editor's stylesheet is
-    // loaded too (it stays in the page once a video was opened), so its dense desktop rules cannot reach Content.
+    // 7a. A dark base: the same dashboard in the person's own colour (working tokens only).
+    await js("import('/static/js/appearance.js').then(m => m.updateAppearance({ mode: 'color', color: '#15171d' }))"); await pause(400);
+    await scopeTo('all'); await tab('dashboard'); await wait("!!document.querySelector('.sc-tile-latest [data-latest]')");
+    await capture('overview-dashboard-dark');
+    await scopeTo(1); await wait("!!document.querySelector('.sc-tile-latest .sc-stats')"); await capture('channel-dashboard-dark');
+    await js("import('/static/js/appearance.js').then(m => m.updateAppearance({ mode: 'default' }))"); await pause(400);
+
+    // 7b. The rail's Editor opens Studio's video editor (the Videos section).
+    await click('.sc-rail-lower button', 'Open the video editor');
+    await wait("document.querySelector('.studio-sections [data-section=videos]')?.getAttribute('aria-selected')==='true' && !document.querySelector('.sc')");
+    await click('.studio-sections button', 'Content');
+    await wait("!!document.querySelector('.sc-shell')");
+
+    // 8. Phone layout: the rail becomes a channel picker; nothing spills sideways and every control is at least 44px. The video
+    // editor's stylesheet is loaded too (it stays in the page once a video was opened), so its dense desktop rules cannot reach Content.
     await js("new Promise(r => { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = '/static/css/studio-editor.css'; l.onload = l.onerror = r; document.head.append(l); })");
     assert.ok(await js("[...document.styleSheets].some(s => (s.href || '').endsWith('/studio-editor.css') && s.cssRules.length > 20)"), 'Editor stylesheet loaded');
     win.setContentSize(390, 1000); await pause(350);
-    for (const name of ['approvals', 'publishing', 'pipeline', 'channels', 'formats', 'characters', 'styles', 'scoreboard', 'report']) {
-      await tab(name); await pause(250); await noOverflow(); await labels();
+    assert.equal(await js("getComputedStyle(document.querySelector('.sc-rail')).display"), 'none', 'No rail on a phone');
+    assert.deepEqual(await js("[...document.querySelector('.sc-picker select').options].map(o=>o.value)"), ['all', '1', '2', '3', 'lib:formats', 'lib:styles', 'lib:characters', 'lib:connections']);
+    const phoneTargets = async name => {
+      await pause(250); await noOverflow(); await labels();
       assert.deepEqual(await js("[...document.querySelectorAll('.sc button,.sc select,.sc input:not([type=checkbox]),.sc textarea')].filter(n=>n.getBoundingClientRect().height>0 && n.getBoundingClientRect().height<43).map(n=>n.outerHTML.slice(0,90))"), [], `Phone targets in ${name}`);
       await capture('phone-' + name);
-    }
+    };
+    const pick = async value => { await fill('Channel or library', String(value)); await wait(`document.querySelector('.sc-shell')?.dataset.scope===${T(String(value))}`); await pause(200); };
+    await pick('all');
+    for (const name of ['dashboard', 'approvals', 'pipeline', 'calendar', 'publishing', 'analytics', 'report']) { await tab(name); await phoneTargets('overview-' + name); }
+    await pick(1);
+    for (const name of ['dashboard', 'pipeline', 'calendar', 'approvals', 'publishing', 'analytics', 'settings']) { await tab(name); await phoneTargets('channel-' + name); }
+    assert.ok(await js("(() => { const bar = document.querySelector('.sc-tabs'), on = bar.querySelector('[aria-selected=true]').getBoundingClientRect(), b = bar.getBoundingClientRect(); return on.left >= b.left - 1 && on.right <= b.right + 1; })()"), 'The open tab is in view on a phone');
+    for (const lib of ['formats', 'characters', 'styles', 'connections']) { await pick('lib:' + lib); await phoneTargets('library-' + lib); }
     win.setContentSize(1440, 1000); await pause(350);
 
     // 9. A 403 reads as a plain sentence, and a signed-out account is told so.
@@ -842,7 +963,7 @@ app.whenReady().then(async () => {
     store.forbidden = false;
 
     assert.deepEqual(errors, []); assert.deepEqual(outside, []);
-    console.log(JSON.stringify({ ok: true, output, writes: writes.length, checks: ['empty state and template deep link', 'add channel', 'warning shown and resolved', 'archive and restore', 'youtube connections and privacy', 'channel look', 'pipeline board', 'details', 'post to youtube', 'approve', 'edit', 'reject with note', 'redraft', 'batch approval', 'scoreboard needs more data', 'niche proposal', 'team settings', 'decisions confirm and reject', 'publishing dashboard, checklist, prepare, schedule, open upload page, mark posted, week calendar, page-read switches', 'format cards and ports', 'characters and sheet approval', 'style packs: brief, duplicate, edit, import, sample, approval', 'channel style pack', 'report', 'csv mapping and import', '390 phone', '403', 'offline'] }));
+    console.log(JSON.stringify({ ok: true, output, writes: writes.length, checks: ['empty state and template deep link', 'add channel', 'rail and overview dashboard', 'channel dashboard and tabs', 'channel settings', 'connections library', 'channel pipeline, calendar, approvals, publishing routes, analytics', 'dark base', 'editor from the rail', 'phone channel picker', 'warning shown and resolved', 'archive and restore', 'youtube connections and privacy', 'channel look', 'pipeline board', 'details', 'post to youtube', 'approve', 'edit', 'reject with note', 'redraft', 'batch approval', 'scoreboard needs more data', 'niche proposal', 'team settings', 'decisions confirm and reject', 'publishing dashboard, checklist, prepare, schedule, open upload page, mark posted, week calendar, page-read switches', 'format cards and ports', 'characters and sheet approval', 'style packs: brief, duplicate, edit, import, sample, approval', 'channel style pack', 'report', 'csv mapping and import', '390 phone', '403', 'offline'] }));
   } catch (error) {
     console.error(error.stack);
     if (win && !win.isDestroyed()) fs.writeFileSync(path.join(output, 'failure.png'), (await win.webContents.capturePage()).toPNG());

@@ -193,7 +193,7 @@ export async function render(container, tabId, options = {}) {
     if (section === 'content') {
       content.replaceChildren(el('p', { role: 'status', text: 'Loading Content...' }));
       contentControl = new AbortController();
-      try { await (await import('/static/js/studioContent.js')).mountContent(content, { signal: contentControl.signal }); }
+      try { await (await import('/static/js/studioContent.js')).mountContent(content, { signal: contentControl.signal, openVideos: () => { section = lastSection = 'videos'; home(); } }); }
       catch (error) { if (!disposed && generation === homeGeneration) content.replaceChildren(el('p', { role: 'alert', text: error.message }), button('Try again', home)); }
       return;
     }

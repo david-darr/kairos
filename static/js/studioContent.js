@@ -1,7 +1,8 @@
 import { api, el, toast, confirmDialog, openPanelDialog } from './api.js';
-import { group, row, pill, note, empty, badge, hueFor } from './settingsKit.js';
+import { group, row, pill, note, empty, hueFor } from './settingsKit.js';
 import * as M from './studioContentModel.js';
 import { libraryShareButton } from './libraryShare.js';
+import { ICONS } from './icons.js';
 
 // The Content section of the Studio tab: channels, the pipeline board, approvals, the scoreboard, the weekly report
 // and the numbers import for the Content Studio team (routes/content_studio_routes.py). Drawn with the Settings kit
@@ -19,9 +20,15 @@ import { libraryShareButton } from './libraryShare.js';
 // Long videos (Video Styles unit 4): a long video's shot plan waits in Approvals before it renders (approved at
 // /api/videos/<id>/plan); a YouTube channel sets its long videos a week in Look (one by default); an approval card shows the
 // chapter list that goes into the YouTube description.
+// Layout (David, 2026-11-10: a creator-studio dashboard, organised by channel): a left rail with All channels, then each
+// channel by niche (its avatar from its look, handle and platform), Add channel, and the shared libraries (the editor,
+// Formats, Styles, Characters, Connections, Templates). All channels has a dashboard of cards (what needs you, latest posts
+// with their numbers, analytics, the weekly report, coming up, the pipeline) and tabs for the overall approvals, pipeline,
+// calendar, publishing, analytics (the scoreboard) and report. Each channel has its own dashboard and the same tabs for
+// itself, plus Settings (look, style pack, renderer, voice, made for kids, cadence, long videos). On phones the rail
+// becomes a channel picker. Only the layout changed: every route and action below is the one the screen always used.
 
 const BASE = '/api/content-studio';
-const TABS = [['approvals', 'Approvals'], ['publishing', 'Publishing'], ['pipeline', 'Pipeline'], ['channels', 'Channels'], ['formats', 'Formats'], ['characters', 'Characters'], ['styles', 'Styles'], ['scoreboard', 'Scoreboard'], ['report', 'Report']];
 const CHARACTERS = '/api/characters';
 const STYLES = '/api/style-packs';
 const sendTo = (path, body = {}) => api(path, { method: 'POST', body: JSON.stringify(body), toast: false });
@@ -70,16 +77,19 @@ async function openTeamTemplate() {
   await templates.openTemplates({ tab: 'explore', preview: 'Content Studio' });
 }
 
-export async function mountContent(host, { signal } = {}) {
+// openVideos: Studio's own switch to its Videos section (the editor), from the rail's Editor item.
+export async function mountContent(host, { signal, openVideos } = {}) {
   await loadStyles();
-  let disposed = false, tab = null, data = null;
+  // scope: 'all', a channel id, or 'lib:<library>'; tab: the tab inside the scope.
+  let disposed = false, tab = null, data = null, scope = 'all';
+  let numbers = new Map(); // post id -> its newest number set (or null), read once per load
   const root = el('div', { class: 'sc', 'data-studio-content': '' });
   host.replaceChildren(root);
   signal?.addEventListener('abort', () => { disposed = true; }, { once: true });
   const alive = () => !disposed && root.isConnected;
 
   async function loadCore() {
-    const names = ['niches', 'channels', 'pipeline', 'approvals', 'watch', 'settings', 'analytics/youtube/status', 'posting/youtube/status', 'publishing'];
+    const names = ['niches', 'channels', 'pipeline', 'approvals', 'watch', 'settings', 'analytics/youtube/status', 'posting/youtube/status', 'publishing', 'decisions'];
     const [results, styles] = await Promise.all([Promise.allSettled(names.map(n => get('/' + n))), api(STYLES).catch(() => null)]);
     if (!alive()) return;
     if (results.every(r => r.status === 'rejected')) {
@@ -94,10 +104,30 @@ export async function mountContent(host, { signal } = {}) {
       styles, findings: value('watch', { findings: [] }).findings,
       hasTeam: (value('settings', {}).team_bot_ids || []).length > 0, settings: value('settings', {}),
       yt: value('analytics/youtube/status', null), ytPost: value('posting/youtube/status', null), pub: value('publishing', null),
+      decisions: value('decisions', { decisions: [] }).decisions || [],
       failed: names.filter((n, i) => results[i].status === 'rejected' && !n.includes('youtube')) };
+    numbers = new Map();
+    if (typeof scope === 'number' && !data.channels.some(c => c.id === scope)) { scope = 'all'; tab = null; }
     await draw();
   }
   const reload = () => loadCore();
+
+  // The newest numbers of each post (GET /posts/<id>, the same read as the post's details), cached until the next load.
+  async function numbersFor(postIds) {
+    await Promise.all(postIds.filter(id => !numbers.has(id)).map(async id => {
+      try { numbers.set(id, M.latestNumbers((await get(`/posts/${id}`)).metrics)); } catch { numbers.set(id, null); }
+    }));
+    return postIds.map(id => numbers.get(id) || null);
+  }
+  const channelOf = id => data.channels.find(c => c.id === id) || null;
+  const pubItems = () => data.pub?.items || [];
+  const needsInput = () => ({ approvals: data.approvals, plans: data.plans, pubItems: pubItems(), sheets: data.sheets, packs: data.packsWaiting, decisions: data.decisions });
+  // A channel's round avatar, coloured from its look.
+  const avatar = (channel, cls = '') => {
+    const a = M.avatarFor(channel);
+    return el('span', { class: `sc-avatar ${cls}`.trim(), 'aria-hidden': 'true', style: `--avatar-hue:${hueFor(a.key)}`, text: a.letter });
+  };
+  const platformTag = platform => el('span', { class: `sc-platform sc-platform-${platform}`, text: M.platformName(platform) });
 
   // -- shared pieces ---------------------------------------------------------------------------
 
@@ -162,21 +192,19 @@ export async function mountContent(host, { signal } = {}) {
         btn('Add a channel', () => addChannelDialog(), data.hasTeam ? 'primary' : '')])]);
   }
 
-  // -- channels --------------------------------------------------------------------------------
+  // -- connections (a library: the account's YouTube project, page reads, the niches) --------------------------
 
-  function channelsView() {
+  function connectionsView() {
     const out = [];
     const cap = data.maxLive ? ` At most ${data.maxLive} niches can be live at once.` : '';
-    out.push(el('div', { class: 'sc-bar' }, [note('Channels you created. Kairos never creates accounts.' + cap), btn('Add a channel', () => addChannelDialog())]));
+    out.push(el('div', { class: 'sc-bar' }, [note('How Kairos reads your numbers and posts for you. Channels you created are in the list on the left. Kairos never creates accounts.' + cap), btn('Add a channel', () => addChannelDialog())]));
     out.push(youtubeGroup());
     const reads = pageReadsGroup();
     if (reads) out.push(reads);
-    for (const { niche, channels } of M.groupChannels(data.niches, data.channels)) {
-      const rows = channels.map(channelRow);
-      if (!rows.length) rows.push(empty('No channels in this niche yet.'));
-      out.push(group({ title: niche.name, description: niche.status === 'live' ? `${niche.slots} posting slot${niche.slots === 1 ? '' : 's'}` : 'Retired. History kept.' }, rows));
-    }
-    if (!data.niches.length) out.push(empty('No channels yet. Add the first one above.'));
+    const niches = M.groupChannels(data.niches, data.channels).map(({ niche, channels }) => row({ title: niche.name, attrs: { 'data-niche-id': niche.id },
+      description: niche.status === 'live' ? `${niche.slots} posting slot${niche.slots === 1 ? '' : 's'}. ${channels.length} channel${channels.length === 1 ? '' : 's'}.` : 'Retired. History kept.',
+      control: pill(niche.status === 'live' ? 'Live' : 'Retired', niche.status === 'live' ? 'ok' : 'muted') }));
+    out.push(group({ title: 'Niches', description: 'The themes your channels share. The team proposes new ones; you confirm them in Analytics.' }, niches.length ? niches : [empty('No niches yet.')]));
     return out;
   }
   // After Google's consent page, the status is read again when the person comes back to Kairos.
@@ -213,8 +241,9 @@ export async function mountContent(host, { signal } = {}) {
     return group({ title: 'YouTube', description: 'Your own Google project. Analytics only reads; posting only sends posts you approved.' }, rows);
   }
 
-  function lookDialog(channel) {
-    const name = `${M.platformName(channel.platform)} ${channel.handle}`;
+  // -- one channel's Settings: its state (archive, restore, a platform warning), then how its videos are made -----------
+
+  function lookForm(channel) {
     const look = textInput('Look id', { value: channel.look || '', maxlength: '80', placeholder: 'For example, sport' });
     const aspect = selectOf('Aspect', M.ASPECTS, channel.aspect || '');
     const notes = el('textarea', { rows: 4, 'aria-label': 'Voice notes', maxlength: '1000', placeholder: 'How this channel talks. For example, calm and curious, no hype.' });
@@ -232,36 +261,40 @@ export async function mountContent(host, { signal } = {}) {
     const youtube = channel.platform === 'youtube';
     const longWeek = el('input', { type: 'number', min: '0', max: '7', step: '1', 'aria-label': 'Long videos a week', value: String(channel.long_per_week ?? 1) });
     longWeek.value = String(channel.long_per_week ?? 1);
+    const niche = data.niches.find(n => n.id === channel.niche_id);
     const status = el('p', { class: 'set-error', role: 'alert' });
-    const body = el('div', { class: 'sc-dialog' }, [
-      note('The Editor renders this channel\'s videos in its style pack, look and aspect, and the Script Writer follows its voice notes.'),
-      group({}, [row({ title: 'Style pack', description: 'How this channel\'s videos look and sound. Only approved packs are listed (Styles).', control: pack }),
-        row({ title: '3D renderer', description: status3d?.blender?.supported ? `For glossy 3D packs. three.js is built in and fast; Blender ${status3d.blender.version} is installed here: softer light, much slower.` : 'For glossy 3D packs. three.js is built in. Blender isn\'t installed on this computer, so it cannot be picked.', control: renderer }),
-        row({ title: 'Look', description: 'A Studio video look id. Leave it empty to let the Editor choose.', control: look, stack: true }),
-        row({ title: 'Aspect', control: aspect }),
-        row({ title: 'Frame rate', description: '60 is smoother for fast motion and takes about twice as long to render. Shorts and most explainers look fine at 30.', control: fps }),
-        row({ title: 'Made for kids', description: 'Answer honestly: YouTube asks this for every upload. A post can answer for itself. Blocky world videos draw children and cannot be prepared until this is set here or on the post. On YouTube, made-for-kids videos have comments and personalised ads turned off (general knowledge, not checked).', control: kids }),
-        row({ title: 'Voice notes', control: notes, stack: true }),
-        row({ title: 'Narrator voice', description: 'The Kokoro voice that narrates every video on this channel. Left empty, the first narrated video sets it.', control: voice, stack: true }),
-        youtube ? row({ title: 'Long videos a week', description: 'Longer videos in chapters, on top of the daily Shorts. The team plans within it, and each plan comes to you before it renders.', control: longWeek }) : null]), status]);
-    const save = btn('Save look', async () => {
+    const save = btn('Save settings', async () => {
       status.textContent = '';
       const week = Number(longWeek.value);
       if (youtube && (!Number.isInteger(week) || week < 0 || week > 7)) { status.textContent = 'Long videos a week is a whole number from 0 to 7.'; return; }
       try { await send(`/channels/${channel.id}/edit`, { look: look.value.trim(), aspect: aspect.value, notes: notes.value.trim(), voice: voice.value.trim(), style_pack: pack.value, renderer: renderer.value, fps: Number(fps.value), made_for_kids: kids.value, ...(youtube ? { long_per_week: week } : {}) }); }
       catch (error) { status.textContent = M.loadFailure(error); return; }
-      dialog.close(); toast('Look saved.'); await reload();
-    }, 'primary');
-    const dialog = openPanelDialog({ title: `Look for ${name}`, body, footer: el('div', {}, [save]), className: 'sc-dialog-panel' });
+      toast('Settings saved.'); await reload();
+    }, 'primary', { 'aria-label': `Save the settings of ${M.channelName(channel)}` });
+    return [
+      group({ title: 'How its videos look', description: 'The Editor renders this channel\'s videos in its style pack, look and aspect.' }, [
+        row({ title: 'Style pack', description: 'How this channel\'s videos look and sound. Only approved packs are listed (Styles).', control: pack }),
+        row({ title: '3D renderer', description: status3d?.blender?.supported ? `For glossy 3D packs. three.js is built in and fast; Blender ${status3d.blender.version} is installed here: softer light, much slower.` : 'For glossy 3D packs. three.js is built in. Blender isn\'t installed on this computer, so it cannot be picked.', control: renderer }),
+        row({ title: 'Look', description: 'A Studio video look id. Leave it empty to let the Editor choose.', control: look, stack: true }),
+        row({ title: 'Aspect', control: aspect }),
+        row({ title: 'Frame rate', description: '60 is smoother for fast motion and takes about twice as long to render. Shorts and most explainers look fine at 30.', control: fps })]),
+      group({ title: 'How it sounds', description: 'The Script Writer follows the voice notes; the narrator voice reads every video.' }, [
+        row({ title: 'Voice notes', control: notes, stack: true }),
+        row({ title: 'Narrator voice', description: 'The Kokoro voice that narrates every video on this channel. Left empty, the first narrated video sets it.', control: voice, stack: true })]),
+      group({ title: 'Audience and cadence' }, [
+        row({ title: 'Made for kids', description: 'Answer honestly: YouTube asks this for every upload. A post can answer for itself. Blocky world videos draw children and cannot be prepared until this is set here or on the post. On YouTube, made-for-kids videos have comments and personalised ads turned off (general knowledge, not checked).', control: kids }),
+        row({ title: 'Cadence', description: `The team makes about one post a day per channel and brings each one to you. ${niche ? `Its niche, ${niche.name}, has ${niche.slots ?? 0} posting slot${niche.slots === 1 ? '' : 's'}; slots move with the scoreboard.` : ''}`.trim(),
+          control: pill('Once a day', 'muted'), attrs: { 'data-cadence': '' } }),
+        youtube ? row({ title: 'Long videos a week', description: 'Longer videos in chapters, on top of the daily Shorts. The team plans within it, and each plan comes to you before it renders.', control: longWeek }) : null]),
+      status, el('div', { class: 'sc-actions' }, [save])];
   }
 
-  function channelRow(channel) {
-    const state = M.channelState(channel), name = `${M.platformName(channel.platform)} ${channel.handle}`;
+  function channelStatusGroup(channel) {
+    const state = M.channelState(channel), name = M.channelName(channel);
     const warning = channel.paused && channel.status !== 'archived' ? (M.warningFor(channel.id, data.findings) || 'The platform sent a warning.') : '';
     const controls = [pill(state.label, state.tone)];
     if (channel.status === 'archived') controls.push(btn('Restore', async () => { await send(`/channels/${channel.id}/restore`); toast('Channel restored.'); await reload(); }, 'quiet', { 'aria-label': `Restore ${name}` }));
     else {
-      controls.push(btn('Look', () => lookDialog(channel), 'quiet', { 'aria-label': `Look for ${name}` }));
       if (warning) controls.push(btn('Resolve warning', () => resolveWarning(channel.id, name), '', { 'aria-label': `Resolve warning for ${channel.handle}` }));
       controls.push(btn('Archive', async () => {
         const ok = await confirmDialog({ title: 'Archive this channel?', message: `${name} leaves the rotation. Its history is kept and you can restore it.`, confirmLabel: 'Archive', danger: false });
@@ -269,17 +302,25 @@ export async function mountContent(host, { signal } = {}) {
         await send(`/channels/${channel.id}/archive`); toast('Channel archived.'); await reload();
       }, 'quiet', { 'aria-label': `Archive ${name}` }));
     }
-    return row({ icon: badge(M.platformName(channel.platform), hueFor(channel.platform)), title: channel.handle,
-      description: M.platformName(channel.platform) + (channel.status === 'archived' ? '' : `. ${M.channelLookText(channel, data.styles?.available)}`) + (channel.archive_reason ? `. ${channel.archive_reason}` : ''),
-      below: warning ? el('div', { class: 'sc-warning', role: 'alert' }, [el('strong', { text: 'Platform warning: ' }), warning]) : null,
-      control: controls, cls: warning ? 'sc-row-warning' : '', attrs: { 'data-channel-id': channel.id } });
+    const niche = data.niches.find(n => n.id === channel.niche_id);
+    return group({ title: 'Channel', description: 'A channel you created yourself. Kairos never creates accounts.' }, [
+      row({ icon: avatar(channel), title: channel.handle,
+        description: `${M.platformName(channel.platform)}${niche ? `, niche ${niche.name}` : ''}` + (channel.status === 'archived' ? '' : `; ${M.channelLookText(channel, data.styles?.available)}`) + (channel.archive_reason ? `. ${channel.archive_reason}` : ''),
+        below: warning ? el('div', { class: 'sc-warning', role: 'alert' }, [el('strong', { text: 'Platform warning: ' }), warning]) : null,
+        control: controls, cls: warning ? 'sc-row-warning' : '', attrs: { 'data-channel-id': channel.id } })]);
+  }
+
+  function settingsView(channel) {
+    return [channelStatusGroup(channel), ...(channel.status === 'archived' ? [note('An archived channel keeps its history. Restore it to change its settings.')] : lookForm(channel))];
   }
 
   // -- pipeline --------------------------------------------------------------------------------
 
-  function pipelineView() {
-    const columns = M.boardColumns(data.items);
-    if (!data.items.length) return [empty('No ideas in the pipeline yet. Topics and posts appear here as the team works.')];
+  // The board of every channel, or of one (its posts and its niche's topics).
+  function pipelineView(channel = null) {
+    const items = M.channelItems(data.items, channel);
+    const columns = M.boardColumns(items);
+    if (!items.length) return [empty(channel ? 'Nothing in this channel\'s pipeline yet. Its topics and posts appear here as the team works.' : 'No ideas in the pipeline yet. Topics and posts appear here as the team works.')];
     return [el('div', { class: 'sc-board', role: 'list', 'aria-label': 'Pipeline' }, columns.map(column =>
       el('section', { class: 'sc-col', role: 'listitem', 'data-column': column.id, 'aria-label': `${column.title}, ${column.items.length}` }, [
         el('h3', { class: 'sc-col-title' }, [column.title, el('span', { class: 'sc-count', text: String(column.items.length) })]),
@@ -482,7 +523,7 @@ export async function mountContent(host, { signal } = {}) {
     const node = el('article', { class: `sc-pub sc-pub-${item.state}`, 'data-pub': item.post_id, 'aria-label': label }, [
       el('header', { class: 'sc-post-head' }, [
         el('h3', { class: 'sc-post-title', text: item.title }),
-        el('div', { class: 'sc-post-pills' }, [pill(M.stateLabel(item.state), M.stateTone(item.state)), badge(M.platformName(item.platform), hueFor(item.platform)),
+        el('div', { class: 'sc-post-pills' }, [pill(M.stateLabel(item.state), M.stateTone(item.state)), platformTag(item.platform),
           el('span', { class: 'sc-dim', text: item.handle }), item.long_form ? pill('Long video', 'muted') : null])]),
       el('p', { class: 'sc-pub-when', text: M.whenText(item) }),
       el('p', { class: `sc-pub-next by-${item.next.who}`, text: M.nextText(item.next) }),
@@ -492,40 +533,76 @@ export async function mountContent(host, { signal } = {}) {
     return node;
   }
 
-  let pubView = 'list', pubFilter = 'all', pubWeek = null;
-  function publishingView() {
+  let pubFilter = 'all', pubWeek = null;
+  const pubFailed = () => [el('p', { role: 'alert', class: 'sc-error', text: 'The publishing dashboard did not load. Try again in a moment.' }), btn('Try again', reload)];
+
+  // How one channel's posts leave Kairos, one row per route (data-publish-route). Prepare post works on every platform;
+  // YouTube adds direct posting through the person's own Google project; TikTok and Instagram add page-read numbers.
+  // A new route (for example an official TikTok or Instagram connection) adds its own row here.
+  function publishRoutesGroup(channel) {
+    const rows = [row({ title: 'Prepare post', attrs: { 'data-publish-route': 'prepare' }, control: pill('Every post', 'ok'),
+      description: `Kairos assembles each approved post for ${M.platformName(channel.platform)} and fills its upload page in the Kairos Browser. You press ${M.POST_BUTTONS[channel.platform] || 'Post'} yourself.` })];
+    if (channel.platform === 'youtube') {
+      const p = data.ytPost, [label, tone] = M.connectionState(p);
+      rows.push(row({ title: 'Post straight to YouTube', description: M.postingText(p), attrs: { 'data-publish-route': 'youtube-api' }, control: [pill(label, tone),
+        btn('Connections', () => go('lib:connections'), 'quiet', { 'aria-label': 'Open YouTube connections' })] }));
+    }
+    const reads = data.pub?.page_reads?.platforms?.[channel.platform];
+    if (reads) rows.push(row({ title: `${reads.name} numbers`, description: M.pageReadText(reads), attrs: { 'data-publish-route': 'page-reads' },
+      control: [pill(reads.on ? 'On' : 'Off', reads.on ? 'ok' : 'muted'), btn('Connections', () => go('lib:connections'), 'quiet', { 'aria-label': `Open ${reads.name} connections` })] }));
+    return group({ title: 'How posts go out', description: 'Nothing is posted without you.', cls: 'sc-routes' }, rows);
+  }
+
+  // Every post (of every channel, or of one) with its state, schedule, link and next action.
+  function publishingView(channel = null) {
     const pub = data.pub;
-    if (!pub) return [el('p', { role: 'alert', class: 'sc-error', text: 'The publishing dashboard did not load. Try again in a moment.' }), btn('Try again', reload)];
-    pubWeek ??= pub.this_week;
-    const views = el('div', { class: 'sc-seg', role: 'group', 'aria-label': 'View' }, [['list', 'List'], ['week', 'Week']].map(([id, text]) =>
-      btn(text, () => { pubView = id; draw(); }, pubView === id ? 'is-on' : 'quiet', { 'aria-pressed': String(pubView === id), 'data-view': id })));
-    const filters = el('div', { class: 'sc-filters', role: 'group', 'aria-label': 'Show posts' }, [{ id: 'all', label: 'All', count: pub.items.length }, ...M.stateCounts(pub.counts)].map(f =>
+    if (!pub) return pubFailed();
+    const all = M.forChannel(pub.items, channel?.id ?? null);
+    const counts = {}; for (const i of all) counts[i.state] = (counts[i.state] || 0) + 1;
+    const toPost = M.filterItems(all, 'to_post').length;
+    const chips = [{ id: 'all', label: 'All', count: all.length }, ...(toPost ? [{ id: 'to_post', label: 'To post', count: toPost }] : []), ...M.stateCounts(counts)];
+    if (!chips.some(f => f.id === pubFilter)) pubFilter = 'all';
+    const filters = el('div', { class: 'sc-filters', role: 'group', 'aria-label': 'Show posts' }, chips.map(f =>
       btn(`${f.label} ${f.count}`, () => { pubFilter = f.id; draw(); }, pubFilter === f.id ? 'is-on' : 'quiet', { 'aria-pressed': String(pubFilter === f.id), 'data-filter': f.id })));
     const intro = note('Every post, its state and what happens next. Prepare post assembles it for its platform; Open upload page fills the page in the Kairos Browser and stops before Post, which you press yourself.');
-    const items = M.filterItems(pub.items, pubFilter);
-    const out = [intro, el('div', { class: 'sc-bar sc-pub-bar' }, [filters, views])];
-    if (!pub.items.length) return [...out, empty('No posts yet. They appear here from the first draft to the live link.')];
-    if (pubView === 'week') {
-      const days = M.weekDays(pubWeek), byDay = M.itemsByDay(items, pubWeek);
-      out.push(el('div', { class: 'sc-week-nav' }, [
-        btn('Previous week', () => { pubWeek = M.addDays(pubWeek, -7); draw(); }, 'quiet', { 'aria-label': 'Previous week' }),
-        el('h3', { class: 'sc-week-title', text: M.weekLabel(pubWeek, pub.this_week) }),
-        pubWeek !== pub.this_week ? btn('This week', () => { pubWeek = pub.this_week; draw(); }, 'quiet') : null,
-        btn('Next week', () => { pubWeek = M.addDays(pubWeek, 7); draw(); }, 'quiet', { 'aria-label': 'Next week' })]));
-      out.push(el('div', { class: 'sc-week', role: 'list', 'aria-label': 'Posts by day' }, days.map((day, i) => el('section', { class: `sc-day${day.at === M.addDays(Date.now() / 1000, 0) ? ' is-today' : ''}`, role: 'listitem', 'aria-label': `${day.label}, ${byDay[i].length} posts` }, [
-        el('h4', { class: 'sc-day-title', text: day.label }),
-        ...(byDay[i].length ? byDay[i].map(item => {
-          const chip = el('button', { type: 'button', class: `sc-cal sc-pub-${item.state}`, 'data-pub': item.post_id, 'aria-label': `${item.title}, ${M.platformName(item.platform)}, ${M.stateLabel(item.state)}` }, [
-            el('span', { class: 'sc-cal-time', text: M.timeText(item.when).split(', ')[1] }), el('span', { class: 'sc-cal-title', text: item.title }),
-            el('span', { class: 'sc-cal-meta' }, [badge(M.platformName(item.platform), hueFor(item.platform)), pill(M.stateLabel(item.state), M.stateTone(item.state))])]);
-          chip.addEventListener('click', () => item.prep_id ? preparedDialog(item) : openDetails({ kind: 'post', id: item.post_id, title: item.title, step: item.state, owner: item.next.who === 'you' ? 'user' : 'publisher', age_h: 0, niche_name: item.niche, platform: item.platform }, chip));
-          return chip;
-        }) : [el('p', { class: 'sc-none', text: 'Nothing.' })])]))));
-      return out;
-    }
+    const items = M.filterItems(all, pubFilter);
+    const out = [...(channel ? [publishRoutesGroup(channel)] : []), intro, el('div', { class: 'sc-bar sc-pub-bar' }, [filters])];
+    if (!all.length) return [...out, empty(channel ? 'No posts on this channel yet. They appear here from the first draft to the live link.' : 'No posts yet. They appear here from the first draft to the live link.')];
     if (!items.length) out.push(empty('No posts in this state.'));
     out.push(...items.map(publishRow));
     return out;
+  }
+
+  // The week calendar of every channel, or of one: each post on the day it is scheduled, posted or made.
+  function calendarView(channel = null) {
+    const pub = data.pub;
+    if (!pub) return pubFailed();
+    pubWeek ??= pub.this_week;
+    const items = M.forChannel(pub.items, channel?.id ?? null);
+    const days = M.weekDays(pubWeek), byDay = M.itemsByDay(items, pubWeek);
+    const today = M.addDays(Date.now() / 1000, 0);
+    return [
+      note(channel ? `${M.channelName(channel)}: every post on its day. Open one for its checklist or details.` : 'Every channel\'s posts on their day. Open one for its checklist or details.'),
+      el('div', { class: 'sc-week-nav' }, [
+        btn('Previous week', () => { pubWeek = M.addDays(pubWeek, -7); draw(); }, 'quiet', { 'aria-label': 'Previous week' }),
+        el('h3', { class: 'sc-week-title', text: M.weekLabel(pubWeek, pub.this_week) }),
+        pubWeek !== pub.this_week ? btn('This week', () => { pubWeek = pub.this_week; draw(); }, 'quiet') : null,
+        btn('Next week', () => { pubWeek = M.addDays(pubWeek, 7); draw(); }, 'quiet', { 'aria-label': 'Next week' })]),
+      el('div', { class: 'sc-week', role: 'list', 'aria-label': 'Posts by day' }, days.map((day, i) => el('section', { class: `sc-day${day.at === today ? ' is-today' : ''}`, role: 'listitem', 'aria-label': `${day.label}, ${byDay[i].length} posts` }, [
+        el('h4', { class: 'sc-day-title', text: day.label }),
+        ...(byDay[i].length ? byDay[i].map(calendarChip) : [el('p', { class: 'sc-none', text: 'Nothing.' })])])))];
+  }
+  function calendarChip(item) {
+    const chip = el('button', { type: 'button', class: `sc-cal sc-pub-${item.state}`, 'data-pub': item.post_id, 'aria-label': `${item.title}, ${M.platformName(item.platform)} ${item.handle}, ${M.stateLabel(item.state)}` }, [
+      el('span', { class: 'sc-cal-time', text: M.timeText(item.when).split(', ')[1] }), el('span', { class: 'sc-cal-title', text: item.title }),
+      el('span', { class: 'sc-cal-meta' }, [platformTag(item.platform), el('span', { class: 'sc-dim', text: item.handle }), pill(M.stateLabel(item.state), M.stateTone(item.state))])]);
+    chip.addEventListener('click', () => openPub(item, chip));
+    return chip;
+  }
+  // A post from the calendar or a dashboard card: its checklist once prepared, else its details.
+  function openPub(item, opener) {
+    if (item.prep_id) return preparedDialog(item);
+    return openDetails({ kind: 'post', id: item.post_id, title: item.title, step: item.state, owner: item.next?.who === 'you' ? 'user' : 'publisher', age_h: 0, niche_name: item.niche, platform: item.platform }, opener);
   }
 
   // Page-read analytics switches on the Channels tab: TikTok and Instagram, each off until the person turns it on.
@@ -571,25 +648,30 @@ export async function mountContent(host, { signal } = {}) {
     return node;
   }
 
-  function approvalsView() {
-    const sheets = [...data.plans.map(planCard), ...data.packsWaiting.map(v => packCard(v)), ...data.sheets.map(sheetCard)];
-    if (!data.approvals.length) return sheets.length ? sheets : [empty('Nothing is waiting for you. Posts appear here when the Producer brings them for approval.')];
+  // What waits for the person: every channel's (with the libraries' character sheets and style packs), or one channel's
+  // posts and long video plans.
+  function approvalsView(channel = null) {
+    const owner = M.postChannels(pubItems());
+    const plans = channel ? data.plans.filter(p => owner[p.post_id] === channel.id) : data.plans;
+    const posts = M.forChannel(data.approvals, channel?.id ?? null);
+    const sheets = [...plans.map(planCard), ...(channel ? [] : [...data.packsWaiting.map(v => packCard(v)), ...data.sheets.map(sheetCard)])];
+    if (!posts.length) return sheets.length ? sheets : [empty(channel ? 'Nothing from this channel is waiting for you.' : 'Nothing is waiting for you. Posts appear here when the Producer brings them for approval.')];
     const out = [...sheets, note('Approving marks a post approved. Nothing is posted by approving: the Publisher prepares it, and you post it from Publishing.')];
-    const count = data.approvals.length;
+    const count = posts.length;
     if (data.settings?.batch_approval && count > 1) {
       out.push(el('div', { class: 'sc-actions sc-batch' }, [btn(`Approve all ${count}`, async () => {
         const ok = await confirmDialog({ title: `Approve all ${count} posts?`, message: 'Each post shown here is approved as it is now. Nothing is posted by approving.', confirmLabel: 'Approve all', danger: false });
         if (!ok) return;
-        const result = await send('/approvals/approve-batch', { post_ids: data.approvals.map(p => p.id) });
+        const result = await send('/approvals/approve-batch', { post_ids: posts.map(p => p.id) });
         toast(M.batchText(result)); await reload();
       }, 'primary', { 'aria-label': `Approve all ${count} posts` })]));
     }
-    return [...out, ...data.approvals.map(approvalCard)];
+    return [...out, ...posts.map(approvalCard)];
   }
   function approvalCard(post) {
     const node = el('article', { class: 'sc-post', 'data-post-id': post.id, 'aria-label': post.title });
     const header = () => el('header', { class: 'sc-post-head' }, [el('h3', { class: 'sc-post-title', text: post.title }),
-      el('div', { class: 'sc-post-pills' }, [pill(M.platformName(post.platform), 'accent'), pill(post.niche_name, 'muted'), post.rejection_count ? pill(`Rejected ${post.rejection_count}x before`, 'warn') : null])]);
+      el('div', { class: 'sc-post-pills' }, [pill(M.platformName(post.platform), 'accent'), post.handle ? pill(post.handle, 'muted') : null, pill(post.niche_name, 'muted'), post.rejection_count ? pill(`Rejected ${post.rejection_count}x before`, 'warn') : null])]);
     const done = async text => { toast(text); await reload(); };
     const view = () => {
       const actions = el('div', { class: 'sc-actions' }, [
@@ -906,6 +988,9 @@ export async function mountContent(host, { signal } = {}) {
     }
     if (board.formats.length) out.push(group({ title: 'Formats' }, M.rankRows(board.formats).map(r => scoreRow(r, r.status === 'retired' ? 'Retired' : r.kind === 'card' ? '' : 'No card'))));
     if (board.style_packs?.length) out.push(group({ title: 'Style packs' }, M.rankRows(board.style_packs).map(r => scoreRow(r, r.available === false ? 'Not built yet' : ''))));
+    if (board.top_posts?.length) out.push(group({ title: 'Top posts', description: 'The best scored posts across your channels.' }, board.top_posts.slice(0, 5).map(t => row({
+      title: t.title, description: `${M.platformName(t.platform)}, ${t.niche}`, attrs: { 'data-top-post': t.post_id },
+      control: [el('span', { class: 'sc-score', text: typeof t.score === 'number' ? t.score.toFixed(1) : '' }), t.posted_url ? el('a', { class: 'btn quiet', href: t.posted_url, target: '_blank', rel: 'noopener noreferrer', text: 'Open post', 'aria-label': `Open the live post of ${t.title}` }) : null] }))));
     out.push(group({ title: 'Recent decisions', description: 'Every retirement, promotion and swap is kept with its numbers.' },
       sorted.recent.length ? sorted.recent.slice(0, 12).map(d => decisionRow(d)) : [empty('No decisions yet.')]));
     out.push(settingsGroup());
@@ -1051,31 +1136,241 @@ export async function mountContent(host, { signal } = {}) {
       row({ title: 'CSV file', control: file }), row({ title: 'Or paste it', control: [paste, bring], stack: true }), mapHost, result]);
   }
 
+  // -- dashboards ----------------------------------------------------------------------------------
+
+  // A dashboard card: a title, its body and a way into the tab it sums up.
+  function tile(key, title, body, more = null) {
+    return el('section', { class: `sc-tile sc-tile-${key}`, 'data-tile': key, 'aria-label': title }, [
+      el('h3', { class: 'sc-tile-title', text: title }), el('div', { class: 'sc-tile-body' }, [].concat(body).filter(Boolean)),
+      more ? el('div', { class: 'sc-tile-foot' }, [].concat(more)) : null]);
+  }
+  const moreBtn = (label, fn, aria) => btn(label, fn, 'quiet sc-more', aria ? { 'aria-label': aria } : {});
+  const stat = (value, label, key) => el('div', { class: 'sc-stat', 'data-stat': key }, [el('span', { class: 'sc-stat-value', text: value }), el('span', { class: 'sc-stat-label', text: label })]);
+  const numbersLine = n => n ? `${M.compact(n.views)} views, ${M.durationText(n.avg)} average view, ${M.compact(n.likes)} likes` : 'No numbers yet.';
+
+  function needsTile(rows, channel = null) {
+    const body = rows.length ? el('ul', { class: 'sc-needs' }, rows.map(r => el('li', {}, [btn(r.text, () => {
+      if (r.filter) pubFilter = r.filter;
+      if (channel) { tab = r.tab; draw(); } else select(r.tab);
+    }, 'quiet sc-need', { 'data-need': r.key })])))
+      : el('p', { class: 'sc-dim', text: channel ? 'Nothing from this channel needs you right now.' : 'Nothing needs you right now.' });
+    return tile('needs', 'What needs you', body);
+  }
+  function upcomingTile(items, channel = null) {
+    const body = items.length ? el('ul', { class: 'sc-list' }, items.map(item => {
+      const open = el('button', { type: 'button', class: 'sc-line', 'data-pub': item.post_id, 'aria-label': `${item.title}, ${M.platformName(item.platform)} ${item.handle}, ${M.timeText(item.scheduled_at)}` }, [
+        el('span', { class: 'sc-line-when', text: M.timeText(item.scheduled_at) }), el('span', { class: 'sc-line-title', text: item.title }),
+        channel ? null : el('span', { class: 'sc-line-meta', text: `${M.platformName(item.platform)} ${item.handle}` })]);
+      open.addEventListener('click', () => openPub(item, open));
+      return el('li', {}, [open]);
+    })) : el('p', { class: 'sc-dim', text: 'Nothing scheduled yet. A post gets a time in Publishing (Schedule).' });
+    return tile('upcoming', 'Coming up', body, moreBtn('Open calendar', () => { tab = 'calendar'; draw(); }));
+  }
+  function pipelineTile(items) {
+    const counts = M.pipelineCounts(items), overdue = items.filter(i => i.overdue).length;
+    return tile('pipeline', 'Pipeline', [el('div', { class: 'sc-stats' }, counts.map(c => stat(String(c.count), c.title, c.id))),
+      overdue ? el('p', { class: 'sc-dim', text: `${overdue} overdue.` }) : null], moreBtn('Open pipeline', () => { tab = 'pipeline'; draw(); }));
+  }
+
+  async function overviewDashboard() {
+    const items = pubItems(), latest = M.latestPosted(items, 4);
+    const [nums, board, report] = await Promise.all([numbersFor(latest.map(i => i.post_id)), get('/scoreboard').catch(() => null), get('/report').catch(() => null)]);
+    const latestBody = latest.length ? el('ul', { class: 'sc-list' }, latest.map((item, i) => el('li', { class: 'sc-latest', 'data-latest': item.post_id }, [
+      avatar(channelOf(item.channel_id) || { handle: item.handle }),
+      el('div', { class: 'sc-latest-text' }, [el('span', { class: 'sc-line-title', text: item.title }),
+        el('span', { class: 'sc-line-meta', text: `${M.platformName(item.platform)} ${item.handle}, posted ${M.timeText(item.posted_at)}` }),
+        el('span', { class: 'sc-latest-numbers', text: numbersLine(nums[i]) })]),
+      item.posted_url ? el('a', { class: 'btn quiet', href: item.posted_url, target: '_blank', rel: 'noopener noreferrer', text: 'Open', 'aria-label': `Open the live post of ${item.title} on ${M.platformName(item.platform)}` }) : null])))
+      : el('p', { class: 'sc-dim', text: 'Nothing posted yet.' });
+    const best = board ? M.rankRows(board.niches || []).find(r => r.eligible && r.score != null) : null;
+    const analyticsBody = board ? [el('div', { class: 'sc-stats' }, [stat(String(board.posts_posted ?? 0), 'posts posted', 'posted'), stat(String(board.posts_scored ?? 0), 'with 7 day numbers', 'scored'),
+      stat(best ? best.score.toFixed(1) : 'None yet', best ? `best niche, ${best.name}` : 'niche scored', 'best')]),
+      el('p', { class: 'sc-dim', text: M.minimumText(board.minimum) })] : el('p', { class: 'sc-dim', text: 'The scoreboard did not load.' });
+    const lines = report ? String(report.text || '').split('\n').filter(l => l.trim()).slice(1, 5) : [];
+    const channels = data.channels.map(c => {
+      const open = el('button', { type: 'button', class: 'sc-line sc-channel-line', 'data-open-channel': c.id, 'aria-label': `Open ${M.channelName(c)}` }, [avatar(c),
+        el('span', { class: 'sc-line-title', text: c.handle }), el('span', { class: 'sc-line-meta', text: M.platformName(c.platform) }), pill(M.channelState(c).label, M.channelState(c).tone)]);
+      open.addEventListener('click', () => go(c.id));
+      return el('li', {}, [open]);
+    });
+    return [el('div', { class: 'sc-tiles' }, [
+      needsTile(M.needsYou(needsInput())),
+      tile('latest', 'Latest posts', latestBody, moreBtn('Open publishing', () => { pubFilter = 'all'; tab = 'publishing'; draw(); })),
+      tile('analytics', 'Analytics', analyticsBody, moreBtn('Open analytics', () => { tab = 'analytics'; draw(); })),
+      tile('report', 'Weekly report', lines.length ? lines.map(l => el('p', { class: 'sc-report-line', text: l.trim() })) : el('p', { class: 'sc-dim', text: 'The report did not load.' }),
+        moreBtn('Open report', () => { tab = 'report'; draw(); })),
+      upcomingTile(M.upcoming(items, Date.now() / 1000, 5)),
+      pipelineTile(data.items),
+      tile('channels', 'Your channels', channels.length ? el('ul', { class: 'sc-list' }, channels) : el('p', { class: 'sc-dim', text: 'No channels yet.' }),
+        moreBtn('Add a channel', () => addChannelDialog()))])];
+  }
+
+  async function channelDashboard(channel) {
+    const items = pubItems(), posted = M.latestPosted(items, 12, channel.id);
+    const nums = await numbersFor(posted.map(i => i.post_id));
+    const latest = posted[0], n = nums[0];
+    const latestBody = latest ? [el('p', { class: 'sc-latest-title', text: latest.title }),
+      el('p', { class: 'sc-dim', text: `Posted ${M.timeText(latest.posted_at)}${n?.at ? `. Numbers from ${M.timeText(n.at)}${n.source ? ` (${n.source})` : ''}` : ''}.` }),
+      n ? el('div', { class: 'sc-stats' }, [stat(M.compact(n.views), 'views', 'views'), stat(M.durationText(n.avg), 'average view', 'avg'), stat(M.compact(n.likes), 'likes', 'likes'),
+        stat(M.compact(n.comments), 'comments', 'comments'), stat(M.compact(n.shares), 'shares', 'shares'), stat(M.compact(n.follows), 'follows gained', 'follows')])
+        : el('p', { class: 'sc-dim', text: 'No numbers yet. They come from the platform once it is read (Analytics).' })]
+      : el('p', { class: 'sc-dim', text: 'Nothing posted on this channel yet.' });
+    const totals = M.numberTotals(nums);
+    const all = M.forChannel(items, channel.id);
+    const numbersBody = [el('div', { class: 'sc-stats' }, [stat(String(all.filter(i => i.state === 'posted').length), 'posts posted', 'posted'),
+      stat(M.compact(totals.views), 'views', 'views'), stat(M.compact(totals.follows), 'follows gained', 'follows'), stat(M.durationText(totals.avg), 'average view', 'avg')]),
+      el('p', { class: 'sc-dim', text: totals.posts ? `Over the ${totals.posts} latest post${totals.posts === 1 ? '' : 's'} with numbers.` : 'No numbers read yet.' })];
+    return [el('div', { class: 'sc-tiles' }, [
+      tile('latest', 'Latest post performance', latestBody, [latest?.posted_url ? el('a', { class: 'btn quiet sc-more', href: latest.posted_url, target: '_blank', rel: 'noopener noreferrer', text: 'Open post', 'aria-label': `Open the live post of ${latest.title}` }) : null,
+        moreBtn('Open analytics', () => { tab = 'analytics'; draw(); })]),
+      tile('numbers', 'Channel numbers', numbersBody),
+      needsTile(M.needsYou(needsInput(), channel.id), channel),
+      upcomingTile(M.upcoming(items, Date.now() / 1000, 5, channel.id), channel),
+      pipelineTile(M.channelItems(data.items, channel)),
+      tile('look', 'Look and voice', [el('p', { class: 'sc-text', text: M.channelLookText(channel, data.styles?.available) }),
+        channel.voice ? el('p', { class: 'sc-dim', text: `Narrator voice ${channel.voice}.` }) : null], moreBtn('Open settings', () => { tab = 'settings'; draw(); }))])];
+  }
+
+  // -- one channel's analytics: its numbers post by post, its niche on the scoreboard, its week, where numbers come from ---
+  async function channelAnalytics(channel) {
+    const items = pubItems(), posted = M.latestPosted(items, 12, channel.id);
+    const [nums, board] = await Promise.all([numbersFor(posted.map(i => i.post_id)), get('/scoreboard').catch(() => null)]);
+    const totals = M.numberTotals(nums);
+    const out = [el('div', { class: 'sc-stats sc-stats-wide' }, [stat(M.compact(totals.views), 'views', 'views'), stat(M.durationText(totals.avg), 'average view', 'avg'),
+      stat(M.compact(totals.likes), 'likes', 'likes'), stat(M.compact(totals.comments), 'comments', 'comments'), stat(M.compact(totals.shares), 'shares', 'shares'), stat(M.compact(totals.follows), 'follows gained', 'follows')]),
+      note(totals.posts ? `Totals over the ${totals.posts} latest post${totals.posts === 1 ? '' : 's'} with numbers, from each post's newest reading.` : 'No numbers read yet for this channel.')];
+    out.push(group({ title: 'Posts', description: 'Newest first, with each post\'s newest numbers.' }, posted.length ? posted.map((item, i) => row({
+      title: item.title, description: `Posted ${M.timeText(item.posted_at)}. ${numbersLine(nums[i])}`, attrs: { 'data-post-numbers': item.post_id },
+      control: item.posted_url ? el('a', { class: 'btn quiet', href: item.posted_url, target: '_blank', rel: 'noopener noreferrer', text: 'Open post', 'aria-label': `Open the live post of ${item.title}` }) : null })) : [empty('Nothing posted on this channel yet.')]));
+    const niche = board?.niches?.find(r => r.id === channel.niche_id);
+    const owner = M.postChannels(items);
+    const tops = (board?.top_posts || []).filter(t => owner[t.post_id] === channel.id);
+    out.push(group({ title: 'Scoreboard', description: board ? M.weightsText(board.weights) : 'The scoreboard did not load.' }, [
+      niche ? scoreRow(niche, niche.status !== 'live' ? 'Retired' : '') : empty('Its niche is not on the scoreboard yet.'),
+      ...tops.map(t => row({ title: t.title, description: 'One of the team\'s best scored posts.', control: el('span', { class: 'sc-score', text: typeof t.score === 'number' ? t.score.toFixed(1) : '' }), attrs: { 'data-top-post': t.post_id } }))]));
+    out.push(group({ title: 'Report', description: 'This channel\'s week.' }, [el('div', { class: 'sc-report', 'data-channel-report': '' }, M.channelWeek(channel, items, Date.now() / 1000, niche).map(l => el('p', { text: l })))]));
+    const source = [];
+    if (channel.platform === 'youtube') source.push(row({ title: 'YouTube analytics', description: M.analyticsText(data.yt), attrs: { 'data-numbers-source': 'youtube' },
+      control: [pill(M.connectionState(data.yt)[0], M.connectionState(data.yt)[1]), data.yt?.connected ? btn('Sync now', async () => { const res = await send('/analytics/youtube/sync'); toast(M.syncText(res.result)); await reload(); }, '', { 'aria-label': 'Sync YouTube numbers now' }) : btn('Connections', () => go('lib:connections'), 'quiet', { 'aria-label': 'Open YouTube connections' })] }));
+    const reads = data.pub?.page_reads?.platforms?.[channel.platform];
+    if (reads) source.push(row({ title: `${reads.name} page reads`, description: M.pageReadText(reads), attrs: { 'data-numbers-source': channel.platform },
+      control: [pill(reads.on ? 'On' : 'Off', reads.on ? 'ok' : 'muted'), btn('Connections', () => go('lib:connections'), 'quiet', { 'aria-label': `Open ${reads.name} connections` })] }));
+    source.push(row({ title: 'Import numbers', description: 'Exported a CSV from the platform? Import it in All channels, Report.', control: btn('Open', () => { scope = 'all'; tab = 'report'; draw(); }, 'quiet', { 'aria-label': 'Open the numbers import' }) }));
+    out.push(group({ title: 'Where the numbers come from' }, source));
+    return out;
+  }
+
   // -- layout ------------------------------------------------------------------------------------
 
-  function select(next) { tab = next; draw(); }
+  const LIB_TEXT = { formats: 'Format cards the Researcher found and the ports the Evaluator checked.', styles: 'Style packs: how a channel\'s videos look and sound.',
+    characters: 'Characters for the Flat 2D pack, each version with its reference sheet.', connections: 'Your YouTube project, TikTok and Instagram page reads, and the niches.' };
+  let focusAfter = null;
+  // Go to a scope: 'all', a channel id or 'lib:<library>'. Each scope opens on its first tab.
+  function go(next, nextTab = null) { scope = M.parseScope(next); tab = nextTab; focusAfter = `[data-scope="${scope}"]`; draw(); }
+  // A tab of the current scope; from a library it is a tab of All channels.
+  function select(next) { if (typeof scope === 'string' && scope !== 'all') scope = 'all'; tab = next; draw(); }
+
+  function waitingCount(channelId = null) {
+    if (channelId == null) return data.approvals.length + data.plans.length + data.sheets.length + data.packsWaiting.length;
+    const owner = M.postChannels(pubItems());
+    return M.forChannel(data.approvals, channelId).length + data.plans.filter(p => owner[p.post_id] === channelId).length;
+  }
+
+  function rail() {
+    const item = (value, label, { icon = null, sub = null, count = 0, attrs = {} } = {}) => {
+      const on = String(scope) === String(value), { 'aria-label': named = label, ...rest } = attrs;
+      const node = el('button', { type: 'button', class: `sc-rail-item${on ? ' is-on' : ''}`, 'data-scope': String(value), ...(on ? { 'aria-current': 'page' } : {}),
+        'aria-label': named + (count ? `, ${count} waiting for you` : ''), ...rest }, [
+        icon, el('span', { class: 'sc-rail-text' }, [el('span', { class: 'sc-rail-name', text: label }), sub]),
+        count ? el('span', { class: 'sc-rail-count', 'aria-hidden': 'true', text: String(count) }) : null]);
+      node.addEventListener('click', () => go(value));
+      return node;
+    };
+    const everyone = M.needsCount(M.needsYou(needsInput()));
+    const nodes = [item('all', 'All channels', { icon: el('span', { class: 'sc-avatar sc-avatar-all', 'aria-hidden': 'true' }, [el('span'), el('span'), el('span'), el('span')]), count: everyone })];
+    for (const { niche, channels } of M.groupChannels(data.niches, data.channels)) {
+      if (!channels.length && niche.status !== 'live') continue;
+      nodes.push(el('p', { class: 'sc-rail-heading', text: niche.status === 'live' ? niche.name : `${niche.name}, retired` }));
+      if (!channels.length) nodes.push(el('p', { class: 'sc-rail-none', text: 'No channels yet.' }));
+      for (const c of channels) {
+        nodes.push(item(c.id, c.handle, { icon: avatar(c), count: M.needsCount(M.needsYou(needsInput(), c.id)),
+          sub: el('span', { class: 'sc-rail-sub' }, [platformTag(c.platform), c.status === 'archived' ? ' Archived' : c.paused ? ' Paused' : '']),
+          attrs: { 'aria-label': `${M.channelName(c)}${c.status === 'archived' ? ', archived' : c.paused ? ', paused' : ''}` } }));
+      }
+    }
+    // The app's own line icons (static strings from icons.js).
+    const icon = name => { const node = el('span', { class: 'sc-rail-icon', 'aria-hidden': 'true' }); node.innerHTML = ICONS[name] || ''; return node; };
+    const withIcon = (node, name) => { node.prepend(icon(name)); return node; };
+    const LIB_ICONS = { formats: 'library', styles: 'design', characters: 'agents', connections: 'settings' };
+    const add = withIcon(btn('Add channel', () => addChannelDialog(), 'quiet sc-rail-add', { 'aria-label': 'Add a channel' }), 'plus');
+    const libs = [
+      withIcon(btn('Editor', () => openVideos ? openVideos() : document.querySelector('.studio-sections [data-section=videos]')?.click(), 'quiet sc-rail-lib', { 'aria-label': 'Open the video editor', 'data-lib': 'editor' }), 'play'),
+      ...M.LIBRARIES.map(([id, label]) => item(`lib:${id}`, label, { icon: icon(LIB_ICONS[id]), attrs: { 'data-lib': id } })),
+      withIcon(btn('Templates', openTeamTemplate, 'quiet sc-rail-lib', { 'aria-label': 'Open team templates', 'data-lib': 'templates' }), 'store')];
+    return el('nav', { class: 'sc-rail', 'aria-label': 'Channels and libraries' }, [
+      el('div', { class: 'sc-rail-top' }, [...nodes, add]),
+      el('div', { class: 'sc-rail-lower' }, [el('p', { class: 'sc-rail-heading', text: 'Libraries' }), ...libs])]);
+  }
+
+  // On phones the rail is this picker.
+  function picker() {
+    const choose = selectOf('Channel or library', M.pickerOptions(data.niches, data.channels), String(scope));
+    choose.addEventListener('change', () => go(choose.value));
+    return el('div', { class: 'sc-picker' }, [choose, btn('Add channel', () => addChannelDialog(), 'quiet', { 'aria-label': 'Add a channel' })]);
+  }
+
+  function head(channel) {
+    if (channel) {
+      const state = M.channelState(channel), niche = data.niches.find(n => n.id === channel.niche_id);
+      return el('div', { class: 'sc-head', 'data-head': 'channel' }, [avatar(channel, 'sc-avatar-big'),
+        el('div', { class: 'sc-head-text' }, [el('h2', { class: 'sc-title', text: channel.handle }),
+          el('p', { class: 'sc-head-meta' }, [platformTag(channel.platform), niche ? el('span', { text: `Niche ${niche.name}` }) : null, pill(state.label, state.tone)])])]);
+    }
+    if (scope === 'all') {
+      const live = data.channels.filter(c => c.status !== 'archived').length, niches = data.niches.filter(n => n.status === 'live').length;
+      return el('div', { class: 'sc-head', 'data-head': 'all' }, [el('span', { class: 'sc-avatar sc-avatar-big sc-avatar-all', 'aria-hidden': 'true' }, [el('span'), el('span'), el('span'), el('span')]),
+        el('div', { class: 'sc-head-text' }, [el('h2', { class: 'sc-title', text: 'All channels' }),
+          el('p', { class: 'sc-head-meta', text: `${live} live channel${live === 1 ? '' : 's'} in ${niches} niche${niches === 1 ? '' : 's'}. Nothing is posted without your OK.` })])]);
+    }
+    const lib = scope.slice(4), label = M.LIBRARIES.find(l => l[0] === lib)?.[1] || lib;
+    return el('div', { class: 'sc-head', 'data-head': 'library' }, [el('div', { class: 'sc-head-text' }, [el('h2', { class: 'sc-title', text: label }), el('p', { class: 'sc-head-meta', text: LIB_TEXT[lib] || '' })])]);
+  }
+
+  function views(channel) {
+    if (typeof scope === 'string' && scope.startsWith('lib:')) return { formats: formatsView, styles: stylesView, characters: charactersView, connections: connectionsView }[scope.slice(4)];
+    if (channel) return { dashboard: () => channelDashboard(channel), pipeline: () => pipelineView(channel), calendar: () => calendarView(channel), approvals: () => approvalsView(channel),
+      publishing: () => publishingView(channel), analytics: () => channelAnalytics(channel), settings: () => settingsView(channel) }[tab];
+    return { dashboard: overviewDashboard, approvals: () => approvalsView(), pipeline: () => pipelineView(), calendar: () => calendarView(), publishing: () => publishingView(),
+      analytics: scoreboardView, report: reportView }[tab];
+  }
+
   async function draw() {
     if (!data) return;
     if (!data.niches.length && !data.channels.length) { root.replaceChildren(emptyState()); return; }
-    tab ||= data.approvals.length || data.plans.length || data.sheets.length || data.packsWaiting.length ? 'approvals' : 'pipeline';
-    const bar = el('div', { class: 'sc-tabs', role: 'tablist', 'aria-label': 'Content sections' }, TABS.map(([id, name]) => {
-      const waiting = data.approvals.length + data.plans.length + data.sheets.length + data.packsWaiting.length, count = id === 'approvals' && waiting ? ` ${waiting}` : '';
-      const node = el('button', { type: 'button', role: 'tab', class: 'sc-tab', id: `sc-tab-${id}`, 'aria-selected': String(id === tab), 'aria-controls': 'sc-body', 'data-tab': id, text: name + count });
-      node.addEventListener('click', () => select(id));
+    const channel = typeof scope === 'number' ? channelOf(scope) : null;
+    if (typeof scope === 'number' && !channel) scope = 'all';
+    const tabs = M.tabsFor(scope);
+    if (tabs.length && !tabs.some(t => t[0] === tab)) tab = 'dashboard';
+    const bar = tabs.length ? el('div', { class: 'sc-tabs', role: 'tablist', 'aria-label': channel ? `${M.channelName(channel)} sections` : 'All channels sections' }, tabs.map(([id, name]) => {
+      const waiting = waitingCount(channel?.id ?? null), count = id === 'approvals' && waiting ? ` ${waiting}` : '';
+      const node = el('button', { type: 'button', role: 'tab', class: 'sc-tab', id: `sc-tab-${id}`, 'aria-selected': String(id === tab), 'aria-controls': 'sc-body', 'data-tab': id, text: name + count, tabindex: id === tab ? '0' : '-1' });
+      node.addEventListener('click', () => { tab = id; draw(); });
       return node;
-    }));
-    bar.addEventListener('keydown', event => {
+    })) : null;
+    bar?.addEventListener('keydown', event => {
       const step = { ArrowRight: 1, ArrowLeft: -1 }[event.key]; if (!step) return;
-      const at = TABS.findIndex(t => t[0] === tab); select(TABS[(at + step + TABS.length) % TABS.length][0]);
-      root.querySelector('[role=tab][aria-selected=true]')?.focus();
+      const at = tabs.findIndex(t => t[0] === tab); tab = tabs[(at + step + tabs.length) % tabs.length][0]; focusAfter = '.sc-tabs [role=tab][aria-selected=true]'; draw();
     });
-    const panel = el('div', { class: 'sc-body', id: 'sc-body', role: 'tabpanel', 'aria-labelledby': `sc-tab-${tab}` }, [el('p', { role: 'status', text: 'Loading...' })]);
-    root.replaceChildren(...[alerts(), data.failed.length ? el('p', { class: 'set-error', role: 'alert', text: 'Some parts did not load. Try again in a moment.' }) : null, bar, panel].filter(Boolean));
-    const shown = tab;
-    const build = { approvals: approvalsView, publishing: publishingView, pipeline: pipelineView, channels: channelsView, formats: formatsView, characters: charactersView, styles: stylesView, scoreboard: scoreboardView, report: reportView }[shown];
+    const panel = el('div', { class: 'sc-body', id: 'sc-body', ...(bar ? { role: 'tabpanel', 'aria-labelledby': `sc-tab-${tab}` } : { role: 'region', 'aria-label': head(channel).textContent }) }, [el('p', { role: 'status', text: 'Loading...' })]);
+    const main = el('div', { class: 'sc-main' }, [picker(), alerts(), data.failed.length ? el('p', { class: 'set-error', role: 'alert', text: 'Some parts did not load. Try again in a moment.' }) : null, head(channel), bar, panel].filter(Boolean));
+    root.replaceChildren(el('div', { class: 'sc-shell', 'data-scope': String(scope) }, [rail(), main]));
+    // A narrow tab bar scrolls: keep the open tab in view.
+    if (bar) { const on = bar.querySelector('[aria-selected=true]'); if (on) bar.scrollLeft = Math.max(0, on.offsetLeft - (bar.clientWidth - on.offsetWidth) / 2); }
+    if (focusAfter) { root.querySelector(focusAfter)?.focus(); focusAfter = null; }
+    const shown = `${scope}/${tab}`, build = views(channel);
     try {
       const content = await build();
-      if (alive() && tab === shown && panel.isConnected) panel.replaceChildren(...content);
+      if (alive() && `${scope}/${tab}` === shown && panel.isConnected) panel.replaceChildren(...content);
     } catch (error) { if (alive() && panel.isConnected) panel.replaceChildren(el('p', { role: 'alert', class: 'sc-error', text: M.loadFailure(error) }), btn('Try again', () => draw())); }
   }
 

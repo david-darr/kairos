@@ -240,5 +240,52 @@ const { pathToFileURL } = require('node:url');
   assert.equal(M.prepareText({ package: { platform_name: 'TikTok', routes: ['browser'], problems: [] } }), 'Prepared for TikTok. Open the upload page when you are ready.');
   for (const text of [M.pageReadText({ on: false, name: 'TikTok' }), M.fillText({ stage: 'done', filled: ['file'] }), M.aiLabel('instagram').text]) assert.ok(!text.includes('—'), 'no em-dashes');
 
+  // The channel dashboard: scopes and their tabs, avatars, what needs you, latest and coming up, numbers, the phone picker.
+  assert.deepEqual(M.tabsFor('all').map(t => t[0]), ['dashboard', 'approvals', 'pipeline', 'calendar', 'publishing', 'analytics', 'report']);
+  assert.deepEqual(M.tabsFor(3).map(t => t[0]), ['dashboard', 'pipeline', 'calendar', 'approvals', 'publishing', 'analytics', 'settings']);
+  assert.deepEqual(M.tabsFor('lib:styles'), []);
+  assert.deepEqual([M.parseScope('all'), M.parseScope('4'), M.parseScope('lib:formats'), M.parseScope('lib:nope'), M.parseScope('-2'), M.parseScope(null)], ['all', 4, 'lib:formats', 'all', 'all', 'all']);
+  assert.deepEqual(M.avatarFor({ handle: '@cooks', look: 'sport' }), { letter: 'C', key: 'sport' });
+  assert.deepEqual(M.avatarFor({ handle: 'trips', style_pack: 'flat-2d' }), { letter: 'T', key: 'flat-2d' });
+  assert.equal(M.avatarFor({ handle: '@' }).letter, '?');
+  assert.equal(M.channelName({ platform: 'tiktok', handle: '@a' }), 'TikTok @a');
+  const ch = { id: 2, niche_id: 7 };
+  const mixed = [{ kind: 'topic', id: 1, niche_id: 7 }, { kind: 'topic', id: 2, niche_id: 8 }, { kind: 'post', id: 3, channel_id: 2, niche_id: 7 }, { kind: 'post', id: 4, channel_id: 5, niche_id: 7 }];
+  assert.deepEqual(M.channelItems(mixed, ch).map(i => i.kind + i.id), ['topic1', 'post3'], 'a channel shows its posts and its niche\'s topics');
+  assert.equal(M.channelItems(mixed, null).length, 4);
+  const pubs = [{ post_id: 1, channel_id: 2, state: 'prepared', scheduled_at: 500 }, { post_id: 2, channel_id: 2, state: 'waiting_for_you' }, { post_id: 3, channel_id: 5, state: 'failed', scheduled_at: 300 },
+    { post_id: 4, channel_id: 2, state: 'posted', posted_at: 200 }, { post_id: 5, channel_id: 5, state: 'posted', posted_at: 400 }, { post_id: 6, channel_id: 2, state: 'rejected', scheduled_at: 900 },
+    { post_id: 7, channel_id: 2, state: 'awaiting_approval' }];
+  assert.deepEqual(M.postChannels(pubs)[3], 5);
+  const needs = M.needsYou({ approvals: [{ id: 7, channel_id: 2 }, { id: 8, channel_id: 5 }], plans: [{ post_id: 1 }, { post_id: 3 }], pubItems: pubs,
+    sheets: [{}], packs: [], decisions: [{ status: 'awaiting_user' }, { status: 'confirmed' }] });
+  assert.deepEqual(needs.map(r => r.text), ['2 posts to approve', '2 long video plans to approve', '2 prepared posts waiting for you to post them', '1 preparation that failed', '1 character sheet to approve', '1 team decision to confirm']);
+  assert.equal(M.needsCount(needs), 9);
+  const mineNeeds = M.needsYou({ approvals: [{ id: 7, channel_id: 2 }], plans: [{ post_id: 1 }, { post_id: 3 }], pubItems: pubs, sheets: [{}], decisions: [{ status: 'awaiting_user' }] }, 2);
+  assert.deepEqual(mineNeeds.map(r => [r.key, r.count, r.tab]), [['approvals', 1, 'approvals'], ['plans', 1, 'approvals'], ['to_post', 2, 'publishing']], 'a channel: its own posts and plans, no libraries');
+  assert.equal(mineNeeds[0].text, '1 post to approve');
+  assert.deepEqual(M.needsYou({}, null), []);
+  assert.deepEqual(M.latestPosted(pubs).map(i => i.post_id), [5, 4]);
+  assert.deepEqual(M.latestPosted(pubs, 4, 2).map(i => i.post_id), [4]);
+  assert.deepEqual(M.upcoming(pubs, 100).map(i => i.post_id), [3, 1], 'soonest first, rejected left out');
+  assert.deepEqual(M.upcoming(pubs, 400, 5, 2).map(i => i.post_id), [1]);
+  assert.deepEqual(M.filterItems(pubs, 'to_post').map(i => i.post_id), [1, 2]);
+  const nums = M.latestNumbers([{ taken_at: 2, views: 900, avg_view_duration_s: 20, likes: 5, follows_gained: 1 }, { taken_at: 1, views: 100 }]);
+  assert.deepEqual([nums.views, nums.avg, nums.likes, nums.comments, nums.follows], [900, 20, 5, 0, 1], 'the newest snapshot');
+  assert.equal(M.latestNumbers([]), null);
+  const totals = M.numberTotals([nums, null, { views: 100, avg: 10, likes: 1, follows: 0 }]);
+  assert.deepEqual([totals.posts, totals.views, totals.likes, totals.avg], [2, 1000, 6, 15]);
+  assert.equal(M.numberTotals([]).avg, null);
+  assert.deepEqual([M.compact(950), M.compact(1200), M.compact(1000), M.compact(34400), M.compact(1500000), M.compact(12000000)], ['950', '1.2K', '1K', '34K', '1.5M', '12M']);
+  assert.deepEqual([M.durationText(21.4), M.durationText(75), M.durationText(null)], ['21 s', '1 min 15 s', 'no number yet']);
+  assert.deepEqual(M.pipelineCounts([item('pick'), item('script'), item('script')]).map(c => c.count), [1, 2, 0, 0, 0, 0]);
+  const week = M.channelWeek({ id: 2 }, pubs, 300, { name: 'Sky', eligible: false, score: null, not_yet: '2 of 10 posts' });
+  assert.deepEqual(week, ['Posted in the last 7 days: 1 post.', 'Scheduled from now on: 1 post.', 'Waiting for your approval: 1 post.',
+    'Prepared and waiting for you to post: 2 posts.', 'Its niche, Sky, is not scored yet: 2 of 10 posts.']);
+  assert.match(M.channelWeek({ id: 2 }, pubs, 300, { name: 'Sky', eligible: true, score: 61.25 }).at(-1), /scores 61\.3/);
+  assert.deepEqual(M.pickerOptions([{ id: 1, name: 'Sky', status: 'live' }], [{ id: 4, niche_id: 1, platform: 'youtube', handle: '@sky', status: 'archived' }]),
+    [['all', 'All channels'], ['4', 'YouTube @sky, Sky, archived'], ['lib:formats', 'Formats'], ['lib:styles', 'Styles'], ['lib:characters', 'Characters'], ['lib:connections', 'Connections']]);
+  for (const text of [...needs.map(r => r.text), ...week]) assert.ok(!text.includes('—'), 'no em-dashes');
+
   console.log('studio content model ok');
 })().catch(error => { console.error(error); process.exit(1); });
