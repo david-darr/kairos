@@ -190,8 +190,9 @@ def _ready(store, post_id):
     return post, channel, ident, render_file(post["render_ref"])
 
 
-async def publish(store, post_id, by, now=None):
-    """Uploads one approved post to its YouTube channel and records the posted link. Returns what YouTube set."""
+async def publish(store, post_id, by, now=None, guard=None):
+    """Uploads one approved post to its YouTube channel and records the posted link. Returns what YouTube set. `guard`
+    (a bot-made post, services/content_studio/handsoff.py gate) is read again just before the upload."""
     account = accounts.effective_account()
     key = (account, post_id)
     if key in _sending:
@@ -219,6 +220,9 @@ async def publish(store, post_id, by, now=None):
                 privacy = "private"   # a scheduled upload is private until YouTube publishes it at publish_at
             with open(path, "rb") as handle:
                 content, kind = _body(metadata(post, privacy, publish_at, store.audience(post)["made_for_kids"]), handle.read())
+            problem = guard() if guard else None
+            if problem:
+                raise PostingError(f"Not posted: {problem}", 409)
             try:
                 answer = await google.request("youtube_upload", "POST", "/videos",
                                               params={"part": "snippet,status", "uploadType": "multipart"},

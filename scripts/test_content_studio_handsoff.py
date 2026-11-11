@@ -23,6 +23,8 @@ from services.content_studio import handsoff, report  # noqa: E402
 from services.content_studio.store import Store, StudioError  # noqa: E402
 from services import studio_team_package as template  # noqa: E402
 
+from types import SimpleNamespace  # noqa: E402
+CTX = SimpleNamespace(turn_taint=None)
 NOT_CAPPED = lambda: {"capped": False, "near_cap": False}  # noqa: E731
 CAPPED = lambda: {"capped": True, "near_cap": True}  # noqa: E731
 
@@ -46,7 +48,10 @@ class Case(unittest.TestCase):
         return post["id"]
 
     def publishers(self, fail=False):
-        async def publish(store, post_id, by):
+        async def publish(store, post_id, by, guard=None):
+            problem = guard() if guard else None   # what the real publishers do before the irreversible call
+            if problem:
+                raise StudioError(f"Not posted: {problem}")
             if fail:
                 raise StudioError("the upload was refused")
             self.posted.append((post_id, by))
@@ -130,7 +135,7 @@ class On(Case):
         self.store.approve(a, by="david")
         self.store.approve(b, by="david")
 
-        async def pause_after_first(store, post_id, by):
+        async def pause_after_first(store, post_id, by, guard=None):
             self.posted.append((post_id, by))
             store.mark_posted(post_id, f"https://example.com/{post_id}")
             handsoff.set_paused(store, True)
@@ -186,6 +191,76 @@ class On(Case):
         text = report.render_text(report.build_report(self.store, spend=lambda: {"available": False}))
         self.assertIn("Moon dust on @space (youtube)", text)
         self.assertIn("Waiting for your tap on TikTok", text)
+
+
+class ReviewFindings(Case):
+    """The independent review of 2026-11-11, kept fixed: every bot-made post passes one gate, read again just before
+    the irreversible call, whether the scheduler or the Publisher's own tool sends it."""
+
+    def setUp(self):
+        super().setUp()
+        handsoff.set_hands_off(self.store, True, "david")
+
+    def test_a_pause_during_the_upload_stops_the_publish_call(self):
+        post = self.queued(self.yt, "Moon")
+        self.store.approve(post, by="david")
+        published = []
+
+        async def slow_upload(store, post_id, by, guard=None):
+            handsoff.set_paused(store, True)          # David presses Pause team while the upload runs
+            problem = guard()
+            if problem:
+                raise StudioError(f"Not posted: {problem}")
+            published.append(post_id)
+            return {}
+        result = self.tick(publishers={"youtube": slow_upload, "instagram": slow_upload})
+        self.assertEqual(published, [])
+        self.assertIn("paused", result["posted"][0]["error"])
+        self.assertEqual(self.store.get_post(post)["state"], "approved")
+
+    def test_the_gate_reads_pause_hands_off_warnings_cap_and_slots(self):
+        a = self.queued(self.yt, "A")
+        self.store.approve(a, by="david")
+        self.assertIsNone(handsoff.gate(self.store, a, spend=NOT_CAPPED))
+        self.assertIn("cap", handsoff.gate(self.store, a, spend=CAPPED))
+        handsoff.set_hands_off(self.store, False, "david")
+        self.assertIn("off", handsoff.gate(self.store, a, spend=NOT_CAPPED))
+        self.assertIsNone(handsoff.gate(self.store, a, spend=NOT_CAPPED, require_hands_off=False))
+        handsoff.set_hands_off(self.store, True, "david")
+        self.store.record_warning(self.yt["id"], "Limit")
+        self.assertIsNotNone(handsoff.gate(self.store, a, spend=NOT_CAPPED))
+        self.store.resume_channel(self.yt["id"])
+        b = self.queued(self.yt, "B")
+        self.store.approve(b, by="david")
+        self.store.mark_posted(a, "https://example.com/a")
+        self.assertIn("for today", handsoff.gate(self.store, b, spend=NOT_CAPPED))
+        t = self.queued(self.tt, "C")
+        self.store.approve(t, by="david")
+        self.assertIn("tap", handsoff.gate(self.store, t, spend=NOT_CAPPED))
+
+    def test_the_publishers_own_tool_passes_the_same_gate_and_hands_on_its_guard(self):
+        from unittest.mock import patch
+        from core import bot_content_studio_tools as tools
+        from services.content_studio import youtube_publish
+        a, b = self.queued(self.yt, "A"), self.queued(self.yt, "B")
+        for post in (a, b):
+            self.store.approve(post, by="david")
+        seen = []
+
+        async def fake_publish(store, post_id, by, now=None, guard=None):
+            seen.append((post_id, guard))
+            self.assertIsNone(guard())
+            store.mark_posted(post_id, f"https://youtube.com/watch?v={post_id}")
+            return {"video_id": "v", "url": "u", "privacy": "private", "asked_privacy": "private", "note": ""}
+        with patch.object(tools, "studio", self.store), patch.object(handsoff.pipeline, "_default_spend", NOT_CAPPED),                 patch.object(youtube_publish, "publish", fake_publish):
+            asyncio.run(tools._publish({"post_id": a}, CTX, {"name": "Publisher"}, "publisher"))
+            with self.assertRaises(StudioError):   # the channel's slot for today is used
+                asyncio.run(tools._publish({"post_id": b}, CTX, {"name": "Publisher"}, "publisher"))
+            handsoff.set_paused(self.store, True)
+            with self.assertRaises(StudioError):
+                asyncio.run(tools._publish({"post_id": b}, CTX, {"name": "Publisher"}, "publisher"))
+        self.assertEqual([p for p, _ in seen], [a])
+        self.assertIsNotNone(seen[0][1])
 
 
 class Policy(unittest.TestCase):

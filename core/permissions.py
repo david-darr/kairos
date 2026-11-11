@@ -290,7 +290,7 @@ def _remember(rule: dict, surface: str) -> None:
 
 
 def stored_decision(surface: str, tool: str, target: str | None, is_admin: bool = False,
-                    bot_id: str | None = None) -> Decision | None:
+                    bot_id: str | None = None, arguments: dict | None = None, mcp: tuple | None = None) -> Decision | None:
     """An answer that needs no one, or None if this has to be asked. For a bot, only rules made by
     answering that bot's own requests count: the app's built-in grants, and another bot's, never
     stand in for the approval level."""
@@ -305,9 +305,21 @@ def stored_decision(surface: str, tool: str, target: str | None, is_admin: bool 
     else:
         saved = [rule for rule in saved if not rule.get("team_id")]  # a team's grant is never anyone else's
     for rule in _session_rules.get(surface, []) + saved:
-        if _matches(rule, tool, target, is_admin):
+        if _matches(rule, tool, target, is_admin) and (not rule.get("team_id") or _team_rule_covers(rule, tool, arguments, mcp)):
             return Decision(rule["behavior"], "A saved rule covers this.", rule)
     return None
+
+
+def _team_rule_covers(rule: dict, tool: str, arguments, mcp) -> bool:
+    """A team grant covers only the kind of operation that was approved, re-judged on each later call: a safe change
+    inside Kairos (never a send, deletion, command or unknown action), of the same kind, and for a multi-action tool
+    the same action (review finding, 2026-11-11). A grant from before this check, with no kind, covers nothing."""
+    from core import bot_policy
+    args = arguments if isinstance(arguments, dict) else {}
+    op = bot_policy.classify(tool, args, mcp)
+    if not rule.get("op_kind") or op.kind != rule["op_kind"] or not bot_policy.safe_operation(op) or op.kind == bot_policy.READ:
+        return False
+    return (rule.get("action") or None) == (args.get("action") if isinstance(args.get("action"), str) else None)
 
 
 def open_channel(surface: str) -> asyncio.Queue:
@@ -432,7 +444,7 @@ def _bot_choices(outcome, target: str | None) -> list[dict]:
     # Allow for this team (Bot team approvals, 2026-11-11): this tool, for every bot on the asking bot's team, and
     # nothing else. Only for changes inside Kairos: never a send, a deletion, an unknown action or a command.
     team = bot_policy.team_of(outcome.bot_id)
-    if team and op is not None and op.kind in (bot_policy.EDIT, bot_policy.DRAFT) and op.scope in ("internal", ""):
+    if team and bot_policy.safe_operation(op) and op.kind in (bot_policy.EDIT, bot_policy.DRAFT):
         choices.insert(-1, {"id": "team", "label": f"Allow for the {team.get('name') or 'whole'} team",
                             "behavior": "allow", "scope": "team"})
     return choices
@@ -514,7 +526,7 @@ async def decide(*, surface: str, tool: str, arguments: dict, title: str = "", d
             return Decision("allow", "Allowed by this chat's Auto mode.")
     # A tainted turn can force a fresh decision without revoking the person's
     # standing grant for future clean turns.
-    saved = None if force_prompt else stored_decision(surface, tool, target, is_admin, bot_id)
+    saved = None if force_prompt else stored_decision(surface, tool, target, is_admin, bot_id, arguments, mcp)
     if saved:
         if outcome is not None:
             _bot_log(outcome, saved.behavior, "saved-rule", "rule", target=target)
@@ -544,7 +556,7 @@ async def decide(*, surface: str, tool: str, arguments: dict, title: str = "", d
     if outcome is not None:
         # One card for one run's simultaneous requests: a second request for the same tool waits on the first
         # one's answer instead of opening another card (Bot team approvals, 2026-11-11).
-        joined = _join_pending(outcome, ask_surface, tool, target)
+        joined = _join_pending(outcome, ask_surface, tool, target, arguments if isinstance(arguments, dict) else {})
         if joined is not None:
             return await _await_joined(joined, outcome, surface, tool, arguments, agent_id, mcp, is_admin,
                                        bot_context, target, timeout)
@@ -652,15 +664,30 @@ def _cannot_ask(outcome, tool: str) -> str:
     return reason
 
 
-def _join_pending(outcome, surface: str, tool: str, target):
-    """A live request from the same bot and run for the same tool and target, still waiting, or None."""
+def _join_pending(outcome, surface: str, tool: str, target, arguments=None):
+    """A live request from the same bot and run for exactly the same call, still waiting, or None. Only a change
+    inside Kairos (an edit or a draft) is ever joined, and only when every argument is identical: two calls that
+    differ in any argument, or any send, deletion, command or unknown action, each get their own card (review
+    finding, 2026-11-11)."""
+    from core import bot_policy
+    op = outcome.op
+    if op is None or op.kind not in (bot_policy.EDIT, bot_policy.DRAFT) or op.destructive:
+        return None
     for request in _pending.values():
         bot = request.bot or {}
         if (request.kind == "permission" and not request.answer.done() and request.surface == surface
                 and request.tool == tool and request.target == target and bot.get("bot_id") == outcome.bot_id
-                and bot.get("run_id") == ((outcome.run or {}).get("run_id"))):
+                and bot.get("run_id") == ((outcome.run or {}).get("run_id"))
+                and bot.get("tool_kind") == op.kind and _same_arguments(request.arguments, arguments)):
             return request
     return None
+
+
+def _same_arguments(a, b) -> bool:
+    try:
+        return json.dumps(a, sort_keys=True, default=str) == json.dumps(b, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        return False
 
 
 async def _await_joined(request, outcome, surface, tool, arguments, agent_id, mcp, is_admin, bot_context, target,
@@ -782,14 +809,17 @@ def answer(request_id: str, choice_id: str, user: str) -> bool:
         except bot_policy.PolicyError:
             return False
     elif choice["scope"] == "team":
-        # This tool, whole, for the asking bot's team (its members at the time of each later call).
+        # This tool, for the asking bot's team (its members at the time of each later call), for the kind of
+        # operation that was approved and, for a multi-action tool, the same action: never a different one.
         from core import bot_policy
         team = bot_policy.team_of(bot.get("bot_id"))
-        if not team:
+        op = bot_policy.classify(request.tool, request.arguments)
+        if not team or not bot_policy.safe_operation(op) or op.kind == bot_policy.READ:
             return False
+        action = request.arguments.get("action") if isinstance(request.arguments.get("action"), str) else None
         rule = {"id": uuid.uuid4().hex, "tool": request.tool, "content": None, "behavior": "allow", "scope": "forever",
                 "granted_at": time.time(), "granted_by": user, "source": "asked-team", "team_id": team["id"],
-                "team_name": team.get("name")}
+                "team_name": team.get("name"), "op_kind": op.kind, "action": action}
         _remember(rule, request.surface)
     elif choice["scope"] in ("session", "forever"):
         rule = {"id": uuid.uuid4().hex, "tool": request.tool, "content": request.target,

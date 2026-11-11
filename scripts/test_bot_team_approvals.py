@@ -311,5 +311,84 @@ class Prompts(TeamCase):
         self.assertEqual([(await first).behavior, (await second).behavior], ["allow", "allow"])
 
 
+class ReviewFindings(TeamCase):
+    """The independent review of 2026-11-11, kept fixed."""
+
+    async def test_batching_never_shares_an_approval_between_different_calls(self):
+        bot = make_bot("NoShare")
+        set_mode(bot, "ask")
+        sid = make_thread(bot)
+        queue = permissions.open_channel(f"chat:{sid}")
+        cases = ((("Bash", {"command": "rm -rf build"}), ("Bash", {"command": "rm -rf /important"})),
+                 (("Write", {"file_path": "notes/a.txt"}), ("Write", {"file_path": "notes/b.txt"})),
+                 (("Bash", {"command": "ls"}), ("Bash", {"command": "ls"})),
+                 (("send_email", {"to": "a@example.com"}), ("send_email", {"to": "a@example.com"})))
+        for first_call, second_call in cases:
+            first = asyncio.create_task(permissions.decide(surface=f"chat:{sid}", tool=first_call[0], arguments=first_call[1],
+                                                           agent_id=bot, is_admin=True))
+            one = await asyncio.wait_for(queue.get(), timeout=5)
+            second = asyncio.create_task(permissions.decide(surface=f"chat:{sid}", tool=second_call[0], arguments=second_call[1],
+                                                            agent_id=bot, is_admin=True))
+            two = await asyncio.wait_for(queue.get(), timeout=5)
+            self.assertNotEqual(one["id"], two["id"], first_call)
+            permissions.answer(one["id"], "once", "local")
+            permissions.answer(two["id"], "reject", "local")
+            self.assertEqual([(await first).behavior, (await second).behavior], ["allow", "deny"], first_call)
+            while not queue.empty():
+                queue.get_nowait()
+
+    async def test_a_multi_action_tool_is_declared_by_its_safe_actions_and_checked_per_call(self):
+        self.assertIn("delete", bot_policy.internal_tool_problem("design_boards"))
+        self.assertIsNone(bot_policy.internal_tool_problem("design_boards.rename"))
+        self.assertIsNotNone(bot_policy.internal_tool_problem("design_boards.delete"))
+        self.assertIsNotNone(bot_policy.internal_tool_problem("design_boards.nonsense"))
+        with self.assertRaises(ValueError):
+            bot_departments.clean_internal_tools(["design_boards"])
+        bot = make_bot("Boards")
+        set_mode(bot, "ask")
+        self.team("Design desk", [bot], internal_tools=["design_boards.rename"])
+        sid = make_thread(bot)
+        self.assertEqual(self.outcome(bot, "design_boards", {"action": "rename", "name": "x"}, surface=f"chat:{sid}").source, "team")
+        for action in ("delete", "move", "delete_note"):
+            self.assertEqual(self.outcome(bot, "design_boards", {"action": action}, surface=f"chat:{sid}").action, "ask", action)
+
+    async def test_a_declared_tool_whose_call_turns_out_unsafe_still_asks(self):
+        bot = make_bot("Notes2")
+        set_mode(bot, "ask")
+        crew = self.team("Notes2", [bot])
+        # A record written before the per-operation check (or by hand) holding a whole multi-action tool.
+        data = bot_departments._read()
+        next(d for d in data["departments"] if d["id"] == crew["id"])["internal_tools"] = ["design_boards", "manage_routine"]
+        bot_departments.save(bot_departments.registry_path(), data)
+        sid = make_thread(bot)
+        self.assertEqual(self.outcome(bot, "design_boards", {"action": "delete"}, surface=f"chat:{sid}").action, "ask")
+        self.assertEqual(self.outcome(bot, "manage_routine", {"action": "delete"}, surface=f"chat:{sid}").action, "ask")
+
+    async def test_allow_for_the_team_covers_only_the_approved_operation(self):
+        a, b = make_bot("Renamer"), make_bot("Mate2")
+        for bot in (a, b):
+            set_mode(bot, "ask")
+        self.team("Boards team", [a, b])
+        sid = make_thread(a)
+        task, payload = await self.asked(f"chat:{sid}", tool="design_boards", arguments={"action": "rename", "name": "x"},
+                                         agent_id=a, is_admin=True)
+        self.assertTrue(permissions.answer(payload["id"], "team", "local"))
+        self.assertEqual((await task).behavior, "allow")
+        mate = make_thread(b)
+        self.assertEqual((await self.decide(b, mate, "design_boards", {"action": "rename", "name": "y"}, timeout=1)).behavior, "allow")
+        for action in ("delete", "move"):
+            self.assertEqual((await self.decide(b, mate, "design_boards", {"action": action}, timeout=1)).behavior, "deny", action)
+        task, payload = await self.asked(f"chat:{sid}", tool="design_boards", arguments={"action": "delete"}, agent_id=a, is_admin=True)
+        self.assertNotIn("team", [c["id"] for c in payload["choices"]])
+        permissions.answer(payload["id"], "reject", "local")
+        await task
+        # An old team grant with no operation kind covers nothing.
+        data = permissions._load()
+        data["rules"].append({"id": "old", "tool": "manage_routine", "content": None, "behavior": "allow", "scope": "forever",
+                              "team_id": bot_departments.team_of(a)["id"]})
+        permissions._save(data)
+        self.assertIsNone(permissions.stored_decision(f"chat:{mate}", "manage_routine", None, True, b, {"action": "delete"}))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -110,40 +110,68 @@ def _posted_today(store, channel_id, now) -> int:
     return sum(1 for p in store.list_posts(state="posted", channel_id=channel_id) if (p.get("posted_at") or 0) > now - DAY)
 
 
-def due(store, now=None, spend=None) -> list:
-    """Approved posts that may go out now: an automatic platform, a live unpaused channel, the team running, under the
-    cap, its schedule reached, within the channel's slots for the day."""
+def gate(store, post_id, now=None, spend=None, require_hands_off=True):
+    """Why this post may not go out now, or None. The one gate every bot-made post passes, from the scheduler or from
+    the Publisher's own tool, and again just before the irreversible call (review finding, 2026-11-11): the team is
+    running (and hands-off on, for an automatic post), the post is approved for an automatic platform, its channel is
+    live, unpaused and has no open warning, the spend cap is not reached, its schedule has come, and the channel has
+    a slot left today (the niche's slots, about one a day)."""
     now = time.time() if now is None else now
     s = store.settings()
-    if not s["hands_off"] or s["team_paused"] or _capped(spend):
+    if s["team_paused"]:
+        return "The team is paused, so nothing is posted until the person resumes it."
+    if require_hands_off and not s["hands_off"]:
+        return "Hands-off posting is off, so the person posts."
+    post = store.get_post(post_id)
+    if post["state"] != "approved":
+        return "Only an approved post goes out."
+    if post["platform"] not in AUTO_PLATFORMS:
+        return "TikTok waits for the person's own tap."
+    channel = store.get_channel(post["channel_id"])
+    if channel["status"] != "live" or channel["paused"]:
+        return "That channel is archived or paused."
+    if any(w["channel_id"] == channel["id"] for w in store.open_warnings()):
+        return "That channel has an open platform warning."
+    if _capped(spend):
+        return "The monthly spend cap is reached, so the team has stopped."
+    prep = store.preparation_for(post_id)
+    if prep and prep.get("scheduled_at") and prep["scheduled_at"] > now:
+        return "Its scheduled time has not come yet."
+    slots = max(1, int((store.get_niche(channel["niche_id"]) or {}).get("slots") or 1))
+    if _posted_today(store, channel["id"], now) >= slots:
+        return f"{channel['handle']} already posted its {slots} for today."
+    return None
+
+
+def due(store, now=None, spend=None) -> list:
+    """Approved posts that pass the gate now, at most one per channel per pass (the gate counts posted ones)."""
+    now = time.time() if now is None else now
+    s = store.settings()
+    if not s["hands_off"] or s["team_paused"]:
         return []
-    out, taken = [], {}
+    out, seen = [], set()
     for post in sorted(store.list_posts(state="approved"), key=lambda p: (p.get("approved_at") or 0, p["id"])):
-        if post["platform"] not in AUTO_PLATFORMS:
+        if post["channel_id"] in seen or gate(store, post["id"], now, spend) is not None:
             continue
-        channel = store.get_channel(post["channel_id"])
-        if channel["status"] != "live" or channel["paused"]:
-            continue
-        prep = store.preparation_for(post["id"])
-        if prep and prep.get("scheduled_at") and prep["scheduled_at"] > now:
-            continue
-        slots = max(1, int((store.get_niche(channel["niche_id"]) or {}).get("slots") or 1))
-        used = taken.get(channel["id"], _posted_today(store, channel["id"], now))
-        if used >= slots:
-            continue
-        taken[channel["id"]] = used + 1
+        seen.add(post["channel_id"])
         out.append(post)
     return out
 
 
-async def _publish_youtube(store, post_id, by):
+def guard_for(store, post_id, spend=None, require_hands_off=True, now=None):
+    """The check a publisher runs immediately before its irreversible call: the gate, read fresh (at the pass's own
+    time when the scheduler gave one, else the clock)."""
+    return lambda: gate(store, post_id, now=now, spend=spend, require_hands_off=require_hands_off)
+
+
+async def _publish_youtube(store, post_id, by, guard=None):
     from . import youtube_publish
-    return await youtube_publish.publish(store, post_id, by)
+    return await youtube_publish.publish(store, post_id, by, guard=guard)
 
 
-async def _publish_instagram(store, post_id, by):
+async def _publish_instagram(store, post_id, by, guard=None):
     from . import instagram_api
-    return await instagram_api.publish(store, post_id, by)
+    return await instagram_api.publish(store, post_id, by, guard=guard)
 
 
 PUBLISHERS = {"youtube": _publish_youtube, "instagram": _publish_instagram}
@@ -167,11 +195,11 @@ async def publish_due(store, now=None, publishers=None, spend=None) -> list:
     by = _publisher_name(store)
     for post in due(store, now, spend):
         s = store.settings()
-        if not s["hands_off"] or s["team_paused"]:
-            break
+        if gate(store, post["id"], now, spend) is not None:
+            continue  # paused, switched off, warned or capped since the list was made: read again for every post
         failures = dict(s["hands_off_failures"])
         try:
-            outcome = await publishers[post["platform"]](store, post["id"], by)
+            outcome = await publishers[post["platform"]](store, post["id"], by, guard=guard_for(store, post["id"], spend, now=now))
             failures.pop(str(post["id"]), None)
             note = (outcome or {}).get("note") or ""
             results.append({"post_id": post["id"], "ok": True, "platform": post["platform"], "note": note})

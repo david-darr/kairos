@@ -303,12 +303,14 @@ class StudioToolTests(unittest.TestCase):
         post = self.rendered_post()
         studio.submit_for_approval(post["id"])
         self.assertIn("Only the Publisher", call("content_studio_publish_youtube", bots["Editor"], post_id=post["id"]))
-        self.assertIn("Only a post you approved", call("content_studio_publish_youtube", bots["Publisher"], post_id=post["id"]))
+        # Every bot-made post passes the one gate first (services/content_studio/handsoff.py gate, 2026-11-11).
+        self.assertIn("only an approved post goes out", call("content_studio_publish_youtube", bots["Publisher"], post_id=post["id"]))
         studio.approve(post["id"], "david")
         self.assertIn("Connect YouTube posting for @space first", call("content_studio_publish_youtube", bots["Publisher"], post_id=post["id"]))
         from services.content_studio import youtube_publish
 
-        async def fake_publish(store, post_id, by, now=None):
+        async def fake_publish(store, post_id, by, now=None, guard=None):
+            self.assertIsNone(guard())   # the gate is handed to the publisher, read again before the upload
             return {"video_id": "NEWvideo_01", "url": "https://www.youtube.com/watch?v=NEWvideo_01", "privacy": "private",
                     "asked_privacy": "public", "note": "YouTube kept it private."}
         with patch.object(youtube_publish, "publish", fake_publish):

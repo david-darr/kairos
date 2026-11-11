@@ -137,8 +137,10 @@ def _caption(package):
     return package["text"].get("caption") or ""
 
 
-async def publish(store, post_id, by, now=None):
-    """Posts one approved post to its Instagram channel as a Reel. Returns what Instagram did."""
+async def publish(store, post_id, by, now=None, guard=None):
+    """Posts one approved post to its Instagram channel as a Reel. Returns what Instagram did. `guard` (a bot-made post,
+    services/content_studio/handsoff.py gate) is read again just before media_publish, the irreversible step: a pause,
+    a switched-off hands-off, a warning or the spend cap that arrived during the upload stops it there."""
     from . import prepare, social
     account = accounts.effective_account()
     key = (account, int(post_id))
@@ -170,6 +172,9 @@ async def publish(store, post_id, by, now=None):
                     raise InstagramError("Meta answered without a container id. Try again.", 502)
                 await _upload(channel["id"], container_id, path)
                 await _wait(channel["id"], container_id)
+                problem = guard() if guard else None
+                if problem:
+                    raise SocialError(f"Not posted: {problem}", 409)
                 done = await _call(channel["id"], "POST", f"/{ig_user}/media_publish", data={"creation_id": container_id})
                 media_id = str(done.get("id") or "")
                 if not media_id:

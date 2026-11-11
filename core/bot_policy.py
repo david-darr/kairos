@@ -969,17 +969,34 @@ def same_team(bot_id: Optional[str], other_id: Optional[str]) -> Optional[dict]:
     return mine if mine and theirs and mine.get("id") == theirs.get("id") else None
 
 
-def internal_tool_problem(name) -> Optional[str]:
-    """Why a team template may not declare `name` as one of its internal tools, or None when it may. Only a Kairos
-    tool that changes Kairos's own data qualifies: never a send, a deletion, a shell or file tool, an explicit-review
-    tool, an admin tool, or anything that reaches outside Kairos."""
-    if not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9_]{2,63}", name):
-        return "An internal tool is a Kairos tool name."
-    if name in CONTENT_STUDIO_INTERNAL_TOOLS:
+def safe_operation(op) -> bool:
+    """A change inside Kairos's own data, or a read: never a send, deletion, command, file edit or unknown action."""
+    return op is not None and op.kind in (READ, EDIT, DRAFT) and not op.destructive and op.scope in ("", "internal")
+
+
+def _tool_actions(spec) -> Optional[list]:
+    """The actions a multi-action tool takes (its schema's `action` enum), or None for a single-purpose tool."""
+    schema = getattr(spec, "schema", None) or {}
+    action = ((schema.get("properties") or {}).get("action") or {}) if isinstance(schema, dict) else {}
+    values = action.get("enum") if isinstance(action, dict) else None
+    return [v for v in values if isinstance(v, str)] if isinstance(values, list) else None
+
+
+def internal_tool_problem(entry) -> Optional[str]:
+    """Why a team template may not declare `entry` as one of its internal tools, or None when it may. An entry is a
+    tool name, or "tool.action" for one action of a multi-action tool. Only a Kairos tool (or action) that changes
+    Kairos's own data qualifies: never a send, a deletion, a shell or file tool, an explicit-review tool, an admin tool,
+    or anything that reaches outside Kairos. A multi-action tool with any unsafe action is declared by its safe actions
+    only, and each call is classified again at runtime (review finding, 2026-11-11)."""
+    if not isinstance(entry, str) or not re.fullmatch(r"[a-z][a-z0-9_]{2,63}(\.[a-z][a-z0-9_]{0,63})?", entry):
+        return "An internal tool is a Kairos tool name, or tool.action."
+    name, _, action = entry.partition(".")
+    if name in CONTENT_STUDIO_INTERNAL_TOOLS and not action:
         return None  # vetted one by one above
     from core import permissions
     if name in CONTENT_STUDIO_ASKS or name in SEND_TOOLS or name in SELF_ONLY_TOOLS or name in PERSON_REQUESTED_TOOLS \
-            or name in permissions.EXPLICIT_REVIEW_TOOLS or name in SHELL_TOOLS or name in FILE_EDIT_TOOLS:
+            or name in permissions.EXPLICIT_REVIEW_TOOLS or name in SHELL_TOOLS or name in FILE_EDIT_TOOLS \
+            or name in HANDS_OFF_PUBLISH_TOOLS or name in TEAM_HANDOFF_TOOLS:
         return f"{name} always asks, so a team cannot make it internal."
     try:
         from core import tool_registry
@@ -990,13 +1007,24 @@ def internal_tool_problem(name) -> Optional[str]:
         return f"{name} is not a Kairos tool."
     if spec.effect not in ("read", "write") or spec.admin_only:
         return f"{name} reaches outside Kairos or runs things, so it keeps asking."
-    op = classify(name, {})
-    if op.kind not in (READ, EDIT, DRAFT) or op.scope not in ("", "internal"):
+    actions = _tool_actions(spec)
+    if action:
+        if actions is None or action not in actions:
+            return f"{name} has no action {action}."
+        if not safe_operation(classify(name, {"action": action})):
+            return f"{name}.{action} sends, deletes or reaches outside Kairos, so it keeps asking."
+        return None
+    if actions:
+        unsafe = [a for a in actions if not safe_operation(classify(name, {"action": a}))]
+        if unsafe:
+            return (f"{name} can also {', '.join(unsafe)}, so a team declares only its safe actions, "
+                    f"each as {name}.<action>.")
+    if not safe_operation(classify(name, {})):
         return f"{name} sends, deletes or reaches outside Kairos, so it keeps asking."
     return None
 
 
-def team_internal(bot_id: str, tool: str, mcp) -> Optional[str]:
+def team_internal(bot_id: str, tool: str, mcp, op=None, args: Optional[dict] = None) -> Optional[str]:
     """Why this call is the bot's team's own record keeping (a reason to log), or None."""
     if mcp is not None or not isinstance(tool, str):
         return None
@@ -1021,7 +1049,13 @@ def team_internal(bot_id: str, tool: str, mcp) -> Optional[str]:
         return None
     team = team_of(bot_id)
     declared = (team or {}).get("internal_tools") or []
-    if tool in declared and internal_tool_problem(tool) is None:
+    if not declared:
+        return None
+    # The call itself is classified again: a declared tool goes ahead only for a safe operation, and a multi-action
+    # tool only for an action the template named.
+    action = (args or {}).get("action") if isinstance((args or {}).get("action"), str) else None
+    entry = tool if tool in declared else (f"{tool}.{action}" if action and f"{tool}.{action}" in declared else None)
+    if entry and safe_operation(op) and internal_tool_problem(entry) is None:
         return f"The {team.get('name') or 'team'} team's own work in Kairos. It is logged and needs no OK."
     return None
 
@@ -1155,7 +1189,7 @@ def authorize_operation(*, bot_id: str, tool: str, arguments=None, mcp: Optional
     # members go ahead at every level and are logged. A bot outside the team, a person, a send, a post or anything
     # outside Kairos never comes through here. A hand-off from a turn that read outside content goes ahead too: the
     # work stays fenced as untrusted in the teammate's prompt, and the teammate is held to its own level.
-    why = team_handoff(bot_id, op.tool, args, mcp) or team_internal(bot_id, op.tool, mcp)
+    why = team_handoff(bot_id, op.tool, args, mcp) or team_internal(bot_id, op.tool, mcp, op, args)
     if why:
         return remember(done("allow", why, "team"))
     # Asking the person a question is how a bot reaches them; it needs no approval of its own.
