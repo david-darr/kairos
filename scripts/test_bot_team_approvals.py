@@ -411,15 +411,15 @@ class SecondReview(TeamCase):
         ready.set()
         await other
         self.assertEqual(checked["bash"].action, "ask", "a parallel call used the run_code approval")
-        inner = bot_policy.authorize_operation(bot_id=bot, tool="run_code", arguments={"code": "print(2)"},
+        inner = bot_policy.authorize_operation(bot_id=bot, tool="run_code", arguments={"code": "print(1)"},
                                                surface=f"chat:{sid}")
         self.assertEqual((inner.action, inner.source), ("allow", "outer"))
-        again = bot_policy.authorize_operation(bot_id=bot, tool="run_code", arguments={"code": "print(2)"},
+        again = bot_policy.authorize_operation(bot_id=bot, tool="run_code", arguments={"code": "print(1)"},
                                                surface=f"chat:{sid}")
         self.assertEqual(again.action, "ask", "an outer approval was used twice")
         bot_policy.mark_inflight(outer, source="person")
         bot_policy.clear_inflight(bot)   # the call finished
-        self.assertEqual(bot_policy.authorize_operation(bot_id=bot, tool="run_code", arguments={"code": "print(2)"},
+        self.assertEqual(bot_policy.authorize_operation(bot_id=bot, tool="run_code", arguments={"code": "print(1)"},
                                                         surface=f"chat:{sid}").action, "ask")
 
     async def test_pausing_a_team_cancels_what_it_waits_on_and_voids_late_answers(self):
@@ -486,6 +486,80 @@ class ThirdReview(TeamCase):
         bot_departments.set_flags(crew["id"], self.user, paused=False)
         agent_service.delete(bot)
         self.assertIn("no longer exists", bot_policy.still_allowed())
+
+
+class FourthReview(TeamCase):
+    """Codex's fourth review of 2026-11-11, kept fixed."""
+
+    async def test_the_inner_check_needs_the_same_tool_and_the_same_arguments(self):
+        bot = make_bot("Inner")
+        set_mode(bot, "ask")
+        sid = make_thread(bot)
+
+        def check(tool, args):
+            return bot_policy.authorize_operation(bot_id=bot, tool=tool, arguments=args, surface=f"chat:{sid}")
+
+        def approve(tool, args):
+            outer = bot_policy.authorize_operation(bot_id=bot, tool=tool, arguments=args, surface=f"chat:{sid}", outer=True)
+            bot_policy.mark_inflight(outer, source="person")
+        drive = {"action": "delete", "file_id": "f1"}
+        approve("google_drive", drive)
+        self.assertEqual(check("google_drive_delete", {"action": "delete", "file_id": "OTHER"}).action, "ask")
+        self.assertEqual(check("Bash", drive).action, "ask")
+        self.assertEqual(check("google_drive_delete", drive).source, "outer")   # google_chat_tools' own per-action check
+        code = {"code": "print(1)"}
+        approve("run_code", code)
+        self.assertEqual(check("run_code_internet", {"command": "print(1)"}).action, "ask")  # internet asks on its own
+        approve("run_code", code)
+        self.assertEqual(check("run_code", code).source, "outer")
+
+    async def test_unknown_spend_under_a_cap_holds_sends_deletions_and_commands_only(self):
+        from services import bot_spend
+        bot = make_bot("Spender")
+        set_mode(bot, "full")
+        sid = make_thread(bot)
+        bot_spend._held.clear()
+        bot_policy._spend_alerted.clear()
+        before = len([i for i in agent_service.inbox(bot, status=None) if i["kind"] == "report"])
+        with patch.object(bot_spend, "budget", return_value={"spend_unknown": True}):
+            for tool, args in (("Bash", {"command": "ls"}), ("send_email", {"to": "a@example.com"}),
+                               ("google_drive", {"action": "delete", "file_id": "f"})):
+                held = self.outcome(bot, tool, args, surface=f"chat:{sid}")
+                self.assertEqual((held.action, held.source), ("deny", "spend-unknown"), tool)
+            for tool, args in (("Read", {"file_path": "a"}), ("Write", {"file_path": "a"}), ("message_me", {"message": "hi"})):
+                self.assertEqual(self.outcome(bot, tool, args, surface=f"chat:{sid}").action, "allow", tool)
+        reports = [i for i in agent_service.inbox(bot, status=None) if i["kind"] == "report"]
+        self.assertEqual(len(reports) - before, 1, "one alert, not one per step")
+        bot_spend._held.clear()
+        with patch.object(bot_spend, "budget", return_value={"spend_unknown": False}):
+            self.assertEqual(self.outcome(bot, "Bash", {"command": "ls"}, surface=f"chat:{sid}").action, "allow")
+        bot_spend._held.clear()
+        from services import bot_usage
+        rows = [{"cost_usd": None}, {"cost_usd": 1.0}]
+        with patch.object(bot_usage, "settings", return_value={"budget": {"monthly_usd": 50, "warn_percent": 80}}), \
+                patch.object(bot_usage, "rows", return_value=rows):
+            self.assertTrue(bot_spend.budget()["spend_unknown"])
+        with patch.object(bot_usage, "settings", return_value={"budget": {"monthly_usd": None, "warn_percent": 80}}), \
+                patch.object(bot_usage, "rows", return_value=rows):
+            self.assertFalse(bot_spend.budget()["spend_unknown"], "no cap set: unchanged")
+
+    async def test_the_pause_recheck_holds_without_an_outer_approval(self):
+        bot = make_bot("Saved")
+        crew = self.team("Saved rules", [bot])
+        self.assertIsNone(bot_policy.still_allowed())
+        with bot_policy.bot_call(bot):
+            self.assertIsNone(bot_policy.still_allowed())
+            bot_departments.set_flags(crew["id"], self.user, paused=True)
+            self.assertIn("paused", bot_policy.still_allowed())
+        bot_departments.set_flags(crew["id"], self.user, paused=False)
+
+    def test_a_google_batch_is_judged_by_what_it_contains(self):
+        for requests in ([{"deleteSheet": {"sheetId": 1}}], [{"addSheet": {}}, {"deleteRange": {}}], ["junk"],
+                         [{"deleteItem": {"location": {"index": 0}}}]):
+            op = bot_policy.classify("google_sheets", {"action": "batch", "requests": requests})
+            self.assertEqual(op.kind, bot_policy.DESTRUCTIVE, requests)
+        self.assertEqual(bot_policy.classify("google_sheets", {"action": "batch", "requests": [{"addSheet": {}}]}).kind,
+                         bot_policy.EDIT)
 
 
 if __name__ == "__main__":

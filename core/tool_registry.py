@@ -319,8 +319,12 @@ async def call(name: str, args: dict, ctx: ToolContext, surface: str) -> str | T
             current = next((item["url"] for item in computer.running() if item["owner"] == owner), "about:blank")
             computer_detail = {"action": args.get("action") or "", "url": args.get("url") or current}
             runs.computer_event(ctx.session_id, "tool_started", computer_detail)
+    from core import bot_policy
     try:
-        result = await spec.handler(dict(args or {}), ctx)
+        # The bot's call is known to every check its handler reaches (pause and the bot itself, right before a launch
+        # or a Google change), whether a person, a saved rule or the level let it through.
+        with bot_policy.bot_call(ctx.agent_id):
+            result = await spec.handler(dict(args or {}), ctx)
     except Exception as e:
         result = f"Tool error: {e}"
     finally:

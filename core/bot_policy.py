@@ -606,6 +606,10 @@ def classify(tool: str, arguments=None, mcp: Optional[tuple] = None) -> Operatio
     def build(kind, scope="", **extra):
         return Operation(kind, scope, name, label, command, path, cwd, **extra)
 
+    # A Google batch is judged by what it contains (fourth review, 2026-11-11): a Sheets batchUpdate or Forms batch
+    # with any delete* request (deleteSheet, deleteRange, deleteItem ...) is a deletion.
+    if mcp is None and name.startswith("google_") and _batch_deletes(args):
+        return build(DESTRUCTIVE, "external", destructive=True)
     if mcp is not None:
         effect, _source = catalog.mcp_effect(mcp[0], mcp[1])
         label = mcp[1]
@@ -649,6 +653,18 @@ def classify(tool: str, arguments=None, mcp: Optional[tuple] = None) -> Operatio
     if re.fullmatch(r"google_[a-z]+_[a-z_]+", name) or guess != catalog.UNKNOWN or effect == catalog.WRITE:
         return _by_words(build, words, catalog.WRITE, "external")
     return build(OPAQUE, "external")
+
+
+def _batch_deletes(args: dict) -> bool:
+    requests = args.get("requests")
+    if not isinstance(requests, list):
+        return False
+    for item in requests:
+        if not isinstance(item, dict):
+            return True   # a batch that cannot be read is not trusted as safe
+        if any(isinstance(key, str) and key.lower().startswith(("delete", "remove", "clear", "cut")) for key in item):
+            return True
+    return False
 
 
 def _by_words(build, words: list, effect: str, scope: str) -> Operation:
@@ -1180,6 +1196,13 @@ def authorize_operation(*, bot_id: str, tool: str, arguments=None, mcp: Optional
     if paused_team and paused_team.get("paused") and op.tool not in PERSON_ASK_TOOLS | SELF_ONLY_TOOLS:
         return done("deny", f"The {paused_team.get('name') or ''} team is paused, so this did not run. "
                             "The person resumes it with Resume team.", "team-paused")
+    # Unknown spend under a cap (fourth review, 2026-11-11): a send, deletion, command or unknown action waits until the
+    # month's spend is known. Reads and edits go on, and reaching the person is never held.
+    if op.kind in (OUTBOUND, DESTRUCTIVE, EXECUTE, OPAQUE) and op.tool not in PERSON_ASK_TOOLS | SELF_ONLY_TOOLS:
+        hold = _spend_hold()
+        if hold:
+            _alert_spend_unknown(bot_id, hold)
+            return done("deny", hold, "spend-unknown")
     # An outer approval of this very call already covers a handler's own check inside it.
     # Only the handler of that call can use it (review finding, 2026-11-11): the mark lives in the task that ran the
     # approved call, so a parallel call (a native Bash beside a long run_code) never sees it; it is used once, for the
@@ -1190,7 +1213,7 @@ def authorize_operation(*, bot_id: str, tool: str, arguments=None, mcp: Optional
     if mark and not explicit_review and not force_prompt and not mark["used"] \
             and _inflight.get((bot_id, session_id)) is mark and mark["bot_id"] == bot_id \
             and mark.get("task") is not None and mark.get("task") is _current_task() \
-            and (mark.get("tool") == op.tool or mark.get("args") == arguments_key(args)):
+            and mark.get("args") == arguments_key(args) and op.tool in inner_names(mark.get("tool"), args):
         if mark["expires"] < time.time():
             _inflight.pop((bot_id, session_id), None)
         elif mark["kind"] == op.kind:
@@ -1285,6 +1308,17 @@ def _current_task():
         return None
 
 
+def inner_names(tool: Optional[str], args) -> set:
+    """The names a registry tool's own handler checks itself under, with the very same arguments (fourth review,
+    2026-11-11): the tool itself, and for a multi-action tool its per-action name (core/google_chat_tools.py checks
+    google_drive's delete as google_drive_delete)."""
+    names = {tool} if tool else set()
+    action = args.get("action") if isinstance(args, dict) else None
+    if tool and isinstance(action, str) and action:
+        names.add(f"{tool}_{action}")
+    return names
+
+
 def arguments_key(args) -> str:
     """The call's arguments, normalized, to tell one call from another."""
     try:
@@ -1352,14 +1386,55 @@ def admission(bot_id: Optional[str], tool: str) -> Optional[str]:
     return mark.get("source")
 
 
+def _spend_hold() -> Optional[str]:
+    try:
+        from services import bot_spend
+        return bot_spend.spend_hold()
+    except Exception:
+        return None
+
+
+_spend_alerted: set = set()
+
+
+def _alert_spend_unknown(bot_id: str, text: str) -> None:
+    """One Inbox note a month, from the first bot held, never one per step."""
+    month = datetime.now(timezone.utc).strftime("%Y-%m")
+    if month in _spend_alerted:
+        return
+    _spend_alerted.add(month)
+    try:
+        from services.agent_service import agent_service
+        item = agent_service.add_item(bot_id, "report", "Bot spend is not fully known", text)
+        agent_service.notify(item)
+    except Exception:
+        logger.exception("could not report unknown spend")
+
+
+_BOT_CALL: contextvars.ContextVar = contextvars.ContextVar("bot_registry_call", default=None)
+
+
+@contextmanager
+def bot_call(bot_id: Optional[str]):
+    """The bot whose registry call runs in this block (core/tool_registry.py), however it was let through: an outer
+    approval, a saved rule, Full. still_allowed reads it (fourth review, 2026-11-11)."""
+    token = _BOT_CALL.set(bot_id) if bot_id else None
+    try:
+        yield
+    finally:
+        if token is not None:
+            _BOT_CALL.reset(token)
+
+
 def still_allowed() -> Optional[str]:
     """Just before work an approved bot call starts after a wait (a sandbox command, a Gmail send, a Drive change): why
     it must not start now, or None. The bot must still exist and its team must not be paused (third review,
-    2026-11-11). Outside a bot's call there is nothing to check."""
-    mark = _OUTER.get()
-    if not mark or not mark.get("bot_id"):
+    2026-11-11). The bot is the one whose registry call is running (bot_call), else the outer approval's; outside a
+    bot's call there is nothing to check."""
+    mark = _OUTER.get() or {}
+    bot_id = _BOT_CALL.get() or mark.get("bot_id")
+    if not bot_id:
         return None
-    bot_id = mark["bot_id"]
     if _agent(bot_id) is None:
         return "This bot no longer exists, so the action did not run."
     team = team_of(bot_id)

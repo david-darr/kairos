@@ -393,7 +393,7 @@ class Asking(ApprovalCase):
             permissions.close_channel(f"chat:{sid}")
             return [outer] + [await self.decide(bot, sid, name, args, timeout=1) for name, args in inner_calls]
         queue = permissions.open_channel(f"chat:{sid}")
-        task = asyncio.create_task(call_and_handler(("google_gmail_send", {"to": "x"}), ("google_gmail_send", {"to": "x"})))
+        task = asyncio.create_task(call_and_handler(("send_email", {"to": "x"}), ("send_email", {"to": "x"})))
         payload = await asyncio.wait_for(queue.get(), timeout=5)
         permissions.answer(payload["id"], "once", "local")
         outer, inner, again = await task
@@ -409,7 +409,7 @@ class Asking(ApprovalCase):
         _, other = await task
         self.assertEqual(other.behavior, "deny")
         # and a call outside that task never sees it
-        self.assertEqual((await self.decide(bot, sid, "google_gmail_send", {"to": "x"}, timeout=1)).behavior, "deny")
+        self.assertEqual((await self.decide(bot, sid, "send_email", {"to": "x"}, timeout=1)).behavior, "deny")
 
     async def test_an_approved_registry_tool_covers_its_handlers_own_check_exactly_once(self):
         bot = make_bot("Nested2")

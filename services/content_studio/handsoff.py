@@ -127,7 +127,7 @@ def unsettled(post_id):
     """A publish whose answer was lost (Instagram "publishing", a YouTube upload pending), or None."""
     from . import social_auth, youtube_publish
     record = social_auth.published(post_id) or {}
-    if record.get("state") == "publishing":
+    if record.get("state") == "publishing" or (record.get("platform") == "instagram" and record.get("media_id")):
         return {"platform": "instagram", "at": record.get("at"), "channel_id": record.get("channel_id")}
     item = youtube_publish.pending(post_id)
     if item:
@@ -137,11 +137,17 @@ def unsettled(post_id):
 
 def _posted_today(store, channel_id, now, exclude=None) -> int:
     """Posts that went out on the channel in the last day, and publishes still being settled (they may have gone out)."""
-    posted = sum(1 for p in store.list_posts(state="posted", channel_id=channel_id) if (p.get("posted_at") or 0) > now - DAY)
+    # Every trace of a post going out counts, once per post (fourth review): a posted row, an Instagram record that is
+    # publishing or published, a YouTube upload still pending. A crash between two writes can never free a slot.
+    ids = {p["id"] for p in store.list_posts(state="posted", channel_id=channel_id) if (p.get("posted_at") or 0) > now - DAY}
     from . import social_auth, youtube_publish
-    waiting = [r for key, r in social_auth.published().items() if r.get("state") == "publishing" and key != str(exclude)]
-    waiting += [r for key, r in youtube_publish.pending().items() if key != str(exclude)]
-    return posted + sum(1 for r in waiting if r.get("channel_id") == channel_id and (r.get("at") or 0) > now - DAY)
+    records = [(key, r) for key, r in social_auth.published().items() if r.get("state") in ("publishing", "published")
+               or (r.get("platform") == "instagram" and r.get("media_id"))]
+    records += list(youtube_publish.pending().items())
+    for key, record in records:
+        if key != str(exclude) and record.get("channel_id") == channel_id and (record.get("at") or 0) > now - DAY:
+            ids.add(int(key))
+    return len(ids)
 
 
 def gate(store, post_id, now=None, spend=None, require_hands_off=True, publishing=False):

@@ -304,7 +304,7 @@ async def publish(store, post_id, by, now=None, guard=None):
                 raise PostingError(f"YouTube did not take the upload: {exc}", 502) from exc
             except Exception as exc:  # noqa: BLE001 - the answer was lost: whether YouTube took it is unknown
                 raise PostingError(UNSETTLED, 502) from exc
-            _set_pending(post_id, None)
+            # Crash-safe order (fourth review): the pending record stays until the post is recorded posted with its id.
             video = answer.get("id") if isinstance(answer, dict) else None
             if not video:
                 raise PostingError("YouTube answered without a video id; check YouTube Studio before trying again.", 502)
@@ -313,6 +313,7 @@ async def publish(store, post_id, by, now=None, guard=None):
             actual = (answer.get("status") or {}).get("privacyStatus") or privacy
             url = f"https://www.youtube.com/watch?v={video}"
             posted = store.mark_posted(post_id, url, now=now)
+            _set_pending(post_id, None)
             stricter = PRIVACY.index(actual) < PRIVACY.index(privacy) if actual in PRIVACY else False
             result = {"post": posted, "video_id": video, "url": url, "privacy": actual, "asked_privacy": privacy,
                       "kept_private": stricter, "by": by, "publish_at": publish_at,

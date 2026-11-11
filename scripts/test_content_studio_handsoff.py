@@ -411,6 +411,52 @@ class ThirdReview(Case):
             self.assertEqual(pipeline._default_spend()["unknown_cost_runs"], 1)
 
 
+class FourthReview(Case):
+    """Codex's fourth review of 2026-11-11: no partial write can free a slot or allow a resend."""
+
+    def setUp(self):
+        super().setUp()
+        handsoff.set_hands_off(self.store, True, "david")
+
+    def approved(self, channel, title):
+        post = self.queued(channel, title)
+        self.store.approve(post, by="david")
+        return post
+
+    def test_every_trace_of_a_post_going_out_counts_once(self):
+        from services.content_studio import social_auth, youtube_publish
+        a, b = self.approved(self.ig, "A"), self.approved(self.ig, "B")
+        # Instagram took it and the record says so, but the post row was never updated (a crash in between).
+        social_auth.remember_publish(a, platform="instagram", state="published", media_id="M1", channel_id=self.ig["id"],
+                                     at=time.time())
+        self.addCleanup(social_auth.forget_publish, a)
+        self.assertIsNotNone(handsoff.gate(self.store, a, spend=NOT_CAPPED), "a post Instagram has is never resent")
+        self.assertIn("for today", handsoff.gate(self.store, b, spend=NOT_CAPPED))
+        # Both a posted row and its record: still one post.
+        self.store.mark_published(a)
+        self.assertEqual(handsoff._posted_today(self.store, self.ig["id"], time.time()), 1)
+        y = self.approved(self.yt, "Y")
+        youtube_publish._set_pending(y, {"at": time.time(), "title": "Y", "channel_id": self.yt["id"]})
+        self.addCleanup(youtube_publish._set_pending, y, None)
+        self.assertEqual(handsoff._posted_today(self.store, self.yt["id"], time.time()), 1)
+
+    def test_youtube_keeps_its_pending_record_until_the_post_is_recorded(self):
+        from unittest.mock import AsyncMock, patch
+        from services.content_studio import youtube, youtube_publish
+        post = self.approved(self.yt, "Moon")
+        answer = {"id": "V1", "snippet": {"channelId": "UC1"}, "status": {"privacyStatus": "private"}}
+        with patch.object(youtube_publish, "_ready", return_value=(self.store.get_post(post), self.store.get_channel(self.yt["id"]), "acct", __file__)), \
+                patch.object(youtube, "_owned_channels", AsyncMock(return_value=[{"id": "UC1", "keys": {"space"}}])), \
+                patch.object(youtube, "_owner_of", return_value="UC1"), \
+                patch.object(youtube_publish.google, "request", AsyncMock(return_value=answer)), \
+                patch.object(self.store, "mark_posted", side_effect=RuntimeError("crash while recording")):
+            with self.assertRaises(RuntimeError):
+                asyncio.run(youtube_publish.publish(self.store, post, "Publisher"))
+        self.addCleanup(youtube_publish._set_pending, post, None)
+        self.assertIsNotNone(youtube_publish.pending(post), "the pending record was dropped before the post was recorded")
+        self.assertIsNotNone(handsoff.gate(self.store, post, spend=NOT_CAPPED))
+
+
 class Policy(unittest.TestCase):
     def test_publish_tools_still_ask_and_approving_is_internal_but_self_guarded(self):
         self.assertIn("content_studio_approve_post", bot_policy.CONTENT_STUDIO_INTERNAL_TOOLS)

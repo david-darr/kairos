@@ -185,8 +185,8 @@ async def publish(store, post_id, by, now=None, guard=None):
                 if settled == "unknown":
                     raise SocialError(UNSETTLED, 409)
                 if settled == "published":
-                    social_auth.remember_publish(post_id, state="published", media_id=found or "unknown")
                     store.mark_published(post_id, now=now)
+                    social_auth.remember_publish(post_id, state="published", media_id=found or "unknown")
                     return {"state": "posted", "post": store.get_post(post_id), "url": None, "media_id": found or None,
                             "note": "Instagram had already posted it; record its link with Mark posted if it is missing.",
                             "ai_label_by_api": None}
@@ -240,9 +240,11 @@ async def publish(store, post_id, by, now=None, guard=None):
                 raise SocialError(UNSETTLED, 502)
             # Instagram has it now: record that at once, before anything else can fail, so it is never sent again and
             # counts toward the channel's posts for the day (review finding, 2026-11-11).
+            # Crash-safe order (fourth review): the post is recorded posted first, then its record says published; until
+            # then the "publishing" record keeps it from being sent again and counts it for the day.
+            store.mark_published(post_id, now=now)
             social_auth.remember_publish(post_id, platform="instagram", state="published", media_id=media_id,
                                          channel_id=channel["id"], at=time.time() if now is None else now)
-            store.mark_published(post_id, now=now)
             try:
                 info = await _call(channel["id"], "GET", f"/{media_id}", params={"fields": "permalink,shortcode"})
             except SocialError:
