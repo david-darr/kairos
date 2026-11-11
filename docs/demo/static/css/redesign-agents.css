@@ -28,15 +28,13 @@
 .kairos-redesign .agents-messenger-stage > .swarm-view { background: transparent; }
 
 /* -- Section titles ---------------------------------------------------------- */
-.kairos-redesign :is(.agents-rail-top h2, .agents-messenger-welcome h1, .agent-call-scene h1, .ecosystem-header h2, .swarm-view h1, .agent-chat-empty .title) {
+.kairos-redesign :is(.agents-rail-top h2, .agents-messenger-welcome h1, .ecosystem-header h2, .swarm-view h1, .agent-chat-empty .title) {
   font-family: var(--rd-font-title); font-style: italic; font-weight: 500; letter-spacing: 0; color: var(--rd-ink);
 }
 .kairos-redesign .agents-rail-top h2 { font-size: 24px; line-height: 1.1; }
 .kairos-redesign .agents-messenger-welcome h1 { font-size: clamp(28px, 3.2vw, 38px); }
 .kairos-redesign .ecosystem-header h2 { font-size: 26px; }
 .kairos-redesign .swarm-view h1 { font-size: 30px; line-height: 1.1; }
-.kairos-redesign .agent-call-scene h1 { font-size: 26px; }
-.kairos-redesign .agent-call[data-settings=open] .agent-call-scene h1 { font-size: 22px; }
 /* Small uppercase tracked labels */
 .kairos-redesign :is(.agents-rail-group h3, .agents-rail-history > summary, .swarm-layout > section > h2, .swarm-view .swarm-field > span) {
   font-family: var(--rd-font-ui); font-size: var(--rd-label-size); font-weight: 500;
@@ -93,17 +91,7 @@
 }
 .kairos-redesign .agents-chat-actions h2 { font-family: var(--rd-font-title); font-style: italic; font-weight: 500; font-size: 24px; }
 
-/* -- Calls: the panel around the orb, not the orb ---------------------------- */
-.kairos-redesign .agent-call {
-  background: var(--rd-surface-solid); border-color: var(--rd-line); border-radius: var(--rd-radius-card); box-shadow: var(--rd-shadow);
-}
-.kairos-redesign .agent-call-tabs { background: var(--rd-surface); border-color: var(--rd-line); border-radius: var(--rd-radius-pill); }
-.kairos-redesign .agent-call-tabs > span { border-radius: var(--rd-radius-pill); }
-.kairos-redesign .agent-call .agent-call-action {
-  background: var(--rd-surface); border-color: var(--rd-line-strong); border-radius: var(--rd-radius-pill); font-family: var(--rd-font-ui); font-weight: 500;
-}
-.kairos-redesign .agent-call .agent-call-action:hover { background: var(--rd-surface-2); border-color: var(--rd-line-strong); }
-.kairos-redesign .agent-call .agent-call-action.is-end { background: rgba(var(--danger-rgb), .1); border-color: rgba(var(--danger-rgb), .3); }
+/* -- Calls: the screen keeps its own night ground (agents-messages.css); only Call settings take the redesign's form */
 .kairos-redesign .agent-call-setup { background: var(--rd-surface); border-color: var(--rd-line); border-radius: var(--rd-radius-card); }
 .kairos-redesign .agent-call-setup :is(select, input:not([type=checkbox])),
 .kairos-redesign .agent-call-runtime input {
@@ -477,7 +465,6 @@
   .kairos-redesign[data-view=agents] .agents-messenger .swarm-composer { border-radius: 30px; }
   .kairos-redesign[data-view=agents] .agents-messenger .swarm-message { border-radius: 22px 22px 22px 6px; }
   .kairos-redesign[data-view=agents] .agents-messenger :is(.swarm-view, .swarm-layout > section) { background: transparent; }
-  .kairos-redesign[data-view=agents] .agent-call .agent-call-action { border-radius: var(--rd-radius-pill); }
 }
 
 @media (max-width: 768px) {

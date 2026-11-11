@@ -1,17 +1,33 @@
 .bots-voice-note { color: var(--text); font-family: var(--bots-font-sans); display: grid; gap: 8px; padding: 12px; border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card); }
 .bots-voice-note audio { width: 100%; min-width: 0; }
 .bots-voice-transcript { white-space: pre-wrap; overflow-wrap: anywhere; }
-.bots-call-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; background: var(--bots-panel); border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card); }
-.bots-call-bar[hidden] { display: none; }
-.bots-call-bar[data-floating] { position: fixed; bottom: 24px; left: 24px; z-index: 950; max-width: calc(100vw - 48px); }
-.bots-call-bar [data-call-clock] { flex: 1; }
-.bots-call-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); animation: bots-call-pulse 1.4s ease-in-out infinite; }
 .bots-live-settings { display: grid; gap: 12px; padding: 20px; }
 .bots-live-settings label { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
-@keyframes bots-call-pulse { 50% { opacity: .4; } }
-@media (prefers-reduced-motion: reduce) { .bots-call-dot { animation: none; } }
 @media (max-width: 767px) {
-  [data-app-mode="bots"] :is(.bots-voice-note, .bots-call-bar, .bots-live-settings) :is(button, input, select, summary, a) { min-height: 44px; }
-  .bots-call-bar[data-floating] { bottom: 12px; left: 12px; max-width: calc(100vw - 24px); }
+  [data-app-mode="bots"] :is(.bots-voice-note, .bots-live-settings) :is(button, input, select, summary, a) { min-height: 44px; }
 }
-
+/* The minimized call (botsCallBar.js, 2026-11-10): a night pill over every screen, the call screen's own tokens. */
+.call-pill { position: fixed; z-index: 1150; left: auto; top: auto; display: flex; align-items: center; gap: 6px; max-width: min(420px, calc(100vw - 24px)); padding: 6px; box-sizing: border-box;
+  border: 1px solid var(--call-line); border-radius: 999px; background: linear-gradient(180deg, var(--call-ground-top), var(--call-ground-bottom)); background-color: var(--call-ground-bottom);
+  color: var(--call-ink); font-family: var(--k-font-sans); box-shadow: 0 12px 34px color-mix(in srgb, var(--call-ground-bottom) 45%, transparent); touch-action: none; }
+.call-pill[hidden], .call-pill [hidden] { display: none !important; }
+.call-pill[data-dragging] { cursor: grabbing; opacity: .92; }
+.call-pill button { min-width: 44px; min-height: 44px; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; }
+.call-pill :focus-visible { outline: 2px solid var(--call-ink); outline-offset: 2px; }
+.call-pill-back { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 0 12px 0 0 !important; border-radius: 999px; background: transparent; text-align: left; }
+.call-pill-face { flex: none; width: 44px; height: 44px; display: grid; place-items: center; border-radius: 50%; background: var(--ui-wash, var(--bg-panel-solid));
+  box-shadow: 0 0 0 calc(2px + max(var(--level, 0), var(--word, 0)) * 6px) color-mix(in srgb, var(--accent) 30%, transparent); transition: box-shadow .14s ease-out; }
+.call-pill-face kairos-mascot { width: 36px; height: 36px; --m-stage: var(--ui-wash, var(--bg-panel-solid)); }
+.call-pill-text { min-width: 0; display: grid; line-height: 1.2; }
+.call-pill-name { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.call-pill-clock { font: 12px var(--font-mono); color: var(--call-ink-dim); font-variant-numeric: tabular-nums; }
+.call-pill-key { flex: none; width: 44px; display: grid; place-items: center; border-radius: 50% !important; background: var(--call-key-quiet) !important; color: var(--call-key-quiet-ink) !important; }
+.call-pill-key[aria-pressed=true] { background: var(--call-key) !important; color: var(--call-key-ink) !important; }
+.call-pill-key.is-end { background: var(--call-hangup) !important; color: var(--call-hangup-ink) !important; }
+.call-pill .call-icon { display: grid; place-items: center; line-height: 0; }
+/* A new message from the bot: a gold dot that opens its chat. */
+.call-pill-unread { flex: none; width: 44px; display: grid; place-items: center; border-radius: 50%; background: transparent; }
+.call-pill-unread::before { content: ''; width: 12px; height: 12px; border-radius: 50%; background: var(--k-gold-hi); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); }
+.call-pill-safe { position: absolute; width: 0; height: var(--mobile-safe-bottom, env(safe-area-inset-bottom, 0px)); visibility: hidden; pointer-events: none; }
+@media (max-width: 767px) { .call-pill { width: calc(100vw - 24px); max-width: none; } }
+@media (prefers-reduced-motion: reduce) { .call-pill-face { transition: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); } }
