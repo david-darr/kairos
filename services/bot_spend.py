@@ -39,7 +39,7 @@ _held: dict = {}   # account -> (when read, reason or "")
 HOLD_CACHE_S = 30
 
 
-def spend_hold(now=None):
+def spend_hold(now=None, fresh=False):
     """Why a send, deletion or command must wait for spend to be known, or None (no cap set, or spend known)."""
     from core import accounts
     now = time.time() if now is None else now
@@ -48,7 +48,7 @@ def spend_hold(now=None):
     except Exception:
         key = ""
     at, value = _held.get(key, (0.0, None))
-    if now - at < HOLD_CACHE_S and value is not None:
+    if not fresh and now - at < HOLD_CACHE_S and value is not None:
         return value or None
     try:
         value = UNKNOWN_TEXT if budget(now).get("spend_unknown") else ""

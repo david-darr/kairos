@@ -562,5 +562,72 @@ class FourthReview(TeamCase):
                          bot_policy.EDIT)
 
 
+class FifthReview(TeamCase):
+    """Codex's fifth review of 2026-11-11: the last check before an outward action reads everything fresh."""
+
+    def test_the_last_check_reads_spend_fresh_for_risky_steps_only(self):
+        from services import bot_spend
+        bot = make_bot("Fresh")
+        bot_spend._held.clear()
+        with patch.object(bot_spend, "budget", return_value={"spend_unknown": False}):
+            self.assertIsNone(bot_spend.spend_hold())   # the admission cache now says "no hold"
+        with patch.object(bot_spend, "budget", return_value={"spend_unknown": True}):
+            self.assertIsNone(bot_spend.spend_hold(), "the admission fast path may use its cache")
+            for kind in (bot_policy.OUTBOUND, bot_policy.DESTRUCTIVE, bot_policy.EXECUTE, bot_policy.OPAQUE):
+                self.assertIn("not fully known", bot_policy.still_allowed(kind, bot_id=bot), kind)
+            self.assertIsNone(bot_policy.still_allowed(bot_policy.EDIT, bot_id=bot))
+            self.assertIsNone(bot_policy.still_allowed(None, bot_id=bot))
+        bot_spend._held.clear()
+
+    def test_smtp_checks_right_before_sendmail_and_a_refused_send_is_dropped_and_reported(self):
+        from unittest.mock import MagicMock
+        from core import email_send
+        from services import email_service as email_module
+        bot = make_bot("Mailer")
+        crew = self.team("Mailers", [bot])
+        smtp = MagicMock()
+        service = email_module.email_service
+        with patch.object(service, "get_account", return_value={"email": "me@example.com", "password_encrypted": "x",
+                                                                 "smtp_security": "ssl", "smtp_host": "h", "smtp_port": 465}), \
+                patch.object(email_module, "decrypt", return_value="pw"), \
+                patch.object(email_module.smtplib, "SMTP_SSL", return_value=smtp), \
+                patch.object(email_send, "accounts", return_value=[{"id": "acc", "via": "Email tab", "email": "me@example.com"}]):
+            message = {"via": "Email tab", "account_id": "acc", "from": "me@example.com", "to": ["a@example.com"], "cc": [],
+                       "subject": "Hello", "body": "Hi", "in_reply_to": None}
+            with bot_policy.bot_call(bot):
+                asyncio.run(email_send.send(message, "local"))
+                self.assertEqual(smtp.sendmail.call_count, 1)
+                bot_departments.set_flags(crew["id"], self.user, paused=True)   # paused while it connected
+                before = len([i for i in agent_service.inbox(bot, status=None) if i["kind"] == "report"])
+                with self.assertRaises(ValueError) as caught:
+                    asyncio.run(email_send.send(message, "local"))
+            self.assertIn("Not sent", str(caught.exception))
+            self.assertEqual(smtp.sendmail.call_count, 1, "sent after the pause")
+            self.assertEqual(smtp.login.call_count, 2)
+            reports = [i for i in agent_service.inbox(bot, status=None) if i["kind"] == "report"]
+            self.assertEqual(len(reports) - before, 1)
+        bot_departments.set_flags(crew["id"], self.user, paused=False)
+
+    def test_a_call_to_someone_else_rechecks_before_it_is_placed(self):
+        from unittest.mock import AsyncMock, MagicMock
+        from services import outbound_calls as calls
+        bot = make_bot("Caller")
+        crew = self.team("Callers", [bot])
+        bot_departments.set_flags(crew["id"], self.user, paused=True)
+        record = {"enabled": True, "others_enabled": True, "caller_name": "David", "provider": "twilio", "number": "+15550000000"}
+        provider = MagicMock()
+        provider.place_call = AsyncMock(side_effect=AssertionError("placed after the pause"))
+        with patch.object(calls.connection, "get", return_value=record), patch.object(calls.connection, "calls_ready", return_value=True), \
+                patch.object(calls, "check_number", return_value="+15551112222"), patch.object(calls, "_hour", return_value=12), \
+                patch.object(calls, "sweep"), patch.object(calls, "_load", return_value={"blocked": [], "calls": []}), \
+                patch.object(calls.phone_calls, "bot_for", return_value={"id": bot, "name": "Caller"}), \
+                patch.object(calls, "voice_problem", AsyncMock(return_value="")), \
+                patch.object(calls.phone_calls, "provider_for", return_value=provider):
+            with self.assertRaises(calls.CallRefused) as caught:
+                asyncio.run(calls.place("acct", bot, "+15551112222", "Luigi", "dinner", "table for two", "inv1"))
+        self.assertIn("paused", str(caught.exception))
+        bot_departments.set_flags(crew["id"], self.user, paused=False)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -263,6 +263,13 @@ async def place(account: str, bot_id: str, to, who, topic, goal, invocation_id: 
     problem = await voice_problem(account, record, bot)
     if problem:
         raise CallRefused(problem)
+    # The voice check can wait: right before the call is placed, the bot must still exist, its team must not be
+    # paused, and spend must be known under a cap (fifth review, 2026-11-11).
+    from core import accounts as account_scope, bot_policy
+    with account_scope.as_account(account):   # the bot was just found in this account (phone_calls.bot_for)
+        stop = bot_policy.still_allowed(bot_policy.OUTBOUND, bot_id=bot_id, check_exists=False)
+    if stop:
+        raise CallRefused(stop)
     owner = account
     taken = _reserve(owner, bot_id, number, invocation_id)
     call_id = uuid.uuid4().hex

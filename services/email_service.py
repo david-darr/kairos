@@ -222,7 +222,8 @@ class EmailService:
                 "tainted": True}
 
     def send_message(self, account_id: str, to: str, subject: str, body: str,
-                     in_reply_to: str | None = None, cc: str | None = None) -> None:
+                     in_reply_to: str | None = None, cc: str | None = None, before_send=None) -> None:
+        """`before_send` runs just before the message goes (after connecting and signing in); it raises to drop it."""
         account = self.get_account(account_id, decrypted=True)
         if account is None:
             raise KeyError(f"no such account: {account_id}")
@@ -248,6 +249,8 @@ class EmailService:
         try:
             smtp.login(account["email"], password)
             recipients = [a.strip() for a in f"{to},{cc or ''}".split(",") if a.strip()]
+            if before_send:
+                before_send()
             smtp.sendmail(account["email"], recipients, msg.as_string())
         finally:
             smtp.quit()

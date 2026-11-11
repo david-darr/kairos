@@ -1426,20 +1426,30 @@ def bot_call(bot_id: Optional[str]):
             _BOT_CALL.reset(token)
 
 
-def still_allowed() -> Optional[str]:
+def still_allowed(kind: Optional[str] = None, bot_id: Optional[str] = None, check_exists: bool = True) -> Optional[str]:
     """Just before work an approved bot call starts after a wait (a sandbox command, a Gmail send, a Drive change): why
     it must not start now, or None. The bot must still exist and its team must not be paused (third review,
     2026-11-11). The bot is the one whose registry call is running (bot_call), else the outer approval's; outside a
     bot's call there is nothing to check."""
     mark = _OUTER.get() or {}
-    bot_id = _BOT_CALL.get() or mark.get("bot_id")
+    bot_id = bot_id or _BOT_CALL.get() or mark.get("bot_id")
     if not bot_id:
         return None
-    if _agent(bot_id) is None:
+    if check_exists and _agent(bot_id) is None:
         return "This bot no longer exists, so the action did not run."
     team = team_of(bot_id)
     if team and team.get("paused"):
         return "The team was paused, so the action did not run."
+    # A send, deletion, command or unknown action also waits for spend to be known (fifth review, 2026-11-11), read
+    # fresh here: the admission check's 30 second cache may be older than the wait this call just came out of.
+    if kind in (OUTBOUND, DESTRUCTIVE, EXECUTE, OPAQUE):
+        try:
+            from services import bot_spend
+            hold = bot_spend.spend_hold(fresh=True)
+        except Exception:
+            hold = None
+        if hold:
+            return hold
     return None
 
 

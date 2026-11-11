@@ -270,7 +270,7 @@ async def run(command: str, *, files: Optional[dict[str, str]] = None, source_di
         # bot itself (third review, 2026-11-11). `before_launch` raises to stop; a bot's call checks by default.
         if before_launch is None:
             from core import bot_policy
-            problem = bot_policy.still_allowed()
+            problem = bot_policy.still_allowed(bot_policy.EXECUTE)
             if problem:
                 raise SandboxUnavailable(problem)
         else:

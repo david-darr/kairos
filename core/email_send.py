@@ -78,8 +78,25 @@ async def send(message: dict, user: str) -> dict:
     if not any(a["id"] == message["account_id"] and a["via"] == "Email tab"
                and a["email"] == message["from"] for a in accounts(user)):
         raise ValueError("That sending account is no longer available")
+    from core import bot_policy
     from services.email_service import email_service
+    # The bot whose call this is travels with the send (fifth review, 2026-11-11): connecting and signing in can take
+    # a while, so right before the message goes the bot must still exist, its team must not be paused, and spend must
+    # be known under a cap. A refused send is dropped and says why.
+    bot_id = bot_policy._BOT_CALL.get()
+
+    def before_send():
+        problem = bot_policy.still_allowed(bot_policy.OUTBOUND, bot_id=bot_id) if bot_id else None
+        if problem:
+            try:   # the person hears it too, not only the bot
+                from services.agent_service import agent_service
+                item = agent_service.add_item(bot_id, "report", f"An email was not sent: {message['subject'][:80]}",
+                                              f"To {', '.join(message['to'])}. {problem}")
+                agent_service.notify(item)
+            except Exception:
+                pass
+            raise ValueError(f"Not sent: {problem}")
     await asyncio.to_thread(email_service.send_message, message["account_id"], ", ".join(message["to"]),
                             message["subject"], message["body"], in_reply_to=message["in_reply_to"],
-                            cc=", ".join(message["cc"]) or None)
+                            cc=", ".join(message["cc"]) or None, before_send=before_send)
     return {"from": message["from"]}
