@@ -54,6 +54,7 @@ class AccountTests(unittest.IsolatedAsyncioTestCase):
         self.refresh_status = 200
         self.rotate = None
         self.userinfo_status = 200
+        self.grant = None  # the scope Google reports for a sign-in; None is every Library scope
         def save(data):
             self.data = deepcopy(data)
         for mock in (patch.object(google, "_load", lambda: deepcopy(self.data)), patch.object(google, "_save", save),
@@ -75,7 +76,7 @@ class AccountTests(unittest.IsolatedAsyncioTestCase):
                                                  **({"refresh_token": self.rotate} if self.rotate else {})})
             email = self.next_email
             return httpx.Response(200, json={"refresh_token": "refresh-" + email, "access_token": "access-" + email,
-                                             "scope": " ".join(google.SCOPES)})
+                                             "scope": self.grant or " ".join(google.SCOPES)})
         if req.url.host == "openidconnect.googleapis.com":
             if self.userinfo_status != 200:
                 return httpx.Response(self.userinfo_status, json={})
@@ -112,6 +113,57 @@ class AccountTests(unittest.IsolatedAsyncioTestCase):
 
     def bearer(self):
         return [req.headers["authorization"] for req in self.requests if req.url.host == "www.googleapis.com"][-1]
+
+    async def test_a_youtube_only_sign_in_adds_an_account_that_is_never_a_default(self):
+        # Content Studio's "Use another Google account" (2026-11-11): the identity and YouTube permissions only.
+        legacy = google.resolve_account("bob")
+        default = self.data["default_account"]
+        seen = []
+        async def then(ident, email):
+            seen.append((ident, email))
+        url = google.start_sign_in(REDIRECT, "bob", add=True, extra_scopes=google.YOUTUBE_SCOPES, only_extra=True, then=then)
+        query = parse_qs(urlsplit(url).query)
+        self.assertEqual(set(query["scope"][0].split()), {"openid", "email", *google.YOUTUBE_SCOPES})
+        self.assertIn("select_account", query["prompt"][0])
+        self.grant = " ".join(("openid", "email", *google.YOUTUBE_SCOPES))
+        self.next_email = "channel@example.com"
+        self.assertEqual(await google.finish_sign_in(query["state"][0], "code", REDIRECT), "channel@example.com")
+        new = next(a for a in self.data["accounts"].values() if a["email"] == "channel@example.com")
+        self.assertEqual(seen, [(new["id"], "channel@example.com")], "the follow-up runs with the saved account")
+        self.assertTrue(new["youtube_only"])
+        self.assertEqual(new["owner"], "bob")
+        self.assertFalse(any("drive" in s or "gmail" in s or "calendar" in s for s in new["granted_scopes"]))
+        self.assertEqual(self.data["default_account"], default, "never the install's default")
+        self.assertEqual(google.resolve_account("bob"), legacy, "never the user's Library default")
+        self.assertNotIn("channel@example.com", [a["email"] for a in google.status("bob")["accounts"]])
+        self.assertEqual(google.resolve_account("bob", new["id"]), new["id"], "still usable when named")
+        listed = {a["email"]: a for a in google.accounts_for("bob")}
+        self.assertTrue(listed["channel@example.com"]["youtube_only"] and listed["channel@example.com"]["youtube_read"])
+        self.assertNotIn("channel@example.com", [a["email"] for a in google.accounts_for("alice")])
+        with self.assertRaises(google.GoogleError) as refused:
+            google.set_default(new["id"], "library", "bob")
+        self.assertEqual(refused.exception.status, 409)
+        # Picking an account Kairos already has keeps everything it granted and adds YouTube; nothing new is added.
+        url = google.start_sign_in(REDIRECT, "bob", add=True, extra_scopes=google.YOUTUBE_UPLOAD_SCOPES, only_extra=True)
+        self.grant = " ".join(("openid", "email", *google.YOUTUBE_UPLOAD_SCOPES))
+        await google.finish_sign_in(parse_qs(urlsplit(url).query)["state"][0], "code", REDIRECT)
+        self.assertEqual(sum(a["email"] == "channel@example.com" for a in self.data["accounts"].values()), 1)
+        self.assertTrue(set(google.YOUTUBE_SCOPES) | set(google.YOUTUBE_UPLOAD_SCOPES) <= set(self.data["accounts"][new["id"]]["granted_scopes"]))
+        # A YouTube-only sign-in names no account and always asks for YouTube.
+        for kwargs in ({"only_extra": True}, {"only_extra": True, "extra_scopes": google.YOUTUBE_SCOPES, "account_id": new["id"]}):
+            with self.assertRaises(google.GoogleError):
+                google.start_sign_in(REDIRECT, "bob", add=True, **kwargs)
+
+    async def test_a_youtube_grant_on_a_library_account_never_moves_the_default(self):
+        legacy = google.resolve_account("admin")
+        second = await self.add_account("second@example.com", user="admin")
+        self.assertEqual(google.resolve_account("admin"), legacy)
+        url = google.start_sign_in(REDIRECT, "admin", add=False, account_id=second, extra_scopes=google.YOUTUBE_SCOPES)
+        self.grant = " ".join((*google.SCOPES, *google.YOUTUBE_SCOPES))
+        self.next_email = "second@example.com"
+        await google.finish_sign_in(parse_qs(urlsplit(url).query)["state"][0], "code", REDIRECT)
+        self.assertEqual(self.data["default_account"], legacy)
+        self.assertFalse(self.data["accounts"][second].get("youtube_only"))
 
     async def test_calendar_reconnect_refreshes_its_account_in_place(self):
         legacy = google.resolve_account("admin")

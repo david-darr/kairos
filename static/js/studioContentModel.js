@@ -195,12 +195,47 @@ export function connectionState(status) {
   return ['Not connected', 'muted'];
 }
 
+// How many of the live YouTube channels have a working link ("2 of 3 channels connected."), or '' without channels.
+function channelsText(status) {
+  const live = (status?.channels || []).filter(c => c.status === 'live');
+  if (!live.length) return '';
+  const on = live.filter(c => c.connected).length;
+  return `${on} of ${live.length} channel${live.length === 1 ? '' : 's'} connected.`;
+}
+
 export function analyticsText(status) {
-  if (!status?.connected) return 'Reads views, watch time, likes and follows for your YouTube posts once a day. Read-only: it never posts.';
-  const parts = [status.google_account?.email ? `As ${status.google_account.email}.` : '',
+  if (!status?.connected) return 'Reads views, watch time, likes and follows for your YouTube posts once a day. Read-only: it never posts. Each channel reads through the Google account that owns it.';
+  const parts = [channelsText(status) || (status.google_account?.email ? `As ${status.google_account.email}.` : ''),
     status.last_sync ? `Last synced ${shortDate(status.last_sync)}.` : 'Not synced yet.'];
   if (status.last_error) parts.push(status.last_error);
   return parts.filter(Boolean).join(' ');
+}
+
+// One YouTube channel's link for analytics or posting (status.channels[n]): [pill label, tone], then the sentence.
+export function linkState(link) {
+  if (!link?.google_account) return ['Not connected', 'muted'];
+  if (link.needs_reconnect) return ['Reconnect', 'error'];
+  if (link.connected) return link.last_error ? ['Check', 'warn'] : ['Connected', 'ok'];
+  return ['Waiting for Google', 'warn'];
+}
+
+export function linkText(link) {
+  const account = link?.google_account;
+  if (!account) return 'Not connected. Choose the Google account that owns this channel.';
+  const who = `${account.email || 'A Google account'}${account.youtube_only ? ' (added for YouTube only)' : ''}`;
+  if (link.needs_reconnect) return `${who} needs signing in again. Choose Change and pick it again.`;
+  if (!link.connected) return `${who} has not granted the YouTube permission yet. Choose Change and allow it in Google's window.`;
+  return [`Uses ${who}.`, link.last_sync ? `Last synced ${shortDate(link.last_sync)}.` : '', link.last_error || ''].filter(Boolean).join(' ');
+}
+
+// The account chooser: each connected Google account (the one in use first marked), then a fresh Google sign-in.
+export function accountChoices(status, link) {
+  const current = link?.google_account?.id;
+  const items = (status?.google_accounts || []).map(a => ({ value: a.id, label: a.email || 'Google account',
+    note: [a.id === current ? 'In use for this channel' : '', a.youtube_only ? 'Added for YouTube only' : '', a.error ? 'Needs signing in again' : ''].filter(Boolean).join('. ') }));
+  items.push({ value: 'new', label: 'Use another Google account',
+    note: "Opens Google's account chooser. A Google account new to Kairos is added for YouTube only: it does not become your Drive, Gmail or Calendar account. For a Brand Account, pick the channel's own name there." });
+  return { items, selected: current || items[0].value };
 }
 
 export function syncText(result) {
@@ -208,15 +243,18 @@ export function syncText(result) {
   const stored = result.stored || 0;
   const head = stored ? `Stored numbers for ${stored} post${stored === 1 ? '' : 's'}.` : 'No new numbers yet.';
   if (result.stopped === 'quota') return head + ' YouTube\'s quota ran out; the rest comes at the next sync.';
-  if (result.channels_not_owned?.length) return head + ` Not on this Google account: ${result.channels_not_owned.join(', ')}.`;
-  return head;
+  const extra = [];
+  if (result.channels_not_owned?.length) extra.push(`Not on its Google account: ${result.channels_not_owned.join(', ')}.`);
+  if (result.channels_not_connected?.length) extra.push(`Not connected: ${result.channels_not_connected.join(', ')}.`);
+  if (result.errors && Object.keys(result.errors).length) extra.push(`Could not read: ${Object.keys(result.errors).join(', ')}.`);
+  return [head, ...extra].join(' ');
 }
 
 export const PRIVACY = [['private', 'Private'], ['unlisted', 'Unlisted'], ['public', 'Public']];
 
 export function postingText(status) {
-  if (!status?.connected) return 'Post approved YouTube posts through your own Google project. Optional: Prepare post stays the default (Publishing).';
-  return status.google_account?.email ? `As ${status.google_account.email}.` : 'Connected.';
+  if (!status?.connected) return 'Post approved YouTube posts through your own Google project, each channel through the Google account that owns it. Optional: Prepare post stays the default (Publishing).';
+  return channelsText(status) || (status.google_account?.email ? `As ${status.google_account.email}.` : 'Connected.');
 }
 
 export function publishText(result) {

@@ -72,6 +72,17 @@
 .sc-batch { margin: 0 0 14px; }
 .sc .set-row-control > input[type=number] { width: 120px; }
 .sc [data-youtube] .set-row-control > select { width: 150px; }
+/* The Google account chooser for a YouTube channel (one radio per account, then Use another Google account). */
+.sc-choices { display: grid; gap: 8px; margin: 12px 0; }
+.sc-choice { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--bg-panel-solid); cursor: pointer; }
+.sc-choice:hover { border-color: var(--border-strong); }
+.sc-choice:has(input:checked) { border-color: var(--accent); }
+.sc-choice:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sc-choice input[type=radio] { margin: 3px 0 0; accent-color: var(--accent); }
+.sc-dialog-panel .sc-choice input[type=radio] { min-height: 0; }
+.sc-choice-text { display: grid; gap: 3px; min-width: 0; }
+.sc-choice-label { font-size: 13.5px; font-weight: 550; color: var(--text); overflow-wrap: anywhere; }
 
 @media (max-width: 768px) {
   .sc .set-row { grid-template-columns: minmax(0, 1fr); }

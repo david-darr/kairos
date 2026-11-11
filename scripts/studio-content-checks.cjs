@@ -27,9 +27,16 @@ const customTab = { id: 'studio', label: 'Studio', user_tab: false, format: 'fol
 // -- the mock Content Studio store ------------------------------------------------------------------------------
 const store = { forbidden: false, metrics: {}, niches: [], channels: [], items: [], approvals: [], plans: [], findings: [], decisions: [], posted: [], team: [], pubItems: [], reads: { tiktok: false, instagram: false },
   settings: { weights: { views: 0.4, watch: 0.4, engagement: 0.2 }, batch_approval: false },
-  yt: { configured: true, connected: false, pending: false, google_account: null, needs_reconnect: false, last_sync: null, notice: 'Read only.' },
+  // YouTube per channel (2026-11-11): channel 1 (@cooks) has no analytics link and posts as me@example.com; the chooser offers the
+  // connected Google accounts, then Use another Google account.
+  googleAccounts: [{ id: 'g1', email: 'me@example.com', youtube_only: false, error: null }],
+  yt: { configured: true, connected: false, pending: false, google_account: null, needs_reconnect: false, last_sync: null, notice: 'Read only.',
+    channels: [{ channel_id: 1, handle: '@cooks', status: 'live', google_account: null, connected: false, pending: false, needs_reconnect: false, last_sync: null, last_error: null }] },
   ytPost: { configured: true, connected: true, pending: false, google_account: { id: 'g1', email: 'me@example.com' }, needs_reconnect: false, privacy: 'private',
-    notice: 'YouTube may keep uploads from a project that has not passed its API audit private.' } };
+    notice: 'YouTube may keep uploads from a project that has not passed its API audit private.',
+    channels: [{ channel_id: 1, handle: '@cooks', status: 'live', google_account: { id: 'g1', email: 'me@example.com', youtube_only: false }, connected: true, pending: false, needs_reconnect: false, last_sync: null, last_error: null }] } };
+const ytStatus = kind => { const s = kind === 'analytics' ? store.yt : store.ytPost; const live = s.channels.filter(c => c.status === 'live');
+  return Object.assign(s, { google_accounts: store.googleAccounts, connected: live.some(c => c.connected), google_account: (live.find(c => c.connected) || {}).google_account || null }); };
 // Publishing (Prepare post and the dashboard): a week of posts in every state. Times are this week's, local.
 const monday = (() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate() - (d.getDay() + 6) % 7).getTime() / 1000; })();
 const at = (day, hour, minute = 0) => { const d = new Date(monday * 1000); return new Date(d.getFullYear(), d.getMonth(), d.getDate() + day, hour, minute).getTime() / 1000; };
@@ -139,9 +146,23 @@ function content(method, p, body) {
     processing_note: 'TikTok takes a few minutes to process a post before it shows on the profile.', blockers: [] }];
   if (/^\/posts\/\d+\/publish-tiktok$/.test(p)) return [200, { state: 'waiting', url: null, privacy: body.privacy_level, note: 'TikTok posted it as Only you.' }];
   if (/^\/posts\/\d+\/publish-instagram$/.test(p)) return [200, { state: 'posted', url: 'https://www.instagram.com/reel/ABCDEFGHIJK/', note: '' }];
-  if (p === '/analytics/youtube/status') return [200, store.yt];
-  if (p === '/posting/youtube/status') return [200, store.ytPost];
-  if (p === '/posting/youtube/privacy') { store.ytPost.privacy = body.privacy; return [200, store.ytPost]; }
+  if (p === '/analytics/youtube/status') return [200, ytStatus('analytics')];
+  if (p === '/posting/youtube/status') return [200, ytStatus('posting')];
+  if (p === '/posting/youtube/privacy') { store.ytPost.privacy = body.privacy; return [200, ytStatus('posting')]; }
+  if (/^\/(analytics|posting)\/youtube\/connect$/.test(p)) {
+    const kind = p.split('/')[1];
+    if (body.new_account) return [200, { url: 'https://accounts.google.com/o/oauth2/v2/auth?prompt=select_account+consent&state=s' }];
+    const account = store.googleAccounts.find(a => a.id === body.account);
+    if (!account) return [404, { detail: 'Unknown Google account' }];
+    const link = ytStatus(kind).channels.find(c => c.channel_id === body.channel_id);
+    Object.assign(link, { google_account: { id: account.id, email: account.email, youtube_only: account.youtube_only }, connected: true });
+    return [200, { linked: true, status: ytStatus(kind) }];
+  }
+  if (/^\/(analytics|posting)\/youtube\/channels\/\d+$/.test(p) && method === 'DELETE') {
+    const kind = p.split('/')[1];
+    Object.assign(ytStatus(kind).channels.find(c => c.channel_id === id), { google_account: null, connected: false });
+    return [200, ytStatus(kind)];
+  }
   if (p === '/approvals/approve-batch') { const ids = body.post_ids; store.approvals = store.approvals.filter(x => !ids.includes(x.id)); return [200, { approved: ids.map(id => ({ id })), skipped: [] }]; }
   if (/^\/posts\/\d+\/publish-youtube$/.test(p)) return [200, { video_id: 'NEWvideo_01', privacy: 'private', note: '' }];
   if (/^\/channels\/\d+\/archive$/.test(p)) { Object.assign(channel, { status: 'archived', archive_reason: 'archived by you' }); return [200, channel]; }
@@ -536,13 +557,44 @@ app.whenReady().then(async () => {
     await scopeTo('lib:connections');
     await wait("!!document.querySelector('[data-youtube=analytics]')");
     assert.equal(await js("!!document.querySelector('.sc-tabs')"), false, 'A library has no tabs');
-    assert.ok(await js("document.querySelector('[data-youtube=analytics]').textContent.includes('Not connected') && !!document.querySelector('button[aria-label=\"Connect YouTube analytics\"]')"));
-    assert.ok(await js("document.querySelector('[data-youtube=posting]').textContent.includes('As me@example.com') && document.querySelector('[data-youtube=posting]').textContent.includes('API audit')"));
+    assert.ok(await js("document.querySelector('[data-youtube=analytics]').textContent.includes('Not connected') && !!document.querySelector('button[aria-label=\"Connect @cooks to YouTube analytics\"]')"));
+    assert.ok(await js("document.querySelector('[data-youtube=posting]').textContent.includes('1 of 1 channel connected.') && document.querySelector('[data-youtube=posting]').textContent.includes('API audit')"));
+    // Each YouTube channel shows the Google account it uses, with Change and Disconnect (2026-11-11).
+    assert.ok(await js("document.querySelector('[data-youtube-kind=posting][data-youtube-channel=\"1\"]').textContent.includes('Uses me@example.com.')"));
+    assert.ok(await js("!!document.querySelector('button[aria-label=\"Change the Google account @cooks uses for YouTube posting\"]') && !!document.querySelector('button[aria-label=\"Disconnect @cooks from YouTube posting\"]')"));
     assert.ok(await js("document.querySelector('[data-niche-id=\"1\"]').textContent.includes('1 posting slot. 2 channels.')"), 'The niches with their slots');
     await fill('Privacy of YouTube uploads', 'unlisted');
     for (let n = 0; n < 100 && !last('/posting/youtube/privacy', 'PUT'); n++) await pause(50);
     assert.deepEqual(last('/posting/youtube/privacy', 'PUT').body, { privacy: 'unlisted' });
     await capture('library-connections'); await noOverflow(); await labels();
+    // Connect opens the account chooser: the connected Google account (picked by default), then Use another Google account.
+    await click('.sc button', 'Connect @cooks to YouTube analytics');
+    await wait("!!document.querySelector('.sc-choices')");
+    assert.deepEqual(await js("[...document.querySelectorAll('.sc-choice')].map(c=>[c.dataset.accountChoice, c.querySelector('input').checked])"), [['g1', true], ['new', false]]);
+    assert.ok(await js("document.querySelector('[data-account-choice=new]').textContent.includes('Use another Google account') && document.querySelector('[data-account-choice=new]').textContent.includes('Brand Account')"));
+    assert.ok(await js("document.querySelector('[data-account-choice=new]').textContent.includes('does not become your Drive, Gmail or Calendar account')"));
+    await capture('youtube-account-chooser'); await labels();
+    // Another Google account: Google's chooser opens in the browser; nothing is linked until the person comes back.
+    await js("window.__opened = []; window.open = (u) => { window.__opened.push(u); return null; }; true");
+    await js("document.querySelector('[data-account-choice=new] input').click()");
+    await click('.sc-dialog-panel button', 'Continue connecting @cooks');
+    await wait("window.__opened.length === 1 && !document.querySelector('.sc-choices')");
+    assert.deepEqual(last('/analytics/youtube/connect').body, { channel_id: 1, new_account: true });
+    assert.ok(await js("window.__opened[0].includes('prompt=select_account')"));
+    // An account already connected links at once and the row says which one.
+    await click('.sc button', 'Connect @cooks to YouTube analytics');
+    await wait("!!document.querySelector('.sc-choices')");
+    await click('.sc-dialog-panel button', 'Continue connecting @cooks');
+    await wait("document.querySelector('[data-youtube-kind=analytics][data-youtube-channel=\"1\"]')?.textContent.includes('Uses me@example.com.')");
+    assert.deepEqual(last('/analytics/youtube/connect').body, { channel_id: 1, account: 'g1' });
+    // The channel's own Settings tab shows the same rows, and Disconnect forgets one link.
+    await scopeTo(1); await tab('settings');
+    await wait("!!document.querySelector('.sc-yt-conn [data-youtube-kind=posting]')");
+    assert.ok(await js("document.querySelector('.sc-yt-conn').textContent.includes('Uses me@example.com.') && document.querySelectorAll('.sc-yt-conn .sc-yt-link').length === 2"));
+    await click('.sc-yt-conn button', 'Disconnect @cooks from YouTube analytics');
+    await wait("!!document.querySelector('.sc-yt-conn button[aria-label=\"Connect @cooks to YouTube analytics\"]')");
+    assert.ok(last('/analytics/youtube/channels/1', 'DELETE'));
+    await capture('channel-youtube-connection'); await noOverflow(); await labels();
 
     // 4. The pipeline board: steps, owner, age, overdue flag; a click opens the details. Every channel, then one.
     await scopeTo('all'); await tab('pipeline');

@@ -192,6 +192,12 @@ def _default(data: dict) -> dict | None:
     return (data.get("accounts") or {}).get(data.get("default_account") or "")
 
 
+def _library(items: list[dict]) -> list[dict]:
+    """The accounts Drive, Gmail and Calendar may use: not one added only for YouTube (Content Studio's "Use another
+    Google account"), which holds the YouTube permissions alone and is never anyone's Library or Calendar default."""
+    return [item for item in items if not item.get("youtube_only")]
+
+
 def resolve_account(user: str, account_id: str | None = None) -> str:
     """The account a Drive request uses: the one named, if this user may use
     it, else their default. Unknown and foreign ids get the same refusal."""
@@ -202,6 +208,7 @@ def resolve_account(user: str, account_id: str | None = None) -> str:
         if match is None:
             raise GoogleError("Unknown Google account", 404)
         return match["id"]
+    usable = _library(usable)
     if not usable:
         raise GoogleError("Connect Google Workspace in Library first", 401)
     chosen = (data.get("library_defaults") or {}).get(user) or data.get("active_account") or data.get("default_account")
@@ -243,6 +250,9 @@ def set_default(account: str, purpose: str = "library", user: str | None = None)
     with _lock:
         ident = resolve_account(user, account)
         data = _state()
+        if data["accounts"][ident].get("youtube_only"):
+            raise GoogleError("That Google account was added only for YouTube. Sign in to it from Library to use it "
+                              "for Drive, Gmail or Calendar", 409)
         data.setdefault("calendar_defaults" if purpose == "calendar" else "library_defaults", {})[user] = ident
         _save(data)
     if purpose == "calendar":
@@ -264,7 +274,21 @@ def account_info(ident: str | None) -> dict | None:
     if not item:
         return None
     return {"id": item["id"], "email": item.get("email"), "granted_scopes": list(item.get("granted_scopes") or []),
-            "connected": bool(item.get("refresh_token")), "error": item.get("error")}
+            "connected": bool(item.get("refresh_token")), "error": item.get("error"),
+            "youtube_only": bool(item.get("youtube_only"))}
+
+
+def accounts_for(user: str | None) -> list[dict]:
+    """Every Google account this user may use, the YouTube-only ones too, for Content Studio's account chooser.
+    Never a token: the id, the email, whether it was added only for YouTube, which YouTube grants it holds."""
+    data = _state()
+    out = []
+    for item in _accounts(data, user):
+        granted = set(item.get("granted_scopes") or [])
+        out.append({"id": item["id"], "email": item.get("email"), "youtube_only": bool(item.get("youtube_only")),
+                    "error": item.get("error"), "youtube_read": set(YOUTUBE_SCOPES) <= granted,
+                    "youtube_upload": set(YOUTUBE_UPLOAD_SCOPES) <= granted})
+    return out
 
 
 def configured() -> bool:
@@ -288,7 +312,7 @@ def status(user: str | None = None) -> dict:
             default = (data.get("accounts") or {})[resolve_calendar_account(user)]
         except GoogleError:
             default = {}
-    usable = [a for a in _accounts(data) if a.get("owner") in (None, user)]
+    usable = _library([a for a in _accounts(data) if a.get("owner") in (None, user)])
     chosen = resolve_account(user, None) if usable else None
     return {"configured": bool(data.get("client_id")),
             "connected": bool(usable),
@@ -330,7 +354,7 @@ def disconnect(account_id: str | None = None, user: str | None = None) -> dict:
     the others stay. Disconnecting when nothing is connected is a no-op. A
     shared (migrated) account may be disconnected by any admin, as before."""
     with _lock:
-        if not _accounts(_state(), user) and account_id is None:
+        if not _library(_accounts(_state(), user)) and account_id is None:
             return status(user)
         ident = resolve_account(user, account_id)
         data = _state()
@@ -339,7 +363,7 @@ def disconnect(account_id: str | None = None, user: str | None = None) -> dict:
         if data.get("default_account") == ident:
             # Calendar passes to a shared account, else to one of the
             # disconnecting user's own, never to another user's account.
-            remaining = _accounts(data)
+            remaining = _library(_accounts(data))
             heir = (next((item for item in remaining if item.get("owner") is None), None)
                     or next((item for item in remaining if item.get("owner") == user), None))
             data["default_account"] = heir["id"] if heir else None
@@ -349,15 +373,23 @@ def disconnect(account_id: str | None = None, user: str | None = None) -> dict:
 
 
 def start_sign_in(redirect_uri: str, owner: str | None = None, add: bool = False,
-                  account_id: str | None = None, extra_scopes: tuple = ()) -> str:
+                  account_id: str | None = None, extra_scopes: tuple = (), only_extra: bool = False,
+                  then=None) -> str:
     """With `add` the default account stays; otherwise the account signed in
     to becomes the default (the one-account behaviour, and Calendar's
     reconnect). `account_id` reconnects that account, which must be one this
     user may use (a shared account too) and must sign in as the same email.
     `extra_scopes` is an optional added grant (YouTube analytics): Google is told to keep what the account
-    already granted, and only a sign-in that asks for them ever carries them."""
+    already granted, and only a sign-in that asks for them ever carries them.
+    `only_extra` (Content Studio's "Use another Google account") asks for the identity and the extra scopes alone,
+    never Drive, Gmail or Calendar: whichever Google account the person picks in Google's chooser is added to this
+    user (an account they already connected keeps what it had), and an account new to Kairos is marked YouTube-only,
+    so it never becomes a Library or Calendar default. `then`, an async callable (account id, email), runs after
+    the account is saved, as the Kairos account that started the sign-in; its GoogleError is the sign-in's answer."""
     if extra_scopes and not set(extra_scopes) <= set(YOUTUBE_SCOPES) | set(YOUTUBE_UPLOAD_SCOPES):
         raise GoogleError("Unknown Google permission requested")
+    if only_extra and (not extra_scopes or account_id is not None):
+        raise GoogleError("A YouTube-only sign-in adds a new account and needs its YouTube permissions")
     if account_id is not None:
         account_id = resolve_account(owner, account_id)
     client_id = _state().get("client_id")
@@ -373,13 +405,14 @@ def start_sign_in(redirect_uri: str, owner: str | None = None, add: bool = False
     from core import accounts
     _pending[state] = {"verifier": verifier, "expires": time.time() + 600, "owner": owner, "add": add,
                        "account": account_id, "client_id": client_id, "extra_scopes": list(extra_scopes),
-                       "kairos_account": accounts.effective_account()}
+                       "only_extra": only_extra, "then": then, "kairos_account": accounts.effective_account()}
     for stale, pending in list(_pending.items()):
         if pending["expires"] < time.time():
             _pending.pop(stale, None)
-    # select_account: the chooser lets a second Google account be added.
+    # select_account: the chooser always shows, so a second Google account (or a YouTube Brand Account) can be picked.
+    base = ("openid", "email") if only_extra else SCOPES
     params = {"client_id": client_id, "redirect_uri": redirect_uri, "response_type": "code",
-              "scope": " ".join((*SCOPES, *extra_scopes)), "access_type": "offline", "prompt": "select_account consent",
+              "scope": " ".join(dict.fromkeys((*base, *extra_scopes))), "access_type": "offline", "prompt": "select_account consent",
               "state": state, "code_challenge": challenge, "code_challenge_method": "S256"}
     if extra_scopes:
         params["include_granted_scopes"] = "true"
@@ -425,6 +458,10 @@ async def finish_sign_in(state: str, code: str | None, redirect_uri: str, error:
         if pending["account"] and named is None:
             raise GoogleError("That Google account was disconnected while signing in", 409)
         if named is not None and (named.get("email") or "").lower() != email.lower():
+            if pending.get("extra_scopes"):
+                raise GoogleError(f"In Google's window you chose {email}, but Kairos asked for {named.get('email')}. "
+                                  f"Connect again and choose {named.get('email')}, or choose Use another Google account "
+                                  f"in Kairos to add {email}", 409)
             raise GoogleError(f"Signed in as {email}, not {named.get('email')}. Choose that account to reconnect it", 409)
         existing = named or next((item for item in _accounts(data) if item.get("owner") == owner and (item.get("email") or "").lower() == email.lower()), None)
     lock = _refresh_locks.setdefault(existing["id"], asyncio.Lock()) if existing else None
@@ -443,20 +480,28 @@ async def finish_sign_in(state: str, code: str | None, redirect_uri: str, error:
             else:
                 ident = "acct_" + secrets.token_urlsafe(12)
                 account = accounts[ident] = {"id": ident, "owner": owner, "added_at": time.time()}
+                if pending.get("only_extra"):
+                    account["youtube_only"] = True
             granted = str(tokens.get("scope") or "").split()
             if pending.get("extra_scopes"):  # an added grant keeps what the account already had
                 granted = list(dict.fromkeys([*(account.get("granted_scopes") or []), *granted]))
+            else:  # a full sign-in (Library) makes a YouTube-only account an ordinary one
+                account.pop("youtube_only", None)
             account.update(refresh_token=encrypt(refresh), access_token=encrypt(access) if access else None,
                            expires_at=time.time() + int(tokens.get("expires_in") or 3600), email=email,
                            granted_scopes=granted)
             account.pop("error", None)
-            if not pending["add"] or not _default(data):
+            # A YouTube grant (pending extra_scopes) never moves the Library or Calendar default.
+            if not account.get("youtube_only") and not pending.get("extra_scopes") and (not pending["add"] or not _default(data)):
                 data["default_account"] = account["id"]
+            ident = account["id"]
             _save(data)
     finally:
         if lock:
             lock.release()
     invalidate_calendar()
+    if pending.get("then"):
+        await pending["then"](ident, email)
     return email
 
 

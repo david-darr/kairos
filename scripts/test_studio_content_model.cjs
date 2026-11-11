@@ -113,7 +113,20 @@ const { pathToFileURL } = require('node:url');
   assert.match(M.analyticsText({ connected: true, last_sync: 1_790_000_000, last_error: 'Quota.' }), /Last synced .*Quota\./);
   assert.equal(M.syncText({ stored: 1 }), 'Stored numbers for 1 post.');
   assert.match(M.syncText({ stored: 0, stopped: 'quota' }), /No new numbers yet\. YouTube's quota ran out/);
-  assert.match(M.syncText({ stored: 2, channels_not_owned: ['@x'] }), /Not on this Google account: @x\./);
+  assert.match(M.syncText({ stored: 2, channels_not_owned: ['@x'], channels_not_connected: ['@y'], errors: { '@z': 'gone' } }),
+    /Not on its Google account: @x\. Not connected: @y\. Could not read: @z\./);
+  // Each YouTube channel's own link (2026-11-11) and the Google account chooser.
+  assert.deepEqual(M.linkState(null), ['Not connected', 'muted']);
+  assert.deepEqual(M.linkState({ google_account: { email: 'a@b.test' }, connected: true }), ['Connected', 'ok']);
+  assert.deepEqual(M.linkState({ google_account: { email: 'a@b.test' }, connected: false }), ['Waiting for Google', 'warn']);
+  assert.deepEqual(M.linkState({ google_account: { email: 'a@b.test' }, connected: true, needs_reconnect: true }), ['Reconnect', 'error']);
+  assert.equal(M.linkText({ google_account: { email: 'a@b.test', youtube_only: true }, connected: true }), 'Uses a@b.test (added for YouTube only).');
+  assert.match(M.linkText(null), /Choose the Google account that owns this channel/);
+  assert.deepEqual(M.accountChoices({ google_accounts: [{ id: 'g1', email: 'a@b.test' }, { id: 'g2', email: 'c@d.test' }] },
+    { google_account: { id: 'g2' } }), { items: M.accountChoices({ google_accounts: [{ id: 'g1', email: 'a@b.test' }, { id: 'g2', email: 'c@d.test' }] }, { google_account: { id: 'g2' } }).items, selected: 'g2' });
+  assert.deepEqual(M.accountChoices({ google_accounts: [] }, null).items.map(i => i.value), ['new']);
+  assert.equal(M.accountChoices({ google_accounts: [] }, null).selected, 'new');
+  assert.match(M.accountChoices({}, null).items[0].note, /Brand Account/);
   assert.match(M.postingText({ connected: false }), /Prepare post stays the default/);
   assert.equal(M.publishText({ privacy: 'unlisted', note: '' }), 'Posted to YouTube as unlisted.');
   assert.equal(M.publishText({ privacy: 'private', note: 'YouTube kept it private.' }), 'YouTube kept it private.');

@@ -59,6 +59,9 @@ class FakeGoogle:
         self.quota_failures = []         # statuses/reasons to answer the next analytics calls with before succeeding
         self.reject_bearer = None        # one bearer token answered with 401, once
         self.refreshes = 0
+        self.refreshed_as = {}           # access token from a refresh -> the email its refresh token belongs to
+        self.channels_for = {}
+        self.revoked = set()             # refresh tokens Google refuses (invalid_grant)           # email -> the channels channels.list mine=true answers for that Google account
         self.uploads = []                # (metadata, video bytes) of each upload
         self.upload_privacy = None       # what YouTube says it set; None echoes the request
         self.upload_channel = "UCalpha0000000000000000"
@@ -72,6 +75,9 @@ class FakeGoogle:
             if form["grant_type"] == ["refresh_token"]:
                 self.refreshes += 1
                 token = form["refresh_token"][0]
+                if token in self.revoked:
+                    return httpx.Response(400, json={"error": "invalid_grant"})
+                self.refreshed_as[f"fresh-{self.refreshes}"] = token.removeprefix("refresh-")
                 return httpx.Response(200, json={"access_token": f"fresh-{self.refreshes}", "expires_in": 3600,
                                                  "scope": self.scope_for.get(token, self.scope)})
             return httpx.Response(200, json={"refresh_token": f"refresh-{self.email}", "access_token": f"access-{self.email}",
@@ -85,7 +91,9 @@ class FakeGoogle:
         q = dict(req.url.params)
         if host == "www.googleapis.com" and path == "/youtube/v3/channels":
             assert q.get("mine") == "true"
-            return httpx.Response(200, json={"items": self.channels})
+            token = bearer.removeprefix("Bearer ")
+            email = self.refreshed_as.get(token) or token.removeprefix("access-")
+            return httpx.Response(200, json={"items": self.channels_for.get(email, self.channels)})
         if host == "www.googleapis.com" and path == "/youtube/v3/videos" and q.get("chart"):
             assert q["chart"] == "mostPopular" and len(q["regionCode"]) == 2 and int(q["maxResults"]) <= 50
             return httpx.Response(200, json={"items": self.popular[:int(q["maxResults"])]})
@@ -191,11 +199,46 @@ class YouTubeAnalytics(unittest.TestCase):
         url = client.post(f"{G}/oauth/start", json={}).json()["url"]
         return self.finish_sign_in(client, url, email)
 
-    def connect(self, client, email="owner@example.com"):
-        self.sign_in_google(client, email)
-        r = client.post(f"{P}/analytics/youtube/connect", json={})
+    def acct_of(self, client):
+        return self.david_id if client is self.d else self.bea_id
+
+    def channel(self, client, handle="@alpha"):
+        """The id of this account's YouTube channel with that handle, made (in a niche) if it does not exist yet."""
+        with accounts.as_account(self.acct_of(client)):
+            found = next((c for c in studio.list_channels() if c["handle"] == handle), None)
+            if found:
+                return found["id"]
+            niche = (studio.list_niches(status="live") or [None])[0] or studio.create_niche("Space")
+            return studio.create_channel(niche["id"], "youtube", handle)["id"]
+
+    def connect(self, client, email="owner@example.com", handle="@alpha", kind="analytics", sign_in=True):
+        """Google sign-in (Library), then Connect for one channel with that (default) account."""
+        if sign_in:
+            self.sign_in_google(client, email)
+        r = client.post(f"{P}/{kind}/youtube/connect", json={"channel_id": self.channel(client, handle)})
         self.assertEqual(r.status_code, 200, r.text)
-        return self.finish_sign_in(client, r.json()["url"])
+        return self.finish_sign_in(client, r.json()["url"], email) if r.json().get("url") else None
+
+    def connect_another(self, client, email, handle="@alpha", kind="analytics", status=200):
+        """Use another Google account: Google's chooser, where the person picks `email`."""
+        r = client.post(f"{P}/{kind}/youtube/connect", json={"channel_id": self.channel(client, handle), "new_account": True})
+        self.assertEqual(r.status_code, 200, r.text)
+        query = parse_qs(urlsplit(r.json()["url"]).query)
+        self.fake.scope, self.fake.email = query["scope"][0], email
+        answer = self.anon.get(f"{G}/oauth/callback", params={"state": query["state"][0], "code": "code"})
+        self.assertEqual(answer.status_code, status, answer.text)
+        return query, answer
+
+    def link_unowned(self, client, handle, kind="analytics"):
+        """Links a channel the Google account owned when it was connected and has since left it."""
+        keep = self.fake.channels
+        self.fake.channels = keep + [{"id": "UCgone00000000000000000", "snippet": {"customUrl": handle, "title": handle}}]
+        r = client.post(f"{P}/{kind}/youtube/connect", json={"channel_id": self.channel(client, handle)})
+        self.assertEqual((r.status_code, r.json().get("linked")), (200, True), r.text)
+        self.fake.channels = keep
+
+    def channel_link(self, status, handle):
+        return next(c for c in status["channels"] if c["handle"] == handle)
 
     def studio_setup(self, acct, handles=("@alpha",)):
         now = time.time()
@@ -219,9 +262,11 @@ class YouTubeAnalytics(unittest.TestCase):
         self.assertNotIn("include_granted_scopes", plain)
         self.assertFalse(any("youtube" in s for s in google.SCOPES))
         self.assertFalse(self.d.get(f"{P}/analytics/youtube/status").json()["connected"])
-        # A YouTube connect with no Google sign-in refuses plainly instead of asking for Drive and Gmail alone.
-        r = self.d.post(f"{P}/analytics/youtube/connect", json={})
+        # A YouTube connect with no Google sign-in and no other account chosen refuses plainly.
+        r = self.d.post(f"{P}/analytics/youtube/connect", json={"channel_id": self.channel(self.d)})
         self.assertEqual(r.status_code, 409, r.text)
+        self.assertIn("Use another Google account", r.json()["detail"])
+        self.assertEqual(self.d.post(f"{P}/analytics/youtube/connect", json={}).status_code, 422, "a channel is always named")
         self.sign_in_google(self.d)
         status = self.d.get(f"{P}/analytics/youtube/status").json()
         self.assertFalse(status["connected"], "a normal Google sign-in does not connect YouTube")
@@ -232,6 +277,8 @@ class YouTubeAnalytics(unittest.TestCase):
         status = self.d.get(f"{P}/analytics/youtube/status").json()
         self.assertTrue(status["connected"])
         self.assertEqual(status["google_account"]["email"], "owner@example.com")
+        self.assertEqual(self.channel_link(status, "@alpha")["google_account"]["email"], "owner@example.com")
+        self.assertIn("select_account", query["prompt"][0], "Google's chooser always shows")
         self.assertIn("never posts", status["notice"])
         self.assertIn("private-only", status["notice"])
         self.assertNotIn("refresh", str(status).lower().replace("needs_reconnect", ""))
@@ -243,15 +290,17 @@ class YouTubeAnalytics(unittest.TestCase):
 
     def test_declining_the_extra_grant_leaves_it_unconnected(self):
         self.sign_in_google(self.d)
-        url = self.d.post(f"{P}/analytics/youtube/connect", json={}).json()["url"]
+        url = self.d.post(f"{P}/analytics/youtube/connect", json={"channel_id": self.channel(self.d)}).json()["url"]
         query = parse_qs(urlsplit(url).query)
         self.fake.scope = BASE_SCOPES  # the person unticked YouTube on Google's consent page
         r = self.anon.get(f"{G}/oauth/callback", params={"state": query["state"][0], "code": "code"})
-        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.status_code, 409)
+        self.assertIn("did not grant the YouTube permission", r.text)
         status = self.d.get(f"{P}/analytics/youtube/status").json()
         self.assertFalse(status["connected"])
-        self.assertTrue(status["pending"])
+        self.assertIsNone(self.channel_link(status, "@alpha")["google_account"])
         self.assertEqual(self.d.post(f"{P}/analytics/youtube/sync").status_code, 409)
+        self.assertEqual(len(self.d.get(f"{G}/status").json()["accounts"]), 1, "the Library sign-in stays")
 
     # -- ownership, mapping, metrics --------------------------------------------------------------
 
@@ -272,11 +321,21 @@ class YouTubeAnalytics(unittest.TestCase):
         self.fake.analytics = {"aaaaaaaaaaa": metrics(1200, 41.5, 90, 12, 7, 3), "bbbbbbbbbbb": metrics(80, 12.0),
                                "ccccccccccc": metrics(5, 100.4, 1, 0, 0, 0), "ddddddddddd": metrics(999, 1)}
         self.connect(self.d)
+        # @other is not this Google account's: connecting it is refused, with the Brand Account case explained.
+        r = self.d.post(f"{P}/analytics/youtube/connect", json={"channel_id": ids["@other"]})
+        self.assertEqual(r.status_code, 409)
+        self.assertIn("does not own @other", r.json()["detail"])
+        self.assertIn("Brand Account", r.json()["detail"])
+        self.assertIn("Alpha Channel", r.json()["detail"], "it names the channels that account does have")
+        self.link_unowned(self.d, "@other")
         r = self.d.post(f"{P}/analytics/youtube/sync")
         self.assertEqual(r.status_code, 200, r.text)
         result = r.json()["result"]
         self.assertEqual(result["stored"], 3)
         self.assertEqual(result["channels_not_owned"], ["@other"])
+        other = self.channel_link(r.json()["status"], "@other")
+        self.assertIn("Brand Account", other["last_error"])
+        self.assertIsNotNone(self.channel_link(r.json()["status"], "@alpha")["last_sync"])
         self.assertEqual(result["skipped"], {"not_owned": 1, "not_on_channel": 1, "no_data_yet": 1})
         snaps = {s["post_id"]: s for s in self.snapshots(self.david_id)}
         self.assertEqual(set(snaps), {a1, a2, a3}, "not-YouTube, other owner's, no-data and un-owned channel posts get nothing")
@@ -379,6 +438,7 @@ class YouTubeAnalytics(unittest.TestCase):
             for account in data["accounts"].values():
                 account["expires_at"] = time.time() - 10
             google._save(data)
+        self.fake.log.clear()
         self.assertEqual(self.d.post(f"{P}/analytics/youtube/sync").json()["result"]["stored"], 1)
         self.assertEqual(self.fake.refreshes, 1)
         bearers = {r.headers["authorization"] for r in self.fake.hit("www.googleapis.com", "/youtube/v3/channels")}
@@ -427,7 +487,8 @@ class YouTubeAnalytics(unittest.TestCase):
         self.assertEqual(self.b.post(f"{P}/analytics/youtube/sync").status_code, 409)
         # Bea cannot attach David's Google sign-in either.
         d_google = self.d.get(f"{G}/status").json()["accounts"][0]["id"]
-        self.assertEqual(self.b.post(f"{P}/analytics/youtube/connect", json={"account": d_google}).status_code, 404)
+        self.assertEqual(self.b.post(f"{P}/analytics/youtube/connect", json={"channel_id": b_ids["@alpha"], "account": d_google}).status_code, 404)
+        self.assertNotIn("owner@example.com", self.b.get(f"{P}/analytics/youtube/status").text)
         self.assertFalse(self.b.get(f"{P}/analytics/youtube/status").json()["pending"])
 
         done = asyncio.run(youtube.sync_all_due())
@@ -481,11 +542,8 @@ class YouTubePostingAndTrends(YouTubeAnalytics):
     """Direct posting through the person's own Google project (D1) and the most-popular list for the Researcher.
     Runs on the same mock Google and accounts; the analytics tests are not repeated here."""
 
-    def connect_posting(self, client, email="owner@example.com"):
-        self.sign_in_google(client, email)
-        r = client.post(f"{P}/posting/youtube/connect", json={})
-        self.assertEqual(r.status_code, 200, r.text)
-        return self.finish_sign_in(client, r.json()["url"])
+    def connect_posting(self, client, email="owner@example.com", handle="@alpha"):
+        return self.connect(client, email, handle, kind="posting")
 
     def approved_post(self, acct, channel_id, video=b"\x00\x00\x00\x18ftypmp42 fake video", tags="space, Black holes, #space"):
         from core import image_gen
@@ -527,7 +585,7 @@ class YouTubePostingAndTrends(YouTubeAnalytics):
         r = self.d.post(f"{P}/posts/{post_id}/publish-youtube")
         self.assertEqual(r.status_code, 409, "posting not connected")
         self.assertIn("Connect YouTube posting", r.json()["detail"])
-        self.assertEqual(self.d.get(f"{P}/posts/{post_id}").json()["direct_post_blocker"], "Connect YouTube posting first.")
+        self.assertEqual(self.d.get(f"{P}/posts/{post_id}").json()["direct_post_blocker"], "Connect YouTube posting for @alpha first.")
         self.connect_posting(self.d)
         self.assertIsNone(self.d.get(f"{P}/posts/{post_id}").json()["direct_post_blocker"])
         r = self.d.post(f"{P}/posts/{post_id}/publish-youtube")
@@ -564,7 +622,8 @@ class YouTubePostingAndTrends(YouTubeAnalytics):
     def test_publish_refuses_what_it_cannot_send_safely(self):
         ids, _ = self.studio_setup(self.david_id, handles=("@alpha", "@stranger"))
         self.connect_posting(self.d)
-        # A channel the connected Google account does not own.
+        self.link_unowned(self.d, "@stranger", kind="posting")
+        # A channel the connected Google account does not own (any more).
         post_id = self.approved_post(self.david_id, ids["@stranger"])
         self.d.post(f"{P}/posts/{post_id}/approve")
         r = self.d.post(f"{P}/posts/{post_id}/publish-youtube")
@@ -611,6 +670,194 @@ class YouTubePostingAndTrends(YouTubeAnalytics):
         self.assertEqual(dict(chart[0].url.params)["videoCategoryId"], "28")
 
     # The analytics tests run once, in YouTubeAnalytics.
+    for _name in [n for n in dir(YouTubeAnalytics) if n.startswith("test_")]:
+        locals()[_name] = None
+    del _name
+
+
+class YouTubeAccountChoice(YouTubeAnalytics):
+    """Which Google account each YouTube channel uses (David's bug, 2026-11-11: his channel's Google account is a
+    different Gmail from his Library one). Same mock Google and accounts; the analytics tests are not repeated."""
+
+    BETA = [{"id": "UCbeta00000000000000000", "snippet": {"customUrl": "@beta", "title": "Beta Channel"}}]
+
+    def google_record(self, acct, email):
+        with accounts.as_account(acct):
+            return next(a for a in google._load()["accounts"].values() if a["email"] == email)
+
+    def test_another_google_account_is_added_without_touching_the_default(self):
+        self.sign_in_google(self.d, "owner@example.com")
+        library = self.d.get(f"{G}/status").json()
+        self.fake.channels_for["channel@example.com"] = self.fake.channels
+        query, answer = self.connect_another(self.d, "channel@example.com")
+        self.assertIn("Connected channel@example.com", answer.text)
+        scopes = query["scope"][0].split()
+        self.assertEqual(set(scopes), {"openid", "email", *youtube.SCOPES}, "identity and YouTube only, never Drive or Gmail")
+        self.assertIn("select_account", query["prompt"][0])
+        self.assertEqual(query["include_granted_scopes"], ["true"])
+        status = self.d.get(f"{P}/analytics/youtube/status").json()
+        link = self.channel_link(status, "@alpha")
+        self.assertTrue(link["connected"])
+        self.assertEqual((link["google_account"]["email"], link["google_account"]["youtube_only"]), ("channel@example.com", True))
+        self.assertEqual({a["email"] for a in status["google_accounts"]}, {"owner@example.com", "channel@example.com"})
+        # Library, Drive, Gmail and Calendar never see it: same accounts, same default as before.
+        after = self.d.get(f"{G}/status").json()
+        self.assertEqual([a["email"] for a in after["accounts"]], ["owner@example.com"])
+        self.assertEqual((after["default_account"], after["email"]), (library["default_account"], "owner@example.com"))
+        record = self.google_record(self.david_id, "channel@example.com")
+        self.assertFalse(any("drive" in s or "gmail" in s or "calendar" in s for s in record["granted_scopes"]))
+        with accounts.as_account(self.david_id):
+            self.assertEqual(google.resolve_account("david"), library["default_account"])
+        r = self.d.post(f"{G}/accounts/default", json={"account": record["id"], "purpose": "library"})
+        self.assertEqual(r.status_code, 409, "a YouTube-only account cannot become the Library default")
+
+    def test_another_account_works_with_no_library_sign_in_at_all(self):
+        self.fake.channels_for["channel@example.com"] = self.fake.channels
+        self.connect_another(self.d, "channel@example.com")
+        self.assertTrue(self.d.get(f"{P}/analytics/youtube/status").json()["connected"])
+        library = self.d.get(f"{G}/status").json()
+        self.assertFalse(library["connected"], "Library still asks for its own sign-in")
+        self.assertEqual(library["accounts"], [])
+        with accounts.as_account(self.david_id):
+            data = google._load()
+            self.assertIsNone(data.get("default_account"))
+            with self.assertRaises(google.GoogleError):
+                google.resolve_account("david")
+        # Signing in to the same Google account from Library later makes it an ordinary account.
+        self.sign_in_google(self.d, "channel@example.com")
+        self.assertNotIn("youtube_only", self.google_record(self.david_id, "channel@example.com"))
+        self.assertEqual(len(self.d.get(f"{G}/status").json()["accounts"]), 1, "found again by email, not added twice")
+
+    def test_picking_a_different_account_than_the_one_chosen_says_so(self):
+        self.sign_in_google(self.d, "owner@example.com")
+        r = self.d.post(f"{P}/analytics/youtube/connect", json={"channel_id": self.channel(self.d)})
+        query = parse_qs(urlsplit(r.json()["url"]).query)
+        self.fake.scope, self.fake.email = query["scope"][0], "channel@example.com"
+        answer = self.anon.get(f"{G}/oauth/callback", params={"state": query["state"][0], "code": "code"})
+        self.assertEqual(answer.status_code, 409)
+        self.assertIn("you chose channel@example.com, but Kairos asked for owner@example.com", answer.text)
+        self.assertIn("Use another Google account", answer.text)
+        with accounts.as_account(self.david_id):
+            self.assertEqual([a["email"] for a in google._load()["accounts"].values()], ["owner@example.com"])
+
+    def test_each_channel_syncs_through_its_own_google_account(self):
+        ids, now = self.studio_setup(self.david_id, ("@alpha", "@beta"))
+        with accounts.as_account(self.david_id):
+            a = make_posted(studio, ids["@alpha"], "a", "https://youtu.be/aaaaaaaaaaa", now - 2 * DAY)
+            b = make_posted(studio, ids["@beta"], "b", "https://youtu.be/bbbbbbbbbbb", now - 2 * DAY)
+        self.fake.videos = {"aaaaaaaaaaa": ("PT20S", "UCalpha0000000000000000"), "bbbbbbbbbbb": ("PT30S", "UCbeta00000000000000000")}
+        self.fake.analytics = {"aaaaaaaaaaa": metrics(10, 5), "bbbbbbbbbbb": metrics(20, 6)}
+        self.fake.channels_for = {"owner@example.com": self.fake.channels, "brand@example.com": self.BETA}
+        self.connect(self.d, "owner@example.com", "@alpha")
+        # owner@ does not have @beta: the chooser's other account does.
+        refused = self.d.post(f"{P}/analytics/youtube/connect", json={"channel_id": ids["@beta"]})
+        self.assertEqual(refused.status_code, 409)
+        self.connect_another(self.d, "brand@example.com", "@beta")
+        status = self.d.get(f"{P}/analytics/youtube/status").json()
+        self.assertEqual({c["handle"]: c["google_account"]["email"] for c in status["channels"]},
+                         {"@alpha": "owner@example.com", "@beta": "brand@example.com"})
+        self.fake.log.clear()
+        result = self.d.post(f"{P}/analytics/youtube/sync").json()["result"]
+        self.assertEqual((result["stored"], result["channels_not_owned"], result["errors"]), (2, [], {}))
+        self.assertEqual({s["post_id"] for s in self.snapshots(self.david_id)}, {a, b})
+        reports = {r.url.params["ids"]: r.headers["authorization"] for r in self.fake.hit("youtubeanalytics.googleapis.com")}
+        self.assertEqual(reports, {"channel==UCalpha0000000000000000": "Bearer access-owner@example.com",
+                                   "channel==UCbeta00000000000000000": "Bearer access-brand@example.com"})
+        # One channel's trouble stays on that channel: @beta's Google sign-in expires, @alpha still syncs.
+        with accounts.as_account(self.david_id):
+            data = google._load()
+            for account in data["accounts"].values():
+                if account["email"] == "brand@example.com":
+                    account["expires_at"] = 0
+            google._save(data)
+        self.fake.revoked.add("refresh-brand@example.com")
+        with accounts.as_account(self.david_id):
+            later = asyncio.run(youtube.sync(studio, now=now + 3 * 3600))
+        self.assertEqual(later["stored"], 1)
+        self.assertEqual((later["stopped"], list(later["errors"])), ("error", ["@beta"]))
+        status = self.d.get(f"{P}/analytics/youtube/status").json()
+        self.assertTrue(self.channel_link(status, "@beta")["needs_reconnect"])
+        self.assertFalse(self.channel_link(status, "@alpha")["needs_reconnect"])
+
+    def test_an_account_without_the_channel_is_refused_with_the_brand_account_case(self):
+        self.fake.channels_for["personal@example.com"] = []   # the person's own Google account; the channel is a Brand Account
+        _, answer = self.connect_another(self.d, "personal@example.com", "@alpha", status=409)
+        self.assertIn("personal@example.com does not own @alpha", answer.text)
+        self.assertIn("It has no YouTube channel of its own", answer.text)
+        self.assertIn("Brand Account", answer.text)
+        status = self.d.get(f"{P}/analytics/youtube/status").json()
+        self.assertIsNone(self.channel_link(status, "@alpha")["google_account"])
+        self.assertEqual(status["google_accounts"], [], "a YouTube-only account that links nothing is not kept")
+        # Picking the Brand Account itself in Google's chooser works.
+        self.fake.channels_for["alpha-brand@example.com"] = self.fake.channels
+        self.connect_another(self.d, "alpha-brand@example.com", "@alpha")
+        self.assertTrue(self.d.get(f"{P}/analytics/youtube/status").json()["connected"])
+
+    def test_consent_without_the_youtube_permission_adds_nothing(self):
+        r = self.d.post(f"{P}/posting/youtube/connect", json={"channel_id": self.channel(self.d), "new_account": True})
+        query = parse_qs(urlsplit(r.json()["url"]).query)
+        self.assertEqual(set(query["scope"][0].split()), {"openid", "email", *youtube_publish.SCOPES})
+        self.fake.scope, self.fake.email = "openid email https://www.googleapis.com/auth/youtube.readonly", "channel@example.com"
+        answer = self.anon.get(f"{G}/oauth/callback", params={"state": query["state"][0], "code": "code"})
+        self.assertEqual(answer.status_code, 409)
+        self.assertIn("leave the YouTube boxes ticked", answer.text)
+        self.assertEqual(self.d.get(f"{P}/posting/youtube/status").json()["google_accounts"], [])
+
+    def test_change_and_disconnect_per_channel(self):
+        ids, _ = self.studio_setup(self.david_id, ("@alpha", "@beta"))
+        self.fake.channels_for = {"owner@example.com": self.fake.channels + self.BETA, "brand@example.com": self.fake.channels}
+        self.sign_in_google(self.d, "owner@example.com")
+        self.connect_another(self.d, "brand@example.com", "@alpha", kind="posting")
+        self.connect(self.d, "owner@example.com", "@beta", kind="posting", sign_in=False)
+        status = self.d.get(f"{P}/posting/youtube/status").json()
+        owner_id = self.channel_link(status, "@beta")["google_account"]["id"]
+        self.assertEqual(self.channel_link(status, "@alpha")["google_account"]["email"], "brand@example.com")
+        # Change @alpha to owner@, which already holds the posting permission: linked at once, no Google window.
+        r = self.d.post(f"{P}/posting/youtube/connect", json={"channel_id": ids["@alpha"], "account": owner_id})
+        self.assertEqual((r.status_code, r.json().get("linked"), r.json().get("url")), (200, True, None), r.text)
+        status = r.json()["status"]
+        self.assertEqual(self.channel_link(status, "@alpha")["google_account"]["email"], "owner@example.com")
+        self.assertNotIn("brand@example.com", {a["email"] for a in status["google_accounts"]},
+                         "the YouTube-only account nothing uses any more is forgotten")
+        # Disconnect one channel; the other keeps its link, and the Library account stays.
+        status = self.d.delete(f"{P}/posting/youtube/channels/{ids['@alpha']}").json()
+        self.assertIsNone(self.channel_link(status, "@alpha")["google_account"])
+        self.assertTrue(self.channel_link(status, "@beta")["connected"])
+        self.assertEqual(len(self.d.get(f"{G}/status").json()["accounts"]), 1)
+        self.assertEqual(self.b.delete(f"{P}/posting/youtube/channels/999").status_code, 404)
+
+    def test_the_old_single_link_moves_onto_the_channels_it_covered(self):
+        self.sign_in_google(self.d, "owner@example.com")
+        record = self.google_record(self.david_id, "owner@example.com")
+        with accounts.as_account(self.david_id):
+            data = google._load()
+            data["accounts"][record["id"]]["granted_scopes"] += [*youtube.SCOPES, *youtube_publish.SCOPES]
+            google._save(data)
+            # The first version's files: one Google account for everything.
+            youtube._save({"google_account": record["id"], "requested_at": 5.0, "last_sync": 7.0})
+            youtube._save({"google_account": record["id"], "privacy": "unlisted"}, "posting")
+            # No channel yet: the link waits rather than being lost.
+            self.assertFalse(youtube.status("david")["connected"])
+            self.assertEqual(youtube._load()["google_account"], record["id"])
+            niche = studio.create_niche("Space")
+            alpha = studio.create_channel(niche["id"], "youtube", "@alpha")["id"]
+            beta = studio.create_channel(niche["id"], "youtube", "@beta")["id"]
+            studio.create_channel(niche["id"], "tiktok", "@alpha.tt")
+        status = self.d.get(f"{P}/analytics/youtube/status").json()
+        self.assertEqual({c["handle"]: c["google_account"]["id"] for c in status["channels"]}, {"@alpha": record["id"], "@beta": record["id"]})
+        self.assertEqual(status["last_sync"], 7.0)
+        posting = self.d.get(f"{P}/posting/youtube/status").json()
+        self.assertTrue(posting["connected"])
+        self.assertEqual(posting["privacy"], "unlisted")
+        with accounts.as_account(self.david_id):
+            saved = youtube._load()
+            self.assertNotIn("google_account", saved)
+            self.assertEqual(set(saved["channels"]), {str(alpha), str(beta)})
+            self.assertEqual(saved["channels"][str(alpha)]["linked_at"], 5.0)
+            self.assertEqual(set(youtube._load("posting")["channels"]), {str(alpha), str(beta)})
+        # Bea's account never sees David's links.
+        self.assertEqual(self.b.get(f"{P}/analytics/youtube/status").json()["channels"], [])
+
     for _name in [n for n in dir(YouTubeAnalytics) if n.startswith("test_")]:
         locals()[_name] = None
     del _name

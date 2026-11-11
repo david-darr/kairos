@@ -16,7 +16,9 @@ is recorded with what YouTube actually set. Public posts then go out through Pre
 Unverified against a real Google project (no account was used to build this): the containsSyntheticMedia field
 name and the private lock are from YouTube's published API notes as remembered, to confirm on first real use.
 
-Per account: data/accounts/<id>/content_studio/youtube_posting.json (which Google account, the privacy).
+Per channel, like analytics (youtube.py): data/accounts/<id>/content_studio/youtube_posting.json holds each YouTube
+channel's Google account for posting ({"channels": {channel id: {"google_account", ...}}}), the privacy and the last
+upload. Each channel posts through its own Google account, which must own it.
 """
 import asyncio
 import json
@@ -28,7 +30,6 @@ from urllib.parse import unquote
 
 from core import accounts
 from core import google_workspace as google
-from core.atomic_io import read_json, write_json_atomic
 
 from . import youtube
 from .store import StudioError
@@ -50,51 +51,25 @@ class PostingError(StudioError):
     pass
 
 
-def _state_path():
-    return os.path.join(accounts.account_dir(create=False), "content_studio", "youtube_posting.json")
-
-
 def _load():
-    state = read_json(_state_path(), {})
-    return state if isinstance(state, dict) else {}
+    return youtube._load("posting")
 
 
 def _save(state):
-    os.makedirs(os.path.dirname(_state_path()), exist_ok=True)
-    write_json_atomic(_state_path(), state)
+    youtube._save(state, "posting")
 
 
-def _link():
-    state = _load()
-    info = google.account_info(state.get("google_account")) if state.get("google_account") else None
-    granted = bool(info and info["connected"] and set(SCOPES) <= set(info["granted_scopes"]))
-    return state, info, granted
+def status(user=None, store=None):
+    state, out = youtube.link_status("posting", user, store)
+    out.update(privacy=state.get("privacy") or "private", privacy_choices=list(PRIVACY),
+               last_upload=state.get("last_upload"), notice=NOTICE)
+    return out
 
 
-def status():
-    state, info, granted = _link()
-    connected = bool(state.get("google_account") and granted)
-    return {"configured": google.configured(), "connected": connected,
-            "pending": bool(state.get("google_account")) and not connected,
-            "google_account": {"id": info["id"], "email": info["email"]} if info else None,
-            "needs_reconnect": bool(info and info.get("error")), "privacy": state.get("privacy") or "private",
-            "privacy_choices": list(PRIVACY), "scopes": list(SCOPES), "last_upload": state.get("last_upload"),
-            "notice": NOTICE}
-
-
-def connect_url(redirect_uri, user, google_account=None):
-    """The consent page that adds YouTube posting to one of this user's Google sign-ins."""
-    try:
-        ident = google.resolve_account(user, google_account)
-        url = google.start_sign_in(redirect_uri, user, account_id=ident, extra_scopes=SCOPES)
-    except google.GoogleError as exc:
-        raise PostingError(str(exc), 409 if exc.status == 401 else exc.status) from exc
-    state = _load()
-    if state.get("google_account") != ident:
-        state = {"google_account": ident, "privacy": state.get("privacy") or "private"}
-    state["requested_at"] = time.time()
-    _save(state)
-    return url
+def connect(redirect_uri, user, channel_id, google_account=None, new_account=False, store=None):
+    """Connect one YouTube channel for posting: the Google account that owns it gets youtube.upload (plus
+    youtube.readonly, so Kairos can check the channel). See youtube.connect_channel."""
+    return youtube.connect_channel("posting", redirect_uri, user, channel_id, google_account, new_account, store)
 
 
 def set_privacy(privacy):
@@ -106,13 +81,11 @@ def set_privacy(privacy):
     return status()
 
 
-def disconnect():
-    """Stops posting from Kairos. The grant itself is Google's to revoke (myaccount.google.com)."""
-    try:
-        os.remove(_state_path())
-    except FileNotFoundError:
-        pass
-    return status()
+def disconnect(user=None, channel_id=None, store=None):
+    """Stops posting from Kairos for one channel, or all of them (the privacy choice goes too). The grant itself
+    is Google's to revoke (myaccount.google.com)."""
+    youtube.unlink("posting", user, channel_id, store)
+    return status(user, store)
 
 
 # -- the file the Editor rendered ---------------------------------------------------------------------
@@ -211,10 +184,10 @@ def _ready(store, post_id):
     if store.audience(post)["made_for_kids"] is None:
         raise PostingError("Say whether this video is made for kids first (on the channel's Look or on the post): this blocky "
                            "world look draws children, and YouTube asks every upload.", 409)
-    state, info, granted = _link()
-    if not state.get("google_account") or not granted:
-        raise PostingError("Connect YouTube posting first.", 409)
-    return post, channel, state, render_file(post["render_ref"])
+    ident = youtube.connected_links("posting", store).get(channel["id"])
+    if ident is None:
+        raise PostingError(f"Connect YouTube posting for {channel['handle']} first.", 409)
+    return post, channel, ident, render_file(post["render_ref"])
 
 
 async def publish(store, post_id, by, now=None):
@@ -226,13 +199,19 @@ async def publish(store, post_id, by, now=None):
     _sending.add(key)
     try:
         async with _locks.setdefault(account, asyncio.Lock()):
-            post, channel, state, path = _ready(store, post_id)
-            ident = state["google_account"]
-            owned = await youtube._owned_channels(ident)
+            post, channel, ident, path = _ready(store, post_id)
+            state = _load()
+            try:
+                owned = await youtube._owned_channels(ident)
+            except youtube._Quota as exc:
+                raise PostingError("YouTube's quota for your project ran out. Try again tomorrow, or use Prepare post.", 429) from exc
+            except StudioError as exc:
+                raise PostingError(exc.detail, exc.status) from exc
             owner_id = youtube._owner_of(channel, owned)
             if owner_id is None:
-                raise PostingError(f"The connected Google account does not own {channel['handle']}. Connect posting "
-                                   "with the Google account that owns this channel.", 409)
+                email = (google.account_info(ident) or {}).get("email")
+                raise PostingError("The connected Google account does not own this channel. "
+                                   + youtube.not_owned_text(email, channel["handle"], owned), 409)
             privacy = state.get("privacy") or "private"
             prep = store.preparation_for(post_id)
             publish_at = prep["scheduled_at"] if prep and prep.get("scheduled_at") and prep["scheduled_at"] > time.time() + 60 else None

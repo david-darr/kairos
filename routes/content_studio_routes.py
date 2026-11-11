@@ -431,32 +431,49 @@ def put_settings(body: SettingsBody, user: str = Depends(require_user)):
 # -- YouTube analytics (read-only) ----------------------------------------------------------------
 
 class YouTubeConnectBody(Body):
-    account: Optional[str] = Field(None, max_length=256)  # which connected Google sign-in; default is the user's usual one
+    channel_id: int                                       # the Content Studio YouTube channel to connect
+    account: Optional[str] = Field(None, max_length=256)  # one of the user's connected Google accounts; default is their usual one
+    new_account: bool = False                             # Use another Google account: Google's chooser adds one
+
+
+async def _studio_call(coro):
+    try:
+        return await coro
+    except StudioError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
 
 
 @router.get("/analytics/youtube/status")
 def youtube_status(user: str = Depends(require_user)):
-    return youtube.status()
+    return youtube.status(user, studio)
 
 
 @router.post("/analytics/youtube/connect")
-def youtube_connect(body: YouTubeConnectBody = YouTubeConnectBody(), user: str = Depends(require_user)):
-    """The consent URL that adds the two read-only YouTube scopes to a Google sign-in. Open it in the browser."""
+async def youtube_connect(body: YouTubeConnectBody, user: str = Depends(require_user)):
+    """Connect one YouTube channel's analytics: {"url"} (Google's page, opened in the browser), or {"linked": true}
+    when the chosen Google account already holds the read-only permissions and owns the channel."""
     from routes.google_routes import CALLBACK
-    return {"url": _run(youtube.connect_url, local_api_base() + CALLBACK, user, body.account)}
+    out = await _studio_call(youtube.connect(local_api_base() + CALLBACK, user, body.channel_id, body.account,
+                                             body.new_account, studio))
+    return {**out, "status": youtube.status(user, studio)}
 
 
 @router.post("/analytics/youtube/sync")
 async def youtube_sync(user: str = Depends(require_user)):
     try:
-        return {"result": await youtube.sync(studio), "status": youtube.status()}
+        return {"result": await youtube.sync(studio), "status": youtube.status(user, studio)}
     except StudioError as exc:
         raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
 
 
 @router.delete("/analytics/youtube")
 def youtube_disconnect(user: str = Depends(require_user)):
-    return youtube.disconnect()
+    return _run(youtube.disconnect, user, None, studio)
+
+
+@router.delete("/analytics/youtube/channels/{channel_id}")
+def youtube_disconnect_channel(channel_id: int, user: str = Depends(require_user)):
+    return _run(youtube.disconnect, user, channel_id, studio)
 
 
 # -- YouTube posting through the person's own Google project (D1) --------------------------------------
@@ -467,24 +484,32 @@ class PrivacyBody(Body):
 
 @router.get("/posting/youtube/status")
 def youtube_posting_status(user: str = Depends(require_user)):
-    return youtube_publish.status()
+    return youtube_publish.status(user, studio)
 
 
 @router.post("/posting/youtube/connect")
-def youtube_posting_connect(body: YouTubeConnectBody = YouTubeConnectBody(), user: str = Depends(require_user)):
-    """The consent URL that adds YouTube upload to a Google sign-in. Open it in the browser."""
+async def youtube_posting_connect(body: YouTubeConnectBody, user: str = Depends(require_user)):
+    """Connect one YouTube channel for posting: {"url"} to open, or {"linked": true}. See the analytics connect."""
     from routes.google_routes import CALLBACK
-    return {"url": _run(youtube_publish.connect_url, local_api_base() + CALLBACK, user, body.account)}
+    out = await _studio_call(youtube_publish.connect(local_api_base() + CALLBACK, user, body.channel_id, body.account,
+                                                     body.new_account, studio))
+    return {**out, "status": youtube_publish.status(user, studio)}
 
 
 @router.put("/posting/youtube/privacy")
 def youtube_posting_privacy(body: PrivacyBody, user: str = Depends(require_user)):
-    return _run(youtube_publish.set_privacy, body.privacy)
+    _run(youtube_publish.set_privacy, body.privacy)
+    return youtube_publish.status(user, studio)
 
 
 @router.delete("/posting/youtube")
 def youtube_posting_disconnect(user: str = Depends(require_user)):
-    return youtube_publish.disconnect()
+    return _run(youtube_publish.disconnect, user, None, studio)
+
+
+@router.delete("/posting/youtube/channels/{channel_id}")
+def youtube_posting_disconnect_channel(channel_id: int, user: str = Depends(require_user)):
+    return _run(youtube_publish.disconnect, user, channel_id, studio)
 
 
 @router.post("/posts/{post_id}/publish-youtube")

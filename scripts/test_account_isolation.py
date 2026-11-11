@@ -148,6 +148,20 @@ def fill(account):
         studio.record_page_read("tiktok", "not_yours", post["id"], "https://www.tiktok.com/tiktokstudio/analytics/1", f"{m} read")
     account.ids.setdefault("preparation", []).append(str(prep["id"]))
     account.seeded["prepared posts"] = "file"
+    # YouTube links per channel (2026-11-11): a YouTube channel linked to a Google account added only for YouTube, both named
+    # with the marker, written to the account's own files (a real link needs Google); the status routes are then read across.
+    from core import google_workspace as google
+    from services.content_studio import youtube
+    with accounts.as_account(auth_manager.account_id(account.name)):
+        yt = studio.create_channel(niche["id"], "youtube", f"@{m}")
+        ident = f"acct_{account.name}_youtube"
+        data = google._load()
+        data.setdefault("accounts", {})[ident] = {"id": ident, "owner": account.name, "added_at": 1.0, "youtube_only": True,
+                                                  "email": f"{m}@example.test", "granted_scopes": list(google.YOUTUBE_SCOPES)}
+        google._save(data)
+        youtube._save({"channels": {str(yt["id"]): {"google_account": ident, "linked_at": 1.0}}})
+    account.youtube = (yt["id"], ident)
+    account.seeded["youtube links"] = "file"
     # Official TikTok and Instagram apps (2026-11-10): each account's own app keys through the route, the marker as the client
     # key (shown back to its owner) and the account's secret as the app secret (never shown to anyone).
     account.seed("tiktok app", "PUT", "/api/content-studio/social/apps/tiktok", {"key": m, "secret": account.secret})
@@ -464,6 +478,27 @@ class AccountIsolation(unittest.TestCase):
             raw = Path(social_auth._path()).read_text(encoding="utf-8")
             self.assertNotIn(bea.secret, raw, "sealed on disk")
             self.assertNotIn(david.mark, raw)
+
+    def test_youtube_links_and_their_google_accounts_are_each_accounts_own(self):
+        # Each YouTube channel's Google account (Content Studio, 2026-11-11) is listed to its own account only, a YouTube-only
+        # Google account never shows in Library, and one account cannot connect a channel with the other's Google account.
+        david, bea = self.accounts["david"], self.accounts["bea"]
+        for me, other in ((david, bea), (bea, david)):
+            for path in ("/api/content-studio/analytics/youtube/status", "/api/content-studio/posting/youtube/status"):
+                r, err = call(me.client, "GET", path)
+                self.assertIsNone(err)
+                self.assertEqual(r.status_code, 200, r.text)
+                self.assertNotIn(other.mark, r.text, f"{me.name} read {other.name}'s YouTube link via {path}")
+            status = call(me.client, "GET", "/api/content-studio/analytics/youtube/status")[0].json()
+            mine = next(c for c in status["channels"] if c["handle"] == f"@{me.mark}")
+            self.assertEqual(mine["google_account"]["email"], f"{me.mark}@example.test")
+            self.assertEqual([a["id"] for a in status["google_accounts"]], [me.youtube[1]])
+            library, _ = call(me.client, "GET", "/api/google/status")
+            self.assertNotIn(me.mark, library.text, "a YouTube-only Google account is not a Library account")
+            for kind in ("analytics", "posting"):
+                r, _ = call(me.client, "POST", f"/api/content-studio/{kind}/youtube/connect",
+                            json={"channel_id": me.youtube[0], "account": other.youtube[1]})
+                self.assertEqual(r.status_code, 404, r.text)
 
     def test_system_status_names_only_the_callers_discord_bots(self):
         from core.channels import discord_channel

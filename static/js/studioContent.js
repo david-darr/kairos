@@ -223,21 +223,22 @@ export async function mountContent(host, { signal, openVideos } = {}) {
   // After Google's consent page, the status is read again when the person comes back to Kairos.
   function reloadOnReturn() { window.addEventListener('focus', () => { if (alive()) reload(); }, { once: true }); }
 
+  // YouTube in the Connections library: analytics and posting, each with one row per YouTube channel, because each
+  // channel reads and posts through the Google account that owns it (David, 2026-11-11: his channel's account is not his
+  // Library one). Connect and Change open the account chooser; the channel's Settings tab has the same rows.
   function youtubeGroup() {
     const a = data.yt, p = data.ytPost;
     if (!a && !p) return group({ title: 'YouTube' }, [empty('YouTube connections could not load. Try again in a moment.')]);
     const configured = (a || p).configured;
     const rows = [];
-    if (!configured) rows.push(row({ title: 'Google first', description: 'Set up Google in Library (your own Google OAuth client and a sign-in), then connect YouTube here.' }));
+    if (!configured) rows.push(row({ title: 'Google first', description: 'Set up Google in Library (your own Google OAuth client), then connect each YouTube channel here or in its Settings.' }));
     const [aLabel, aTone] = M.connectionState(a);
     const aControls = [pill(aLabel, aTone)];
     if (a?.connected) {
-      aControls.push(btn('Sync now', async () => { const out = await send('/analytics/youtube/sync'); toast(M.syncText(out.result)); await reload(); }, '', { 'aria-label': 'Sync YouTube numbers now' }),
-        btn('Disconnect', async () => { await remove('/analytics/youtube'); toast('YouTube analytics disconnected. Numbers already stored stay.'); await reload(); }, 'quiet', { 'aria-label': 'Disconnect YouTube analytics' }));
-    } else if (configured) {
-      aControls.push(btn(a?.needs_reconnect ? 'Reconnect' : 'Connect', async () => { const out = await send('/analytics/youtube/connect'); await openGoogle(out.url); reloadOnReturn(); toast('Finish in the Google window, then come back here.'); }, '', { 'aria-label': 'Connect YouTube analytics' }));
+      aControls.push(btn('Sync now', async () => { const out = await send('/analytics/youtube/sync'); toast(M.syncText(out.result)); await reload(); }, '', { 'aria-label': 'Sync YouTube numbers now' }));
     }
     rows.push(row({ title: 'Analytics', description: M.analyticsText(a), control: aControls, attrs: { 'data-youtube': 'analytics' } }));
+    if (a && configured) rows.push(...youtubeChannelRows('analytics', a));
     const [pLabel, pTone] = M.connectionState(p);
     const pControls = [pill(pLabel, pTone)];
     if (p?.connected) {
@@ -245,13 +246,86 @@ export async function mountContent(host, { signal, openVideos } = {}) {
       privacy.addEventListener('change', async () => {
         try { data.ytPost = await put('/posting/youtube/privacy', { privacy: privacy.value }); toast(`Uploads ask for ${privacy.value}.`); } catch (error) { say(error); privacy.value = data.ytPost.privacy; }
       });
-      pControls.push(privacy, btn('Disconnect', async () => { await remove('/posting/youtube'); toast('YouTube posting disconnected.'); await reload(); }, 'quiet', { 'aria-label': 'Disconnect YouTube posting' }));
-    } else if (configured) {
-      pControls.push(btn(p?.needs_reconnect ? 'Reconnect' : 'Connect', async () => { const out = await send('/posting/youtube/connect'); await openGoogle(out.url); reloadOnReturn(); toast('Finish in the Google window, then come back here.'); }, '', { 'aria-label': 'Connect YouTube posting' }));
+      pControls.push(privacy);
     }
     rows.push(row({ title: 'Posting', description: M.postingText(p), control: pControls, attrs: { 'data-youtube': 'posting' },
       below: p ? el('p', { class: 'sc-dim sc-notice', text: p.notice }) : null }));
-    return group({ title: 'YouTube', description: 'Your own Google project. Analytics only reads; posting only sends posts you approved.' }, rows);
+    if (p && configured) rows.push(...youtubeChannelRows('posting', p));
+    return group({ title: 'YouTube', description: 'Your own Google project. Analytics only reads; posting only sends posts you approved. Each channel uses the Google account that owns it.' }, rows);
+  }
+
+  // One row per YouTube channel (live and paused; archived ones keep their link quietly), or a hint when there are none.
+  function youtubeChannelRows(kind, status) {
+    const links = (status.channels || []).filter(c => c.status !== 'archived');
+    if (!links.length) return [row({ title: 'No YouTube channels yet', description: 'Add a YouTube channel, then connect it here.', attrs: { 'data-youtube-channel': '', 'data-youtube-kind': kind } })];
+    return links.map(link => youtubeLinkRow(kind, status, link, link.handle));
+  }
+
+  // One channel's link for analytics or posting: which Google account it uses, with Connect, or Change and Disconnect.
+  function youtubeLinkRow(kind, status, link, title) {
+    const what = kind === 'analytics' ? 'YouTube analytics' : 'YouTube posting';
+    const [label, tone] = M.linkState(link);
+    const controls = [pill(label, tone)];
+    if (status.configured) {
+      if (link.google_account) {
+        controls.push(btn('Change', () => accountChooser(kind, status, link), '', { 'aria-label': `Change the Google account ${link.handle} uses for ${what}` }),
+          btn('Disconnect', async () => {
+            await remove(`/${kind}/youtube/channels/${link.channel_id}`);
+            toast(`${link.handle} disconnected from ${what}.${kind === 'analytics' ? ' Numbers already stored stay.' : ''}`); await reload();
+          }, 'quiet', { 'aria-label': `Disconnect ${link.handle} from ${what}` }));
+      } else {
+        controls.push(btn('Connect', () => accountChooser(kind, status, link), 'primary', { 'aria-label': `Connect ${link.handle} to ${what}` }));
+      }
+    }
+    return row({ title, description: M.linkText(link), control: controls, cls: 'sc-yt-link',
+      attrs: { 'data-youtube-channel': link.channel_id, 'data-youtube-kind': kind } });
+  }
+
+  // Which Google account a channel uses: one already connected to Kairos, or Use another Google account (Google's chooser,
+  // which adds that account for YouTube only). An account that already holds the permission and owns the channel links
+  // at once; otherwise Google's window asks for it.
+  function accountChooser(kind, status, link) {
+    const what = kind === 'analytics' ? 'YouTube analytics' : 'YouTube posting';
+    const { items, selected } = M.accountChoices(status, link);
+    const name = `sc-yt-account-${kind}-${link.channel_id}`;
+    const choices = items.map((item, i) => {
+      const input = el('input', { type: 'radio', name, value: item.value, ...(item.note ? { 'aria-describedby': `${name}-note-${i}` } : {}) });
+      input.checked = item.value === selected;
+      return el('label', { class: 'sc-choice', 'data-account-choice': item.value }, [input,
+        el('span', { class: 'sc-choice-text' }, [el('span', { class: 'sc-choice-label', text: item.label }),
+          item.note ? el('span', { class: 'sc-dim', id: `${name}-note-${i}`, text: item.note }) : null])]);
+    });
+    const problem = el('p', { class: 'set-error', role: 'alert' });
+    const body = el('div', { class: 'sc-dialog' }, [
+      note(`Pick the Google account that owns ${link.handle} on YouTube. Kairos checks that it does before using it.`),
+      el('div', { class: 'sc-choices', role: 'radiogroup', 'aria-label': `Google account for ${link.handle}` }, choices), problem]);
+    const submit = btn('Continue', async () => {
+      problem.textContent = '';
+      const value = body.querySelector(`input[name="${name}"]:checked`)?.value;
+      if (!value) { problem.textContent = 'Choose a Google account first.'; return; }
+      let out;
+      try { out = await send(`/${kind}/youtube/connect`, value === 'new' ? { channel_id: link.channel_id, new_account: true } : { channel_id: link.channel_id, account: value }); }
+      catch (error) { problem.textContent = M.loadFailure(error); return; }
+      dialog.close();
+      if (out.url) {
+        await openGoogle(out.url); reloadOnReturn();
+        toast(value === 'new' ? `In Google's window, choose the account that owns ${link.handle}, then come back here.` : 'Finish in the Google window, then come back here.');
+      } else { toast(`${link.handle} connected to ${what}.`); await reload(); }
+    }, 'primary', { 'aria-label': `Continue connecting ${link.handle}` });
+    const dialog = openPanelDialog({ title: `Google account for ${link.handle}`, body, footer: el('div', {}, [submit]), className: 'sc-dialog-panel' });
+  }
+
+  // A YouTube channel's own Settings: its Google account for analytics and for posting.
+  function youtubeConnectionGroup(channel) {
+    const a = data.yt, p = data.ytPost;
+    if (!a && !p) return group({ title: 'YouTube connection' }, [empty('The connection could not load. Try again in a moment.')]);
+    const rows = [];
+    if (!(a || p).configured) rows.push(row({ title: 'Google first', description: 'Set up Google in Library (your own Google OAuth client), then connect this channel here.' }));
+    for (const [kind, status, title] of [['analytics', a, 'Analytics'], ['posting', p, 'Posting']]) {
+      const link = status?.channels?.find(c => c.channel_id === channel.id);
+      if (link) rows.push(youtubeLinkRow(kind, status, link, title));
+    }
+    return group({ title: 'YouTube connection', description: 'The Google account that owns this channel. It can differ from your Library account, and each channel can use its own.', cls: 'sc-yt-conn' }, rows);
   }
 
   // The person's own TikTok or Meta app (services/content_studio/social_auth.py): its key and secret (sealed, never shown
@@ -434,7 +508,8 @@ export async function mountContent(host, { signal, openVideos } = {}) {
 
   function settingsView(channel) {
     if (channel.status === 'archived') return [channelStatusGroup(channel), note('An archived channel keeps its history. Restore it to change its settings.')];
-    return [channelStatusGroup(channel), ...(SOCIAL_NAMES[channel.platform] ? [socialConnectionGroup(channel)] : []), ...lookForm(channel)];
+    return [channelStatusGroup(channel), ...(SOCIAL_NAMES[channel.platform] ? [socialConnectionGroup(channel)] : []),
+      ...(channel.platform === 'youtube' ? [youtubeConnectionGroup(channel)] : []), ...lookForm(channel)];
   }
 
   // -- pipeline --------------------------------------------------------------------------------
@@ -722,9 +797,9 @@ export async function mountContent(host, { signal, openVideos } = {}) {
     const rows = [row({ title: 'Prepare post', attrs: { 'data-publish-route': 'prepare' }, control: pill('Every post', 'ok'),
       description: `Kairos assembles each approved post for ${M.platformName(channel.platform)} and fills its upload page in the Kairos Browser. You press ${M.POST_BUTTONS[channel.platform] || 'Post'} yourself.` })];
     if (channel.platform === 'youtube') {
-      const p = data.ytPost, [label, tone] = M.connectionState(p);
-      rows.push(row({ title: 'Post straight to YouTube', description: M.postingText(p), attrs: { 'data-publish-route': 'youtube-api' }, control: [pill(label, tone),
-        btn('Connections', () => go('lib:connections'), 'quiet', { 'aria-label': 'Open YouTube connections' })] }));
+      const p = data.ytPost, link = p?.channels?.find(c => c.channel_id === channel.id), [label, tone] = link ? M.linkState(link) : M.connectionState(p);
+      rows.push(row({ title: 'Post straight to YouTube', description: link ? M.linkText(link) : M.postingText(p), attrs: { 'data-publish-route': 'youtube-api' }, control: [pill(label, tone),
+        btn('Settings', () => go(channel.id, 'settings'), 'quiet', { 'aria-label': `Open the YouTube connection of ${M.channelName(channel)}` })] }));
     }
     const official = SOCIAL_NAMES[channel.platform];
     let connected = false;
