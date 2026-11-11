@@ -536,10 +536,10 @@ module.exports = async ({ js, win, waitFor, delay, navigate, capture, writes, re
       ['hero action', '.dashboard-actions .btn.primary'], ['Customize', '.hm-customize']];
     const lost = [];
     for (const [name, selector] of targets) {
-      const label = await js(`(() => { const n = document.querySelector(${JSON.stringify(selector)}); if (!n) return null; n.focus(); return n.textContent.trim() + '|' + n.className; })()`);
+      const label = await js(`(() => { const n = document.querySelector(${JSON.stringify(selector)}); if (!n) return null; n.focus(); return n.textContent.trim().replace(/[0-9]+[smhd] ago$/, '') + '|' + n.className; })()`);
       if (!label) { lost.push(name + ' (missing)'); continue; }
       await refreshHome();
-      const after = await js(`(() => { const a = document.activeElement; return a && a !== document.body ? a.textContent.trim() + '|' + a.className : 'body'; })()`);
+      const after = await js(`(() => { const a = document.activeElement; return a && a !== document.body ? a.textContent.trim().replace(/[0-9]+[smhd] ago$/, '') + '|' + a.className : 'body'; })()`);
       if (after !== label) lost.push(`${name}: focus was "${label.split('|')[0]}", now "${after.split('|')[0]}"`);
     }
     assert.deepEqual(lost, [], 'a Home refresh keeps keyboard focus where it was');
