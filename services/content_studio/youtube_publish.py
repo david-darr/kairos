@@ -225,13 +225,17 @@ async def publish(store, post_id, by, now=None, guard=None):
                 privacy = "private"   # a scheduled upload is private until YouTube publishes it at publish_at
             with open(path, "rb") as handle:
                 content, kind = _body(metadata(post, privacy, publish_at, store.audience(post)["made_for_kids"]), handle.read())
-            problem = guard() if guard else None
-            if problem:
-                raise PostingError(f"Not posted: {problem}", 409)
+
+            def check():
+                problem = guard() if guard else None
+                if problem:
+                    raise PostingError(f"Not posted: {problem}", 409)
+            check()
             try:
                 answer = await google.request("youtube_upload", "POST", "/videos",
                                               params={"part": "snippet,status", "uploadType": "multipart"},
-                                              content=content, content_type=kind, account=ident, timeout=UPLOAD_TIMEOUT_S)
+                                              content=content, content_type=kind, account=ident, timeout=UPLOAD_TIMEOUT_S,
+                                              before=check)
             except google.GoogleError as exc:
                 problem = youtube.classify(exc, "youtube_upload")
                 if problem and problem["kind"] in ("api_disabled", "wrong_project"):

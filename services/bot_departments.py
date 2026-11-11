@@ -356,7 +356,21 @@ def set_flags(ident, user=None, *, hands_off=None, paused=None):
                 target[key] = value
         target["revision"] = target["revision"] + 1
         save(registry_path(), data)
-        return copy.deepcopy(target)
+        result = copy.deepcopy(target)
+    if paused:
+        _cancel_waiting(ident, user)
+    return result
+
+
+def _cancel_waiting(ident, user=None):
+    """Pause team: every approval the team's bots are waiting on is cancelled at once, and its card settles."""
+    try:
+        from core import permissions
+        ids = {b["id"] for b in members(ident, user)}
+        permissions.cancel_pending(lambda meta: meta.get("bot_id") in ids,
+                                   "The team was paused, so the action did not run.")
+    except Exception:
+        pass
 
 
 def prune():

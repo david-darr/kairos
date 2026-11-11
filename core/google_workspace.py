@@ -599,7 +599,9 @@ async def _token(account_id: str | None = None, force: bool = False) -> str:
 async def request(api: str, method: str, path: str, *, params: dict | None = None,
                   body: dict | None = None, content: bytes | None = None,
                   content_type: str | None = None, raw: bool = False, account: str | None = None,
-                  timeout: float = 45) -> dict | bytes:
+                  timeout: float = 45, before=None) -> dict | bytes:
+    """`before`, when given, runs just before every attempt, the retry after a refreshed token included; it raises to
+    stop an irreversible call (a bot-made YouTube upload, services/content_studio/handsoff.py)."""
     decoded = path
     for _ in range(3):
         decoded = unquote(decoded)
@@ -611,6 +613,8 @@ async def request(api: str, method: str, path: str, *, params: dict | None = Non
     url = HOSTS[api] + path
     for retry in range(2):
         token = await _token(account, force=bool(retry))
+        if before:
+            before()
         headers = {"Authorization": f"Bearer {token}"}
         if content_type:
             headers["Content-Type"] = content_type

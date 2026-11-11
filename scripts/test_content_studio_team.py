@@ -303,7 +303,13 @@ class StudioToolTests(unittest.TestCase):
         post = self.rendered_post()
         studio.submit_for_approval(post["id"])
         self.assertIn("Only the Publisher", call("content_studio_publish_youtube", bots["Editor"], post_id=post["id"]))
-        # Every bot-made post passes the one gate first (services/content_studio/handsoff.py gate, 2026-11-11).
+        # Every bot-made post passes the one gate first (services/content_studio/handsoff.py gate, 2026-11-11). Called
+        # straight, the handler knows of no approval, so with hands-off off it refuses; as if the person allowed it:
+        self.assertIn("hands-off posting is off", call("content_studio_publish_youtube", bots["Publisher"], post_id=post["id"]))
+        from core import bot_policy
+        person = patch.object(bot_policy, "admission", return_value="person")
+        person.start()
+        self.addCleanup(person.stop)
         self.assertIn("only an approved post goes out", call("content_studio_publish_youtube", bots["Publisher"], post_id=post["id"]))
         studio.approve(post["id"], "david")
         self.assertIn("Connect YouTube posting for @space first", call("content_studio_publish_youtube", bots["Publisher"], post_id=post["id"]))

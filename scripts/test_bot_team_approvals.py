@@ -390,5 +390,55 @@ class ReviewFindings(TeamCase):
         self.assertIsNone(permissions.stored_decision(f"chat:{mate}", "manage_routine", None, True, b, {"action": "delete"}))
 
 
+class SecondReview(TeamCase):
+    """Codex's re-review of 2026-11-11, kept fixed."""
+
+    async def test_an_outer_approval_covers_only_its_own_handler_once(self):
+        bot = make_bot("Outer")
+        set_mode(bot, "ask")
+        sid = make_thread(bot)
+        ready, checked = asyncio.Event(), {}
+
+        async def parallel_native_call():   # started before the approval, like a native Bash beside a long run_code
+            await ready.wait()
+            checked["bash"] = bot_policy.authorize_operation(bot_id=bot, tool="Bash", arguments={"command": "rm -rf /x"},
+                                                             surface=f"chat:{sid}")
+        other = asyncio.create_task(parallel_native_call())
+        await asyncio.sleep(0)
+        outer = bot_policy.authorize_operation(bot_id=bot, tool="run_code", arguments={"code": "print(1)"},
+                                               surface=f"chat:{sid}", outer=True)
+        bot_policy.mark_inflight(outer, source="person")   # the person allowed run_code
+        ready.set()
+        await other
+        self.assertEqual(checked["bash"].action, "ask", "a parallel call used the run_code approval")
+        inner = bot_policy.authorize_operation(bot_id=bot, tool="run_code", arguments={"code": "print(2)"},
+                                               surface=f"chat:{sid}")
+        self.assertEqual((inner.action, inner.source), ("allow", "outer"))
+        again = bot_policy.authorize_operation(bot_id=bot, tool="run_code", arguments={"code": "print(2)"},
+                                               surface=f"chat:{sid}")
+        self.assertEqual(again.action, "ask", "an outer approval was used twice")
+        bot_policy.mark_inflight(outer, source="person")
+        bot_policy.clear_inflight(bot)   # the call finished
+        self.assertEqual(bot_policy.authorize_operation(bot_id=bot, tool="run_code", arguments={"code": "print(2)"},
+                                                        surface=f"chat:{sid}").action, "ask")
+
+    async def test_pausing_a_team_cancels_what_it_waits_on_and_voids_late_answers(self):
+        bot = make_bot("Waiting")
+        set_mode(bot, "ask")
+        crew = self.team("Pausable", [bot])
+        sid = make_thread(bot)
+        task, payload = await self.asked(f"chat:{sid}", tool="Write", arguments={"file_path": "a.txt"}, agent_id=bot, is_admin=True)
+        bot_departments.set_flags(crew["id"], self.user, paused=True)
+        decision = await asyncio.wait_for(task, timeout=5)
+        self.assertEqual(decision.behavior, "deny")
+        self.assertIn("paused", decision.reason)
+        outcome = self.outcome(bot, "Write", {"file_path": "a.txt"}, surface=f"chat:{sid}")
+        self.assertIn("paused", bot_policy.live_denial(bot, sid, outcome))
+        read = self.outcome(bot, "Read", {"file_path": "a.txt"}, surface=f"chat:{sid}")
+        self.assertIsNone(bot_policy.live_denial(bot, sid, read))
+        bot_departments.set_flags(crew["id"], self.user, paused=False)
+        self.assertIsNone(bot_policy.live_denial(bot, sid, outcome))
+
+
 if __name__ == "__main__":
     unittest.main()

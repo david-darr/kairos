@@ -734,7 +734,11 @@ class InstagramPosting(Base):
     def test_the_publisher_bots_tool_posts_an_approved_reel(self):
         import core.bot_content_studio_tools as tools
         ctx = type("Ctx", (), {})()
-        with patch.object(tools, "_data", lambda ctx, label, value: json.dumps(value)):
+        from core import bot_policy
+        # The handler is called straight, as if the person allowed this call (the registry's gate records how a call
+        # was let through; a call let through only by hands-off posting needs it still on).
+        with patch.object(tools, "_data", lambda ctx, label, value: json.dumps(value)), \
+                patch.object(bot_policy, "admission", return_value="person"):
             out = run(tools._publish_instagram({"post_id": self.post["id"]}, ctx, {"name": "Publisher"}, "publisher"))
         self.assertIn("https://www.instagram.com/reel/DAbCdEfGhIj/", out)
         self.assertEqual(studio.evidence(self.post["id"], "api_post")[0]["body"]["by"], "Publisher")

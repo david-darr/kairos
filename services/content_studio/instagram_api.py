@@ -64,7 +64,8 @@ def _limited(response):
     return isinstance(err, dict) and err.get("code") in RATE_CODES
 
 
-async def _call(channel_id, method, path, *, params=None, data=None, url=None, headers=None, content=None, timeout=None):
+async def _call(channel_id, method, path, *, params=None, data=None, url=None, headers=None, content=None, timeout=None,
+                before=None):
     """One Graph call with the channel's Page token in the Authorization header (never in the address)."""
     access = await social_auth.token(channel_id, "instagram")
     kwargs = {"params": params, "data": data, "headers": {"Authorization": f"Bearer {access}", **(headers or {})}}
@@ -72,7 +73,7 @@ async def _call(channel_id, method, path, *, params=None, data=None, url=None, h
         kwargs["content"] = content
     if timeout:
         kwargs["timeout"] = timeout
-    response = await send("instagram", method, url or (_graph() + path), limited=_limited, **kwargs)
+    response = await send("instagram", method, url or (_graph() + path), limited=_limited, before=before, **kwargs)
     data_out = body(response)
     if response.status_code < 400 and not data_out.get("error"):
         return data_out
@@ -149,6 +150,10 @@ async def publish(store, post_id, by, now=None, guard=None):
     _sending.add(key)
     try:
         async with _locks.setdefault(account, asyncio.Lock()):
+            already = social_auth.published(post_id) or {}
+            if already.get("platform") == "instagram" and already.get("media_id"):
+                raise SocialError(f"Instagram already has this post (media {already['media_id']}), so it is not sent again. "
+                                  "Record its link with Mark posted if it is missing.", 409)
             post, channel, prep, path, package = social.package_for(store, post_id, by, "instagram")
             if os.path.getsize(path) > MAX_BYTES:
                 raise SocialError("Instagram's API takes Reels up to 300 MB. Make a smaller export, or use Open upload page.", 413)
@@ -172,26 +177,36 @@ async def publish(store, post_id, by, now=None, guard=None):
                     raise InstagramError("Meta answered without a container id. Try again.", 502)
                 await _upload(channel["id"], container_id, path)
                 await _wait(channel["id"], container_id)
-                problem = guard() if guard else None
-                if problem:
-                    raise SocialError(f"Not posted: {problem}", 409)
-                done = await _call(channel["id"], "POST", f"/{ig_user}/media_publish", data={"creation_id": container_id})
+
+                def check():
+                    problem = guard() if guard else None
+                    if problem:
+                        raise SocialError(f"Not posted: {problem}", 409)
+                done = await _call(channel["id"], "POST", f"/{ig_user}/media_publish", data={"creation_id": container_id},
+                                   before=check)
                 media_id = str(done.get("id") or "")
                 if not media_id:
                     raise InstagramError("Meta answered without a post id; check Instagram before trying again.", 502)
-                social_auth.remember_publish(post_id, platform="instagram", media_id=media_id, channel_id=channel["id"],
-                                             at=time.time() if now is None else now)
-                info = await _call(channel["id"], "GET", f"/{media_id}", params={"fields": "permalink,shortcode"})
             except SocialError as exc:
                 prepare.record_failure(store, post_id, exc.detail, now=now)
                 raise
+            # Instagram has it now: record that at once, before anything else can fail, so it is never sent again and
+            # counts toward the channel's posts for the day (review finding, 2026-11-11).
+            social_auth.remember_publish(post_id, platform="instagram", media_id=media_id, channel_id=channel["id"],
+                                         at=time.time() if now is None else now)
+            store.mark_published(post_id, now=now)
+            try:
+                info = await _call(channel["id"], "GET", f"/{media_id}", params={"fields": "permalink,shortcode"})
+            except SocialError:
+                info = {}
             link = info.get("permalink") or (f"https://www.instagram.com/reel/{info['shortcode']}/" if info.get("shortcode") else "")
             store.add_evidence(post_id, "api_post", {"platform": "instagram", "by": by, "media_id": media_id,
                                                      "ai_label": ai_by_api, "share_to_feed": True})
             if not platforms.host_ok("instagram", link):
                 note = "Instagram posted it but gave no link; paste the link with Mark posted."
-                return {"state": "waiting", "post": store.get_post(post_id), "url": None, "media_id": media_id, "note": note}
-            posted = store.mark_posted(post_id, link, now=now)
+                return {"state": "posted", "post": store.get_post(post_id), "url": None, "media_id": media_id, "note": note,
+                        "ai_label_by_api": ai_by_api}
+            posted = store.set_posted_link(post_id, link)
             return {"state": "posted", "post": posted, "url": link, "media_id": media_id,
                     "note": "" if ai_by_api else AI_LABEL_APP_NOTE, "ai_label_by_api": ai_by_api}
     finally:

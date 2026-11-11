@@ -993,6 +993,26 @@ class Store:
             self._update("preparations", prep["id"], state="posted", error="", updated_at=now)
         return posted
 
+    def mark_published(self, post_id, now=None):
+        """The platform took the post but its link is not known yet: it is posted (never sent again, counted for the
+        day), and set_posted_link records the link when it comes (Mark posted also does)."""
+        now = time.time() if now is None else now
+        posted = self._move(post_id, ("approved",), "posted", now, posted_at=now)
+        prep = self.preparation_for(post_id)
+        if prep:
+            self._update("preparations", prep["id"], state="posted", error="", updated_at=now)
+        return posted
+
+    def set_posted_link(self, post_id, url):
+        url = _clean_text(url, "posted link", 500)
+        post = self.get_post(post_id)
+        if post["state"] != "posted":
+            raise conflict("only a posted post gets its link")
+        if any(other["posted_url"] == url and other["channel_id"] != post["channel_id"] for other in self.list_posts()):
+            raise conflict("that link is already recorded on another of the team's channels")
+        self._update("posts", post_id, posted_url=url)
+        return self.get_post(post_id)
+
     # -- appeal evidence ------------------------------------------------------------------------
 
     def add_evidence(self, post_id, kind, body, now=None):

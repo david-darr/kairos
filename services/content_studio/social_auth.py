@@ -315,12 +315,14 @@ def _transport_error(platform):
     return SocialError(f"{name} can't be reached right now. Try again when the connection is back.", 503)
 
 
-async def send(platform, method, url, *, limited=None, attempts=ATTEMPTS, **kwargs):
+async def send(platform, method, url, *, limited=None, attempts=ATTEMPTS, before=None, **kwargs):
     """One request with backoff: a 429 (or what `limited(response)` says is a rate limit) waits (Retry-After when sent,
     else 1, 2, 4 seconds) and tries again; when the attempts are spent it raises Limited. Never puts a URL, a token or a
     body in an error message."""
     timeout = kwargs.pop("timeout", TIMEOUT_S)
     for attempt in range(attempts):
+        if before:
+            before()   # an irreversible call checks again before every attempt, retries after a wait included
         try:
             async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
                 response = await client.request(method, url, **kwargs)

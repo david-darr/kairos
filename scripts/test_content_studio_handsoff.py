@@ -160,7 +160,7 @@ class On(Case):
         self.assertIn("spend_capped", [f["kind"] for f in result["sent"]])
         with self.assertRaises(StudioError):
             from unittest.mock import patch
-            with patch.object(handsoff, "_capped", return_value=True):
+            with patch.object(handsoff, "spend_problem", return_value="The monthly spend cap is reached."):
                 handsoff.producer_approve(self.store, self.queued(self.yt, "Two"), "Producer", "Ready")
 
     def test_repeated_failures_are_raised_once_and_updates_are_batched(self):
@@ -261,6 +261,85 @@ class ReviewFindings(Case):
                 asyncio.run(tools._publish({"post_id": b}, CTX, {"name": "Publisher"}, "publisher"))
         self.assertEqual([p for p, _ in seen], [a])
         self.assertIsNotNone(seen[0][1])
+
+
+class SecondReview(Case):
+    """Codex's re-review of 2026-11-11, kept fixed."""
+
+    def setUp(self):
+        super().setUp()
+        handsoff.set_hands_off(self.store, True, "david")
+
+    def approved(self, channel, title):
+        post = self.queued(channel, title)
+        self.store.approve(post, by="david")
+        return post
+
+    def test_a_call_let_through_by_hands_off_needs_it_still_on(self):
+        from unittest.mock import patch
+        from core import bot_content_studio_tools as tools, bot_policy
+        post = self.approved(self.yt, "A")
+        with patch.object(tools, "studio", self.store), patch.object(handsoff.pipeline, "_default_spend", NOT_CAPPED):
+            with patch.object(bot_policy, "admission", return_value="team"):
+                guard = tools._gated(post, "pub1", "content_studio_publish_youtube")
+                handsoff.set_hands_off(self.store, False, "david")
+                self.assertIn("off", guard())
+                with self.assertRaises(StudioError):
+                    tools._gated(post, "pub1", "content_studio_publish_youtube")
+            with patch.object(bot_policy, "admission", return_value="person"):
+                self.assertIsNone(tools._gated(post, "pub1", "content_studio_publish_youtube")())
+
+    def test_every_attempt_of_an_irreversible_call_checks_first_retries_included(self):
+        import httpx
+        from unittest.mock import AsyncMock, patch
+        from core import google_workspace as google
+        from services.content_studio import social_auth
+        calls = []
+
+        def before():
+            calls.append(len(calls))
+            if len(calls) == 2:
+                raise StudioError("Not posted: the team is paused")
+        limited = httpx.Response(429, headers={"retry-after": "0"}, request=httpx.Request("POST", "https://graph.example"))
+        with patch.object(social_auth, "_sleep", AsyncMock()), \
+                patch.object(httpx.AsyncClient, "request", AsyncMock(side_effect=[limited, AssertionError("sent after pause")])):
+            with self.assertRaises(StudioError):
+                asyncio.run(social_auth.send("instagram", "POST", "https://graph.example/x", before=before))
+        self.assertEqual(calls, [0, 1])
+        calls.clear()
+        expired = httpx.Response(401, request=httpx.Request("POST", "https://www.googleapis.com/upload"))
+        with patch.object(google, "_token", AsyncMock(return_value="t")), \
+                patch.object(httpx.AsyncClient, "request", AsyncMock(side_effect=[expired, AssertionError("sent after pause")])):
+            with self.assertRaises(StudioError):
+                asyncio.run(google.request("youtube_upload", "POST", "/videos", content=b"x", content_type="video/mp4",
+                                           account="a", before=before))
+        self.assertEqual(calls, [0, 1])
+
+    def test_a_post_instagram_took_is_never_sent_again_and_counts_for_the_day(self):
+        from services.content_studio import instagram_api, social_auth
+        a, b = self.approved(self.ig, "A"), self.approved(self.ig, "B")
+        social_auth.remember_publish(a, platform="instagram", media_id="M1", channel_id=self.ig["id"], at=time.time())
+        self.addCleanup(social_auth.forget_publish, a)
+        with self.assertRaises(StudioError) as caught:
+            asyncio.run(instagram_api.publish(self.store, a, "Publisher"))
+        self.assertIn("already has this post", caught.exception.detail)
+        self.store.mark_published(a)
+        self.assertEqual(self.store.get_post(a)["state"], "posted")
+        self.assertIn("for today", handsoff.gate(self.store, b, spend=NOT_CAPPED))
+        self.assertEqual(self.store.set_posted_link(a, "https://www.instagram.com/reel/abc/")["posted_url"],
+                         "https://www.instagram.com/reel/abc/")
+
+    def test_unknown_spend_stops_approving_and_posting_and_says_so(self):
+        from unittest.mock import patch
+        post = self.approved(self.yt, "A")
+        for unknown in (lambda: None, lambda: (_ for _ in ()).throw(RuntimeError("usage store unreadable"))):
+            self.assertIn("could not be checked", handsoff.gate(self.store, post, spend=unknown))
+        result = self.tick(spend=lambda: None)
+        self.assertEqual(self.posted, [])
+        self.assertIn("spend_unknown", [f["kind"] for f in result["sent"]])
+        with patch.object(handsoff.pipeline, "_default_spend", lambda: None):
+            with self.assertRaises(StudioError):
+                handsoff.producer_approve(self.store, self.queued(self.yt, "B"), "Producer", "Ready")
 
 
 class Policy(unittest.TestCase):

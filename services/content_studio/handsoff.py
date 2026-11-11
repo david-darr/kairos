@@ -94,16 +94,29 @@ def producer_approve(store, post_id, producer_name: str, reason: str, now=None) 
     reason = (reason or "").strip()
     if not reason:
         raise StudioError("say why the post is ready, in a sentence")
-    if _capped():
-        raise conflict("the monthly spend cap is reached, so the team has stopped")
+    problem = spend_problem()
+    if problem:
+        raise conflict(problem[0].lower() + problem[1:].rstrip("."))
     approved = store.approve(post_id, by=f"Producer ({producer_name})", now=now)
     store.add_evidence(post_id, "producer_approval", {"by": producer_name, "reason": reason[:500], "hands_off": True}, now=now)
     return approved
 
 
+def spend_problem(spend=None):
+    """Why spend stops the team now, or None. Unknown spend stops it too (fails closed, review finding 2026-11-11)."""
+    try:
+        state_ = spend() if spend else pipeline._default_spend()
+    except Exception:
+        state_ = None
+    if not state_:
+        return "The spend could not be checked, so nothing is approved or posted until it can be."
+    if state_.get("capped"):
+        return "The monthly spend cap is reached, so the team has stopped."
+    return None
+
+
 def _capped(spend=None) -> bool:
-    state_ = spend() if spend else pipeline._default_spend()
-    return bool(state_ and state_.get("capped"))
+    return spend_problem(spend) is not None
 
 
 def _posted_today(store, channel_id, now) -> int:
@@ -132,8 +145,9 @@ def gate(store, post_id, now=None, spend=None, require_hands_off=True):
         return "That channel is archived or paused."
     if any(w["channel_id"] == channel["id"] for w in store.open_warnings()):
         return "That channel has an open platform warning."
-    if _capped(spend):
-        return "The monthly spend cap is reached, so the team has stopped."
+    problem = spend_problem(spend)
+    if problem:
+        return problem
     prep = store.preparation_for(post_id)
     if prep and prep.get("scheduled_at") and prep["scheduled_at"] > now:
         return "Its scheduled time has not come yet."
@@ -246,6 +260,11 @@ def collect(store, now=None, spend=None) -> list:
             found.append({"key": f"retire:{decision['id']}", "kind": "retirement",
                           "text": f"A retirement is proposed for {decision['subject_name']}: {decision['reason'] or 'see the numbers'}. "
                                   "It needs your OK in Studio > Content."})
+    unknown = spend_problem(spend)
+    if unknown and unknown.startswith("The spend could not"):
+        found.append({"key": f"spend_unknown:{time.strftime('%Y-%m-%d', time.gmtime(now))}", "kind": "spend_unknown",
+                      "text": "Kairos could not check the team's spend, so nothing is approved or posted until it can. "
+                              "Open Settings > Usage to check the cap."})
     taps = tiktok_taps(store)
     if taps:
         ids = ",".join(str(p["id"]) for p in taps)

@@ -463,27 +463,30 @@ def _posted(args, ctx, bot, role):
     return _data(ctx, "content studio post", studio.mark_posted(args["post_id"], url)) + " Its numbers can be recorded now."
 
 
-def _gated(post_id):
+def _gated(post_id, bot_id=None, tool=""):
     """Every post a bot makes passes the one gate (services/content_studio/handsoff.py gate): the team running, the
     channel live with no open warning, under the spend cap, its schedule come and a slot left today. Returns the guard
     the publisher reads again just before its irreversible call. Hands-off need not be on here: below it, the person
-    allowed this very call."""
+    allowed this very call. A call let through only because hands-off posting is on (review finding, 2026-11-11)
+    needs it still on, at the start and in the guard; only a call the person stands behind may skip that."""
+    from core import bot_policy
     from services.content_studio import handsoff
-    problem = handsoff.gate(studio, post_id, require_hands_off=False)
+    require = bot_policy.admission(bot_id, tool) not in bot_policy.PERSON_BACKED
+    problem = handsoff.gate(studio, post_id, require_hands_off=require)
     if problem:
         raise StudioError(problem[0].lower() + problem[1:])
-    return handsoff.guard_for(studio, post_id, require_hands_off=False)
+    return handsoff.guard_for(studio, post_id, require_hands_off=require)
 
 
 async def _publish(args, ctx, bot, role):
-    guard = _gated(args["post_id"])
+    guard = _gated(args["post_id"], bot.get("id"), "content_studio_publish_youtube")
     result = await youtube_publish.publish(studio, args["post_id"], bot["name"], guard=guard)
     note = (" " + result["note"]) if result["note"] else ""
     return _data(ctx, "content studio upload", {k: result[k] for k in ("video_id", "url", "privacy", "asked_privacy")}) + note
 
 
 async def _publish_instagram(args, ctx, bot, role):
-    guard = _gated(args["post_id"])
+    guard = _gated(args["post_id"], bot.get("id"), "content_studio_publish_instagram")
     result = await instagram_api.publish(studio, args["post_id"], bot["name"], guard=guard)
     note = (" " + result["note"]) if result.get("note") else ""
     return _data(ctx, "content studio instagram post", {k: result.get(k) for k in ("state", "url", "media_id")}) + note

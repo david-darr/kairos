@@ -594,7 +594,7 @@ async def decide(*, surface: str, tool: str, arguments: dict, title: str = "", d
             if stale:
                 return Decision("deny", stale)
             if (bot_context or {}).get("outer"):
-                bot_policy.mark_inflight(outcome)
+                bot_policy.mark_inflight(outcome, source="person")
         return decision
     except asyncio.TimeoutError:
         ended = "expired"

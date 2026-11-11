@@ -878,6 +878,9 @@ class Outcome:
 
 
 _inflight: dict = {}
+# The outer approval of the registry call running in this task (mark_inflight). A context variable on purpose: a call
+# running in parallel, in another task, never inherits a mark made after it started.
+_OUTER: contextvars.ContextVar = contextvars.ContextVar("bot_outer_call", default=None)
 _hooks_installed = False
 
 
@@ -1172,11 +1175,15 @@ def authorize_operation(*, bot_id: str, tool: str, arguments=None, mcp: Optional
         return done("deny", f"The {paused_team.get('name') or ''} team is paused, so this did not run. "
                             "The person resumes it with Resume team.", "team-paused")
     # An outer approval of this very call already covers a handler's own check inside it.
-    mark = _inflight.get((bot_id, session_id)) if not outer else None
-    if mark and not explicit_review and not force_prompt:
+    # Only the handler of that call can use it (review finding, 2026-11-11): the mark lives in the task that ran the
+    # approved call, so a parallel call (a native Bash beside a long run_code) never sees it; it is used once, for the
+    # same kind of action, and ends with the call.
+    mark = _OUTER.get() if not outer else None
+    if mark and not explicit_review and not force_prompt and not mark["used"]             and _inflight.get((bot_id, session_id)) is mark and mark["bot_id"] == bot_id:
         if mark["expires"] < time.time():
             _inflight.pop((bot_id, session_id), None)
         elif mark["kind"] == op.kind:
+            mark["used"] = True
             _inflight.pop((bot_id, session_id), None)
             return done("allow", "Covered by the approval of the call it belongs to.", "outer", invocation_id=mark.get("id"))
 
@@ -1259,12 +1266,14 @@ def authorize_operation(*, bot_id: str, tool: str, arguments=None, mcp: Optional
     return done("ask", "This approval level asks.", "default")
 
 
-def mark_inflight(outcome: Outcome) -> None:
+def mark_inflight(outcome: Outcome, source: Optional[str] = None) -> None:
     """An outer approval of a registry call stands for the one check its own handler makes inside it:
     the same kind of action, for this bot and conversation, once, for a couple of minutes."""
     if outcome.bot_id and outcome.op is not None:
-        _inflight[(outcome.bot_id, outcome.thread_id)] = {
-            "kind": outcome.op.kind, "expires": time.time() + INFLIGHT_SECONDS, "id": outcome.invocation_id}
+        mark = {"kind": outcome.op.kind, "tool": outcome.op.tool, "expires": time.time() + INFLIGHT_SECONDS,
+                "id": outcome.invocation_id, "bot_id": outcome.bot_id, "used": False, "source": source or outcome.source}
+        _inflight[(outcome.bot_id, outcome.thread_id)] = mark
+        _OUTER.set(mark)   # visible only in this task: the approved call's own handler
 
 
 def _fallback_invocation(session_id: Optional[str], tool: str, args: dict) -> str:
@@ -1278,6 +1287,9 @@ def live_denial(bot_id: str, session_id: Optional[str], outcome: Outcome) -> Opt
     has ended, or a read-and-draft limit all void the answer."""
     if _agent(bot_id) is None:
         return "This bot no longer exists, so the action did not run."
+    team = team_of(bot_id)
+    if team and team.get("paused") and (outcome.op is None or outcome.op.kind != READ):
+        return "The team was paused, so the action did not run."
     run = outcome.run
     if run:
         now = run_context(bot_id)
@@ -1298,9 +1310,28 @@ def finish(owner: Optional[str], bot_id: str, invocation_id: Optional[str], resu
         logger.exception("could not settle the outbound reservation")
 
 
+# How a call was let through, when the person stands behind it: their own answer, Full, their send allowance or a rule
+# they saved. Anything else (a team rule, hands-off posting) holds only while that rule still holds.
+PERSON_BACKED = frozenset({"person", "full", "allowance", "saved-rule", "command-rule"})
+
+
+def admission(bot_id: Optional[str], tool: str) -> Optional[str]:
+    """How the registry call now running in this task was let through (its outer approval's source), or None."""
+    mark = _OUTER.get()
+    if not mark or mark.get("used") or mark.get("bot_id") != bot_id or mark.get("tool") != catalog.canonical(tool) \
+            or mark.get("expires", 0) < time.time():
+        return None
+    return mark.get("source")
+
+
 def clear_inflight(bot_id: str) -> None:
     for key in [k for k in _inflight if k[0] == bot_id]:
-        _inflight.pop(key, None)
+        mark = _inflight.pop(key, None)
+        if mark:
+            mark["used"] = True
+    held = _OUTER.get()
+    if held and held.get("bot_id") == bot_id:
+        held["used"] = True
 
 
 # -- decision history --------------------------------------------------------------------------

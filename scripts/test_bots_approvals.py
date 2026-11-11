@@ -385,24 +385,31 @@ class Asking(ApprovalCase):
         bot = make_bot("Nested")
         sid = make_thread(bot)
         set_mode(bot, "ask")
-        task, payload = await self.asked(f"chat:{sid}", tool="mcp__hive_mind__send_email", arguments={"to": "x"},
-                                         agent_id=bot, is_admin=True, bot_context={"outer": True})
+        # The approved call and its handler's own checks run in one task, as core/tool_registry.py runs them; the
+        # cover is visible only there (2026-11-11 re-review: a parallel call never uses it).
+        async def call_and_handler(*inner_calls):
+            outer = await permissions.decide(surface=f"chat:{sid}", tool="mcp__hive_mind__send_email", arguments={"to": "x"},
+                                             agent_id=bot, is_admin=True, bot_context={"outer": True})
+            permissions.close_channel(f"chat:{sid}")
+            return [outer] + [await self.decide(bot, sid, name, args, timeout=1) for name, args in inner_calls]
+        queue = permissions.open_channel(f"chat:{sid}")
+        task = asyncio.create_task(call_and_handler(("google_gmail_send", {"to": "x"}), ("google_gmail_send", {"to": "x"})))
+        payload = await asyncio.wait_for(queue.get(), timeout=5)
         permissions.answer(payload["id"], "once", "local")
-        self.assertEqual((await task).behavior, "allow")
-        permissions.close_channel(f"chat:{sid}")
+        outer, inner, again = await task
+        self.assertEqual(outer.behavior, "allow")
         # the handler's own send check, same kind of action, same chat: covered once, never asked again
-        inner = await self.decide(bot, sid, "google_gmail_send", {"to": "x"}, timeout=1)
         self.assertEqual(inner.behavior, "allow")
-        again = await self.decide(bot, sid, "google_gmail_send", {"to": "x"}, timeout=1)
         self.assertEqual(again.behavior, "deny", "the cover is used up")
         # a different kind of action is never covered by it
-        task, payload = await self.asked(f"chat:{sid}", tool="mcp__hive_mind__send_email", arguments={"to": "x"},
-                                         agent_id=bot, is_admin=True, bot_context={"outer": True})
+        queue = permissions.open_channel(f"chat:{sid}")
+        task = asyncio.create_task(call_and_handler(("Bash", {"command": "ls"})))
+        payload = await asyncio.wait_for(queue.get(), timeout=5)
         permissions.answer(payload["id"], "once", "local")
-        await task
-        permissions.close_channel(f"chat:{sid}")
-        other = await self.decide(bot, sid, "Bash", {"command": "ls"}, timeout=1)
+        _, other = await task
         self.assertEqual(other.behavior, "deny")
+        # and a call outside that task never sees it
+        self.assertEqual((await self.decide(bot, sid, "google_gmail_send", {"to": "x"}, timeout=1)).behavior, "deny")
 
     async def test_an_approved_registry_tool_covers_its_handlers_own_check_exactly_once(self):
         bot = make_bot("Nested2")
