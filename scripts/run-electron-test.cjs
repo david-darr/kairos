@@ -2,7 +2,7 @@
 // Node waits for Electron and propagates the actual suite result.
 const { spawnSync, execFileSync } = require('node:child_process');
 const path = require('node:path');
-const SUITES = ['bg-tasks-smoke', 'browser-smoke', 'preview-smoke', 'video-render-smoke', 'studio-checks', 'studio-content-checks', 'motion-engine-checks', 'chat-smoke', 'ui-smoke', 'usage-overlay-smoke', 'crm-smoke', 'roblox-smoke', 'mobile-tabs-checks', 'ask-user-checks', 'chat-scroll-checks', 'chat-speed-checks', 'account-switcher-checks', 'browse-media-checks', 'chat-bot-maker-checks'];
+const SUITES = ['bg-tasks-smoke', 'browser-smoke', 'preview-smoke', 'video-render-smoke', 'studio-checks', 'studio-content-checks', 'motion-engine-checks', 'chat-smoke', 'ui-smoke', 'usage-overlay-smoke', 'crm-smoke', 'roblox-smoke', 'mobile-tabs-checks', 'ask-user-checks', 'chat-scroll-checks', 'chat-speed-checks', 'account-switcher-checks', 'browse-media-checks', 'chat-bot-maker-checks', 'bot-reports-checks'];
 // 2026-10-13: accept the documented script path as well as its short name.
 const requestedSuite = path.basename(process.argv[2] || '').replace(/\.cjs$/, '');
 // The phone sidebar checks share the mobile-tabs synthetic backend and layout helpers.

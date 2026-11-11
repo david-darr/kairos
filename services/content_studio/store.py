@@ -36,6 +36,10 @@ DEFAULT_SETTINGS = {
     # the Kairos Browser. Off until the person turns each platform on.
     "page_reads": {"tiktok": False, "instagram": False},
     "page_reads_reset": {},      # platform -> when the person pressed Try again after the reads paused
+    # Hands-off posting (handsoff.py, David 2026-11-11): off until the person's own click; Pause team stops it at once.
+    "hands_off": False, "hands_off_since": None, "hands_off_by": None, "team_paused": False,
+    "hands_off_failures": {},    # post id -> failed automatic posts in a row
+    "hands_off_alerts": {},      # key -> {kind, text, urgent, at}: waiting for the Producer's next batched update
 }
 TEAM_ROLES = ("producer", "researcher", "evaluator", "script_writer", "editor", "publisher", "executor")
 ASPECTS = ("9:16", "16:9", "1:1")
@@ -54,7 +58,7 @@ LATER_COLUMNS = {"snapshots": {"source": "TEXT NOT NULL DEFAULT 'manual'"},
 AUDIENCE = {"": None, "no": 0, "yes": 1}
 # What a post keeps as appeal evidence (Video Styles build spec section 7): the person's approval, the shot plan,
 # the sources behind its facts, and the policy checks it passed.
-EVIDENCE_KINDS = ("approval", "shot_plan", "sources", "policy_check", "port", "plan_approval", "api_post")
+EVIDENCE_KINDS = ("approval", "shot_plan", "sources", "policy_check", "port", "plan_approval", "api_post", "producer_approval")
 VOICE_ID = re.compile(r"^[a-z]{2}_[a-z0-9]{1,30}$")
 # Long-form (Video Styles section 7, V3, locked): one long video a week per YouTube channel, plus daily Shorts. The cap is
 # set per channel (0 to 7) and is soft: the person can change it on the channel; the team plans long videos within it.
@@ -277,9 +281,17 @@ class Store:
                 if not isinstance(value, dict) or any(not isinstance(k, str) for k in value):
                     raise StudioError("notified must be an object")
                 value = dict(sorted(value.items(), key=lambda kv: kv[1])[-500:])
-            elif key == "batch_approval":
+            elif key in ("batch_approval", "hands_off", "team_paused"):
                 if not isinstance(value, bool):
-                    raise StudioError("batch_approval is true or false")
+                    raise StudioError(f"{key} is true or false")
+            elif key == "hands_off_since":
+                value = None if value is None else _num(value, key)
+            elif key == "hands_off_by":
+                if value is not None and (not isinstance(value, str) or len(value) > 100):
+                    raise StudioError("hands_off_by is a name")
+            elif key in ("hands_off_failures", "hands_off_alerts"):
+                if not isinstance(value, dict) or len(value) > 500 or any(not isinstance(k, str) for k in value):
+                    raise StudioError(f"{key} must be an object")
             elif key == "page_reads":
                 if not isinstance(value, dict) or not set(value) <= {"tiktok", "instagram"} or \
                         any(not isinstance(v, bool) for v in value.values()):

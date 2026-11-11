@@ -52,6 +52,10 @@ def build_report(store, now=None, days=7, spend=None):
                       "niches_wanted": [d for d in decisions if d["kind"] == "replace" and d["subject_type"] == "niche"
                                         and d["status"] == "open"],
                       "niches_proposed": [d for d in decisions if d["kind"] == "add" and d["status"] in review.OPEN]},
+        "posted": [{"title": p["title"], "handle": p["handle"], "platform": p["platform"], "url": p["posted_url"],
+                    "approved_by": p.get("approved_by")} for p in posted_week][:20],
+        "hands_off": bool(store.settings()["hands_off"]),
+        "taps": sum(1 for p in store.list_posts(state="approved") if p["platform"] == "tiktok"),
         "activity": {"posted_this_week": len(posted_week), "awaiting_approval": len(pipeline.approval_queue(store)),
                      "findings": len(pipeline.watch(store, now, spend=lambda: None))},
         "spend": team_spend(store, now) if spend is None else spend(),
@@ -99,5 +103,8 @@ def render_text(report):
     else:
         lines.append("Spend: not available right now.")
     act = report["activity"]
-    lines.append(f"Posted this week: {act['posted_this_week']}. Waiting for your OK: {act['awaiting_approval']}. Open watch findings: {act['findings']}.")
+    waiting = "Waiting for your tap on TikTok" if report.get("hands_off") else "Waiting for your OK"
+    lines.append(f"Posted this week: {act['posted_this_week']}. {waiting}: {act['awaiting_approval'] if not report.get('hands_off') else report.get('taps', 0)}. Open watch findings: {act['findings']}.")
+    for post in report.get("posted", []):
+        lines.append(f"  {post['title']} on {post['handle']} ({post['platform']}): {post['url'] or 'link not recorded'}")
     return "\n".join(lines)

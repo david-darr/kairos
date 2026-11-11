@@ -797,3 +797,30 @@ async def page_read_result(job_id: str, request: Request) -> dict:
     if len(body) > 2 * 1024 * 1024:
         raise HTTPException(413, "Too large")
     return {"ok": page_reads.complete(job_id, body, request.headers.get("X-Kairos-Render-Error"))}
+
+
+# -- hands-off posting and Pause team (services/content_studio/handsoff.py, 2026-11-11) ------------------------------
+# The person's click only: these routes need their sign-in, and no bot tool changes either switch.
+
+class SwitchBody(Body):
+    on: bool
+
+
+@router.get("/hands-off")
+def hands_off_state(user: str = Depends(require_user)):
+    from services.content_studio import handsoff
+    taps = [{"post_id": p["id"], "title": p["title"], "handle": p["handle"]} for p in handsoff.tiktok_taps(studio)]
+    return {**handsoff.state(studio), "taps": taps}
+
+
+@router.put("/hands-off")
+def set_hands_off(body: SwitchBody, user: str = Depends(require_user)):
+    from services.content_studio import handsoff
+    return _run(handsoff.set_hands_off, studio, body.on, user)
+
+
+@router.put("/team-pause")
+def set_team_pause(body: SwitchBody, user: str = Depends(require_user)):
+    """Pause team (body.on true) stops posting and approving at once; the team's bots may only read until resumed."""
+    from services.content_studio import handsoff
+    return _run(handsoff.set_paused, studio, body.on, user)

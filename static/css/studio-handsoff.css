@@ -1,0 +1,11 @@
+/* Studio > Content: hands-off posting and Pause team (static/js/studioHandsOff.js). Kairos tokens only. */
+.sc-handsoff { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 0 0 14px; padding: 10px 14px;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--bg-panel-solid); color: var(--text); }
+.sc-handsoff[data-state="paused"] { border-color: rgba(var(--danger-rgb), .45); background: rgba(var(--danger-rgb), .07); }
+.sc-handsoff:empty { display: none; }
+.sc-handsoff-text { flex: 1 1 260px; margin: 0; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.sc-handsoff-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.sc-handsoff-btn { min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+.sc-handsoff-pause { font-weight: 600; border-color: rgba(var(--danger-rgb), .55); color: var(--danger); }
+.sc-handsoff-pause.is-paused { border-color: var(--accent); color: var(--text); }
+.sc-handsoff-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

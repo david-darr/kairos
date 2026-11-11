@@ -27,7 +27,7 @@ def selected(package, selection):
     if selection is None:
         selection = {k: [r[field] for r in package[k]] for k, field in groups.items()}
         selection["sections"] = list(package.get("sections", {}))
-    if not isinstance(selection, dict) or set(selection) - {*groups, "sections"}:
+    if not isinstance(selection, dict) or set(selection) - {*groups, "sections", "models", "hands_off"}:
         raise ValueError("Invalid import selection")
     result = {}
     for group, field in groups.items():
@@ -40,7 +40,30 @@ def selected(package, selection):
     if not isinstance(sections, list) or any(s not in package.get("sections", {}) for s in sections):
         raise ValueError("Invalid section selection")
     result["sections"] = {s: package["sections"][s] for s in sections}
+    models = selection.get("models") or {}
+    keys = {b["key"] for b in package["bots"]}
+    if not isinstance(models, dict) or any(k not in keys for k in models):
+        raise ValueError("Invalid model selection")
+    result["models"] = models
+    if selection.get("hands_off") not in (None, True, False):
+        raise ValueError("Invalid hands-off choice")
+    result["hands_off"] = bool(selection.get("hands_off")) and "content_studio" in result["sections"]
     return result
+
+
+def model_for(bot, picked, endpoints):
+    """The model an imported bot gets (services/bot_model_tiers.py): the person's pick from the preview, checked
+    against this account's connections, else its tier's model. Never a provider the account has not connected."""
+    from services import bot_model_tiers
+    if picked is not None:
+        choice = bot_model_tiers.decode(picked) if isinstance(picked, str) else picked
+        return bot_model_tiers.check_choice({k: choice.get(k) for k in ("endpoint_id", "model_override", "model_effort")}, endpoints)
+    if bot.get("model_tier") not in bot_model_tiers.TIERS:
+        return {}
+    choice = bot_model_tiers.resolve(bot["model_tier"], endpoints)
+    if not choice:
+        return {}
+    return bot_model_tiers.check_choice({k: choice.get(k) for k in ("endpoint_id", "model_override", "model_effort")}, endpoints)
 
 
 def _stage_skill(skill, bot_ids):
@@ -69,6 +92,18 @@ def _stage_connection(connection):
     return lambda: path.unlink(missing_ok=True)
 
 
+def _remember_tiers(bots, mapping):
+    """Each imported bot's tier is kept on its team, so Suggest models can propose the same map later."""
+    from services import bot_departments
+    for bot in bots:
+        ident = mapping.get(bot["key"])
+        if not ident or not bot.get("model_tier"):
+            continue
+        team = bot_departments.team_of(ident)
+        if team:
+            bot_departments.set_meta(team["id"], team.get("owner_user"), model_tiers={ident: bot["model_tier"]})
+
+
 def apply(package, selection=None, *, owner_user=None):
     from services import bot_record
     from services.agent_service import agent_service
@@ -78,6 +113,10 @@ def apply(package, selection=None, *, owner_user=None):
         raise ValueError("The workspace allows at most 100 bots")
     journal, created = [], []
     taken = [a["name"] for a in agent_service.list_agents()]
+    from services import bot_model_tiers
+    endpoints = bot_model_tiers.connected()
+    # Every model is settled before anything is made, so a bad pick refuses the import cleanly.
+    models = {bot["key"]: model_for(bot, chosen["models"].get(bot["key"]), endpoints) for bot in chosen["bots"]}
     try:
         for bot in chosen["bots"]:
             name = free_name(bot["name"], taken)
@@ -85,6 +124,7 @@ def apply(package, selection=None, *, owner_user=None):
                 "profile": {**{k: copy.deepcopy(bot[k]) for k in ("role", "blurb", "soul", "avatar", "color") if k in bot}, "name": name},
                 "approval_mode": bot_record.default_approval(), "integration_ids": [], "routines": [], "memory_seed": bot.get("memory_seed", []),
                 "origin": {"kind": "preset", "id": bot["key"]}, "use_defaults": False,
+                **({"model": models[bot["key"]]} if models.get(bot["key"]) else {}),
             }, owner_user=owner_user)
             agent = result["agent"]
             journal.append(("bot", lambda ident=agent["id"]: agent_service.delete(ident)))
@@ -108,7 +148,14 @@ def apply(package, selection=None, *, owner_user=None):
             if not callable(undo):
                 raise ValueError(f"Section {name} did not provide rollback")
             journal.append((name, undo))
-        return {"created": created, "warnings": [], "counts": {k: len(v) for k, v in chosen.items()}}
+        _remember_tiers(chosen["bots"], mapping)
+        if chosen["hands_off"]:
+            # The person ticked Hands-off posting in the import preview: their own click, with the explanation shown.
+            from services.content_studio import handsoff, studio
+            handsoff.set_hands_off(studio, True, owner_user or "the person")
+        counts = {k: len(v) for k, v in chosen.items() if k not in ("models", "hands_off")}
+        return {"created": created, "warnings": [], "counts": counts,
+                "models": {row["key"]: models.get(row["key"]) or None for row in created}}
     except Exception as exc:
         errors = list(getattr(exc, "cleanup_errors", []))
         for label, undo in reversed(journal):

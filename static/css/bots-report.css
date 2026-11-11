@@ -1,0 +1,50 @@
+/* Bots mode: a bot's report, its team's report and Suggest models (2026-11-11). Module: static/js/botsActivityReport.js.
+   Scope: [data-app-mode="bots"] only; the dialog's wrapper carries the scope, so Studio shows it the same way.
+   Every value reads the --bots-* tokens from bots.css, so scripts/test_kairos_theme.py finds no raw colour here. */
+[data-app-mode="bots"].bots-report-scope { display: contents; }
+[data-app-mode="bots"] .bots-report-dialog { width: 760px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); padding: 0; box-sizing: border-box; border: 1px solid var(--bots-hairline); border-radius: var(--bots-radius-card); color: var(--bots-ink); background: var(--bots-panel); font: 400 var(--bots-text-row)/1.45 var(--bots-font-sans); box-shadow: var(--bots-shadow-float); overflow: auto; }
+[data-app-mode="bots"] .bots-report-dialog::backdrop { background: var(--bots-menu-active); }
+[data-app-mode="bots"] .bots-report-head { position: sticky; top: 0; z-index: 1; display: flex; gap: 12px; justify-content: space-between; align-items: center; padding: 12px 16px; background: var(--bots-panel); border-bottom: 1px solid var(--bots-hairline-dense); }
+[data-app-mode="bots"] .bots-report-head h2 { font-size: 16px; margin: 0; min-width: 0; overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-report-body { padding: 12px 16px 20px; overflow-wrap: anywhere; }
+[data-app-mode="bots"] .bots-report-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+[data-app-mode="bots"] .bots-report-body select { min-width: 0; max-width: 100%; box-sizing: border-box; border: 1px solid var(--bots-control-line); border-radius: 8px; background: var(--bots-control); color: var(--bots-ink); font: inherit; padding: 6px 8px; }
+[data-app-mode="bots"] .bots-report-sub { margin: 10px 0 0; color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-report-totals { margin: 8px 0; font-weight: 600; }
+[data-app-mode="bots"] .bots-report-section { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--bots-hairline-dense); }
+[data-app-mode="bots"] .bots-report-section h3 { margin: 0 0 8px; font-size: 13px; letter-spacing: .02em; color: var(--bots-ink-secondary); text-transform: uppercase; }
+[data-app-mode="bots"] .bots-report-quiet { color: var(--bots-ink-secondary); }
+[data-app-mode="bots"] .bots-report-made, [data-app-mode="bots"] .bots-report-list { margin: 0; padding-left: 18px; }
+[data-app-mode="bots"] .bots-report-made li, [data-app-mode="bots"] .bots-report-list li { margin: 4px 0; }
+[data-app-mode="bots"] .bots-report-run { margin: 6px 0; border: 1px solid var(--bots-hairline-dense); border-radius: var(--bots-radius-card); background: var(--bots-card); }
+[data-app-mode="bots"] .bots-report-run > summary { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 8px 10px; cursor: pointer; list-style: none; }
+[data-app-mode="bots"] .bots-report-run > summary::-webkit-details-marker { display: none; }
+[data-app-mode="bots"] .bots-report-run[open] > summary { border-bottom: 1px solid var(--bots-hairline-dense); }
+[data-app-mode="bots"] .bots-report-run > :not(summary) { margin-left: 10px; margin-right: 10px; }
+[data-app-mode="bots"] .bots-report-run-what { flex: 1; min-width: 140px; font-weight: 600; }
+[data-app-mode="bots"] .bots-report-steps { margin: 8px 0; padding-left: 22px; }
+[data-app-mode="bots"] .bots-report-badge { display: inline-block; padding: 1px 8px; border-radius: var(--bots-radius-pill); border: 1px solid var(--bots-hairline); color: var(--bots-ink-secondary); font-size: 12px; text-transform: capitalize; }
+[data-app-mode="bots"] .bots-report-badge[data-outcome="finished"] { color: var(--bots-success); border-color: var(--bots-success); }
+[data-app-mode="bots"] .bots-report-badge[data-outcome="failed"] { color: var(--bots-danger); border-color: var(--bots-danger); }
+[data-app-mode="bots"] .bots-report-error { color: var(--bots-danger); margin: 6px 0; }
+[data-app-mode="bots"] .bots-report-fix { padding: 8px 0; border-bottom: 1px solid var(--bots-hairline-dense); }
+[data-app-mode="bots"] .bots-report-fix p { margin: 4px 0; }
+[data-app-mode="bots"] .bots-report-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; padding: 8px 0; }
+[data-app-mode="bots"] .bots-report-members { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+[data-app-mode="bots"] .bots-report-member { padding: 10px 12px; border: 1px solid var(--bots-hairline-dense); border-radius: var(--bots-radius-card); background: var(--bots-card); }
+[data-app-mode="bots"] .bots-report-member p { margin: 4px 0; }
+[data-app-mode="bots"] .bots-report-member-head { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+[data-app-mode="bots"] .bots-report-model-row { display: grid; gap: 4px; padding: 10px 0; border-bottom: 1px solid var(--bots-hairline-dense); }
+[data-app-mode="bots"] .bots-report-model-row p { margin: 0; }
+[data-app-mode="bots"] :is(.bots-report-dialog, .bots-package-models) :is(button, select, summary):focus-visible { outline: 2px solid var(--bots-focus); outline-offset: 2px; }
+[data-app-mode="bots"] .bots-package-models { margin: 12px 0; padding: 10px 12px; border: 1px solid var(--bots-hairline-dense); border-radius: var(--bots-radius-card); background: var(--bots-card); }
+[data-app-mode="bots"] .bots-package-models h4 { margin: 0 0 6px; font-size: 13px; }
+[data-app-mode="bots"] .bots-package-model { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 4px 12px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--bots-hairline-dense); }
+[data-app-mode="bots"] .bots-package-model select { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid var(--bots-control-line); border-radius: 8px; background: var(--bots-control); color: var(--bots-ink); font: inherit; padding: 6px 8px; }
+[data-app-mode="bots"] .bots-package-model small { grid-column: 1 / -1; color: var(--bots-ink-secondary); }
+@media (max-width: 560px) {
+  [data-app-mode="bots"] .bots-report-dialog { width: calc(100vw - 16px); max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  [data-app-mode="bots"] .bots-report-body { padding: 10px 12px 16px; }
+  [data-app-mode="bots"] .bots-report-members { grid-template-columns: 1fr; }
+  [data-app-mode="bots"] .bots-package-model { grid-template-columns: 1fr; }
+}

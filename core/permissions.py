@@ -247,7 +247,8 @@ def standing_grants() -> set[str]:
     still pre-approve. A seeded built-in grant that has been revoked is no
     longer here, so the tool goes back to being asked about."""
     return {rule["tool"] for rule in _load()["rules"]
-            if rule.get("behavior") == "allow" and not rule.get("content") and rule.get("scope") == "forever"}
+            if rule.get("behavior") == "allow" and not rule.get("content") and rule.get("scope") == "forever"
+            and not rule.get("team_id") and not rule.get("bot_id")}
 
 
 def grant_standing(tools: list[str], granted_by: str) -> None:
@@ -295,7 +296,14 @@ def stored_decision(surface: str, tool: str, target: str | None, is_admin: bool 
     stand in for the approval level."""
     saved = _load()["rules"]
     if bot_id:
-        saved = [rule for rule in saved if rule.get("bot_id") == bot_id]
+        team_id = None
+        if any(rule.get("team_id") for rule in saved):
+            from core import bot_policy
+            team_id = (bot_policy.team_of(bot_id) or {}).get("id")
+        saved = [rule for rule in saved if rule.get("bot_id") == bot_id
+                 or (team_id and rule.get("team_id") == team_id and not rule.get("bot_id"))]
+    else:
+        saved = [rule for rule in saved if not rule.get("team_id")]  # a team's grant is never anyone else's
     for rule in _session_rules.get(surface, []) + saved:
         if _matches(rule, tool, target, is_admin):
             return Decision(rule["behavior"], "A saved rule covers this.", rule)
@@ -420,7 +428,14 @@ def _bot_choices(outcome, target: str | None) -> list[dict]:
     if op is not None and op.kind == bot_policy.EXECUTE and op.scope == "shell" and op.command and outcome.cwd:
         return [once, {"id": "command", "label": "Always allow this exact command here", "behavior": "allow",
                        "scope": "command"}, reject]
-    return [dict(item, label="Deny") if item["id"] == "reject" else item for item in _default_choices("", target)]
+    choices = [dict(item, label="Deny") if item["id"] == "reject" else item for item in _default_choices("", target)]
+    # Allow for this team (Bot team approvals, 2026-11-11): this tool, for every bot on the asking bot's team, and
+    # nothing else. Only for changes inside Kairos: never a send, a deletion, an unknown action or a command.
+    team = bot_policy.team_of(outcome.bot_id)
+    if team and op is not None and op.kind in (bot_policy.EDIT, bot_policy.DRAFT) and op.scope in ("internal", ""):
+        choices.insert(-1, {"id": "team", "label": f"Allow for the {team.get('name') or 'whole'} team",
+                            "behavior": "allow", "scope": "team"})
+    return choices
 
 
 def cancel_pending(match, reason: str) -> int:
@@ -506,17 +521,34 @@ async def decide(*, surface: str, tool: str, arguments: dict, title: str = "", d
         return saved
     queue = _channels.get(surface)
     run = outcome.run if outcome is not None else None
-    if queue is None and not (run and _card_service_ready()):
+    route = outcome.route if outcome is not None else None
+    ask_surface = surface
+    if queue is None and route and route.get("thread_id") and _card_service_ready():
+        # A teammate's delegated run, or a coordinator's continuation (Bot team approvals, 2026-11-11): nobody
+        # watches its own surface, so it asks in a conversation the person owns. The card shows there and in the
+        # Inbox; the delegating thread's hand-off says it waits for them.
+        ask_surface = f"chat:{route['thread_id']}"
+        queue = _channels.get(ask_surface)
+        timeout = max(timeout, _delegated_wait())
+    elif queue is None and not (run and _card_service_ready()):
         # Nobody is watching this surface - a scheduled task, a chat in a
         # channel with no prompt, a closed window. Denying is the only honest
         # answer, and it says where to grant it instead.
         if outcome is not None:
             _bot_log(outcome, "deny", "nobody-to-ask", "policy", target=target)
+            return Decision("deny", _cannot_ask(outcome, tool))
         return Decision("deny", f"{tool} needs permission and this surface cannot ask. "
                                 "Grant it in Settings > Permissions, then try again.")
-    if outcome is not None and run and queue is None:
+    if outcome is not None and run and queue is None and ask_surface == surface:
         timeout = max(timeout, _unattended_wait())
-    request = Request(id=uuid.uuid4().hex, surface=surface, tool=tool, target=target,
+    if outcome is not None:
+        # One card for one run's simultaneous requests: a second request for the same tool waits on the first
+        # one's answer instead of opening another card (Bot team approvals, 2026-11-11).
+        joined = _join_pending(outcome, ask_surface, tool, target)
+        if joined is not None:
+            return await _await_joined(joined, outcome, surface, tool, arguments, agent_id, mcp, is_admin,
+                                       bot_context, target, timeout)
+    request = Request(id=uuid.uuid4().hex, surface=ask_surface, tool=tool, target=target,
                       arguments=arguments if isinstance(arguments, dict) else {},
                       title=title or tool, description=description or (outcome.reason if outcome else ""),
                       choices=choices or (_bot_choices(outcome, target) if outcome is not None
@@ -535,6 +567,8 @@ async def decide(*, surface: str, tool: str, arguments: dict, title: str = "", d
         _card_open(request, outcome)
         if waiting_task:
             _routine_wait(waiting_task, True, f"Waiting for you: {request.title}")
+        if route:
+            _route_waiting(route, True, request.title)
     ended = "answered"
     try:
         decision = await asyncio.wait_for(asyncio.shield(request.answer), timeout=timeout)
@@ -561,13 +595,100 @@ async def decide(*, surface: str, tool: str, arguments: dict, title: str = "", d
                 _card_settle(request.id, "expired" if ended == "expired" else "cancelled")
             if waiting_task:
                 _routine_wait(waiting_task, False)
+            if route:
+                _route_waiting(route, False)
             answered = request.answer.done() and not request.answer.cancelled()
             result = request.answer.result() if answered else None
             _bot_log(outcome, getattr(result, "behavior", "deny") if answered else "expired",
                      "asked" if answered else "timeout", "owner" if answered else "timeout", target=target,
                      scope=((result.rule or {}).get("scope") if answered and getattr(result, "rule", None) else None))
-        if _channels.get(surface) is queue and queue is not None:
+        if _channels.get(request.surface) is queue and queue is not None:
             queue.put_nowait({"permission_closed": request.id})
+
+
+def _delegated_wait() -> float:
+    from core import bot_policy
+    return bot_policy.DELEGATED_WAIT_SECONDS
+
+
+def _route_waiting(route: dict, waiting: bool, title: str = "") -> None:
+    """The delegating thread's hand-off chip says the teammate waits for the person (services/agent_handoff.py)."""
+    if not route.get("card_id"):
+        return
+    try:
+        from services import agent_handoff
+        agent_handoff.mark_waiting(route["card_id"], f"Needs your OK: {title}. Answer it in your Inbox." if waiting else "")
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("could not mark the hand-off as waiting")
+
+
+_reported: dict = {}
+REPORT_EVERY_SECONDS = 3600
+
+
+def _cannot_ask(outcome, tool: str) -> str:
+    """Nobody could be asked about a bot's step (Bot team approvals, 2026-11-11). The step never fails silently:
+    the bot is told exactly why and what fixes it, and the person gets one Inbox note per bot and tool an hour."""
+    from services.agent_service import agent_service
+    bot = agent_service.get(outcome.bot_id) or {"name": "This bot"}
+    name, label = bot.get("name") or "This bot", outcome.op.label if outcome.op else tool
+    fix = (f"Open {name}'s conversation and ask again while you are there, or answer from your Inbox next time. "
+           f"To let {name} do this without asking, raise its approval in its Permissions.")
+    reason = (f"{tool} needs permission and this surface cannot ask: nobody was watching, so {label} did not run. "
+              f"{outcome.reason} Fix: {fix}")
+    key = (outcome.bot_id, label)
+    now = time.time()
+    if now - _reported.get(key, 0) >= REPORT_EVERY_SECONDS:
+        _reported[key] = now
+        try:
+            item = agent_service.add_item(outcome.bot_id, "report", f"{name} could not ask you about {label}",
+                                          f"{name} wanted to use {label}. {outcome.reason} Nobody was watching, so it "
+                                          f"did not run and {name} was told why. Fix: {fix}")
+            agent_service.notify(item)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("could not report a step nobody could approve")
+    return reason
+
+
+def _join_pending(outcome, surface: str, tool: str, target):
+    """A live request from the same bot and run for the same tool and target, still waiting, or None."""
+    for request in _pending.values():
+        bot = request.bot or {}
+        if (request.kind == "permission" and not request.answer.done() and request.surface == surface
+                and request.tool == tool and request.target == target and bot.get("bot_id") == outcome.bot_id
+                and bot.get("run_id") == ((outcome.run or {}).get("run_id"))):
+            return request
+    return None
+
+
+async def _await_joined(request, outcome, surface, tool, arguments, agent_id, mcp, is_admin, bot_context, target,
+                        timeout) -> Decision:
+    request.joined = getattr(request, "joined", 1) + 1
+    try:
+        from core import bot_policy
+        store = bot_policy.cards()
+        if store is not None and hasattr(store, "update_summary_for_request"):
+            store.update_summary_for_request(request.id, f"{request.description} This run asked {request.joined} "
+                                                         "times for this at once. One answer covers them all.")
+    except Exception:
+        pass
+    try:
+        decision = await asyncio.wait_for(asyncio.shield(request.answer), timeout=max(1, request.expires_at - time.time()))
+    except asyncio.TimeoutError:
+        _bot_log(outcome, "expired", "timeout", "timeout", target=target)
+        return Decision("deny", f"Nobody answered the request to use {tool} in time, so it was not allowed.")
+    if decision.behavior == "allow":
+        again = ceiling_denial(surface, tool, arguments, agent_id, mcp, is_admin)
+        if again is not None:
+            return again
+        from core import bot_policy
+        stale = bot_policy.live_denial(outcome.bot_id, outcome.thread_id, outcome)
+        if stale:
+            return Decision("deny", stale)
+    _bot_log(outcome, decision.behavior, "asked-batch", "owner", target=target)
+    return Decision(decision.behavior, decision.reason, decision.rule)
 
 
 def _card_service_ready() -> bool:
@@ -660,6 +781,16 @@ def answer(request_id: str, choice_id: str, user: str) -> bool:
                                         by=user, request_id=request_id)
         except bot_policy.PolicyError:
             return False
+    elif choice["scope"] == "team":
+        # This tool, whole, for the asking bot's team (its members at the time of each later call).
+        from core import bot_policy
+        team = bot_policy.team_of(bot.get("bot_id"))
+        if not team:
+            return False
+        rule = {"id": uuid.uuid4().hex, "tool": request.tool, "content": None, "behavior": "allow", "scope": "forever",
+                "granted_at": time.time(), "granted_by": user, "source": "asked-team", "team_id": team["id"],
+                "team_name": team.get("name")}
+        _remember(rule, request.surface)
     elif choice["scope"] in ("session", "forever"):
         rule = {"id": uuid.uuid4().hex, "tool": request.tool, "content": request.target,
                 "behavior": choice["behavior"], "scope": choice["scope"], "granted_at": time.time(),

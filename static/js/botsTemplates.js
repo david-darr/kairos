@@ -26,7 +26,7 @@ export async function download(path, body, signal, filename) {
 }
 
 export function mount(host, ctx = {}) {
-  loadBotsCss('/static/css/bots-lifecycle.css');
+  loadBotsCss('/static/css/bots-lifecycle.css'); loadBotsCss('/static/css/bots-report.css');
   const control = new AbortController(); let view = new AbortController(), destroyed = false, tab = ctx.tab || 'explore';
   const shell = el('div', { class: 'bots-lifecycle', 'data-section': 'templates' }), tabs = el('div', { class: 'bots-lifecycle-tabs', role: 'tablist', 'aria-label': 'Templates' });
   const content = el('div', { class: 'bots-lifecycle-content', role: 'tabpanel' });

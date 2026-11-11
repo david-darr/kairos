@@ -3,7 +3,12 @@
 `bot_package.register_section` callbacks for the two shared things a package of bots can bring along:
 
 - `departments`: every team an exported bot belongs to, with its name, members, chief and team
-  instructions. Team memory stays out, the same way a bot's live notebook does.
+  instructions. Team memory stays out, the same way a bot's live notebook does. A team may also name its
+  `internal_tools` (2026-11-11): Kairos tools that only change Kairos's own data, which its bots then use below
+  Full without a prompt (still logged; core/bot_policy.py team_internal). Each is checked on import by
+  core/bot_policy.py internal_tool_problem, and one that sends, deletes, runs things or reaches outside Kairos
+  refuses the import. A package bot's `model_tier` (light, standard, strong) is kept on its team too, for
+  Suggest models (services/bot_model_tiers.py).
 - `rooms`: every open room an exported bot sits in, with its name, context, description, room
   instructions, default responder and turn limit. Only the exported bots come along as members.
   Messages and the working folder (a path on this machine) stay out.
@@ -71,8 +76,11 @@ def export_departments(bot_ids):
         members = [b["id"] for b in bot_departments.members(team["id"]) if b["id"] in keys]
         if not members:
             continue
-        out.append({"name": team["name"], "members": [keys[i] for i in members],
-                    "chief": keys.get(team.get("chief_bot_id")), "instructions": bot_departments.instructions(team["id"])["text"]})
+        row = {"name": team["name"], "members": [keys[i] for i in members],
+               "chief": keys.get(team.get("chief_bot_id")), "instructions": bot_departments.instructions(team["id"])["text"]}
+        if team.get("internal_tools"):
+            row["internal_tools"] = list(team["internal_tools"])
+        out.append(row)
     return {"teams": out[:MAX_TEAMS]}
 
 
@@ -90,7 +98,10 @@ def import_departments(data, mapping):
         chief = row.get("chief")
         if chief is not None and (not isinstance(chief, str) or not KEY.fullmatch(chief)):
             raise ValueError("A team's chief must be a package bot key")
-        plan.append((name, members, mapping.get(chief), _text(row.get("instructions", ""), 24000, "Team instructions")))
+        # A template can name the tools its bots use for the team's own work in Kairos (core/bot_policy.py
+        # team_internal). Checked here: a tool that sends, deletes or reaches outside Kairos refuses the import.
+        tools = bot_departments.clean_internal_tools(row.get("internal_tools"))
+        plan.append((name, members, mapping.get(chief), _text(row.get("instructions", ""), 24000, "Team instructions"), tools))
     made = []
 
     def undo():
@@ -98,12 +109,14 @@ def import_departments(data, mapping):
             bot_departments.delete(ident, owner)
 
     try:
-        for name, members, chief, text in plan:
+        for name, members, chief, text, tools in plan:
             if not members:
                 continue  # none of its bots were chosen for this import
             name = _free(name, [t["name"] for t in bot_departments.list(owner)], 60)
             team = bot_departments.create(name, members, owner)
             made.append(team["id"])
+            if tools:
+                bot_departments.set_meta(team["id"], owner, internal_tools=tools)
             if text:
                 bot_departments.put_instructions(team["id"], text, bot_departments.instructions(team["id"], owner)["hash"], owner)
             if chief:

@@ -690,6 +690,9 @@ export function mountBotsRail(nav) {
         { label: 'Team instructions', iconName: 'book-open', onSelect: () => openTeamInstructions({ departmentId: team.id }) },
         { label: 'Team memory', iconName: 'brain', onSelect: () => openTeamMemory({ departmentId: team.id }) },
         { label: 'Team settings', iconName: 'settings', onSelect: () => openTeamSettings({ departmentId: team.id }) },
+        { label: 'Team report', iconName: 'gauge', onSelect: () => import('./botsActivityReport.js').then(m => m.openTeamReport({ teamId: team.id })) },
+        { label: 'Suggest models', iconName: 'sparkles', onSelect: () => import('./botsActivityReport.js').then(m => m.openSuggestModels({ teamId: team.id })) },
+        { label: team.paused ? 'Resume team' : 'Pause team', iconName: team.paused ? 'play' : 'pause', onSelect: () => import('./botsActivityReport.js').then(m => m.setTeamPaused(team.id, !team.paused)) },
         { label: 'Rename', iconName: 'pencil', onSelect: () => openTeamDialog({ departmentId: team.id, mode: 'rename' }) },
         { label: 'Delete', iconName: 'trash-2', danger: true, onSelect: () => openTeamDialog({ departmentId: team.id, mode: 'delete' }) },
       ], { align: 'end' }) }, [icon('ellipsis', { size: 14 })]);

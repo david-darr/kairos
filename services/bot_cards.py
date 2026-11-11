@@ -432,6 +432,18 @@ class CardStore:
             self._emit("updated", card)
             return self.public(card)
 
+    def update_summary_for_request(self, request_id: str, summary: str) -> dict | None:
+        """More requests joined this one (one run asking for the same thing at once): say so on its card. The
+        revision does not move, because what an answer allows is unchanged."""
+        with self._lock:
+            for card in self._cards.values():
+                if card["status"] in OPEN_STATUSES and self._handles.get(card["id"]) == request_id:
+                    card["details"]["summary"] = redact(summary, MAX_SUMMARY)
+                    self._save()
+                    self._emit("updated", card)
+                    return self.public(card)
+        return None
+
     # reading -------------------------------------------------------------------
 
     def get(self, card_id: str, owner: Optional[str]) -> dict:
@@ -668,9 +680,9 @@ class CardStore:
             elif action == "deny":
                 choice = next(c for c in card["choices"] if c["behavior"] == "deny")
             else:
-                scope = {"once": "once", "session": "session", "always": "forever", None: "once"}.get(remember)
+                scope = {"once": "once", "session": "session", "always": "forever", "team": "team", None: "once"}.get(remember)
                 if scope is None:
-                    raise CardError("Remember is once, session or always.")
+                    raise CardError("Remember is once, session, always or team.")
                 choice = next((c for c in card["choices"] if c["behavior"] == "allow" and c["scope"] == scope), None)
                 if choice is None:
                     raise CardError("That kind of Always allow was not offered for this request.")

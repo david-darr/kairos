@@ -138,7 +138,7 @@ def normalize(value) -> tuple[dict, list]:
                "bots": [], "skills": [], "connections": [], "presets": [], "sections": {}, "requirements": []}
     keys = set()
     routine_count = memory_count = 0
-    allowed = {"key", "name", "role", "blurb", "soul", "avatar", "color", "memory_seed", "routines", "skill_names"}
+    allowed = {"key", "name", "role", "blurb", "soul", "avatar", "color", "memory_seed", "routines", "skill_names", "model_tier"}
     for row in _rows(value.get("bots", []), 200, "Bots"):
         key = row.get("key")
         if not isinstance(key, str) or not KEY.fullmatch(key) or key in keys:
@@ -169,6 +169,13 @@ def normalize(value) -> tuple[dict, list]:
         if not isinstance(names, list) or len(names) > 30 or any(not isinstance(n, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", n) for n in names):
             raise ValueError("Invalid skill names")
         bot["skill_names"] = names
+        # A tier, never a model: the import picks the model from this account's own connections
+        # (services/bot_model_tiers.py), and the person can change it in the preview.
+        if row.get("model_tier") is not None:
+            from services.bot_model_tiers import TIERS
+            if row["model_tier"] not in TIERS:
+                raise ValueError("A bot's model tier is light, standard or strong")
+            bot["model_tier"] = row["model_tier"]
         cleaned["bots"].append(bot)
     if routine_count > 50 or memory_count > 100:
         raise ValueError("Packages allow 50 routines and 100 memory notes")
@@ -202,7 +209,11 @@ def normalize(value) -> tuple[dict, list]:
 
 
 def preview(package, warnings=(), skipped=()) -> dict:
-    return {"name": package["manifest"]["name"], "bots": package.get("bots", []),
+    models = None
+    if any(b.get("model_tier") for b in package.get("bots", [])):
+        from services import bot_model_tiers
+        models = bot_model_tiers.plan(package["bots"])
+    return {"name": package["manifest"]["name"], "bots": package.get("bots", []), "models": models,
             "skills": package.get("skills", []), "connections": package.get("connections", []),
             "presets": package.get("presets", []), "requirements": package.get("requirements", []),
             "sections": list(package.get("sections", {})),

@@ -1,0 +1,206 @@
+"""Hands-off posting (David, 2026-11-11: "yes fully hands off posting"): services/content_studio/handsoff.py.
+
+Off: the Producer cannot approve and nothing posts on its own. On (the person's click): the Producer approves with a
+reason, approved YouTube and Instagram posts go out on schedule within the niche's slots, TikTok never does, Pause team
+stops everything at once, a platform warning pauses the channel, the spend cap stops the work, and the Producer's
+updates come batched. No network: the publishers are stand-ins. Run: python scripts/test_content_studio_handsoff.py
+"""
+import asyncio
+import os
+import sys
+import tempfile
+import time
+import unittest
+from pathlib import Path
+
+DATA = tempfile.TemporaryDirectory(prefix="kairos-handsoff-", ignore_cleanup_errors=True)
+os.environ["JARVIS_DATA_DIR"] = DATA.name
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from core import bot_policy  # noqa: E402
+from core import bot_content_studio_tools  # noqa: E402,F401
+from services.content_studio import handsoff, report  # noqa: E402
+from services.content_studio.store import Store, StudioError  # noqa: E402
+from services import studio_team_package as template  # noqa: E402
+
+NOT_CAPPED = lambda: {"capped": False, "near_cap": False}  # noqa: E731
+CAPPED = lambda: {"capped": True, "near_cap": True}  # noqa: E731
+
+
+class Case(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(dir=DATA.name)
+        self.store = Store(os.path.join(self.dir, "studio.db"))
+        self.addCleanup(self.store.close)
+        self.store.update_settings(team_roles={"p1": "producer", "pub1": "publisher"})
+        niche = self.store.create_niche("Space")
+        self.yt = self.store.create_channel(niche["id"], "youtube", "@space")
+        self.ig = self.store.create_channel(niche["id"], "instagram", "@space.ig")
+        self.tt = self.store.create_channel(niche["id"], "tiktok", "@space.tt")
+        self.sent, self.posted = [], []
+
+    def queued(self, channel, title):
+        post = self.store.create_post(channel["id"], title)
+        self.store._update("posts", post["id"], state="awaiting_approval", render_status="ok", render_ref="r.mp4",
+                           script_ref="script")
+        return post["id"]
+
+    def publishers(self, fail=False):
+        async def publish(store, post_id, by):
+            if fail:
+                raise StudioError("the upload was refused")
+            self.posted.append((post_id, by))
+            store.mark_posted(post_id, f"https://example.com/{post_id}")
+            return {"note": "YouTube kept it private."}
+        return {"youtube": publish, "instagram": publish}
+
+    def deliver(self, bot_id, title, body):
+        self.sent.append((bot_id, title, body))
+        return True
+
+    def tick(self, **kw):
+        return asyncio.run(handsoff.tick(self.store, publishers=kw.pop("publishers", self.publishers()), spend=kw.pop("spend", NOT_CAPPED),
+                                         deliver=self.deliver, **kw))
+
+
+class Off(Case):
+    def test_off_the_producer_cannot_approve_and_nothing_posts(self):
+        post = self.queued(self.yt, "Moon")
+        with self.assertRaises(StudioError):
+            handsoff.producer_approve(self.store, post, "Producer", "Ready")
+        self.store.approve(post, by="david")
+        self.assertEqual(self.tick(), {"posted": [], "sent": []})
+        self.assertEqual(self.posted, [])
+
+
+class On(Case):
+    def setUp(self):
+        super().setUp()
+        handsoff.set_hands_off(self.store, True, "david")
+
+    def test_the_producer_approves_with_its_reason_and_youtube_and_instagram_post(self):
+        a, b = self.queued(self.yt, "Moon"), self.queued(self.ig, "Mars")
+        for post in (a, b):
+            approved = handsoff.producer_approve(self.store, post, "Producer", "Sourced, checks passed", )
+            self.assertEqual(approved["approved_by"], "Producer (Producer)")
+        evidence = self.store.evidence(a, "producer_approval")
+        self.assertEqual(evidence[0]["body"]["reason"], "Sourced, checks passed")
+        with self.assertRaises(StudioError):
+            handsoff.producer_approve(self.store, self.queued(self.yt, "No reason"), "Producer", "")
+        result = self.tick()
+        self.assertEqual(sorted(p for p, _ in self.posted), sorted([a, b]))
+        self.assertTrue(all(r["ok"] for r in result["posted"]))
+        self.assertTrue(all(by == "Publisher" for _, by in self.posted))
+
+    def test_tiktok_never_posts_on_its_own_and_waits_for_a_tap(self):
+        post = self.queued(self.tt, "Comets")
+        handsoff.producer_approve(self.store, post, "Producer", "Ready")
+        result = self.tick()
+        self.assertEqual(self.posted, [])
+        self.assertEqual([p["id"] for p in handsoff.tiktok_taps(self.store)], [post])
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn("TikTok", self.sent[0][2])
+        self.assertEqual([f["kind"] for f in result["sent"]], ["taps"])
+
+    def test_one_post_a_day_per_channel_by_the_niche_slots_and_the_schedule(self):
+        posts = [self.queued(self.yt, f"Post {n}") for n in range(3)]
+        for post in posts:
+            self.store.approve(post, by="david")
+        self.tick()
+        self.assertEqual(len(self.posted), 1)
+        self.tick()
+        self.assertEqual(len(self.posted), 1, "a second post the same day went out")
+        later = time.time() + 2 * 86400
+        self.tick(now=later)
+        self.assertEqual(len(self.posted), 2)
+
+    def test_pause_team_stops_posting_and_approving_at_once_and_holds_the_bots(self):
+        post = self.queued(self.yt, "Moon")
+        self.store.approve(post, by="david")
+        handsoff.set_paused(self.store, True)
+        self.assertEqual(self.tick()["posted"], [])
+        with self.assertRaises(StudioError):
+            handsoff.producer_approve(self.store, self.queued(self.yt, "Other"), "Producer", "Ready")
+        handsoff.set_paused(self.store, False)
+        self.tick()
+        self.assertEqual([p for p, _ in self.posted], [post])
+
+    def test_the_kill_switch_is_read_again_between_posts(self):
+        a, b = self.queued(self.yt, "A"), self.queued(self.ig, "B")
+        self.store.approve(a, by="david")
+        self.store.approve(b, by="david")
+
+        async def pause_after_first(store, post_id, by):
+            self.posted.append((post_id, by))
+            store.mark_posted(post_id, f"https://example.com/{post_id}")
+            handsoff.set_paused(store, True)
+            return {}
+        self.tick(publishers={"youtube": pause_after_first, "instagram": pause_after_first})
+        self.assertEqual(len(self.posted), 1)
+
+    def test_a_platform_warning_pauses_the_channel_and_is_said_at_once(self):
+        post = self.queued(self.yt, "Moon")
+        self.store.approve(post, by="david")
+        self.store.record_warning(self.yt["id"], "Community guidelines strike")
+        result = self.tick()
+        self.assertEqual(self.posted, [])
+        self.assertIn("platform_warning", [f["kind"] for f in result["sent"]])
+        self.assertIn("strike", self.sent[0][2])
+
+    def test_the_spend_cap_stops_the_work(self):
+        post = self.queued(self.yt, "Moon")
+        self.store.approve(post, by="david")
+        result = self.tick(spend=CAPPED)
+        self.assertEqual(self.posted, [])
+        self.assertIn("spend_capped", [f["kind"] for f in result["sent"]])
+        with self.assertRaises(StudioError):
+            from unittest.mock import patch
+            with patch.object(handsoff, "_capped", return_value=True):
+                handsoff.producer_approve(self.store, self.queued(self.yt, "Two"), "Producer", "Ready")
+
+    def test_repeated_failures_are_raised_once_and_updates_are_batched(self):
+        post = self.queued(self.yt, "Moon")
+        self.store.approve(post, by="david")
+        tiktok = self.queued(self.tt, "Comets")
+        self.store.approve(tiktok, by="david")
+        for _ in range(handsoff.FAILS_BEFORE_ALERT):
+            self.tick(publishers=self.publishers(fail=True))
+        texts = "\n".join(body for _, _, body in self.sent)
+        self.assertIn("failed 3 times", texts)
+        self.assertEqual(len(self.sent), 2, "one batch for the TikTok tap, one for the failure, never one per attempt")
+        self.assertIn("- ", self.sent[0][2])
+        before = len(self.sent)
+        self.tick(publishers=self.publishers(fail=True))
+        self.assertEqual(len(self.sent), before, "nothing new, nothing sent")
+
+    def test_a_retirement_proposal_is_raised_and_still_needs_the_person(self):
+        self.store.add_decision("retire", "niche", 1, "Space", "awaiting_user", "executor", reason="Behind for two reviews")
+        result = self.tick()
+        self.assertIn("retirement", [f["kind"] for f in result["sent"]])
+        self.assertIn("needs your OK", self.sent[0][2])
+
+    def test_the_weekly_report_lists_what_posted(self):
+        post = self.queued(self.yt, "Moon dust")
+        self.store.approve(post, by="Producer (Producer)")
+        self.tick()
+        text = report.render_text(report.build_report(self.store, spend=lambda: {"available": False}))
+        self.assertIn("Moon dust on @space (youtube)", text)
+        self.assertIn("Waiting for your tap on TikTok", text)
+
+
+class Policy(unittest.TestCase):
+    def test_publish_tools_still_ask_and_approving_is_internal_but_self_guarded(self):
+        self.assertIn("content_studio_approve_post", bot_policy.CONTENT_STUDIO_INTERNAL_TOOLS)
+        self.assertTrue(bot_policy.HANDS_OFF_PUBLISH_TOOLS <= bot_policy.CONTENT_STUDIO_ASKS)
+        self.assertIsNotNone(bot_policy.internal_tool_problem("content_studio_publish_youtube"))
+
+    def test_the_template_says_both_rules(self):
+        soul = next(b["soul"] for b in template.BOTS if b["name"] == "Producer")
+        self.assertIn("Hands-off posting off, the default: every post waits for the person's OK", soul)
+        self.assertIn("content_studio_approve_post", soul)
+        self.assertIn("TikTok still waits for the person's own tap", soul)
+        self.assertNotIn("—", soul)
+
+
+if __name__ == "__main__":
+    unittest.main()

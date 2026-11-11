@@ -37,18 +37,22 @@ async def coordinate(args, ctx):
     targets = [bot_peers.resolve(target) for target in ids]
     if len({t["id"] for t in targets}) != len(targets):
         raise ValueError("Choose different bots.")
+    from core import bot_policy
     lines = []
     for target in targets:
         needs_approval = False
+        # Teammates hand work to each other without a prompt (Bot team approvals, 2026-11-11); a bot outside the
+        # team keeps asking. The work stays fenced as untrusted in the teammate's prompt either way.
+        teammate = bot_policy.same_team(ctx.agent_id, target["id"]) is not None
         try:
-            verdict = bot_peers.authorize(ctx.agent_id, target, session_id=ctx.session_id)
+            verdict = bot_peers.authorize(ctx.agent_id, target, session_id=ctx.session_id, approved=teammate)
         except PermissionError:
             needs_approval = True
         except ValueError as error:
             lines.append(f"Assignment refused: {error}")
             continue
         key = f"coordinate_bots:{target['id']}"
-        tainted = bool(ctx.turn_taint and ctx.turn_taint.tainted)
+        tainted = bool(ctx.turn_taint and ctx.turn_taint.tainted) and not teammate
         decision = await permissions.decide(surface=(ctx.permission_surface if needs_approval or tainted else f"agent:{ctx.agent_id}"), tool="coordinate_bots",
             arguments={"bot_id": target["id"], "message": args["message"], "kind": "peer_approval"},
             title=f"Contact {target['name']}?", description=(f"This turn read {ctx.turn_taint.reason}. " if tainted else "") +

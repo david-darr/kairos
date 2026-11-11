@@ -133,6 +133,7 @@ def _pipeline(args, ctx, bot, role):
     team.seed_strategies(studio)  # a team imported before a starting strategy existed gains it (a dropped one never returns)
     return _data(ctx, "content studio pipeline", {
         "you_are": role, "items": pipeline.pipeline(studio), "approvals_waiting": len(pipeline.approval_queue(studio)),
+        "hands_off": _hands_off_line(),
         "niches": [{"id": n["id"], "name": n["name"], "slots": n["slots"]} for n in studio.list_niches("live")],
         "channels": channels, "strategies": strategies, "niches_wanted": wanted,
         "formats": [{"id": f["id"], "name": f["name"]} for f in studio.list_formats("active")],
@@ -141,6 +142,14 @@ def _pipeline(args, ctx, bot, role):
         "characters": _characters(),
         "style_packs": [{"id": p["id"], "name": p["name"], "base": p.get("base", p["id"]), "available": p["available"]}
                         for p in formats.packs()]})
+
+
+def _hands_off_line():
+    from services.content_studio import handsoff
+    s = handsoff.state(studio)
+    return {"on": s["on"], "team_paused": s["paused"], "tiktok_taps_waiting": s["taps"],
+            "rule": ("The Producer approves queued posts with content_studio_approve_post; Kairos posts YouTube and Instagram on schedule; "
+                     "TikTok waits for the person's tap." if s["on"] else "Every post waits for the person's OK.")}
 
 
 def _characters():
@@ -454,13 +463,20 @@ def _posted(args, ctx, bot, role):
     return _data(ctx, "content studio post", studio.mark_posted(args["post_id"], url)) + " Its numbers can be recorded now."
 
 
+def _not_paused():
+    if studio.settings()["team_paused"]:
+        raise StudioError("the person paused the team, so nothing is posted until they resume it")
+
+
 async def _publish(args, ctx, bot, role):
+    _not_paused()
     result = await youtube_publish.publish(studio, args["post_id"], bot["name"])
     note = (" " + result["note"]) if result["note"] else ""
     return _data(ctx, "content studio upload", {k: result[k] for k in ("video_id", "url", "privacy", "asked_privacy")}) + note
 
 
 async def _publish_instagram(args, ctx, bot, role):
+    _not_paused()
     result = await instagram_api.publish(studio, args["post_id"], bot["name"])
     note = (" " + result["note"]) if result.get("note") else ""
     return _data(ctx, "content studio instagram post", {k: result.get(k) for k in ("state", "url", "media_id")}) + note
@@ -674,6 +690,14 @@ def _submit(args, ctx, bot, role):
     return _data(ctx, "content studio post", post) + " It now waits for the person's approval."
 
 
+def _approve(args, ctx, bot, role):
+    from services.content_studio import handsoff
+    post = handsoff.producer_approve(studio, args["post_id"], bot["name"], args.get("reason", ""))
+    tail = (" It goes out on its schedule through the connected app." if post["platform"] in handsoff.AUTO_PLATFORMS else
+            " TikTok asks the person to choose who sees each post, so it waits for their tap; mention it in your update.")
+    return _data(ctx, "content studio post", post) + " Approved by you (hands-off posting is on)." + tail
+
+
 def _watch(args, ctx, bot, role):
     findings = pipeline.watch(studio)
     sent = delivery.deliver_findings(studio, findings) if args.get("notify", True) else []
@@ -839,6 +863,11 @@ _add("content_studio_reject_decision", "Producer: reject an Executor proposal, w
      _obj({"decision_id": _int(), "reason": _str(300)}, ("decision_id",)), WRITE, ("producer",), _reject)
 _add("content_studio_submit_post", "Editor or Producer: put a rendered post in the approval queue. Only the person can approve it.",
      _obj({"post_id": _int()}, ("post_id",)), WRITE, ("editor", "producer"), _submit)
+_add("content_studio_approve_post", "Producer: approve a queued post yourself, with the reason it is ready. Only while the person has hands-off "
+     "posting on (refused otherwise, and while the team is paused or the spend cap is reached); the policy checks already ran "
+     "when it was queued. YouTube and Instagram posts then go out on their schedule; TikTok waits for the person's tap.",
+     _obj({"post_id": _int(), "reason": _str(500, "Why it is ready, in a sentence")}, ("post_id", "reason")),
+     WRITE, ("producer",), _approve)
 _add("content_studio_watch", "Producer: run the watch (overdue steps, render failures, posts rejected twice, spend near the cap, platform warnings). "
      "Urgent findings go to the person's Inbox once; set notify false to only read.", _obj({"notify": {"type": "boolean"}}), WRITE, ("producer",), _watch)
 _add("content_studio_send_report", "Producer: put the weekly report (what won, what is retiring, what replaces it, spend) in the person's Inbox.",

@@ -730,6 +730,8 @@ function usageSection(ctx) {
     Card({ label: `Last ${facts.runs} runs`, children: facts.runs ? [fact('Results', Object.entries(facts.tally).map(([k, n]) => `${OUTCOME[k] || k}: ${n}`)), ...(facts.average ? [fact('Average length', `${facts.average} seconds`)] : [])]
       : [note('There are no runs to count yet.')] }),
     Card({ label: 'Cost', children: [note('Cost is not tracked yet, so none is shown. Run counts above are exact.')] }),
+    Card({ label: 'Report', children: [note('What it did, made and asked, run by run, with errors and their fixes.'),
+      Button({ label: 'Open report', iconName: 'gauge', onClick: () => import('./botsActivityReport.js').then(m => m.openBotReport({ botId: agent.id })) })] }),
   ]);
 }
 

@@ -87,6 +87,20 @@ async function openTeamTemplate() {
   await templates.openTemplates({ tab: 'explore', preview: 'Content Studio' });
 }
 
+async function openTeamReport() {
+  const found = await api('/api/bot-reports/content-team', { toast: false }).catch(() => ({}));
+  const reports = await import('./botsActivityReport.js');
+  if (found.team_id) await reports.openTeamReport({ teamId: found.team_id });
+  else toast('The Content Studio bots are not in a team yet. Open a bot\'s report from the Bots tab.');
+}
+
+// Hands-off posting and Pause team (static/js/studioHandsOff.js, 2026-11-11).
+function handsOffHost() {
+  const host = el('div', { 'data-handsoff': '' });
+  import('./studioHandsOff.js').then(m => m.mountHandsOff(host)).catch(() => {});
+  return host;
+}
+
 // openVideos: Studio's own switch to its Videos section (the editor), from the rail's Editor item.
 export async function mountContent(host, { signal, openVideos } = {}) {
   await loadStyles();
@@ -1580,7 +1594,9 @@ export async function mountContent(host, { signal, openVideos } = {}) {
     const libs = [
       withIcon(btn('Editor', () => openVideos ? openVideos() : document.querySelector('.studio-sections [data-section=videos]')?.click(), 'quiet sc-rail-lib', { 'aria-label': 'Open the video editor', title: 'Open the video editor', 'data-lib': 'editor' }), 'play'),
       ...M.LIBRARIES.map(([id, label]) => item(`lib:${id}`, label, { icon: icon(LIB_ICONS[id]), attrs: { 'data-lib': id } })),
-      withIcon(btn('Templates', openTeamTemplate, 'quiet sc-rail-lib', { 'aria-label': 'Open team templates', title: 'Open team templates', 'data-lib': 'templates' }), 'store')];
+      withIcon(btn('Templates', openTeamTemplate, 'quiet sc-rail-lib', { 'aria-label': 'Open team templates', title: 'Open team templates', 'data-lib': 'templates' }), 'store'),
+      // Each bot's report and the team's (static/js/botsActivityReport.js, 2026-11-11).
+      ...(data.hasTeam ? [withIcon(btn('Bot reports', openTeamReport, 'quiet sc-rail-lib', { 'aria-label': 'Open the team\'s bot reports', title: 'Open the team\'s bot reports', 'data-lib': 'reports' }), 'agents')] : [])];
     return el('nav', { class: 'sc-rail', 'aria-label': 'Channels and libraries' }, [
       el('div', { class: 'sc-rail-top' }, [...nodes, add]),
       el('div', { class: 'sc-rail-lower' }, [el('p', { class: 'sc-rail-heading', text: 'Libraries' }), ...libs])]);
@@ -1636,7 +1652,7 @@ export async function mountContent(host, { signal, openVideos } = {}) {
       const at = tabs.findIndex(t => t[0] === tab); tab = tabs[(at + step + tabs.length) % tabs.length][0]; focusAfter = '.sc-tabs [role=tab][aria-selected=true]'; draw();
     });
     const panel = el('div', { class: 'sc-body', id: 'sc-body', ...(bar ? { role: 'tabpanel', 'aria-labelledby': `sc-tab-${tab}` } : { role: 'region', 'aria-label': head(channel).textContent }) }, [el('p', { role: 'status', text: 'Loading...' })]);
-    const main = el('div', { class: 'sc-main' }, [picker(), alerts(), data.failed.length ? el('p', { class: 'set-error', role: 'alert', text: 'Some parts did not load. Try again in a moment.' }) : null, head(channel), bar, panel].filter(Boolean));
+    const main = el('div', { class: 'sc-main' }, [picker(), data.hasTeam ? handsOffHost() : null, alerts(), data.failed.length ? el('p', { class: 'set-error', role: 'alert', text: 'Some parts did not load. Try again in a moment.' }) : null, head(channel), bar, panel].filter(Boolean));
     // On the calendar the rail folds to its avatars and icons, so the week has the width (names stay in the tooltips).
     root.replaceChildren(el('div', { class: `sc-shell${tab === 'calendar' && tabs.length ? ' is-narrow-rail' : ''}`, 'data-scope': String(scope), 'data-tab': tabs.length ? tab : '' }, [rail(), main]));
     // A narrow tab bar scrolls: keep the open tab in view.

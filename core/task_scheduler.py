@@ -297,6 +297,15 @@ async def _run_card(card: dict) -> None:
     back to Ready for a retry, or to Blocked when out of attempts."""
     brain = None
     agent = agent_service.get(card.get("agent_id"))
+    # A card another bot assigned: nobody watches this run, so a step that needs the person's OK asks in the
+    # teammate's work thread and their Inbox (Bot team approvals, 2026-11-11).
+    from contextlib import ExitStack
+    from core import bot_policy
+    from services.agent_handoff import route_for_card
+    routes = ExitStack()
+    route = route_for_card(card) if agent else None
+    if route:
+        routes.enter_context(bot_policy.routing_asks(f"agent:{agent['id']}", route))
     try:
         brain = _task_brain(card)
         await brain.connect()
@@ -322,6 +331,7 @@ async def _run_card(card: dict) -> None:
                     level="error" if blocked else "warning", task_id=card["id"])
         logger.exception("card '%s' (%s) failed (attempt %s)", card["name"], card["id"], card["attempts"])
     finally:
+        routes.close()
         if brain is not None:
             await brain.disconnect()
 
@@ -507,6 +517,7 @@ async def _tick() -> None:
                 logger.exception("scheduler: the pass for account %s failed", account_id)
     _youtube_daily(loop)
     _social_daily(loop)
+    _hands_off_due(loop)
     _page_reads_due(loop)
     _check_mcp_servers(loop)
     try:
@@ -545,6 +556,22 @@ def _social_daily(loop) -> None:
     _social["last"] = clock.time()
     from services.content_studio import social
     _social["task"] = loop.create_task(social.sync_all_due())
+
+
+_hands_off = {"task": None, "last": 0.0}
+
+
+def _hands_off_due(loop) -> None:
+    """Content Studio's hands-off posting (services/content_studio/handsoff.py): every five minutes, for each account
+    that switched it on, post the approved YouTube and Instagram posts that are due and send the Producer's batched
+    update. An account with it off does nothing."""
+    import time as clock
+    from services.content_studio import handsoff
+    running = _hands_off["task"]
+    if (running is not None and not running.done()) or clock.time() - _hands_off["last"] < handsoff.LOOK_EVERY_S:
+        return
+    _hands_off["last"] = clock.time()
+    _hands_off["task"] = loop.create_task(handsoff.tick_all_due())
 
 
 _page_reads ={"task": None, "last": 0.0}

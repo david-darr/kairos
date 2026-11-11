@@ -40,6 +40,9 @@ export function mount(host, ctx = {}) {
       { label: 'Team instructions', iconName: 'book-open', onSelect: () => openTeamInstructions({ departmentId: team.id }) },
       { label: 'Team memory', iconName: 'brain', onSelect: () => openTeamMemory({ departmentId: team.id }) },
       { label: 'Team settings', iconName: 'settings', onSelect: () => openTeamSettings({ departmentId: team.id }) },
+        { label: 'Team report', iconName: 'gauge', onSelect: () => import('./botsActivityReport.js').then(m => m.openTeamReport({ teamId: team.id })) },
+        { label: 'Suggest models', iconName: 'sparkles', onSelect: () => import('./botsActivityReport.js').then(m => m.openSuggestModels({ teamId: team.id })) },
+        { label: team.paused ? 'Resume team' : 'Pause team', iconName: team.paused ? 'play' : 'pause', onSelect: () => import('./botsActivityReport.js').then(m => m.setTeamPaused(team.id, !team.paused)) },
       { label: 'Rename', iconName: 'pencil', onSelect: () => openTeamDialog({ departmentId: team.id, mode: 'rename' }) },
       { label: 'Delete', iconName: 'trash-2', danger: true, onSelect: () => openTeamDialog({ departmentId: team.id, mode: 'delete' }) },
     ], { align: 'end' });
@@ -55,6 +58,7 @@ export function mount(host, ctx = {}) {
     ])]);
     card.append(main, h('div', { class: 'bots-team-bot-foot' }, [
       IconButton({ label: `Chat with ${bot.name || 'bot'}`, iconName: 'message-square', onClick: () => { if (!suppressClick) teamNavigate('botsShell', { agentId: bot.id }); } }),
+      IconButton({ label: `Report for ${bot.name || 'bot'}`, iconName: 'gauge', onClick: () => { if (!suppressClick) import('./botsActivityReport.js').then(m => m.openBotReport({ botId: bot.id })); } }),
       h('span', { class: 'bots-team-status' }, [h('span', { class: 'bots-status-dot', 'data-state': state.state }), h('span', { text: state.label })]),
       Button({ label: bot.model_label || bot.model_override || 'Model', onClick: () => { if (!suppressClick) openBotSettings(bot.id, { section: 'model' }); } }),
     ]));
@@ -68,7 +72,11 @@ export function mount(host, ctx = {}) {
     world.replaceChildren(...tiles.map(team => {
       const more = IconButton({ label: `Options for ${team.name}`, iconName: 'ellipsis', onClick: e => menu(team, e.currentTarget) });
       const header = h('header', { class: 'bots-team-tile-head', 'data-team-drag': team.id }, [icon('move', { size: 16 }), h('h2', { text: team.name }),
-        h('span', { class: 'bots-row-hint', text: String(team.members.length) }), team.ungrouped ? null : more]);
+        h('span', { class: 'bots-row-hint', text: String(team.members.length) }),
+        // Pause team, the kill switch, always in sight on the team's tile.
+        team.ungrouped ? null : Button({ label: team.paused ? 'Resume team' : 'Pause team', iconName: team.paused ? 'play' : 'pause',
+          onClick: () => import('./botsActivityReport.js').then(m => m.setTeamPaused(team.id, !team.paused)).then(() => ctx.onChanged?.()) }),
+        team.ungrouped ? null : more]);
       return h('section', { class: 'bots-team-tile', 'data-team-key': team.id, 'aria-label': team.name }, [header,
         h('div', { class: 'bots-team-grid' }, team.members.length ? team.members.map(b => botCard(b, team)) : [h('p', { text: 'No bots in this team.' })])]);
     }));

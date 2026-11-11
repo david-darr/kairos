@@ -159,7 +159,7 @@ class StudioTeamTests(unittest.TestCase):
         self.assertIn("content_studio_record_metrics", souls["Executor"])
         self.assertIn("$50", souls["Producer"])
         self.assertIn("Inbox", souls["Producer"])
-        self.assertIn("Never post anything the person has not approved", souls["Publisher"])
+        self.assertIn("Never post anything that is not approved (by the person, or by the Producer while hands-off posting is on)", souls["Publisher"])
         self.assertIn("never retire anything yourself", souls["Executor"])
         self.assertIn("3 weeks and 10 posts", souls["Executor"])
 
@@ -227,7 +227,7 @@ class StudioToolTests(unittest.TestCase):
 
     def test_tools_are_registered_agent_only_and_none_approves_or_posts(self):
         names = sorted(n for n in tool_registry._REGISTRY if n.startswith("content_studio_"))
-        self.assertEqual(names, ["content_studio_add_topic", "content_studio_check_port", "content_studio_check_post",
+        self.assertEqual(names, ["content_studio_add_topic", "content_studio_approve_post", "content_studio_check_port", "content_studio_check_post",
                                  "content_studio_confirm_decision", "content_studio_decide_port", "content_studio_formats",
                                  "content_studio_mark_posted", "content_studio_pick_topic", "content_studio_pipeline",
                                  "content_studio_post_evidence", "content_studio_prepare_post", "content_studio_propose_niche", "content_studio_propose_port",
@@ -240,7 +240,9 @@ class StudioToolTests(unittest.TestCase):
                                  "content_studio_submit_plan", "content_studio_submit_post", "content_studio_watch", "content_studio_youtube_trending"])
         for name in names:
             self.assertTrue(tool_registry._REGISTRY[name].agent_only)
-        self.assertFalse(any("approve" in n for n in names), "no tool approves a post")
+        # The one approving tool is the Producer's, and refuses unless the person switched hands-off posting on
+        # (David, 2026-11-11; scripts/test_content_studio_handsoff.py).
+        self.assertEqual([n for n in names if "approve" in n], ["content_studio_approve_post"])
 
     def test_import_seeds_the_starting_strategies_once(self):
         active = {(s["owner_role"], s["name"]): bool(s["is_default"]) for s in studio.list_strategies()}

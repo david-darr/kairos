@@ -92,6 +92,88 @@ def delete(ident: str, user: str = Depends(require_user)):
     return teams.delete(ident, user)
 
 
+class ModelPick(Body):
+    endpoint_id: str = Field(min_length=1, max_length=200)
+    model_override: str | None = Field(default=None, max_length=200)
+    model_effort: str | None = Field(default=None, max_length=40)
+
+
+class ApplyModels(Body):
+    models: dict[str, ModelPick] = Field(max_length=100)
+
+
+@router.get("/{ident}/models")
+def model_suggestion(ident: str, user: str = Depends(require_user)):
+    """Suggest models: the team's tier map turned into models from this account's connections. A proposal only;
+    nothing changes until the person applies it."""
+    from services import bot_model_tiers
+    return {"team": teams.get(ident, user)["name"], **bot_model_tiers.suggest(teams.members(ident, user), _tiers(ident, user))}
+
+
+@router.post("/{ident}/models")
+def apply_models(ident: str, body: ApplyModels, user: str = Depends(require_user)):
+    """Apply the models the person picked, member by member. Each pick must be a connection this account has."""
+    from fastapi import HTTPException
+    from services import bot_model_tiers
+    from services.agent_service import agent_service
+    members = {b["id"]: b for b in teams.members(ident, user)}
+    if set(body.models) - set(members):
+        raise HTTPException(400, "Pick models for this team's bots only")
+    checked = {}
+    try:
+        for bot_id, pick in body.models.items():
+            checked[bot_id] = bot_model_tiers.check_choice(pick.model_dump())
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+    changed = []
+    for bot_id, model in checked.items():
+        agent_service.update(bot_id, endpoint_id=model["endpoint_id"], model_override=model["model_override"],
+                             model_effort=model["model_effort"])
+        changed.append(bot_id)
+    return {"changed": changed, **bot_model_tiers.suggest(teams.members(ident, user), _tiers(ident, user))}
+
+
+def _tiers(ident, user):
+    """Each member's tier: the one its template gave it, else for a Content Studio bot the role's tier."""
+    team = teams.get(ident, user)
+    tiers = dict(team.get("model_tiers") or {})
+    try:
+        from services.content_studio import studio, team as studio_team
+        from services.studio_team_package import TIERS_BY_ROLE
+        for bot in teams.members(ident, user):
+            role = studio_team.role_of(studio, bot["id"])
+            if bot["id"] not in tiers and role in TIERS_BY_ROLE:
+                tiers[bot["id"]] = TIERS_BY_ROLE[role]
+    except Exception:
+        pass
+    return tiers
+
+
+class Flags(Body):
+    paused: bool | None = None
+    hands_off: bool | None = None
+
+
+@router.put("/{ident}/flags")
+def set_flags(ident: str, body: Flags, user: str = Depends(require_user)):
+    """Pause team and hands-off posting, by the person's click. For the Content Studio team the same switches drive
+    Studio's posting (services/content_studio/handsoff.py), so both places always agree."""
+    team = teams.get(ident, user)
+    try:
+        from services.content_studio import handsoff, studio, team as studio_team
+        producer = studio_team.producer_id(studio)
+        found = teams.team_of(producer) if producer else None
+        if found and found["id"] == team["id"]:
+            if body.paused is not None:
+                handsoff.set_paused(studio, body.paused, user)
+            if body.hands_off is not None:
+                handsoff.set_hands_off(studio, body.hands_off, user)
+            return teams.get(ident, user)
+    except ImportError:
+        pass
+    return teams.set_flags(ident, user, paused=body.paused, hands_off=body.hands_off)
+
+
 @router.get("/{ident}/instructions")
 def instructions(ident: str, user: str = Depends(require_user)):
     return teams.instructions(ident, user)

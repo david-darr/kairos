@@ -19,6 +19,12 @@ Order at each action boundary (design 5.1): resolve the bot, thread and run from
 confine a read-and-draft run; classify the operation; apply explicit-review exceptions and the
 outbound allowance; apply exact grants and the selected level; otherwise ask.
 
+Teams (2026-11-11): a team's own record keeping (CONTENT_STUDIO_INTERNAL_TOOLS, or the internal tools a team
+template declared) and hand-offs between members of one team go ahead at every level and are logged; posting,
+anything outbound, deletions and contact outside the team keep asking. A teammate's delegated run has no window,
+so its caller registers a route (routing_asks): the request becomes a card in a conversation the person owns and a
+row in their Inbox, under the person's own name, instead of being refused with nobody to ask.
+
 Also kept here, because they are the same security record: the policy revision, the verified level of
 each bot and thread (a level written behind this module's back is not honoured), exact command
 rules, the desktop elevation handshake, and the redacted decision history.
@@ -534,6 +540,30 @@ SELF_ONLY_TOOLS = frozenset({"ring_me", "message_me", "ask_me_by_call", "notify_
 # Below Full they never ask: the tool holds the limits itself (the new bot starts at Ask with paused routines, a cap an
 # hour, a live conversation only, never on a turn that read outside content) and refuses before this gate otherwise.
 PERSON_REQUESTED_TOOLS = frozenset({"create_bot", "update_bot"})
+# Asking the person a question (agent_ask puts it in their Inbox, or with the requesting bot). Asking is how a bot
+# reaches the person when it is unsure, so it never needs an approval of its own (Bot team approvals, 2026-11-11).
+PERSON_ASK_TOOLS = frozenset({"agent_ask"})
+# Content Studio tools that only read or write Kairos's own Content Studio record (core/bot_content_studio_tools.py;
+# each is also gated to its team role there). Below Full they go ahead without a prompt and are still logged. An
+# explicit name list on purpose: a new content_studio_* tool asks until someone adds it here. Never here: preparing
+# an upload, posting or publishing, reading a platform's own pages, rendering a style pack sample (CONTENT_STUDIO_ASKS).
+# Every post still waits for the person's OK in Studio (the locked rule): content_studio_submit_post only queues it.
+CONTENT_STUDIO_INTERNAL_TOOLS = frozenset({
+    "content_studio_add_topic", "content_studio_pick_topic", "content_studio_save_script", "content_studio_save_shot_plan",
+    "content_studio_submit_plan", "content_studio_check_post", "content_studio_record_render", "content_studio_submit_post",
+    "content_studio_mark_posted", "content_studio_propose_niche", "content_studio_save_format", "content_studio_propose_port",
+    "content_studio_check_port", "content_studio_decide_port", "content_studio_run_review", "content_studio_confirm_decision",
+    "content_studio_reject_decision", "content_studio_watch", "content_studio_send_report", "content_studio_record_warning",
+    "content_studio_record_metrics", "content_studio_propose_style_pack",
+    # Refuses unless the person switched hands-off posting on (services/content_studio/handsoff.py).
+    "content_studio_approve_post"})
+# Posting through the person's connected app: asks, except for the team's Publisher while hands-off posting is on.
+HANDS_OFF_PUBLISH_TOOLS = frozenset({"content_studio_publish_youtube", "content_studio_publish_instagram"})
+CONTENT_STUDIO_ASKS = frozenset({"content_studio_prepare_post", "content_studio_publish_youtube",
+                                 "content_studio_publish_instagram", "content_studio_read_analytics",
+                                 "content_studio_style_pack_sample"})
+# Handing work to a teammate. Inside one team these go ahead; a bot outside the team, or a person, still asks.
+TEAM_HANDOFF_TOOLS = frozenset({"coordinate_bots", "agent_assign", "agent_answer_assignment"})
 DESTRUCTIVE_TOKENS = frozenset("delete remove drop destroy purge wipe erase revoke trash kill uninstall reset clear "
                                "truncate".split())
 DRAFT_TOKENS = frozenset({"draft", "drafts"})
@@ -844,18 +874,21 @@ class Outcome:
     provider: Optional[str] = None
     cwd: Optional[str] = None
     policy_revision: int = 0
+    route: Optional[dict] = None
 
 
 _inflight: dict = {}
 _hooks_installed = False
 
 
-def _owner_for(bot_id: str, session: Optional[dict], run: Optional[dict]) -> str:
+def _owner_for(bot_id: str, session: Optional[dict], run: Optional[dict], route: Optional[dict] = None) -> str:
     from core.auth import SINGLE_USER
     if run and run.get("owner"):
         return run["owner"]
     if session and session.get("owner_user"):
         return session["owner_user"]
+    if route and route.get("owner"):
+        return route["owner"]
     try:
         from core import task_scope
         owner = task_scope.current_owner(bot_id)
@@ -863,11 +896,171 @@ def _owner_for(bot_id: str, session: Optional[dict], run: Optional[dict]) -> str
             return owner
     except Exception:
         pass
-    return SINGLE_USER
+    return account_owner() or SINGLE_USER
+
+
+def account_owner() -> Optional[str]:
+    """The signed-in user whose account this work runs in. With accounts on, bot work that names no owner belongs
+    to that user, never to the old "local" default (Bot team approvals, 2026-11-11)."""
+    try:
+        from services import bot_attention
+        return bot_attention.legacy_owner()
+    except Exception:
+        return None
 
 
 def _session_from_surface(surface: str) -> Optional[str]:
     return surface.removeprefix("chat:") if isinstance(surface, str) and surface.startswith("chat:") else None
+
+
+# -- where an unwatched bot run asks (Bot team approvals, 2026-11-11) ----------------------------
+# A teammate's delegated run (a card another bot assigned, core/task_scheduler.py) and a coordinator's continuation
+# (services/agent_handoff.py) have no window open. Their caller registers a route here, by the surface the run's tools
+# ask on: the request then becomes a card in a conversation the person owns (the teammate's work thread) and a row
+# in their Inbox, instead of being refused because nobody was watching. Kept by surface rather than in a context
+# variable, because a model's in-process tools may run in a task made before the route was set.
+
+DELEGATED_WAIT_SECONDS = 15 * 60
+_routes: dict = {}
+_routes_lock = threading.Lock()
+
+
+@contextmanager
+def routing_asks(surface: str, route: dict):
+    """While this block runs, an approval on `surface` that nobody is watching is asked in route["thread_id"]
+    (a conversation route["owner"] owns). Nested registrations for one surface stack; the newest wins."""
+    entry = {**(route or {}), "id": uuid.uuid4().hex}
+    with _routes_lock:
+        _routes.setdefault(surface, []).append(entry)
+    try:
+        yield entry
+    finally:
+        with _routes_lock:
+            stack = _routes.get(surface) or []
+            if entry in stack:
+                stack.remove(entry)
+            if not stack:
+                _routes.pop(surface, None)
+
+
+def ask_route(surface: Optional[str]) -> Optional[dict]:
+    with _routes_lock:
+        stack = _routes.get(surface or "") or []
+        return dict(stack[-1]) if stack else None
+
+
+# -- teams: their own record keeping and hand-offs go ahead (Bot team approvals, 2026-11-11) ----------
+
+def team_of(bot_id: Optional[str]) -> Optional[dict]:
+    if not bot_id:
+        return None
+    try:
+        from services import bot_departments
+        return bot_departments.team_of(bot_id)
+    except Exception:
+        return None
+
+
+def same_team(bot_id: Optional[str], other_id: Optional[str]) -> Optional[dict]:
+    """The team both bots belong to, or None (a bot never counts as its own teammate here)."""
+    if not bot_id or not other_id or bot_id == other_id:
+        return None
+    mine, theirs = team_of(bot_id), team_of(other_id)
+    return mine if mine and theirs and mine.get("id") == theirs.get("id") else None
+
+
+def internal_tool_problem(name) -> Optional[str]:
+    """Why a team template may not declare `name` as one of its internal tools, or None when it may. Only a Kairos
+    tool that changes Kairos's own data qualifies: never a send, a deletion, a shell or file tool, an explicit-review
+    tool, an admin tool, or anything that reaches outside Kairos."""
+    if not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9_]{2,63}", name):
+        return "An internal tool is a Kairos tool name."
+    if name in CONTENT_STUDIO_INTERNAL_TOOLS:
+        return None  # vetted one by one above
+    from core import permissions
+    if name in CONTENT_STUDIO_ASKS or name in SEND_TOOLS or name in SELF_ONLY_TOOLS or name in PERSON_REQUESTED_TOOLS \
+            or name in permissions.EXPLICIT_REVIEW_TOOLS or name in SHELL_TOOLS or name in FILE_EDIT_TOOLS:
+        return f"{name} always asks, so a team cannot make it internal."
+    try:
+        from core import tool_registry
+        spec = tool_registry._REGISTRY.get(name)
+    except Exception:
+        spec = None
+    if spec is None:
+        return f"{name} is not a Kairos tool."
+    if spec.effect not in ("read", "write") or spec.admin_only:
+        return f"{name} reaches outside Kairos or runs things, so it keeps asking."
+    op = classify(name, {})
+    if op.kind not in (READ, EDIT, DRAFT) or op.scope not in ("", "internal"):
+        return f"{name} sends, deletes or reaches outside Kairos, so it keeps asking."
+    return None
+
+
+def team_internal(bot_id: str, tool: str, mcp) -> Optional[str]:
+    """Why this call is the bot's team's own record keeping (a reason to log), or None."""
+    if mcp is not None or not isinstance(tool, str):
+        return None
+    if tool in CONTENT_STUDIO_INTERNAL_TOOLS:
+        try:
+            from services.content_studio import studio, team as studio_team
+            if studio_team.role_of(studio, bot_id):
+                return "The Content Studio team's own record. It is logged and needs no OK."
+        except Exception:
+            return None
+        return None
+    if tool in HANDS_OFF_PUBLISH_TOOLS:
+        # Hands-off posting, switched on by the person (services/content_studio/handsoff.py): the team's Publisher
+        # posts approved posts through the person's own connected app. The tool still refuses anything not approved.
+        try:
+            from services.content_studio import studio, team as studio_team
+            settings = studio.settings()
+            if settings["hands_off"] and not settings["team_paused"] and studio_team.role_of(studio, bot_id) == "publisher":
+                return "Hands-off posting is on: the Publisher posts approved posts. It is logged."
+        except Exception:
+            return None
+        return None
+    team = team_of(bot_id)
+    declared = (team or {}).get("internal_tools") or []
+    if tool in declared and internal_tool_problem(tool) is None:
+        return f"The {team.get('name') or 'team'} team's own work in Kairos. It is logged and needs no OK."
+    return None
+
+
+def handoff_targets(tool: str, args: dict, bot_id: str) -> Optional[list]:
+    """The bots a hand-off reaches, or None when they cannot all be named from trusted state."""
+    try:
+        from services import bot_peers
+        if tool == "coordinate_bots":
+            raw = args.get("bot_ids") if isinstance(args.get("bot_ids"), list) else (
+                [args["bot_id"]] if isinstance(args.get("bot_id"), str) else None)
+            if not raw or any(not isinstance(item, str) for item in raw):
+                return None
+            return [bot_peers.resolve(item)["id"] for item in raw]
+        if tool == "agent_assign":
+            return [bot_peers.resolve(str(args.get("agent") or ""))["id"]]
+        if tool == "agent_answer_assignment":
+            from services.agent_service import agent_service
+            from services.task_service import task_service
+            item = agent_service.get_item(str(args.get("question_id") or ""))
+            card = task_service.get_task(item.get("card_id")) if item and item.get("card_id") else None
+            if not card or (card.get("requester") or {}).get("agent_id") != bot_id or args.get("escalate"):
+                return None  # escalating goes to the person: it asks like before
+            return [card["agent_id"]]
+    except Exception:
+        return None
+    return None
+
+
+def team_handoff(bot_id: str, tool: str, args: dict, mcp) -> Optional[str]:
+    if mcp is not None or tool not in TEAM_HANDOFF_TOOLS:
+        return None
+    targets = handoff_targets(tool, args, bot_id)
+    if not targets:
+        return None
+    teams = [same_team(bot_id, target) for target in targets]
+    if all(teams):
+        return f"A hand-off inside the {teams[0].get('name') or 'same'} team. It is logged and needs no OK."
+    return None
 
 
 def install_run_hooks() -> bool:
@@ -910,15 +1103,19 @@ def authorize_operation(*, bot_id: str, tool: str, arguments=None, mcp: Optional
     turn = current_turn() or {}
     provider = provider or turn.get("provider") or provider_for(bot_id, session)
     run = run_context(bot_id)
-    owner = _owner_for(bot_id, session, run)
+    route = ask_route(surface) or (ask_route(f"chat:{session_id}") if session_id else None)
+    if route and route.get("bot_id") not in (None, bot_id):
+        route = None
+    owner = _owner_for(bot_id, session, run, route)
     policy = effective_policy(bot_id, session_id if session else None, provider)
     op = classify(tool, args, mcp)
     if op.kind == EXECUTE and op.scope == "shell" and not op.cwd:
         op = Operation(op.kind, op.scope, op.tool, op.label, op.command, op.path, cwd or default_cwd(session),
                        op.destructive)
-    result = Outcome("ask", op=op, mode=policy.mode, owner=owner, thread_id=session_id if session else None,
-                     bot_id=bot_id, unattended=bool(run), run=run, provider=provider, cwd=op.cwd,
-                     policy_revision=policy.revision, invocation_id=invocation_id)
+    thread_id = session_id if session else (route or {}).get("thread_id")
+    result = Outcome("ask", op=op, mode=policy.mode, owner=owner, thread_id=thread_id,
+                     bot_id=bot_id, unattended=bool(run or route), run=run, provider=provider, cwd=op.cwd,
+                     policy_revision=policy.revision, invocation_id=invocation_id, route=route)
 
     def done(action: str, reason: str, source: str, **extra) -> Outcome:
         result.action, result.reason, result.source = action, reason, source
@@ -935,6 +1132,11 @@ def authorize_operation(*, bot_id: str, tool: str, arguments=None, mcp: Optional
         return done("deny", f"This routine can only read and draft. It cannot {verb}.", "read-and-draft")
     if op.kind == READ:
         return done("allow", "Reading needs no approval.", "read")
+    # Pause team (2026-11-11): one switch stops every step of the team's bots that is not a read, at every level.
+    paused_team = team_of(bot_id)
+    if paused_team and paused_team.get("paused") and op.tool not in PERSON_ASK_TOOLS | SELF_ONLY_TOOLS:
+        return done("deny", f"The {paused_team.get('name') or ''} team is paused, so this did not run. "
+                            "The person resumes it with Resume team.", "team-paused")
     # An outer approval of this very call already covers a handler's own check inside it.
     mark = _inflight.get((bot_id, session_id)) if not outer else None
     if mark and not explicit_review and not force_prompt:
@@ -949,6 +1151,16 @@ def authorize_operation(*, bot_id: str, tool: str, arguments=None, mcp: Optional
             mark_inflight(outcome)
         return outcome
 
+    # A team's own work (Bot team approvals, 2026-11-11): its record keeping in Kairos and hand-offs between its own
+    # members go ahead at every level and are logged. A bot outside the team, a person, a send, a post or anything
+    # outside Kairos never comes through here. A hand-off from a turn that read outside content goes ahead too: the
+    # work stays fenced as untrusted in the teammate's prompt, and the teammate is held to its own level.
+    why = team_handoff(bot_id, op.tool, args, mcp) or team_internal(bot_id, op.tool, mcp)
+    if why:
+        return remember(done("allow", why, "team"))
+    # Asking the person a question is how a bot reaches them; it needs no approval of its own.
+    if mcp is None and op.tool in PERSON_ASK_TOOLS:
+        return remember(done("allow", "It only asks you a question in your Inbox.", "asks-person"))
     # 4. Explicit-review tools ask at every level, Full included.
     if explicit_review:
         return done("ask", "This kind of action always needs your review.", "explicit-review")

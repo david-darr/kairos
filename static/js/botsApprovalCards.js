@@ -18,7 +18,8 @@ export const POLL_MS = 3000;
 
 // -- Rows and titles ----------------------------------------------------------------
 
-const SCOPE_TEXT = { once: 'Allowed once', session: 'Allowed for this chat', forever: 'Always allowed' };
+const SCOPE_TEXT = { once: 'Allowed once', session: 'Allowed for this chat', forever: 'Always allowed', team: 'Allowed for the team' };
+const REMEMBER = { forever: 'always', session: 'session', team: 'team' };
 
 // One plain line for a settled card. An action that did not run says so.
 export function settledText(card) {
@@ -61,7 +62,7 @@ export function answerLines(card) {
 export function rememberChoices(card) {
   if (card.kind !== 'approval') return [];
   return (card.choices || []).filter(c => c.behavior === 'allow' && c.scope !== 'once')
-    .map(c => ({ id: c.id, label: c.label, remember: c.scope === 'forever' ? 'always' : 'session' }));
+    .map(c => ({ id: c.id, label: c.label, remember: REMEMBER[c.scope] || 'session' }));
 }
 
 export function approvalBody(card, action, remember = 'once') {

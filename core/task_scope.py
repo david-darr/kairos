@@ -18,12 +18,25 @@ def owner_for(task):
     if owners:
         return owners.pop()
     owner = None
-    if task.get("origin_session_id"):
+    # A card another bot assigned belongs to whoever owns the delegating thread (Bot team approvals, 2026-11-11).
+    for key in ("origin_session_id",):
+        if task.get(key):
+            from core.session_manager import session_manager
+            owner = (session_manager.get_session(task[key]) or {}).get("owner_user")
+    requester = task.get("requester") if isinstance(task.get("requester"), dict) else {}
+    if not owner and requester.get("session_id"):
         from core.session_manager import session_manager
-        owner = (session_manager.get_session(task["origin_session_id"]) or {}).get("owner_user")
-    # An ownerless routine on a one-account install is that account's.
+        owner = (session_manager.get_session(requester["session_id"]) or {}).get("owner_user")
+    # An ownerless routine on a one-account install is that account's; with several accounts, the user of the
+    # account this work runs in (its folder is theirs), never the old "local" default.
     from core.auth import auth_manager
-    return owner or auth_manager.sole_user()
+    if owner or auth_manager.sole_user():
+        return owner or auth_manager.sole_user()
+    try:
+        from core import accounts
+        return auth_manager.username_for_account(accounts.effective_account())
+    except Exception:
+        return None
 
 
 @contextmanager

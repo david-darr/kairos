@@ -21,7 +21,7 @@ router = APIRouter()
 
 ROUTERS = ("bot_connections_routes", "bot_skills_routes", "bot_recall_routes", "bot_access_routes", "bot_memory_routes",
            "bot_card_routes", "bot_automation_change_routes",
-           "bot_event_routes")
+           "bot_event_routes", "bot_activity_routes")
 # Approval and routine routes are already mounted by permission_routes and task_routes respectively.
 # Keep their existing hosts and never include them a second time here.
 included: list = []

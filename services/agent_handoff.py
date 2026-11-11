@@ -121,7 +121,11 @@ def assign(requesting_id: str, target: str, work: str, session_id: str | None = 
             return "Assignment refused: no requesting thread was found."
         session_id = origin.get("coordination_thread_id")
         if not session_id:
-            session_id = session_manager.create_session(f"Work on {origin['name']}")["id"]
+            # The coordination thread is the person's, like the card it belongs to (never ownerless).
+            from core import task_scope
+            owner = origin.get("owner_user") or task_scope.owner_for(origin)
+            session_id = session_manager.create_session(f"Work on {origin['name']}",
+                                                        **({"owner_user": owner} if owner else {}))["id"]
             endpoint_id = agent_service.chat_endpoint(source)
             if endpoint_id:
                 session_manager.set_model_endpoint(session_id, endpoint_id)
@@ -169,8 +173,10 @@ def assign(requesting_id: str, target: str, work: str, session_id: str | None = 
             "partner": {"id": peer["id"], "name": peer["name"]}, "work_session_id": work_session})
         return f"Notified {peer['name']}. End this turn and do not poll."
     work_session = _work_thread(peer, source, session_id, standing=thread == "standing", title=title)
+    # The delegated card belongs to the person who owns the delegating thread (multi-account: never "local").
+    owner = (session_manager.get_session(session_id) or {}).get("owner_user")
     card = task_service.create_task(work.strip().splitlines()[0][:60], framed, "card", status="ready",
-                                    agent_id=peer["id"], requester=request)
+                                    agent_id=peer["id"], requester=request, **({"owner_user": owner} if owner else {}))
     card["assignment_chain"] = chain + [peer["id"]]
     card.update(assignment_id=node["id"], mode=mode, reason=reason, done_when=done_when,
                 work_session_id=work_session, partner={"id": peer["id"], "name": peer["name"]})
@@ -232,6 +238,36 @@ def sync_card(card: dict) -> None:
                 {"handoff_status": status})
     if (requester(card) or {}).get("kind") == "bot" and status in ("done", "failed"):
         schedule_wake()
+
+
+def mark_waiting(card_id: str, note: str = "") -> None:
+    """A teammate's run waits for the person's OK (core/permissions.py routes it to their Inbox): the delegating
+    thread's hand-off says so, and goes back to its real status once answered."""
+    card = task_service.get_task(card_id)
+    if not card:
+        return
+    if not note:
+        sync_card(card)
+        return
+    session_id = _thread(card)
+    if session_id:
+        _update(session_id, lambda m: m.get("type") == "handoff" and m.get("card_id") == card["id"],
+                {"handoff_status": "needs_you", "note": note[:300]})
+
+
+def route_for_card(card: dict) -> dict | None:
+    """Where a delegated card's run asks the person (core/bot_policy.py routing_asks): the teammate's work thread,
+    owned by the person who owns the delegating thread. None for a card nobody delegated."""
+    req = requester(card) or {}
+    if req.get("kind") not in ("bot", "room") or not card.get("work_session_id"):
+        return None
+    work = session_manager.get_session(card["work_session_id"]) or {}
+    source = session_manager.get_session(req.get("session_id")) if req.get("session_id") else None
+    owner = (source or {}).get("owner_user") or work.get("owner_user") or card.get("owner_user")
+    if work.get("agent_id") != card.get("agent_id"):
+        return None
+    return {"bot_id": card["agent_id"], "thread_id": card["work_session_id"], "owner": owner, "card_id": card["id"],
+            "requester_bot_id": req.get("agent_id"), "requester_thread_id": req.get("session_id"), "kind": "delegated"}
 
 
 def _post(card: dict, text: str, key: str, **extra) -> None:
@@ -364,11 +400,17 @@ async def wake_batches(now: float | None = None) -> None:
 
 
 async def _resume(req: dict, prompt: str) -> None:
+    from core import bot_policy
     from services import chat_service
     # Coordinated continuation is unattended and uses the same admission
     # reservation as background cards (2026-10-14). No recall extras.
-    with agent_service.run(req["agent_id"]):
-        session_id = req["session_id"]
+    session_id = req["session_id"]
+    # Nobody watches the continuation, so a step that needs the person's OK asks in this same thread and their
+    # Inbox, instead of being refused (Bot team approvals, 2026-11-11).
+    owner = (session_manager.get_session(session_id) or {}).get("owner_user")
+    route = {"bot_id": req["agent_id"], "thread_id": session_id, "owner": owner, "kind": "continuation"}
+    with agent_service.run(req["agent_id"]), bot_policy.routing_asks(f"chat:{session_id}", route), \
+            bot_policy.routing_asks(f"agent:{req['agent_id']}", route):
         async with chat_service.session_operation(session_id):
             await _resume_claimed(req, prompt)
 

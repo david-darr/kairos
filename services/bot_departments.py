@@ -298,6 +298,67 @@ def set_chief(ident, bot_id, also_manages=(), user=None):
         return copy.deepcopy(target)
 
 
+TIERS = ("light", "standard", "strong")
+
+
+def clean_internal_tools(value):
+    """A team template's internal tools (Bot team approvals, 2026-11-11): Kairos tools that only change Kairos's
+    own data, which the team's bots use without a prompt (core/bot_policy.py team_internal). A tool that sends,
+    deletes, runs things or reaches outside Kairos is refused, not silently dropped."""
+    from core import bot_policy
+    if value is None:
+        return []
+    if not isinstance(value, builtins.list) or len(value) > 100 or len(set(map(str, value))) != len(value):
+        raise ValueError("A team's internal tools are up to 100 distinct tool names")
+    for name in value:
+        problem = bot_policy.internal_tool_problem(name)
+        if problem:
+            raise ValueError(problem)
+    return sorted(value)
+
+
+def clean_model_tiers(value):
+    if value is None:
+        return {}
+    if not isinstance(value, dict) or len(value) > 100 or any(
+            not isinstance(k, str) or v not in TIERS for k, v in value.items()):
+        raise ValueError("Model tiers are light, standard or strong, by bot")
+    return dict(value)
+
+
+def set_meta(ident, user=None, *, internal_tools=None, model_tiers=None):
+    """What a team template brought along: its internal tools and each bot's model tier."""
+    with LOCK:
+        get(ident, user)
+        data = _sync()
+        target = next(d for d in data["departments"] if d["id"] == ident)
+        if internal_tools is not None:
+            target["internal_tools"] = clean_internal_tools(internal_tools)
+        if model_tiers is not None:
+            target["model_tiers"] = {**(target.get("model_tiers") or {}), **clean_model_tiers(model_tiers)}
+        target["revision"] = target["revision"] + 1
+        save(registry_path(), data)
+        return copy.deepcopy(target)
+
+
+def set_flags(ident, user=None, *, hands_off=None, paused=None):
+    """Team switches the person sets: hands_off (its lead approves and its work goes out without per-item OKs, where
+    the team's own feature supports it; Content Studio: services/content_studio/handsoff.py) and paused (Pause team:
+    its bots may only read until resumed, core/bot_policy.py)."""
+    with LOCK:
+        get(ident, user)
+        data = _sync()
+        target = next(d for d in data["departments"] if d["id"] == ident)
+        for key, value in (("hands_off", hands_off), ("paused", paused)):
+            if value is not None:
+                if not isinstance(value, bool):
+                    raise HTTPException(400, f"{key} is true or false")
+                target[key] = value
+        target["revision"] = target["revision"] + 1
+        save(registry_path(), data)
+        return copy.deepcopy(target)
+
+
 def prune():
     with LOCK:
         data = _sync()

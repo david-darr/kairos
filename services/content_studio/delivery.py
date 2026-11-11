@@ -62,7 +62,13 @@ def deliver_warning(store, channel_id, notifier=None, now=None):
         return False
     finding = {"kind": "platform_warning", "notify_user": True, "channel_id": channel_id, "warning_id": warning["id"],
                "message": f"{warning['platform']} warned {warning['handle']}: {warning['text']} The channel is paused."}
-    return bool(deliver_findings(store, [finding], notifier, now))
+    return bool(deliver_findings(store, [finding], notifier or urgent_notifier, now))
+
+
+def urgent_notifier(bot_id, title, body, urgent=True):
+    """The Inbox note and, at once, a Reach me message (2026-11-11: a platform warning reaches the person right away)."""
+    from . import handsoff
+    return handsoff.inbox_and_message(bot_id, title, body, urgent)
 
 
 def deliver_report(store, notifier=None, now=None, spend=None):
@@ -70,5 +76,9 @@ def deliver_report(store, notifier=None, now=None, spend=None):
     now = time.time() if now is None else now
     data = report_mod.build_report(store, now, spend=spend)
     text = report_mod.render_text(data)
+    if notifier is None and data.get("hands_off"):
+        # Hands-off: the weekly report is the person's main view, so it also reaches them through Reach me.
+        from . import handsoff
+        notifier = lambda bot_id, title, body, urgent=False: handsoff.inbox_and_message(bot_id, title, body)  # noqa: E731
     delivered = _send(store, "Content Studio weekly report", text, False, notifier)
     return {"delivered": delivered, "text": text}
