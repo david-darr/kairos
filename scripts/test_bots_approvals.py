@@ -228,6 +228,92 @@ class Levels(ApprovalCase):
         self.assertEqual((await self.decide(two, sb, "Write", {"file_path": "a/c.txt"}, timeout=1)).behavior, "deny")
 
 
+class SelfOnlyReach(ApprovalCase):
+    """ring_me, message_me, ask_me_by_call and notify_me_by_call reach only the person: no approval prompt below Full."""
+    SELF = ("ring_me", "message_me", "ask_me_by_call", "notify_me_by_call")
+    ARGS = {"ring_me": {"reason": "x"}, "message_me": {"message": "x"}, "ask_me_by_call": {"question": "x"},
+            "notify_me_by_call": {"message": "x"}}
+
+    async def test_they_go_ahead_at_every_level_without_asking(self):
+        bot = make_bot("SelfReach")
+        sid = make_thread(bot)
+        for mode in ("ask", "edits", "auto", "full"):
+            set_mode(bot, mode)
+            for tool in self.SELF:
+                decision = await self.decide(bot, sid, tool, self.ARGS[tool], timeout=1)
+                self.assertEqual(decision.behavior, "allow", f"{mode} {tool}")
+
+    async def test_the_source_is_self_only_below_full_and_they_do_not_spend_the_send_allowance(self):
+        bot = make_bot("SelfAllowance")
+        sid = make_thread(bot)
+        set_mode(bot, "ask")
+        for tool in self.SELF:
+            outcome = bot_policy.authorize_operation(bot_id=bot, tool=tool, arguments=self.ARGS[tool], surface=f"chat:{sid}",
+                                                     invocation_id=f"inv-{tool}")
+            self.assertEqual((outcome.action, outcome.source, outcome.reservation), ("allow", "self-only", None), tool)
+
+    async def test_the_claude_prefixed_name_is_the_same_tool(self):
+        bot = make_bot("SelfPrefixed")
+        sid = make_thread(bot)
+        set_mode(bot, "ask")
+        outcome = bot_policy.authorize_operation(bot_id=bot, tool=bot_policy.catalog.HIVE_PREFIX + "ring_me",
+                                                 arguments={"reason": "x"}, surface=f"chat:{sid}")
+        self.assertEqual(outcome.source, "self-only")
+
+    async def test_other_sends_still_ask(self):
+        bot = make_bot("SelfOthers")
+        sid = make_thread(bot)
+        dial = {"to": "+15551230000", "who": "Luigi's", "topic": "a table", "goal": "Table for two."}
+        lookalikes = (("dial_someone", dial), ("notify_me_by_text", {"message": "x"}), ("send_email", {}),
+                      ("ring_someone_else", {"reason": "x"}), ("notify_team", {"message": "x"}), ("ring_me_now", {"reason": "x"}),
+                      ("message_me_later", {"message": "x"}))
+        for mode in ("ask", "edits", "auto"):
+            set_mode(bot, mode)
+            for tool, args in lookalikes:
+                outcome = bot_policy.authorize_operation(bot_id=bot, tool=tool, arguments=args, surface=f"chat:{sid}")
+                self.assertEqual(outcome.action, "ask", f"{mode} {tool}")
+                self.assertNotEqual(outcome.source, "self-only", f"{mode} {tool}")
+
+    async def test_a_tool_from_an_outside_server_with_the_same_name_still_asks(self):
+        bot = make_bot("SelfMcp")
+        sid = make_thread(bot)
+        set_mode(bot, "ask")
+        outcome = bot_policy.authorize_operation(bot_id=bot, tool="ring_me", arguments={"reason": "x"}, mcp=("srv", "ring_me"),
+                                                 surface=f"chat:{sid}")
+        self.assertEqual(outcome.action, "ask")
+
+    async def test_explicit_review_and_the_grant_ceiling_still_win(self):
+        bot = make_bot("SelfCeiling", tool_scope={"allow": [], "deny": ["native:ring_me"]})
+        sid = make_thread(bot)
+        set_mode(bot, "ask")
+        denied = await self.decide(bot, sid, "ring_me", {"reason": "x"}, timeout=1)
+        self.assertEqual(denied.behavior, "deny")
+        self.assertIn("Access settings", denied.reason)
+        outcome = bot_policy.authorize_operation(bot_id=bot, tool="ring_me", arguments={"reason": "x"}, surface=f"chat:{sid}",
+                                                 explicit_review=True)
+        self.assertEqual((outcome.action, outcome.source), ("ask", "explicit-review"))
+
+    async def test_a_routine_that_may_only_read_and_draft_still_cannot_reach_out(self):
+        bot = make_bot("SelfRoutine")
+        sid = make_thread(bot)
+        self.with_run({"routine_id": "r1", "run_id": "run1", "bot_id": bot, "owner": "local",
+                       "access": "read-and-draft", "unattended": True, "trigger": "schedule"})
+        for mode in ("ask", "full"):
+            set_mode(bot, mode)
+            for tool in self.SELF:
+                decision = await self.decide(bot, sid, tool, self.ARGS[tool])
+                self.assertEqual(decision.behavior, "deny", f"{mode} {tool}")
+                self.assertIn("only read and draft", decision.reason)
+
+    async def test_an_ordinary_routine_can_reach_the_person_at_ask(self):
+        bot = make_bot("SelfNormalRoutine")
+        sid = make_thread(bot)
+        set_mode(bot, "ask")
+        self.with_run({"routine_id": "r1", "run_id": "run1", "bot_id": bot, "owner": "local", "access": "normal",
+                       "unattended": True, "trigger": "schedule"})
+        self.assertEqual((await self.decide(bot, sid, "ring_me", {"reason": "x"}, timeout=1)).behavior, "allow")
+
+
 class Asking(ApprovalCase):
     async def test_a_command_can_be_remembered_only_as_that_exact_command_in_that_folder(self):
         bot = make_bot("Cmd")

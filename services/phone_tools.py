@@ -1,8 +1,11 @@
 """Bot tools that reach the person (build spec step 8, and Reach me in the 2.3.0 plan): a message, a call or a text to
 the account the bot works for. Where it goes is the person's choice in Settings > Reach me (core/reach_me.py,
 services/reach_me.py); a number or chat is never an argument, so a bot (or a prompt injected into one) cannot reach
-anyone else. The names carry a send word ("message", "notify", "ring") so the approval levels treat every one as an
-outbound send (core/bot_policy.py), on top of the daily limits services/phone_calls.py applies itself.
+anyone else. The names carry a send word ("message", "notify", "ring") so the approval levels classify every one as an
+outbound send (core/bot_policy.py). The four that only reach the person themselves (message_me, ring_me,
+ask_me_by_call, notify_me_by_call) are on bot_policy.SELF_ONLY_TOOLS and go ahead without asking, bounded by the
+daily limits, quiet hours and cooldowns applied here and in services/phone_calls.py; dial_someone and
+notify_me_by_text still ask.
 """
 from core import phone_connection  # noqa: F401  (tests patch phone_tools.phone_connection)
 from services import call_ask, outbound_calls, phone_calls, reach_me, rings  # noqa: F401

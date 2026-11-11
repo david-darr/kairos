@@ -524,6 +524,12 @@ SEND_TOKENS = frozenset("send reply forward post publish invite share pay transf
 # Sends whose names carry no send word (Reach me's message_me reaches the person on their chosen channels;
 # ask_me_by_call calls them through the same call order).
 SEND_TOOLS = frozenset({"message_me", "ask_me_by_call"})
+# Reach me tools whose only recipient is the person themselves (services/phone_tools.py). They are still sends for
+# a read-and-draft routine, but below Full they never ask: the person is the only one reached, and the daily
+# caps, quiet hours and cooldowns (services/rings.py, services/reach_me.py) already bound them. An explicit name
+# list on purpose: a future tool with "ring" or "notify" in its name is a send like any other and still asks.
+# dial_someone and notify_me_by_text are not here.
+SELF_ONLY_TOOLS = frozenset({"ring_me", "message_me", "ask_me_by_call", "notify_me_by_call"})
 DESTRUCTIVE_TOKENS = frozenset("delete remove drop destroy purge wipe erase revoke trash kill uninstall reset clear "
                                "truncate".split())
 DRAFT_TOKENS = frozenset({"draft", "drafts"})
@@ -943,6 +949,10 @@ def authorize_operation(*, bot_id: str, tool: str, arguments=None, mcp: Optional
     if explicit_review:
         return done("ask", "This kind of action always needs your review.", "explicit-review")
     mode = policy.mode
+    # Reaching the person themselves goes ahead at every level that can send at all (their own caps apply
+    # inside the tool). The grant ceiling and a read-and-draft routine were judged before this point.
+    if mode != "full" and op.kind == OUTBOUND and mcp is None and op.tool in SELF_ONLY_TOOLS:
+        return remember(done("allow", "It only reaches you, within its daily limits.", "self-only"))
     # Sends: Full bypasses the allowance; below Full they draw on it or ask.
     if op.kind == OUTBOUND and mode != "full":
         outbound = (_agent(bot_id) or {}).get("outbound") or {}

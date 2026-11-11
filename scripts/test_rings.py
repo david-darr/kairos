@@ -388,7 +388,7 @@ class ToolTests(RingCase):
         from core import tool_registry
         return tool_registry.ToolContext(agent_id="bot-kip", owner_user="alice", invocation_id=inv)
 
-    async def test_ring_me_is_registered_outbound_and_asks_like_other_sends(self):
+    async def test_ring_me_is_registered_and_classified_as_a_send_though_it_never_asks_the_person(self):
         from core import bot_policy, tool_registry
         for name, args in (("ring_me", {"reason": "x"}), ("notify_me_by_call", {"message": "x"})):
             self.assertIn(name, tool_registry._REGISTRY)
