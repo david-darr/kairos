@@ -53,7 +53,10 @@ const sceneProject = { id: sceneId, owner: 'local', title: 'Why the sky is blue'
   music: { mood: 'calm', volume: .5 }, version: 1, updated: Date.now() / 1000, created: Date.now() / 1000 };
 const characters = { characters: [{ id: pipId, name: 'Pip', family: 'round', approved_version: 1, versions: [{ version: 1, status: 'approved' }] },
   { id: 'bbbbbbbbbbbb', name: 'Bo', family: 'square', approved_version: null, versions: [{ version: 1, status: 'draft' }] },
-  { id: 'cccccccccccc', name: 'Pip 3D', family: 'round', approved_version: 1, versions: [{ version: 1, status: 'approved' }] }], pending: [] };
+  { id: 'cccccccccccc', name: 'Pip 3D', family: 'round', approved_version: 1, versions: [{ version: 1, status: 'approved' }] },
+  { id: 'dddddddddddd', name: 'Pip Block', family: 'round', approved_version: 1, versions: [{ version: 1, status: 'approved' }] },
+  { id: 'eeeeeeeeeeee', name: 'Rook', family: 'square', approved_version: 1, versions: [{ version: 1, status: 'approved' }] },
+  { id: 'ffffffffffff', name: 'Fenn', family: 'round', approved_version: 1, versions: [{ version: 1, status: 'approved' }] }], pending: [] };
 const tokens = { '--ds-bg': '#101418', '--ds-surface': '#1b2129', '--ds-text': '#ffffff', '--ds-text-dim': '#b4bdc8', '--ds-accent': '#c6ff3d',
   '--ds-accent-2': '#ff5a1f', '--ds-on-accent': '#101418', '--ds-font-display': 'Arial, sans-serif', '--ds-font-sans': 'Arial, sans-serif', '--ds-radius-m': '4px' };
 let enabled = true;
@@ -69,6 +72,36 @@ const review = { comments: [], runs: [], since: { since: null, changes: [] }, co
 // Step 7: a video file this video holds (its decoded frames stand in as the app icon) with its sound.
 const videoSha = 'f'.repeat(64), trackMedia = { ['media/' + videoSha]: { seconds: 4, frames: 120, width: 192, height: 192, title: 'Waves', bytes: 2400000, audio: soundAsset, cut: false } };
 const asks = [];
+// Polish for 2.3.0: Pack C's voxel beat and Pack C classic's story beat in their own forms. The starter specs come from
+// core/character_store.py so the preview draws the real blocky and block characters.
+const packC = (() => {
+  const python = [path.join(root, '.venv', 'Scripts', 'python.exe'), path.join(root, '.venv', 'bin', 'python')].find(p => fs.existsSync(p));
+  const out = require('node:child_process').spawnSync(python, ['-c', "import json; from core import character_store as c; print(json.dumps({'voxel': c.starter_voxel('round'), 'rook': c.starter_block('square'), 'fenn': c.starter_block('round')}))"], { cwd: root, encoding: 'utf8', windowsHide: true });
+  if (out.status !== 0) throw Error('Could not read the starter characters: ' + out.stderr);
+  return JSON.parse(out.stdout);
+})();
+const voxId = 'aaaa1111bbbb', blockPip = 'dddddddddddd', rookId = 'eeeeeeeeeeee', fennId = 'ffffffffffff';
+const PACK_C_SPECS = { [blockPip]: packC.voxel, [rookId]: packC.rook, [fennId]: packC.fenn };
+// Stored as the server keeps them (defaults filled in), with fields the forms do not show (a face angle, a change some
+// seconds after its word, a move, a leave, a prop colour) so opening the beats must not change a thing.
+const voxelBeat = { id: 'v1', kind: 'voxel', text: 'Blocks', bars: 2, voxel: { world: 'cave', time: 'dusk', shot: 'medium', seed: 7,
+  cast: [{ character: blockPip, x: -.2, expression: 'happy', action: 'wave', facing: 'camera', speaking: false }], people: { count: 1, seed: 3 },
+  props: [{ kind: 'gem', x: .6, depth: .4 }], labels: [{ over: 'c0', text: '3.5%', sub: 'salt', at: .5 }] } };
+const storyBeats = [
+  { id: 'st1', kind: 'story', text: '', bars: 1, say: 'Help me, I am slipping off the edge!', speaker: rookId, gap: .3, flashback: false, seconds: 2.6,
+    story: { place: 'cliff', seed: 4, time: 'day',
+      cast: [{ character: rookId, x: 0, y: -1, pose: 'hang', mood: 'scared', face: 25, changes: [{ at: { word: 4, after: .2 }, mood: 'shocked' }] },
+        { character: fennId, x: 3, y: 0, pose: 'idle', mood: 'neutral', face: 'c0', changes: [], move: { to: [1.5, 0], at: { word: 2 }, run: true }, leave: { at: { t: 2.2 } } }],
+      shots: [{ shot: 'medium', on: 0, push: .3, shake: false }, { shot: 'close', on: 1, with: 0, at: { word: 3 }, push: .2, shake: true, side: 'left' }],
+      fx: [{ kind: 'fall', at: { word: 6 }, on: 0, seconds: 1.4 }], props: [{ kind: 'crate', x: 4, y: 0, colour: '#e8434e' }],
+      sfx: [{ kind: 'gasp', at: { word: 0 } }], keys: ['edge'] } },
+  { id: 'st2', kind: 'story', text: '', bars: 1, hold: 1.2, flashback: true,
+    story: { place: 'meadow', seed: 0, time: 'day', cast: [{ character: fennId, x: 0, y: 0, pose: 'think', mood: 'neutral', face: 'camera', changes: [] }],
+      shots: [{ shot: 'wide', on: 0, push: .3, shake: false }], fx: [], props: [], sfx: [], keys: [] } }];
+const voxProject = { id: voxId, owner: 'local', title: 'Blocks and stories', look: 'sport', bpm: 120, fps: 30, aspects: ['9:16'],
+  cast: [{ character: blockPip, version: 1 }, { character: rookId, version: 1 }, { character: fennId, version: 1 }],
+  beats: [voxelBeat, ...storyBeats], music: { mood: 'calm', volume: .5 }, version: 1, updated: Date.now() / 1000, created: Date.now() / 1000 };
+const voxOriginal = structuredClone(voxProject);
 // The app page carries the exact Content-Security-Policy the backend sends for "/" (core/middleware.py), so the
 // hashed three.js import map is checked in a real browser under the real policy.
 const appPolicy = (() => {
@@ -170,6 +203,11 @@ async function serve(req, res) {
       return json(res, longJob);
     }
     if (p === `/api/videos/${sceneId}`) return json(res, req.method === 'PUT' ? Object.assign(sceneProject, body, { version: sceneProject.version + 1 }) : sceneProject);
+    if (p === `/api/videos/${voxId}`) return json(res, req.method === 'PUT' ? Object.assign(voxProject, body, { version: voxProject.version + 1 }) : voxProject);
+    if (p === `/api/tab-studio/videos/${voxId}/resources`) return json(res, { assets: [], renders: [], jobs: [], thumbnail: null });
+    if (p === `/api/tab-studio/videos/${voxId}/waveform`) return json(res, { beats: {} });
+    const packCSpec = /^\/api\/characters\/([a-f0-9]{12})\/versions\/1$/.exec(p);
+    if (packCSpec && PACK_C_SPECS[packCSpec[1]]) return json(res, { version: 1, status: 'approved', spec: PACK_C_SPECS[packCSpec[1]] });
     if (p === `/api/tab-studio/videos/${sceneId}/resources`) return json(res, { assets: [], renders: [], jobs: [], thumbnail: null });
     if (p === `/api/tab-studio/videos/${sceneId}/waveform`) return json(res, { beats: { s1: { key: '0123456789abcdef', rate: 40, offset: .25, peaks: Array.from({ length: 88 }, (_, i) => Math.round(120 + 100 * Math.sin(i / 3))) } } });
     if (p === '/api/characters') return json(res, characters);
@@ -282,7 +320,7 @@ app.whenReady().then(async () => {
     const devtools = async () => { if (!debug.isAttached()) debug.attach('1.3'); await debug.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true }); };
     const MODS = { alt: 1, ctrl: 2, meta: 4, shift: 8 };
     const KEYS = { ' ': ['Space', 32], ArrowLeft: ['ArrowLeft', 37], ArrowRight: ['ArrowRight', 39], ArrowUp: ['ArrowUp', 38], ArrowDown: ['ArrowDown', 40],
-      Home: ['Home', 36], End: ['End', 35], Delete: ['Delete', 46], Escape: ['Escape', 27], '=': ['Equal', 187], '-': ['Minus', 189], '\\': ['Backslash', 220], '?': ['Slash', 191] };
+      Home: ['Home', 36], End: ['End', 35], Delete: ['Delete', 46], Backspace: ['Backspace', 8], Escape: ['Escape', 27], '=': ['Equal', 187], '-': ['Minus', 189], '\\': ['Backslash', 220], '?': ['Slash', 191] };
     const press = async (key, ...mods) => {
       const [code, vk] = KEYS[key] || ['Key' + key.toUpperCase(), key.toUpperCase().charCodeAt(0)];
       const modifiers = mods.reduce((n, m) => n | MODS[m], 0), text = key.length === 1 && !(modifiers & 7) ? key : undefined;
@@ -603,6 +641,118 @@ app.whenReady().then(async () => {
     win.setContentSize(390, 1000); await pause(400); await noOverflow(); await labels(); await capture('phone-scene');
     win.setContentSize(1440, 1000); await pause(300);
 
+    // Polish for 2.3.0: Pack C's voxel beat and Pack C classic's story beat have their own forms, edited here with real
+    // DevTools mouse and keyboard input. Opening them changes nothing; every edit writes exactly the schema.
+    {
+      const label = text => `[aria-label=${JSON.stringify(text)}]`;
+      const focusOn = async text => js(`(() => { const n = document.querySelector(${JSON.stringify(label(text))}); n.scrollIntoView({ block: 'center' }); n.focus(); return document.activeElement === n; })()`);
+      const realClick = async selector => { await js(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({ block: 'center' })`); await pause(60); const b = await box(selector); await tap({ x: b.cx, y: b.cy }); };
+      // A select picked with the arrow keys (a closed select on Windows changes its value and fires change on each key).
+      const choose = async (text, value) => {
+        for (let n = 0; n < 40; n++) {
+          const [now, target] = await js(`(() => { const s = document.querySelector(${JSON.stringify(label(text))}); return [s.selectedIndex, [...s.options].findIndex(o => o.value === ${JSON.stringify(value)})]; })()`);
+          assert.ok(target >= 0, `${text} offers ${value}`);
+          if (now === target) return;
+          assert.ok(await focusOn(text), `${text} takes focus`);
+          await press(target > now ? 'ArrowDown' : 'ArrowUp'); await pause(40);
+        }
+        throw Error(`Could not choose ${value} in ${text}`);
+      };
+      const clickButton = async (scope, text) => { await js(`[...document.querySelectorAll(${JSON.stringify(scope + ' button')})].find(b => b.textContent === ${JSON.stringify(text)}).dataset.hit = '1'`); await realClick('[data-hit="1"]'); await js(`document.querySelector('[data-hit]')?.removeAttribute('data-hit')`); };
+      const typeInto = async (text, value) => {
+        await realClick(label(text)); await press('a', 'ctrl'); await press('Backspace');
+        if (value) await debug.sendCommand('Input.insertText', { text: value });
+        await pause(80);
+      };
+      const nudge = async (text, key, times) => { assert.ok(await focusOn(text)); for (let n = 0; n < times; n++) await press(key); };
+      const voxSaved = () => wait("document.querySelector('.studio-editor-top [role=status]').textContent==='Saved'");
+      const voxPuts = () => writes.filter(w => w.path === `/api/videos/${voxId}` && w.method === 'PUT');
+      const lastVox = () => voxPuts().at(-1)?.body;
+      const pickBeat = async index => { await realClick(`.ste-clip[data-index="${index}"]`); await pause(250); };
+      await win.loadURL(base + '/#/studio/' + voxId); await wait("!!document.querySelector('.studio-stage canvas') && !!document.querySelector('[data-voxel-form]')");
+      await devtools(); await blur();
+      await wait("document.querySelector('[data-voxel-member] strong')?.textContent === '1. Pip Block'");
+      assert.equal(await js("!!document.querySelector('[aria-label=\"Blocky world as JSON\"], [aria-label=\"Story shot as JSON\"]')"), false, 'No raw JSON for voxel or story beats');
+      // Round trip: opening each beat in its form writes nothing.
+      await pickBeat(1); await wait("!!document.querySelector('[data-story-form]')");
+      await wait("document.querySelector('[data-story-member] strong')?.textContent === '1. Rook'");
+      await pickBeat(2); await wait("document.querySelector('[data-story-member] strong')?.textContent === '1. Fenn'");
+      assert.ok(await js("!!document.querySelector('[aria-label=\"Hold without a line\"]') && !document.querySelector('[aria-label=\"Speaker\"]')"), 'A held story shot shows its hold, not a speaker');
+      await pickBeat(0); await wait("!!document.querySelector('[data-voxel-form]')"); await pause(1200);
+      assert.equal(voxPuts().length, 0, 'Opening the voxel and story beats in their forms changes nothing');
+      assert.deepEqual(voxProject, voxOriginal, 'The video is exactly as stored');
+      // The pickers offer only the characters each look casts.
+      const pickerIds = text => js(`[...document.querySelector(${JSON.stringify(label(text))}).options].map(o => o.value)`);
+      assert.deepEqual(await pickerIds('Blocky character 1'), [blockPip], 'A pastel voxel beat casts blocky characters only');
+
+      // The voxel form, by real input.
+      await choose('Voxel world', 'village'); await choose('Voxel time of day', 'night');
+      await typeInto('World variation', '42');
+      await choose('Expression of blocky character 1', 'surprised');
+      await realClick(label('Blocky character 1 speaks the narration'));
+      await nudge('Position of blocky character 1', 'ArrowRight', 10);
+      await choose('Voxel prop 1', 'star');
+      await clickButton('[data-voxel-form]', 'Add a voxel prop');
+      await wait("document.querySelectorAll('[data-voxel-prop]').length === 2");
+      await typeInto('Label 1 text', '4%');
+      await voxSaved();
+      assert.deepEqual(lastVox().beats[0], { ...voxelBeat, voxel: { world: 'village', time: 'night', shot: 'medium', seed: 42,
+        cast: [{ character: blockPip, x: -.1, expression: 'surprised', action: 'wave', facing: 'camera', speaking: true }], people: { count: 1, seed: 3 },
+        props: [{ kind: 'star', x: .6, depth: .4 }, { kind: 'lantern', x: .7, depth: .5 }], labels: [{ over: 'c0', text: '4%', sub: 'salt', at: .5 }] } }, 'The voxel form writes the schema');
+      assert.deepEqual(lastVox().beats.slice(1), storyBeats, 'and leaves the story beats alone');
+      // The classic look casts block characters (stored as look: classic); back to pastel drops the field again.
+      await choose('Voxel look', 'classic'); await voxSaved();
+      assert.equal(lastVox().beats[0].voxel.look, 'classic');
+      assert.deepEqual(await pickerIds('Blocky character 1'), [blockPip, rookId, fennId], 'The classic look offers block characters');
+      await capture('desktop-voxel'); await noOverflow(); await labels();
+      for (const [sel, name] of [['[data-voxel-member]', 'desktop-voxel-cast'], ['[data-voxel-prop]', 'desktop-voxel-props']]) { await js(`document.querySelector('${sel}').scrollIntoView({ block: 'start' })`); await capture(name); }
+      await choose('Voxel look', 'pastel'); await voxSaved();
+      assert.equal('look' in lastVox().beats[0].voxel, false, 'The pastel look is the default and is not stored');
+
+      // The story form, by real input.
+      await pickBeat(1); await wait("!!document.querySelector('[data-story-form]')");
+      assert.deepEqual(await pickerIds('Story character 1'), [rookId], 'A story beat casts block characters only (the free ones)');
+      assert.deepEqual(await pickerIds('Speaker'), [rookId, fennId]);
+      assert.equal(await js("document.querySelector('[aria-label=\"Story character 1 faces\"]').value"), 'angle', 'A face angle shows as an angle');
+      assert.equal(await js("document.querySelector('[aria-label=\"Story character 1 face angle\"]').value"), '25');
+      assert.equal(await js("document.querySelector('[aria-label=\"Change 1 of story character 1 at, seconds after the word\"]').value"), '0.2', 'A change some seconds after its word');
+      await choose('Story place', 'beach');
+      await choose('Pose of story character 1', 'flail'); await choose('Mood of story character 2', 'angry');
+      await realClick(label('Flashback'));
+      await typeInto('Key words', 'edge, help');
+      await choose('Shot 2 size', 'top'); await choose('Shot 2 cuts at', 'w5');
+      await choose('Effect 1', 'splat'); await choose('Sound 1', 'boom');
+      await clickButton('[data-story-form]', 'Add a shot');
+      await wait("document.querySelectorAll('[data-story-shot]').length === 3");
+      await realClick(label('Add a change to story character 2'));
+      await wait("!!document.querySelector('[data-story-change=\"2.1\"]')");
+      await choose('Speaker', fennId);
+      await typeInto('Gap after the line', '0.5');
+      await voxSaved();
+      const st = storyBeats[0], s = st.story;
+      assert.deepEqual(lastVox().beats[1], { ...st, speaker: fennId, gap: .5, flashback: true, story: { ...s, place: 'beach',
+        cast: [{ ...s.cast[0], pose: 'flail' }, { ...s.cast[1], mood: 'angry', changes: [{ at: { word: 0 }, mood: 'shocked' }] }],
+        shots: [s.shots[0], { ...s.shots[1], shot: 'top', at: { word: 5 } }, { shot: 'close', on: 1, at: { word: 4 }, push: .3 }],
+        fx: [{ ...s.fx[0], kind: 'splat' }], sfx: [{ kind: 'boom', at: { word: 0 } }], keys: ['edge', 'help'] } }, 'The story form writes the schema, keeping what it does not show');
+      await capture('desktop-story'); await noOverflow(); await labels();
+      for (const [sel, name] of [['[data-story-member]', 'desktop-story-cast'], ['[data-story-member="2"]', 'desktop-story-cast-2'], ['[data-story-shot]', 'desktop-story-shots'], ['[data-story-fx]', 'desktop-story-effects']]) { await js(`document.querySelector('${sel}').scrollIntoView({ block: 'start' })`); await capture(name); }
+      win.setContentSize(390, 1000); await pause(400); await noOverflow(); await labels(); await capture('phone-story');
+      win.setContentSize(1440, 1000); await pause(300);
+      // A held shot given a line gets a speaker (the first block character on it) and loses its hold; clearing the line
+      // gives the hold back.
+      await pickBeat(2); await wait("!!document.querySelector('[aria-label=\"Hold without a line\"]')");
+      await typeInto('Narration (the line spoken over this beat)', 'Back then.');
+      await wait("!!document.querySelector('[aria-label=\"Speaker\"]')"); await voxSaved();
+      assert.equal(await js("document.activeElement?.getAttribute('aria-label')"), 'Narration (the line spoken over this beat)', 'The line keeps its focus');
+      assert.deepEqual((({ say, speaker, hold, gap }) => ({ say, speaker, hold, gap }))(lastVox().beats[2]), { say: 'Back then.', speaker: fennId, hold: undefined, gap: undefined });
+      await typeInto('Narration (the line spoken over this beat)', '');
+      await wait("!!document.querySelector('[aria-label=\"Hold without a line\"]')"); await voxSaved();
+      assert.deepEqual((({ say, speaker, hold, gap }) => ({ say, speaker, hold, gap }))(lastVox().beats[2]), { say: undefined, speaker: undefined, hold: 1.2, gap: undefined });
+      await pickBeat(0); await wait("!!document.querySelector('[data-voxel-form]')");
+      win.setContentSize(390, 1000); await pause(400); await noOverflow(); await labels(); await capture('phone-voxel');
+      win.setContentSize(1440, 1000); await pause(300);
+    }
+
     // Steps 3 and 4: tracks and clips on the timeline, the clip inspector, sounds, then Ask Kairos with comment pins,
     // an applied run with its own undo, and a dry run applied after a look.
     await win.loadURL(base + '/#/studio/' + trackId); await wait("!!document.querySelector('.studio-stage canvas') && document.querySelectorAll('.ste-clip').length===3");
@@ -877,7 +1027,7 @@ app.whenReady().then(async () => {
     console.log(JSON.stringify({ ok: true, output, writes: writes.length, checks: ['projects', 'FFmpeg banner', 'docked panes', 'safe-area guides', 'live canvas', 'edit and PUT', 'inline validation', 'reorder', 'undo',
       'timeline clip sizes', 'zoom button, keys and fit', 'playhead drag', 'snapping and Shift', 'clip selection opens the inspector', 'clip drag reorder', 'edge trim in half bars',
       'Space, J/K/L, frame steps, beat edges, I/O, Alt+X, Delete, Ctrl+D, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, Alt+arrows, N, G, ?', 'keys in fields', 'aspect', 'render progress', 'downloads',
-      'history confirmation', 'pane persistence per person', 'both themes', 'phone stacked view', 'scene inspector round trip', 'scene undo and redo', 'stage inspector round trip', 'cast picker', 'waveform and music lanes',
+      'history confirmation', 'pane persistence per person', 'both themes', 'phone stacked view', 'scene inspector round trip', 'scene undo and redo', 'stage inspector round trip', 'voxel and story forms: unchanged on open, real input, exact schema, line toggles speaker and hold', 'cast picker', 'waveform and music lanes',
       'chat card', 'recovery', 'long video chapters, markers, plan gate and resume', '3D preview under the real policy',
       'tracks: add, drag, trim both edges, split, lanes, lock, hide, ripple, undo, sound, image', 'Ask Kairos: comment pin, run, undo, dry run',
       'step 5: track rename in place, canvas move, snap guide, nudges, scale, turn, keyframes (A, drag, row drag, copy, paste, delete, [ ], ease)',

@@ -132,7 +132,7 @@ VOXEL_LOOKS = ("pastel", "classic")
 STORY_PLACES = ("meadow", "cliff", "village", "party", "cave", "beach", "sky-island")
 STORY_TIMES = ("day", "dusk")
 STORY_POSES = ("idle", "walk", "run", "hips", "despair", "flail", "hang", "wave", "shove", "nod", "point", "cheer", "cry", "laugh",
-               "shrug", "think", "sit")
+               "shrug", "think", "sit", "slip")
 STORY_MOODS = ("neutral", "happy", "smug", "angry", "scared", "sad", "crying", "shocked", "laughing", "splat")
 STORY_SHOTS = ("close", "medium", "wide", "low", "top", "orbit")
 STORY_FX = ("fuse", "blast", "splat", "fall", "pop")

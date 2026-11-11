@@ -182,6 +182,13 @@ class StudioTests(unittest.TestCase):
         self.assertEqual(js_list(model, "STAGE_PROPS"), list(style_packs.STAGE_PROPS))
         self.assertEqual(js_list(model, "STAGE_FACINGS"), list(style_packs.STAGE_FACINGS))
         self.assertIn(f"MAX_PEOPLE = {style_packs.MAX_PEOPLE}, MAX_LABELS = {style_packs.MAX_LABELS}", model)
+        # Pack C's voxel form and Pack C classic's story form (polish for 2.3.0) offer the schema's own choices.
+        for name in ("VOXEL_WORLDS", "VOXEL_TIMES", "VOXEL_PROPS", "VOXEL_LOOKS", "STORY_PLACES", "STORY_TIMES", "STORY_POSES", "STORY_MOODS",
+                     "STORY_SHOTS", "STORY_FX", "STORY_PROPS", "STORY_SFX"):
+            self.assertEqual(js_list(model, name), list(getattr(style_packs, name)), name)
+        self.assertIn(f"VOXEL_MAX_PEOPLE = {style_packs.VOXEL_MAX_PEOPLE};", model)
+        self.assertIn(f"STORY_MAX_CAST = {style_packs.STORY_MAX_CAST}, STORY_MAX_SHOTS = {style_packs.STORY_MAX_SHOTS}, STORY_MAX_FX = 4, STORY_MAX_PROPS = 6, STORY_MAX_SFX = 6, STORY_MAX_KEYS = 8", model)
+        self.assertIn(f"STORY_GAP = [{video_store.STORY_GAP_RANGE[0]}, {video_store.STORY_GAP_RANGE[1]}], STORY_HOLD = [{video_store.STORY_HOLD_RANGE[0]}, {int(video_store.STORY_HOLD_RANGE[1])}]".replace("0.", "."), model)
         self.assertEqual(js_list(view, "KINDS"), list(video_store.KINDS))
         self.assertEqual(js_list(view, "CAMERAS"), list(video_store.CAMERAS))
         self.assertEqual(js_list(view, "TRANSITIONS"), list(video_store.TRANSITIONS))
@@ -195,6 +202,7 @@ class StudioTests(unittest.TestCase):
         overlay = (ROOT / "static/motion/overlay.js").read_text(encoding="utf-8")
         self.assertEqual(js_list(overlay, "COLORS"), list(video_tracks.COLORS))
         for path in ("tabs/studio/view.js", "static/js/studioEditorModel.js", "static/js/studioTimeline.js", "static/js/studioSceneForm.js", "static/js/studioStageForm.js",
+                     "static/js/studioVoxelForm.js", "static/js/studioStoryForm.js",
                      "static/js/studioClipForm.js", "static/motion/overlay.js", "static/css/studio-editor.css"):
             self.assertNotIn("—", (ROOT / path).read_text(encoding="utf-8"), path + " has an em-dash")
 

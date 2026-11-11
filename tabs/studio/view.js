@@ -4,6 +4,8 @@ import * as M from '/static/js/studioEditorModel.js';
 import { createTimeline } from '/static/js/studioTimeline.js';
 import { sceneForm } from '/static/js/studioSceneForm.js';
 import { stageForm } from '/static/js/studioStageForm.js';
+import { voxelForm } from '/static/js/studioVoxelForm.js';
+import { storyForm } from '/static/js/studioStoryForm.js';
 import { clipForm } from '/static/js/studioClipForm.js';
 
 // Runtime URLs also work in the generated website demo, which keeps motion modules.
@@ -18,7 +20,7 @@ const NEW_SCENE = { setting: 'meadow', shot: 'medium', cast: [], props: [] };
 const NEW_STAGE = { set: 'lavender', shot: 'medium', cast: [], people: { count: 0 }, props: [], labels: [] };
 // Pack C: a blocky voxel world shot (static/motion/voxel.js): world, time of day, shot, seed, blocky cast, people, props, labels.
 const NEW_VOXEL = { world: 'meadow', time: 'day', shot: 'medium', seed: 0, cast: [], people: { count: 0 }, props: [], labels: [] };
-// A Story Short shot (Pack C classic): its scene, edited as JSON like the blocky world.
+// A Story Short shot (Pack C classic): its scene (static/js/studioStoryForm.js edits it).
 const NEW_STORY = { place: 'meadow', seed: 0, time: 'day', cast: [], shots: [{ shot: 'medium', on: 0 }], fx: [], props: [], sfx: [], keys: [] };
 // A Pack A video's cast: each character's spec at the version the project pins (routes/character_routes.py).
 const castCache = new Map();
@@ -312,6 +314,7 @@ async function editor(host, id, looks, back, parentDisposed) {
   // copied keyframes, and a drag on the preview in progress.
   let media = {}, selectedKeys = null, keyClipboard = null, canvasDrag = null, frameQueued = false;
   const names = {}, forms = {};  // each cast character's name and its form (2d draws scenes, 3d plays stage beats)
+  const storySpeakers = new Map();  // a story beat's speaker while its line is cleared, by beat id
   const state = sessions.get(id) || { p: null, undo: [], redo: [], dirty: false, revision: 0, saving: null, error: '' };
   state.view ||= {};
   sessions.set(id, state);
@@ -802,7 +805,7 @@ async function editor(host, id, looks, back, parentDisposed) {
       [next] = await Promise.all([preview(canvas, { ...clone(state.p), media: mediaFrames() }, aspect, { onFrame }), layoutModule || import(LAYOUT_URL).then(m => { layoutModule = m; })]);
       if (disposed || generation !== mountGeneration) { next.dispose?.(); return; }
       let named = false;
-      for (const [cid, entry] of Object.entries(await castSpecs(state.p).catch(() => ({})))) { const form = entry.spec?.form === '3d' ? '3d' : '2d'; if ((entry.spec?.name && names[cid] !== entry.spec.name) || forms[cid] !== form) { names[cid] = entry.spec?.name || names[cid]; forms[cid] = form; named = true; } }
+      for (const [cid, entry] of Object.entries(await castSpecs(state.p).catch(() => ({})))) { const form = ['3d', 'voxel', 'block'].includes(entry.spec?.form) ? entry.spec.form : '2d'; if ((entry.spec?.name && names[cid] !== entry.spec.name) || forms[cid] !== form) { names[cid] = entry.spec?.name || names[cid]; forms[cid] = form; named = true; } }
       if (named) { drawInspector(); drawProject(); }
       const old = player; player = next; old?.dispose?.();
       frameBox.replaceChildren(canvas, guides, selectionLayer, pinsLayer); stage.dataset.aspect = aspect; previewError.textContent = '';
@@ -896,7 +899,7 @@ async function editor(host, id, looks, back, parentDisposed) {
   let spaceTaken = false;
   function onKey(event) {
     if (disposed || !shell.isConnected || event.defaultPrevented || event.isComposing) return;
-    if (M.isTyping(event.target) || sheet.open || document.querySelector('.confirm-panel, dialog[open]')) return;
+    if (M.isTyping(event.target) || M.sliderKey(event) || sheet.open || document.querySelector('.confirm-panel, dialog[open]')) return;
     if (event.target && event.target !== document.body && !shell.contains(event.target)) return;
     const action = M.keyAction(event);
     if (!action) return;
@@ -1192,7 +1195,27 @@ async function editor(host, id, looks, back, parentDisposed) {
       return;
     }
     const beat = state.p.beats[selected], path = `beats[${selected}]`, c = clipList()[selected];
-    const setBeat = (key, value) => changed(p => { if ((key === 'image' || key === 'say') && !value) delete p.beats[selected][key]; else p.beats[selected][key] = value; }, true, path + '.' + key);
+    const setBeat = (key, value) => {
+      const b0 = state.p.beats[selected], toggles = key === 'say' && b0.kind === 'story' && !!b0.say !== !!value;
+      changed(p => {
+        const b = p.beats[selected];
+        if ((key === 'image' || key === 'say') && !value) delete b[key]; else b[key] = value;
+        // A story shot with a line has a speaker and a gap; without one it holds. Clearing the line keeps its speaker
+        // for this session, so typing a line again gives it back.
+        if (toggles && !value) { if (b.speaker) storySpeakers.set(b.id, b.speaker); delete b.speaker; delete b.gap; b.hold ??= 1.2; }
+        if (toggles && value) {
+          delete b.hold;
+          b.speaker ||= storySpeakers.get(b.id) || (b.story?.cast || []).map(m => m.character).find(id => forms[id] === 'block') || (p.cast || []).map(c => c.character).find(id => forms[id] === 'block');
+          if (!b.speaker) delete b.speaker;
+        }
+      }, true, path + '.' + key);
+      if (toggles) {
+        // Redraw the story form (speaker or hold) and give the line's field its focus back.
+        drawInspector();
+        const line = inspector.querySelector('[aria-label="Narration (the line spoken over this beat)"]');
+        if (line) { line.focus(); line.setSelectionRange(line.value.length, line.value.length); }
+      }
+    };
     const textField = (label, key, limit, multiline = false) => {
       const input = el(multiline ? 'textarea' : 'input', { value: beat[key] ?? '', 'aria-label': label, maxlength: limit, ...(multiline ? { rows: 2 } : {}) });
       input.value = beat[key] ?? '';
@@ -1224,34 +1247,9 @@ async function editor(host, id, looks, back, parentDisposed) {
     only(textField('Number', 'number', 140), kind === 'big-number'), only(itemField, kind === 'list')]));
     if (kind === 'scene') inspector.append(group('Scene', [sceneForm({ beat, path, cast: state.p.cast || [], names, forms, helpers: sceneHelpers })], { 'data-group': 'scene' }));
     if (kind === 'stage') inspector.append(group('3D stage', [stageForm({ beat, path, cast: state.p.cast || [], names, forms, helpers: sceneHelpers })], { 'data-group': 'stage' }));
-    if (kind === 'voxel') {
-      // Pack C's blocky world shot, edited as JSON (three.js only).
-      const voxelText = el('textarea', { rows: 10, 'aria-label': 'Blocky world as JSON', spellcheck: 'false' });
-      voxelText.value = JSON.stringify(beat.voxel || NEW_VOXEL, null, 1);
-      const voxelField = field('Blocky world (world, time, shot, seed, cast, people, props, labels)', voxelText, path + '.voxel',
-        'Worlds: meadow, cave, village, sky-island, ocean. Times: day, dusk, night. Props: gem, lantern, crate, flag, ball, star. Cast blocky characters (form voxel).');
-      voxelText.addEventListener('input', () => {
-        try { setBeat('voxel', JSON.parse(voxelText.value)); voxelField.querySelector('.meta').textContent = 'Saved.'; }
-        catch { voxelField.querySelector('.meta').textContent = 'Not valid JSON yet; nothing saved.'; }
-      });
-      inspector.append(group('Blocky world', [voxelField], { 'data-group': 'voxel' }));
-    }
-    if (kind === 'story') {
-      // A Story Short shot (Pack C classic), edited as JSON: who speaks, the flashback flag and the scene.
-      const storyText = el('textarea', { rows: 12, 'aria-label': 'Story shot as JSON', spellcheck: 'false' });
-      const pick = b => ({ speaker: b.speaker, flashback: b.flashback, gap: b.gap, hold: b.hold, story: b.story || NEW_STORY });
-      storyText.value = JSON.stringify(pick(beat), null, 1);
-      const storyField = field('Story shot (speaker, flashback, gap or hold, story: place, cast, shots, fx, props, sfx, keys)', storyText, path + '.story',
-        'Places: meadow, cliff, village, party, cave, beach, sky-island. Shots cut on words ({word: n}). Cast classic block characters (form block).');
-      storyText.addEventListener('input', () => {
-        try {
-          const value = JSON.parse(storyText.value);
-          changed(p => { const b = p.beats[selected]; for (const k of ['speaker', 'flashback', 'gap', 'hold', 'story']) { if (value[k] === undefined) delete b[k]; else b[k] = value[k]; } });
-          storyField.querySelector('.meta').textContent = 'Saved.';
-        } catch { storyField.querySelector('.meta').textContent = 'Not valid JSON yet; nothing saved.'; }
-      });
-      inspector.append(group('Story shot', [storyField], { 'data-group': 'story' }));
-    }
+    // Pack C's blocky world shot and Pack C classic's Story Short shot, each in its own form (three.js only).
+    if (kind === 'voxel') inspector.append(group('Blocky world', [voxelForm({ beat, path, cast: state.p.cast || [], names, forms, helpers: sceneHelpers })], { 'data-group': 'voxel' }));
+    if (kind === 'story') inspector.append(group('Story shot', [storyForm({ beat, path, cast: state.p.cast || [], names, forms, helpers: sceneHelpers, beats: state.p.beats })], { 'data-group': 'story' }));
     // Pictures.
     const upload = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/gif,image/webp', 'aria-label': 'Upload an image' });
     upload.addEventListener('change', async () => {

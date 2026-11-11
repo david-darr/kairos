@@ -436,13 +436,20 @@ app.whenReady().then(async () => {
     assert.deepEqual(await js("[...document.querySelectorAll('.sc-rail-top > *')].map(n=>n.classList.contains('sc-rail-heading') ? '# '+n.textContent : n.dataset.scope ? n.dataset.scope+' '+n.querySelector('.sc-rail-name').textContent : n.textContent)"),
       ['all All channels', '# Cooking', '1 @cooks', '2 @cooks.tt', '# Travel', '3 @trips', 'Add channel']);
     assert.deepEqual(await js("[...document.querySelectorAll('.sc-rail-item[data-scope=\"1\"], .sc-rail-item[data-scope=\"3\"]')].map(n=>[n.querySelector('.sc-avatar').textContent, n.querySelector('.sc-rail-sub').textContent, n.getAttribute('aria-label')])"),
-      [['C', 'YouTube Paused', 'YouTube @cooks, paused, 3 waiting for you'], ['T', 'Instagram Archived', 'Instagram @trips, archived, 2 waiting for you']]);
+      [['COYT', 'YouTube Paused', 'YouTube @cooks, paused, 3 waiting for you'], ['TRIG', 'Instagram Archived', 'Instagram @trips, archived, 2 waiting for you']]);
+    // Channels starting with the same letter are told apart: two letters, the platform glyph and a hue of their own.
+    const railAvatars = await js("[...document.querySelectorAll('.sc-rail-item .sc-avatar[data-avatar]')].map(a=>[a.dataset.avatar, a.querySelector('.sc-avatar-glyph').textContent, getComputedStyle(a).backgroundColor])");
+    assert.deepEqual(railAvatars.map(a => a[0] + ' ' + a[1]), ['CO YT', 'CT TT', 'TR IG']);
+    assert.equal(new Set(railAvatars.map(a => a[2])).size, 3, 'each channel avatar has its own colour');
     assert.equal(await js("document.querySelector('.sc-rail-item[data-scope=all]').getAttribute('aria-current')"), 'page');
     assert.deepEqual(await js("[...document.querySelectorAll('.sc-rail-lower button')].map(b=>b.textContent)"), ['Editor', 'Formats', 'Styles', 'Characters', 'Connections', 'Templates']);
     // The overview dashboard's cards.
     assert.deepEqual(await js("[...document.querySelectorAll('.sc-tile')].map(t=>t.dataset.tile)"), ['needs', 'latest', 'analytics', 'report', 'upcoming', 'pipeline', 'channels']);
     assert.deepEqual(await js("[...document.querySelectorAll('.sc-tile-needs .sc-need')].map(b=>b.textContent)"),
       ['4 posts to approve', '2 prepared posts waiting for you to post them', '1 preparation that failed', '2 team decisions to confirm']);
+    // The rows sit close: one line each, no taller than 32 px apart on the desktop.
+    const needTops = await js("[...document.querySelectorAll('.sc-tile-needs .sc-need')].map(b=>b.getBoundingClientRect().top)");
+    for (let i = 1; i < needTops.length; i++) assert.ok(needTops[i] - needTops[i - 1] <= 32, `What needs you rows are ${needTops[i] - needTops[i - 1]} px apart`);
     const latestText = await js("document.querySelector('.sc-tile-latest').textContent");
     for (const part of ['Clouds weigh tons', 'YouTube @cooks', '1.2K views, 21 s average view, 84 likes', 'TikTok @cooks.tt', '860 views, 14 s average view, 40 likes']) assert.ok(latestText.includes(part), part);
     assert.deepEqual(await js("[...document.querySelectorAll('.sc-tile-latest [data-latest]')].map(n=>n.dataset.latest)"), ['35', '34'], 'newest first');
@@ -523,7 +530,7 @@ app.whenReady().then(async () => {
     await click('.sc button', 'Save the settings of YouTube @cooks');
     await wait("document.querySelector('[data-channel-id=\"1\"]')?.textContent.includes('style Flat science explainer, look sport, 16:9, voice notes set')");
     assert.deepEqual(last('/channels/1/edit').body, { look: 'sport', aspect: '16:9', notes: 'Calm, curious.', voice: 'af_heart', style_pack: 'aaaaaaaaaaaa', renderer: '', fps: 60, made_for_kids: 'yes', long_per_week: 2 });
-    assert.equal(await js("document.querySelector('[data-scope=\"1\"] .sc-avatar').style.getPropertyValue('--avatar-hue') !== document.querySelector('[data-scope=\"2\"] .sc-avatar').style.getPropertyValue('--avatar-hue')"), true, 'The avatar colour follows the look');
+    assert.equal(await js("document.querySelector('[data-scope=\"1\"] .sc-avatar').style.getPropertyValue('--avatar-hue') !== document.querySelector('[data-scope=\"2\"] .sc-avatar').style.getPropertyValue('--avatar-hue')"), true, 'Two channels keep their own avatar colours');
     await noOverflow(); await labels();
     // The account's connections live in a library: YouTube analytics not connected offers Connect; posting is connected with its privacy.
     await scopeTo('lib:connections');
@@ -713,6 +720,22 @@ app.whenReady().then(async () => {
     await wait("document.querySelectorAll('.sc-day').length===7");
     assert.deepEqual(await js("[...document.querySelectorAll('.sc-day')].map(d=>d.querySelectorAll('.sc-cal').length)"), [1, 1, 1, 2, 1, 1, 1], 'posts on their days (the scheduled one moved to next week)');
     assert.match(await js("document.querySelector('.sc-week-title').textContent"), /^This week, /);
+    // Compact at 1440 px beside the rail: the seven days in one row, every line of an entry one line high (cut, not
+    // wrapped), the whole text in the tooltip.
+    const week = await js(`(() => { const days = [...document.querySelectorAll('.sc-day')].map(d => Math.round(d.getBoundingClientRect().top));
+      const lines = [...document.querySelectorAll('.sc-cal-title, .sc-cal-state, .sc-cal-top')].map(n => { const c = getComputedStyle(n); return n.getBoundingClientRect().height / parseFloat(c.lineHeight || c.fontSize); });
+      const chips = [...document.querySelectorAll('.sc-cal')].map(c => ({ title: c.title, name: c.querySelector('.sc-cal-title').textContent, cut: c.querySelector('.sc-cal-title').scrollWidth > c.querySelector('.sc-cal-title').clientWidth }));
+      return { rows: new Set(days).size, maxLines: Math.max(...lines), chips, width: innerWidth }; })()`);
+    assert.equal(week.width, 1440);
+    assert.equal(week.rows, 1, 'the week is one row at 1440 px');
+    assert.ok(week.maxLines < 1.6, `every calendar line is one line high (${week.maxLines.toFixed(2)})`);
+    assert.ok(week.chips.every(c => c.title.includes(c.name)), 'the tooltip carries the full title');
+    // The rail folds to its avatars on the calendar (names in the tooltips), so the week has the width.
+    const folded = await js("(() => { const r = document.querySelector('.sc-rail'); return { width: r.getBoundingClientRect().width, titles: [...r.querySelectorAll('.sc-rail-item[data-scope]')].map(n => n.title), names: [...r.querySelectorAll('.sc-rail-name')].filter(n => n.getBoundingClientRect().width > 0).length, day: document.querySelector('.sc-day').getBoundingClientRect().width }; })()");
+    assert.ok(folded.width <= 64, `the rail folds on the calendar (${folded.width} px)`);
+    assert.equal(folded.names, 0, 'no names shown in the folded rail');
+    assert.ok(folded.titles.includes('YouTube @cooks, paused, 3 waiting for you') || folded.titles.some(t => t.startsWith('YouTube @cooks')), 'the folded rail keeps the names as tooltips');
+    assert.ok(folded.day >= 140, `each day is at least 140 px wide (${folded.day.toFixed(0)})`);
     await keep('publishing-week'); await capture('overview-calendar'); await noOverflow(); await labels();
     await click('.sc-week-nav button', 'Next week');
     await wait("document.querySelector('.sc-week-title').textContent.startsWith('Week of')");
@@ -734,6 +757,7 @@ app.whenReady().then(async () => {
     assert.equal(await js("[...document.querySelectorAll('.sc-cal')].every(n=>n.getAttribute('aria-label').includes('YouTube @cooks'))"), true, 'only this channel on its calendar');
     await capture('channel-calendar'); await noOverflow(); await labels();
     await tab('publishing');
+    assert.ok(await js("document.querySelector('.sc-rail').getBoundingClientRect().width > 150"), 'the rail opens again off the calendar');
     await wait("!!document.querySelector('.sc-routes')");
     assert.deepEqual(await js("[...document.querySelectorAll('[data-publish-route]')].map(n=>n.dataset.publishRoute)"), ['prepare', 'youtube-api']);
     assert.deepEqual(await js("[...document.querySelectorAll('.sc-pub')].map(n=>n.dataset.pub)"), ['32', '35', '26', '11', '21']);

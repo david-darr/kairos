@@ -24,7 +24,7 @@ import { ICONS } from './icons.js';
 // /api/videos/<id>/plan); a YouTube channel sets its long videos a week in Look (one by default); an approval card shows the
 // chapter list that goes into the YouTube description.
 // Layout (David, 2026-11-10: a creator-studio dashboard, organised by channel): a left rail with All channels, then each
-// channel by niche (its avatar from its look, handle and platform), Add channel, and the shared libraries (the editor,
+// channel by niche (its avatar: two letters and a hue no other channel shares, and its platform's glyph), Add channel, and the shared libraries (the editor,
 // Formats, Styles, Characters, Connections, Templates). All channels has a dashboard of cards (what needs you, latest posts
 // with their numbers, analytics, the weekly report, coming up, the pipeline) and tabs for the overall approvals, pipeline,
 // calendar, publishing, analytics (the scoreboard) and report. Each channel has its own dashboard and the same tabs for
@@ -132,10 +132,13 @@ export async function mountContent(host, { signal, openVideos } = {}) {
   const channelOf = id => data.channels.find(c => c.id === id) || null;
   const pubItems = () => data.pub?.items || [];
   const needsInput = () => ({ approvals: data.approvals, plans: data.plans, pubItems: pubItems(), sheets: data.sheets, packs: data.packsWaiting, decisions: data.decisions });
-  // A channel's round avatar, coloured from its look.
+  // A channel's round avatar: two letters and a hue no other channel shares, with its platform's glyph in the corner.
   const avatar = (channel, cls = '') => {
-    const a = M.avatarFor(channel);
-    return el('span', { class: `sc-avatar ${cls}`.trim(), 'aria-hidden': 'true', style: `--avatar-hue:${hueFor(a.key)}`, text: a.letter });
+    const a = channel?.id != null ? M.avatarsFor(data.channels).get(channel.id) : null;
+    if (!a) { const one = M.avatarFor(channel); return el('span', { class: `sc-avatar ${cls}`.trim(), 'aria-hidden': 'true', style: `--avatar-hue:${hueFor(one.key)}`, text: one.letter }); }
+    return el('span', { class: `sc-avatar ${cls}`.trim(), 'aria-hidden': 'true', style: `--avatar-hue:${a.hue}`, 'data-avatar': a.letters }, [
+      el('span', { class: 'sc-avatar-letters', text: a.letters }),
+      a.glyph ? el('span', { class: `sc-avatar-glyph sc-glyph-${a.platform}`, text: a.glyph }) : null]);
   };
   const platformTag = platform => el('span', { class: `sc-platform sc-platform-${platform}`, text: M.platformName(platform) });
 
@@ -782,10 +785,16 @@ export async function mountContent(host, { signal, openVideos } = {}) {
         el('h4', { class: 'sc-day-title', text: day.label }),
         ...(byDay[i].length ? byDay[i].map(calendarChip) : [el('p', { class: 'sc-none', text: 'Nothing.' })])])))];
   }
+  // A compact entry: time and platform glyph, the title on one line, the channel and state on one line; the whole text is
+  // its tooltip, so a long title is cut, never wrapped.
   function calendarChip(item) {
-    const chip = el('button', { type: 'button', class: `sc-cal sc-pub-${item.state}`, 'data-pub': item.post_id, 'aria-label': `${item.title}, ${M.platformName(item.platform)} ${item.handle}, ${M.stateLabel(item.state)}` }, [
-      el('span', { class: 'sc-cal-time', text: M.timeText(item.when).split(', ')[1] }), el('span', { class: 'sc-cal-title', text: item.title }),
-      el('span', { class: 'sc-cal-meta' }, [platformTag(item.platform), el('span', { class: 'sc-dim', text: item.handle }), pill(M.stateLabel(item.state), M.stateTone(item.state))])]);
+    const time = M.timeText(item.when).split(', ')[1], state = M.stateLabel(item.state);
+    const full = `${time}, ${item.title}, ${M.platformName(item.platform)} ${item.handle}, ${state}`;
+    const chip = el('button', { type: 'button', class: `sc-cal sc-pub-${item.state}`, 'data-pub': item.post_id, title: full, 'aria-label': `${item.title}, ${M.platformName(item.platform)} ${item.handle}, ${state}` }, [
+      el('span', { class: 'sc-cal-top' }, [el('span', { class: 'sc-cal-time', text: time }),
+        el('span', { class: `sc-cal-glyph sc-glyph-${item.platform}`, text: M.PLATFORM_SHORT[item.platform] || '' }), el('span', { class: 'sc-cal-handle', text: item.handle })]),
+      el('span', { class: 'sc-cal-title', text: item.title }),
+      el('span', { class: `sc-cal-state tone-${M.stateTone(item.state)}`, text: state })]);
     chip.addEventListener('click', () => openPub(item, chip));
     return chip;
   }
@@ -1470,7 +1479,7 @@ export async function mountContent(host, { signal, openVideos } = {}) {
     const item = (value, label, { icon = null, sub = null, count = 0, attrs = {} } = {}) => {
       const on = String(scope) === String(value), { 'aria-label': named = label, ...rest } = attrs;
       const node = el('button', { type: 'button', class: `sc-rail-item${on ? ' is-on' : ''}`, 'data-scope': String(value), ...(on ? { 'aria-current': 'page' } : {}),
-        'aria-label': named + (count ? `, ${count} waiting for you` : ''), ...rest }, [
+        'aria-label': named + (count ? `, ${count} waiting for you` : ''), title: named + (count ? `, ${count} waiting for you` : ''), ...rest }, [
         icon, el('span', { class: 'sc-rail-text' }, [el('span', { class: 'sc-rail-name', text: label }), sub]),
         count ? el('span', { class: 'sc-rail-count', 'aria-hidden': 'true', text: String(count) }) : null]);
       node.addEventListener('click', () => go(value));
@@ -1492,11 +1501,11 @@ export async function mountContent(host, { signal, openVideos } = {}) {
     const icon = name => { const node = el('span', { class: 'sc-rail-icon', 'aria-hidden': 'true' }); node.innerHTML = ICONS[name] || ''; return node; };
     const withIcon = (node, name) => { node.prepend(icon(name)); return node; };
     const LIB_ICONS = { formats: 'library', styles: 'design', characters: 'agents', connections: 'settings' };
-    const add = withIcon(btn('Add channel', () => addChannelDialog(), 'quiet sc-rail-add', { 'aria-label': 'Add a channel' }), 'plus');
+    const add = withIcon(btn('Add channel', () => addChannelDialog(), 'quiet sc-rail-add', { 'aria-label': 'Add a channel', title: 'Add a channel' }), 'plus');
     const libs = [
-      withIcon(btn('Editor', () => openVideos ? openVideos() : document.querySelector('.studio-sections [data-section=videos]')?.click(), 'quiet sc-rail-lib', { 'aria-label': 'Open the video editor', 'data-lib': 'editor' }), 'play'),
+      withIcon(btn('Editor', () => openVideos ? openVideos() : document.querySelector('.studio-sections [data-section=videos]')?.click(), 'quiet sc-rail-lib', { 'aria-label': 'Open the video editor', title: 'Open the video editor', 'data-lib': 'editor' }), 'play'),
       ...M.LIBRARIES.map(([id, label]) => item(`lib:${id}`, label, { icon: icon(LIB_ICONS[id]), attrs: { 'data-lib': id } })),
-      withIcon(btn('Templates', openTeamTemplate, 'quiet sc-rail-lib', { 'aria-label': 'Open team templates', 'data-lib': 'templates' }), 'store')];
+      withIcon(btn('Templates', openTeamTemplate, 'quiet sc-rail-lib', { 'aria-label': 'Open team templates', title: 'Open team templates', 'data-lib': 'templates' }), 'store')];
     return el('nav', { class: 'sc-rail', 'aria-label': 'Channels and libraries' }, [
       el('div', { class: 'sc-rail-top' }, [...nodes, add]),
       el('div', { class: 'sc-rail-lower' }, [el('p', { class: 'sc-rail-heading', text: 'Libraries' }), ...libs])]);
@@ -1553,7 +1562,8 @@ export async function mountContent(host, { signal, openVideos } = {}) {
     });
     const panel = el('div', { class: 'sc-body', id: 'sc-body', ...(bar ? { role: 'tabpanel', 'aria-labelledby': `sc-tab-${tab}` } : { role: 'region', 'aria-label': head(channel).textContent }) }, [el('p', { role: 'status', text: 'Loading...' })]);
     const main = el('div', { class: 'sc-main' }, [picker(), alerts(), data.failed.length ? el('p', { class: 'set-error', role: 'alert', text: 'Some parts did not load. Try again in a moment.' }) : null, head(channel), bar, panel].filter(Boolean));
-    root.replaceChildren(el('div', { class: 'sc-shell', 'data-scope': String(scope) }, [rail(), main]));
+    // On the calendar the rail folds to its avatars and icons, so the week has the width (names stay in the tooltips).
+    root.replaceChildren(el('div', { class: `sc-shell${tab === 'calendar' && tabs.length ? ' is-narrow-rail' : ''}`, 'data-scope': String(scope), 'data-tab': tabs.length ? tab : '' }, [rail(), main]));
     // A narrow tab bar scrolls: keep the open tab in view.
     if (bar) { const on = bar.querySelector('[aria-selected=true]'); if (on) bar.scrollLeft = Math.max(0, on.offsetLeft - (bar.clientWidth - on.offsetWidth) / 2); }
     if (focusAfter) { root.querySelector(focusAfter)?.focus(); focusAfter = null; }

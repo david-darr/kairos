@@ -24,6 +24,37 @@ export const STAGE_PROPS = ['ball', 'block', 'pillar', 'ring', 'coin'];
 export const STAGE_FACINGS = ['camera', 'left', 'right'];
 export const STAGE_COLORS = ['mint', 'violet', 'gold', 'coral', 'blue'];
 export const MAX_PEOPLE = 8, MAX_LABELS = 8;
+// Pack C's voxel shot (core/video_store.py _voxel; static/motion/voxel.js, classic.js for the classic look).
+export const VOXEL_WORLDS = ['meadow', 'cave', 'village', 'sky-island', 'ocean'];
+export const VOXEL_TIMES = ['day', 'dusk', 'night'];
+export const VOXEL_PROPS = ['gem', 'lantern', 'crate', 'flag', 'ball', 'star'];
+export const VOXEL_LOOKS = ['pastel', 'classic'];
+export const VOXEL_MAX_PEOPLE = 6;
+// Pack C classic's Story Short shot (core/video_store.py _story_beat; static/motion/classic.js, story.js).
+export const STORY_PLACES = ['meadow', 'cliff', 'village', 'party', 'cave', 'beach', 'sky-island'];
+export const STORY_TIMES = ['day', 'dusk'];
+export const STORY_POSES = ['idle', 'walk', 'run', 'hips', 'despair', 'flail', 'hang', 'wave', 'shove', 'nod', 'point', 'cheer', 'cry', 'laugh',
+  'shrug', 'think', 'sit', 'slip'];
+export const STORY_MOODS = ['neutral', 'happy', 'smug', 'angry', 'scared', 'sad', 'crying', 'shocked', 'laughing', 'splat'];
+export const STORY_SHOTS = ['close', 'medium', 'wide', 'low', 'top', 'orbit'];
+export const STORY_FX = ['fuse', 'blast', 'splat', 'fall', 'pop'];
+export const STORY_PROPS = ['crate', 'cake', 'lantern', 'balloon', 'table'];
+export const STORY_SFX = ['boom', 'splat', 'sting', 'riser', 'pop', 'whoosh', 'impact', 'steps', 'gasp'];
+export const STORY_MAX_CAST = 4, STORY_MAX_SHOTS = 3, STORY_MAX_FX = 4, STORY_MAX_PROPS = 6, STORY_MAX_SFX = 6, STORY_MAX_KEYS = 8;
+export const STORY_GAP = [.1, 1.6], STORY_HOLD = [.4, 4];
+export const STORY_FACES = ['camera', 'left', 'right', 'away'];
+// The words of a line as the captions show them (core/video_store.py clause_words): a word cue {word: n} counts these.
+export const clauseWords = say => String(say || '').split(/\s+/).filter(w => /[\p{L}\p{N}_]/u.test(w));
+// A moment in a story shot ({word: n, after?} or {t}) in words: "word 3 (help)", "word 3 (help) + 0.4 s", "1.2 s in".
+export function momentText(ref, say) {
+  if (!ref || typeof ref !== 'object') return '';
+  if ('t' in ref) return `${Number(ref.t)} s in`;
+  const w = clauseWords(say)[ref.word];
+  return `word ${Number(ref.word) + 1}${w ? ` (${w})` : ''}${ref.after ? ` + ${ref.after} s` : ''}`;
+}
+// Comma-separated key words to the stored list, and back.
+export const keysFrom = text => String(text || '').split(',').map(k => k.trim()).filter(Boolean);
+export const keysText = keys => (keys || []).join(', ');
 export const LEAD = .25;   // seconds of picture before a narrated line starts (core/video_store.py LEAD)
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -236,6 +267,12 @@ export function isTyping(target) {
   if (target.isContentEditable || tag === 'textarea' || tag === 'select') return true;
   if (tag === 'input') return !['checkbox', 'radio', 'button', 'range'].includes(String(target.type || '').toLowerCase());
   return false;
+}
+// A focused slider keeps its own keys (arrows, Home, End, Page Up and Down move it); other shortcuts still work there.
+const SLIDER_KEYS = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'];
+export function sliderKey(event) {
+  const t = event?.target;
+  return !!t && String(t.tagName || '').toLowerCase() === 'input' && String(t.type || '').toLowerCase() === 'range' && SLIDER_KEYS.includes(event.key) && !event.altKey;
 }
 export function edgeTime(list, t, direction) {
   const edges = [...new Set([0, ...list.map(c => c.end)])].sort((a, b) => a - b), eps = .5 / FPS;

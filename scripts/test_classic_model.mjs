@@ -10,7 +10,8 @@ import { readFileSync } from 'node:fs';
 import { TEXTURES, blockTexture, pixel, grassEdge, plankSeam, COLOURS, BLOCKS, skinTexture, faceTexture, faceCells, MOODS, MOOD_FACE, TEAR, rgb } from '../static/motion/blocks.js';
 import { worldModel, meshWorld, PLACES, P, HEIGHT, BODY, blockPlan, blockCharacter, poseAt, keyed, KEY_RATE, normalizeStory, storyModel, storyPose,
   timeOf, shotAt, wordStarts, CUT_EARLY, FOV, debrisAt, smokeAt, blastLight, blastShake, splatAt, fuseAt, blastSet, groundAt, openFrames, classicBoxes,
-  voxelAsStory, avatarCamera, POSES } from '../static/motion/classic.js';
+  voxelAsStory, avatarCamera, POSES, shotLights, SHOT_LIGHT, SKY, projectV, balanceCoverage, MAX_CLOSE_SHARE } from '../static/motion/classic.js';
+const FOV_KEYS = ['close', 'medium', 'wide', 'low', 'top', 'orbit'];
 import { LAYOUT, W, H, captionAt, mouthOpen, edgeFlash, SEPIA, KEY_WORDS, words as lineWords } from '../static/motion/story.js';
 
 let checks = 0;
@@ -201,6 +202,69 @@ ok(avatar.fov < later.fov, 'the avatar pops in a little when the speaker changes
 const vb = voxelAsStory({ id: 'v', kind: 'voxel', start: 0, end: 3, camera: 'push', voxel: { world: 'ocean', time: 'night', shot: 'wide', seed: 2, look: 'classic',
   cast: [{ character: 'aaaaaaaaaaaa', x: .5, action: 'jump', expression: 'surprised', speaking: true, facing: 'camera' }], props: [], labels: [] } });
 ok(vb.story.place === 'beach' && vb.story.time === 'dusk' && vb.story.cast[0].pose === 'cheer' && vb.story.cast[0].mood === 'shocked', 'world, time, action and expression map to the classic set');
+
+// 11. 2.3.0 polish: shot lights, the slip, the high angle over the edge, the wider fall orbit, coverage balance.
+{
+  // Shot lights: a fill from beside the camera (strongest on the low angle), a rim from behind the target, both scaled by the
+  // place's world light.
+  const low = shotLights(p1.camera, SKY.day), close = shotLights(p0.camera, SKY.day), dusk = shotLights(p1.camera, SKY.dusk);
+  ok(low.fill.intensity > close.fill.intensity && low.fill.intensity >= 1, 'the low angle gets the strongest fill (its sky is behind the face)');
+  near(low.fill.pos[2], p1.camera.pos[2] + 1.2, 1e-3, 'the fill sits just above the camera');
+  ok(Math.hypot(low.fill.pos[0] - p1.camera.pos[0], low.fill.pos[1] - p1.camera.pos[1]) < 1, 'and beside it');
+  const toTarget = [p1.camera.target[0] - p1.camera.pos[0], p1.camera.target[1] - p1.camera.pos[1]], toRim = [low.rim.pos[0] - p1.camera.target[0], low.rim.pos[1] - p1.camera.target[1]];
+  ok(toTarget[0] * toRim[0] + toTarget[1] * toRim[1] > 0 && low.rim.pos[2] > p1.camera.target[2] + 3, 'the rim sits behind the subject and above');
+  ok(dusk.fill.intensity < low.fill.intensity && shotLights(p1.camera, SKY.cave).fill.intensity < dusk.fill.intensity, 'dimmer at dusk, little in a cave');
+  eq(Object.keys(SHOT_LIGHT).sort(), [...FOV_KEYS].sort(), 'every shot has its lights');
+  // The slip: one hand still on the ledge, the other swinging free, on held keys; placed like a hanger.
+  ok(POSES.includes('slip'), 'slip is a pose');
+  const slips = [0, .1, .2, .3].map(t => poseAt('slip', t));
+  ok(slips.every(q => q.arm_l[0] < -Math.PI) && slips.every(q => q.arm_r[0] > -1.5), 'slip: the left hand grips, the right hand has let go');
+  ok(new Set(slips.map(q => q.arm_r[0])).size === 2, 'the free arm swings on held keys');
+  const slipBeat = { ...beat, story: normalizeStory({ place: 'cliff', cast: [{ character: 'aaaaaaaaaaaa', pose: 'hang', changes: [{ at: { word: 2 }, pose: 'slip' }] }],
+    shots: [{ shot: 'close', on: 0 }, { shot: 'top', on: 0, at: { word: 2 } }] }) };
+  const slipModel = storyModel(slipBeat, chars), slipPose = storyPose(slipModel, slipBeat, .9, 1080, 1280);
+  ok(Math.abs(slipModel.actors[0].place.z - (0 - 34 * P)) < 1e-9 && slipPose.poses[0].pose === 'slip', 'a hanger who slips stays at the edge, slipping');
+  // The high angle: in front of him and above, looking down about 45 degrees at the edge, so the grass edge, the hands
+  // and the face show (straight down showed only the top of his head).
+  const cam = slipPose.camera, d = [cam.target[0] - cam.pos[0], cam.target[1] - cam.pos[1], cam.target[2] - cam.pos[2]];
+  const down = Math.atan2(-d[2], Math.hypot(d[0], d[1])) / DEG;
+  ok(down > 35 && down < 60, `the high angle looks down ${down.toFixed(0)} degrees, not straight down`);
+  ok(cam.pos[1] < slipModel.world.marks.edge.y - 1, 'from the drop side, facing his face');
+  const [, edgeY] = projectV(cam, [0, .3, slipModel.world.marks.edge.z], 1080, 1280), [, handY] = projectV(cam, [0, -5 * P, slipModel.world.marks.edge.z], 1080, 1280);
+  ok(edgeY > 0 && edgeY < 1280 * .6 && handY > edgeY, `the ledge edge is in frame above the hands (edge at ${edgeY.toFixed(0)} px)`);
+  const [, belowY] = projectV(cam, [0, -5 * P, slipModel.world.marks.edge.z - 2.4], 1080, 1280);
+  ok(belowY < 1280 && belowY > handY, 'and the cliff face below him is in frame');
+  // The fall's orbit: a long, eased swing of 1.6 radians that pulls back from 4.6 to 8 blocks and rises, looking down.
+  const fallBeat = { ...beat, start: 0, end: 3.4, story: normalizeStory({ place: 'cliff', cast: [{ character: 'aaaaaaaaaaaa', pose: 'hang' }], shots: [{ shot: 'orbit', on: 0 }],
+    fx: [{ kind: 'fall', on: 0, at: { t: 0 } }] }) };
+  const fallModel = storyModel(fallBeat, chars), at = t => storyPose(fallModel, fallBeat, t, 1080, 1280).camera;
+  const angle = c => Math.atan2(c.pos[1] - c.target[1], c.pos[0] - c.target[0]), reach = c => Math.hypot(c.pos[0] - c.target[0], c.pos[1] - c.target[1]);
+  near(Math.abs(angle(at(3.4)) - angle(at(0))), 1.6, .05, 'the orbit swings 1.6 radians over the shot');
+  ok([0, 1.7, 3.4].every(t => at(t).pos[1] < at(t).target[1]), 'staying on the valley side, the cliff behind him');
+  ok(at(3.4).pos[2] - at(3.4).target[2] > 3.5, 'and ends looking down on him');
+  const floor = fallModel.world.marks.edge.z - fallModel.world.marks.drop, late = storyPose(fallModel, fallBeat, 3.4, 1080, 1280);
+  ok(late.poses[0].z >= floor - 1e-9 && late.poses[0].z < floor + .5, 'a long fall stops at the valley floor, not through it');
+  ok(late.camera.target[2] >= floor + 1.2 - 1e-6, 'and the camera never follows below it');
+  near(reach(at(0)), 4.6, .05, 'from 4.6 blocks'); near(reach(at(3.4)), 8, .05, 'out to 8');
+  // Coverage: one character's closes beyond a fifth of the story shots play as mediums, a two-shot when someone else is on.
+  const mk = (id, cast, shots, speaker = cast[0]) => ({ id, kind: 'story', speaker, story: normalizeStory({ cast: cast.map(c => ({ character: c })), shots }) });
+  const A = 'aaaaaaaaaaaa', B = 'bbbbbbbbbbbb';
+  const run = [mk('1', [A], [{ shot: 'close', on: 0 }, { shot: 'wide', on: 0, at: { t: 1 } }]), mk('2', [A, B], [{ shot: 'low', on: 1 }], B),
+    mk('3', [A, B], [{ shot: 'close', on: 0 }]), mk('4', [A, B], [{ shot: 'low', on: 1 }], B), mk('5', [A, B], [{ shot: 'close', on: 0 }]),
+    mk('6', [B], [{ shot: 'close', on: 0 }], B), mk('7', [A, B], [{ shot: 'close', on: 0 }]), mk('8', [A], [{ shot: 'close', on: 0 }]),
+    mk('9', [A, B], [{ shot: 'close', on: 0 }], B), { id: 'x', kind: 'statement' }];
+  const changed = balanceCoverage(run), shots = run.filter(b => b.story).flatMap(b => b.story.shots);
+  eq(changed.map(c => c.beat), ['3', '7', '9', '5'], 'four of A\'s six closes turn (two kept of ten shots): every other one after the first, then the rest in order');
+  eq(shots.length, 10, 'ten story shots');
+  ok(shots.filter(s => s.shot === 'close' && s !== run[5].story.shots[0]).length <= Math.max(2, Math.floor(MAX_CLOSE_SHARE * 10)), 'A keeps at most a fifth of the shots as closes (two at least)');
+  eq([run[2].story.shots[0].shot, run[2].story.shots[0].with], ['medium', 1], 'a close with someone else on the shot becomes a two-shot');
+  eq([run[8].story.shots[0].with], [1], 'with the speaker first');
+  eq(run[5].story.shots[0].shot, 'close', 'another character\'s close is untouched');
+  ok(run[2].story.shots[0].balanced?.from === 'close', 'the turned shot says why');
+  const few = [mk('1', [A], [{ shot: 'close', on: 0 }]), mk('2', [A], [{ shot: 'close', on: 0 }])];
+  eq(balanceCoverage(few), [], 'two closes are always allowed');
+  const again = structuredClone(run); eq(balanceCoverage(again), [], 'balancing twice changes nothing more');
+}
 
 // 10. Distance rules: no other game's name, its creatures or the named channel's characters anywhere in the classic code.
 const source = ['blocks.js', 'classic.js', 'classic3d.js', 'story.js'].map(f => readFileSync(new URL(`../static/motion/${f}`, import.meta.url), 'utf8')).join('\n');

@@ -680,6 +680,38 @@ export function avatarFor(channel) {
   return { letter, key: channel?.look || channel?.style_pack || channel?.handle || '' };
 }
 export const PLATFORM_SHORT = { youtube: 'YT', tiktok: 'TT', instagram: 'IG' };
+
+// Two-letter initials for a handle, in order of preference: the first letters of its first two words (cooks.tt: CT),
+// then the first letter with each later letter (cooks: CO, CK...), then the first letter with a digit.
+function initialsFor(handle) {
+  const clean = String(handle || '').replace(/^@/, '').replace(/([a-z])([A-Z])/g, '$1 $2');
+  const words = clean.split(/[^A-Za-z0-9]+/).filter(Boolean);
+  const flat = words.join('');
+  if (!flat) return ['?'];
+  const first = flat[0].toUpperCase(), out = [];
+  if (words.length > 1) out.push(first + words[1][0].toUpperCase());
+  for (const ch of flat.slice(1)) out.push(first + ch.toUpperCase());
+  for (let n = 2; n < 10; n++) out.push(first + n);
+  return [...new Set(out.length ? out : [first])];
+}
+const hueOf = text => { let hash = 0; for (const ch of String(text || '')) hash = (hash * 31 + ch.charCodeAt(0)) % 360; return hash; };
+const hueGap = (a, b) => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
+
+// Every channel's avatar, told apart from the others: two letters no other channel uses, a hue at least 30 degrees from
+// every other channel's (starting from its look, so a look keeps its colour family), and its platform's glyph.
+// Channels are taken in id order so a channel's avatar does not change when a later one is added.
+export function avatarsFor(channels) {
+  const out = new Map(), usedLetters = new Set(), usedHues = [];
+  for (const c of [...(channels || [])].sort((a, b) => (a.id ?? 0) - (b.id ?? 0))) {
+    const letters = initialsFor(c.handle).find(l => !usedLetters.has(l)) || initialsFor(c.handle)[0];
+    usedLetters.add(letters);
+    let hue = hueOf(`${c.look || c.style_pack || ''}|${c.platform || ''}|${c.handle || ''}`);
+    for (let n = 0; n < 12 && usedHues.some(h => hueGap(h, hue) < 30); n++) hue = (hue + 37) % 360;
+    usedHues.push(hue);
+    out.set(c.id, { letters, hue, platform: c.platform || '', glyph: PLATFORM_SHORT[c.platform] || '' });
+  }
+  return out;
+}
 export const channelName = channel => channel ? `${platformName(channel.platform)} ${channel.handle}` : '';
 
 // The pipeline of one channel: its own posts, plus its niche's topics (a topic belongs to a niche until a post is made).

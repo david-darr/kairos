@@ -38,6 +38,8 @@ const project = { id: 'motion-check', title: 'Spring season', bpm: 120, fps: 30,
   proportions: { head: .42, body_width: .62, limb_length: .26, limb_width: .055, eye_size: .036 },
   palette: { body: '#f4a259', body_shade: '#e0843d', head: '#f7c08a', limb: '#5b4a6b', eye: '#231b2e', mouth: '#8c3b4a', outline: '#2e2438', accent: '#7cc6a4', cheek: '#f08a8a' } } } } };
 // Pack C classic's Story Short (static/motion/story.js, classic.js, classic3d.js): two speakers, a shot now and a flashback.
+// The helper's face in the low angle, mean brightness of a 40 px patch: measured 2026-11-11 at 144 without the shot lights and 183 with them.
+const LOW_FACE_MIN = 165;
 const outfit = (shirt, hair) => ({ skin: '#f0c8a8', hair, hair_style: 'short', shirt, detail: '#f2f2f2', detail_style: 'zip', pants: '#2a2833', shoes: '#ececec', eyes: '#2d2140' });
 const story = { id: 'story-check', title: 'Story', bpm: 120, fps: 30, aspects: ['9:16'], look: 'brutalist', narration: { voice: 'af_heart', captions: true },
   characters: { a00000000001: { version: 1, spec: { form: 'block', colour: '#b05aff', outfit: outfit('#5e2b8c', '#1d1a22') } },
@@ -378,6 +380,13 @@ app.whenReady().then(async () => {
     out.borderThen = px(6, 320); out.then = region(0, 700, 1080, 1200); out.layoutThen = kdLayout(2.9);
     out.frameThen = canvas.toDataURL('image/png').split(',')[1];
     out.same = (await hash(1.1)) === (await hash(1.1));
+    // 2.3.0 polish: the low angle on the helper (word 2) lights her face with the shot fill: the face's mean brightness.
+    kdDrawFrame(1.2);
+    out.lowLayout = kdLayout(1.2);
+    const helper = out.lowLayout.find(e => e.kind === 'character' && e.character === 'a00000000002');
+    if (helper) { const d = g.getImageData(Math.round(helper.x + helper.w / 2 - 20), Math.round(helper.y + helper.h * .14 - 20), 40, 40).data; let sum = 0;
+      for (let i = 0; i < d.length; i += 4) sum += .2126 * d[i] + .7152 * d[i + 1] + .0722 * d[i + 2]; out.lowFace = sum / (d.length / 4); }
+    out.frameLow = canvas.toDataURL('image/png').split(',')[1];
     return out;
   })()`);
   const close = (a, b, tol, msg) => assert.ok(a.every((v, i) => Math.abs(v - b[i]) <= tol), msg + ': ' + a + ' vs ' + b);
@@ -396,6 +405,10 @@ app.whenReady().then(async () => {
   assert.ok(shortInfo.same, 'A story frame draws the same pixels every time');
   fs.writeFileSync(path.join(output, 'motion-story-now.png'), Buffer.from(shortInfo.frameNow, 'base64'));
   fs.writeFileSync(path.join(output, 'motion-story-flashback.png'), Buffer.from(shortInfo.frameThen, 'base64'));
+  fs.writeFileSync(path.join(output, 'motion-story-low.png'), Buffer.from(shortInfo.frameLow, 'base64'));
+  assert.equal(shortInfo.lowLayout.find(e => e.kind === 'story').shot, 'low', 'The low angle on the helper');
+  console.log('Low-angle face brightness: ' + (shortInfo.lowFace ?? 'not found').toString());
+  assert.ok(shortInfo.lowFace > LOW_FACE_MIN, `The helper's face reads in the low angle (mean brightness ${shortInfo.lowFace})`);
   console.log('PASS Story Short: split screen, speaker border and divider, one-word captions, sepia flashback, deterministic; frames: motion-story-now.png, motion-story-flashback.png');
   console.log('Motion engine Electron checks passed (two looks, three aspects, all beats, cameras, transitions, image treatments, overlay tracks, keyframes, video clips, word captions and the Story Short).');
   cleanup(); app.exit(0);

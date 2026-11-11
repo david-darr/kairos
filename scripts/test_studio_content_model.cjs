@@ -248,6 +248,20 @@ const { pathToFileURL } = require('node:url');
   assert.deepEqual(M.avatarFor({ handle: '@cooks', look: 'sport' }), { letter: 'C', key: 'sport' });
   assert.deepEqual(M.avatarFor({ handle: 'trips', style_pack: 'flat-2d' }), { letter: 'T', key: 'flat-2d' });
   assert.equal(M.avatarFor({ handle: '@' }).letter, '?');
+  // Every channel's avatar is told apart: two letters no other channel uses, hues at least 30 degrees apart, the platform glyph.
+  const same = [{ id: 1, handle: '@cooks', platform: 'youtube', look: 'sport' }, { id: 2, handle: '@cooks.tt', platform: 'tiktok', look: 'sport' },
+    { id: 3, handle: '@trips', platform: 'instagram' }, { id: 4, handle: '@cooks', platform: 'instagram', look: 'sport' }, { id: 5, handle: 'CookingDaily', platform: 'youtube' },
+    { id: 6, handle: '@c', platform: 'tiktok' }, { id: 7, handle: '@c', platform: 'youtube' }];
+  const avatars = M.avatarsFor(same);
+  assert.deepEqual([...avatars.values()].map(a => a.letters), ['CO', 'CT', 'TR', 'CK', 'CD', 'C2', 'C3']);
+  assert.deepEqual([...avatars.values()].map(a => a.glyph), ['YT', 'TT', 'IG', 'IG', 'YT', 'TT', 'YT']);
+  assert.equal(new Set([...avatars.values()].map(a => a.letters)).size, same.length, 'no two channels share letters');
+  const hues = [...avatars.values()].map(a => a.hue);
+  for (let i = 0; i < hues.length; i++) for (let j = i + 1; j < hues.length; j++) {
+    const d = Math.abs(hues[i] - hues[j]) % 360; assert.ok(Math.min(d, 360 - d) >= 30, `hues ${i} and ${j} are apart`);
+  }
+  assert.deepEqual(M.avatarsFor([...same].reverse()).get(1), avatars.get(1), 'id order, so an added channel never changes an older avatar');
+  assert.deepEqual(M.avatarsFor(same.slice(0, 2)).get(2), avatars.get(2), 'a later channel does not change an earlier one');
   assert.equal(M.channelName({ platform: 'tiktok', handle: '@a' }), 'TikTok @a');
   const ch = { id: 2, niche_id: 7 };
   const mixed = [{ kind: 'topic', id: 1, niche_id: 7 }, { kind: 'topic', id: 2, niche_id: 8 }, { kind: 'post', id: 3, channel_id: 2, niche_id: 7 }, { kind: 'post', id: 4, channel_id: 5, niche_id: 7 }];

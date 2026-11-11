@@ -20,8 +20,8 @@ export function sceneForm({ beat, path, cast, names, forms = {}, helpers }) {
   // Cast on screen: only characters the project casts (each pinned to a version).
   const members = Array.isArray(scene.cast) ? scene.cast : [];
   const castBox = el('fieldset', { class: 'ste-group' }, [el('legend', { text: `Characters on screen (${members.length} of ${M.MAX_ON_SCREEN})` })]);
-  // A scene shows flat (2D) characters; 3D ones (Pack B) play stage beats.
-  const castIds = (cast || []).map(c => c.character).filter(id => forms[id] !== '3d'), nameOf = id => names[id] || `Character ${id.slice(0, 6)}`;
+  // A scene shows flat (2D) characters; 3D ones (Pack B) play stage beats, blocky and block ones (Pack C) voxel and story beats.
+  const castIds = (cast || []).map(c => c.character).filter(id => !forms[id] || forms[id] === '2d'), nameOf = id => names[id] || `Character ${id.slice(0, 6)}`;
   members.forEach((m, i) => {
     const n = i + 1, at = `${where}.cast[${i}]`;
     const free = castIds.filter(id => id === m.character || !members.some(o => o.character === id));

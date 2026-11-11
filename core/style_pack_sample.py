@@ -230,10 +230,13 @@ def beats_story(data) -> list[dict]:
         {"id": "juno-bye", "kind": "story", "speaker": juno, "say": "Then hang in there. Bye!", "gap": .8,
          "story": cliff(on_edge(juno, -.7, pose="idle", mood="smug", changes=[{"at": {"word": 4}, "pose": "wave"}], leave={"at": {"word": 4, "after": .55}}),
                         shots=[{"shot": "low", "on": 1, "push": .25}, {"shot": "medium", "on": 1, "at": {"word": 4}, "push": .3}], keys=["bye"])},
+        # One hand loses the ledge on the third "no" (the slip pose), seen from the high angle over the edge.
         {"id": "slip", "kind": "story", "speaker": rook, "say": "No, no, no, no!", "gap": .3,
-         "story": cliff(shots=[{"shot": "close", "on": 0, "shake": True, "push": .3}, {"shot": "top", "on": 0, "at": {"word": 2}, "push": .4}],
-                        sfx=[{"kind": "gasp", "at": {"word": 3}}], keys=["no"])},
-        {"id": "fall", "kind": "story", "speaker": rook, "say": "Hit like and subscribe!", "gap": .9,
+         "story": {"place": "cliff", "seed": 2, "cast": [hang(changes=[{"at": {"word": 2}, "pose": "slip"}])],
+                   "shots": [{"shot": "close", "on": 0, "shake": True, "push": .3}, {"shot": "top", "on": 0, "at": {"word": 2}, "push": .3}],
+                   "sfx": [{"kind": "gasp", "at": {"word": 3}}], "keys": ["no"]}},
+        # The fall holds longer (gap 1.5 s) so the wider orbit has time to swing out over the valley.
+        {"id": "fall", "kind": "story", "speaker": rook, "say": "Hit like and subscribe!", "gap": 1.5,
          "story": cliff(fx=[{"kind": "fall", "on": 0, "at": {"t": 0}}], shots=[{"shot": "orbit", "on": 0}],
                         sfx=[{"kind": "whoosh", "at": {"t": 0}}], keys=["like", "subscribe"])},
     ]

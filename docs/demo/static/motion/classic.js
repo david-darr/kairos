@@ -17,7 +17,7 @@ export const HEIGHT = 32 * P;            // a character is two blocks tall
 export const PLACES = ['meadow', 'cliff', 'village', 'party', 'cave', 'beach', 'sky-island'];
 export const TIMES = ['day', 'dusk'];
 export const POSES = ['idle', 'walk', 'run', 'hips', 'despair', 'flail', 'hang', 'wave', 'shove', 'nod', 'point', 'cheer', 'cry',
-  'laugh', 'shrug', 'think', 'sit'];
+  'laugh', 'shrug', 'think', 'sit', 'slip'];
 export const SHOTS = ['close', 'medium', 'wide', 'low', 'top', 'orbit'];
 export const FX = ['fuse', 'blast', 'splat', 'fall', 'pop'];
 export const PROPS = ['crate', 'cake', 'lantern', 'balloon', 'table'];
@@ -354,6 +354,8 @@ export function poseAt(pose, t, { talking = false, phase = 0 } = {}) {
     case 'despair': q.head[0] = .45; q.arm_l = [-2.6, -.38, 0]; q.arm_r = [-2.6, .38, 0]; q.body[0] = .18; break;   // hands to the head, head down
     case 'flail': { const k = Math.floor(tt * 6 + 1e-6) % 2; q.arm_l = [-2.8 + k * 1.4, .45, 0]; q.arm_r = [-1.4 - k * 1.4, -.45, 0]; q.leg_l[0] = (k ? .5 : -.4); q.leg_r[0] = (k ? -.4 : .5); q.head[2] = k ? .2 : -.2; break; }
     case 'hang': { const k = Math.floor(tt * 3 + 1e-6) % 2; q.arm_l = [-3.32, -.1, 0]; q.arm_r = [-3.32, .1, 0]; q.leg_l[0] = k ? .35 : -.25; q.leg_r[0] = k ? -.25 : .35; q.head[0] = -.12; break; }
+    // Slipping: one hand still on the ledge, the other has lost it and swings down and out, legs kicking faster.
+    case 'slip': { const k = Math.floor(tt * 5 + 1e-6) % 2; q.arm_l = [-3.32, -.1, 0]; q.arm_r = [k ? -1.1 : -.35, k ? -.75 : -.45, 0]; q.leg_l[0] = k ? .5 : -.35; q.leg_r[0] = k ? -.35 : .5; q.head[0] = .18; q.head[2] = k ? .18 : .1; q.body[1] = -.08; break; }
     case 'wave': { const k = Math.floor(tt * 2.5 * 2 + 1e-6) % 2; q.arm_r = [-2.75, k ? -.5 : .05, 0]; q.head[1] = .06; break; }
     case 'shove': { const k = t < .12 ? 0 : 1; q.arm_l = [-.6 - .95 * k, -.12 * k, 0]; q.arm_r = [-.6 - .95 * k, .12 * k, 0]; q.body[0] = .18 * k; q.leg_l[0] = -.3 * k; q.leg_r[0] = .3 * k; break; }
     case 'nod': break;
@@ -367,7 +369,7 @@ export function poseAt(pose, t, { talking = false, phase = 0 } = {}) {
     default: break;
   }
   // A talker nods on held keys; idle figures breathe in two steps so nothing is ever frozen.
-  if (talking && pose !== 'flail' && pose !== 'hang') q.head[0] += [0, .1, 0, .05][Math.floor(tt * 4 + 1e-6) % 4];
+  if (talking && pose !== 'flail' && pose !== 'hang' && pose !== 'slip') q.head[0] += [0, .1, 0, .05][Math.floor(tt * 4 + 1e-6) % 4];
   if (pose === 'nod') q.head[0] += [0, .22, 0, .22][Math.floor(tt * 3 + 1e-6) % 4];
   if (pose === 'idle' || pose === 'hips') { q.arm_l[2] -= Math.floor(tt * 1.2 + 1e-6) % 2 ? .04 : 0; q.arm_r[2] += Math.floor(tt * 1.2 + 1e-6) % 2 ? .04 : 0; }
   return q;
@@ -444,7 +446,7 @@ export function storyModel(beat, characters, blasts = []) {
   for (const b of blasts) for (const x of blastSet(world, b)) gone.add(key(x.i, x.j, x.k));
   const actors = v.cast.map((m, i) => {
     const spec = characters[m.character]?.spec;
-    const hang = m.pose === 'hang' || m.changes.some(c => c.pose === 'hang');
+    const hang = ['hang', 'slip'].includes(m.pose) || m.changes.some(c => c.pose === 'hang' || c.pose === 'slip');
     const edge = world.marks.edge;
     const z = hang && edge ? edge.z - 34 * P : groundAt(world, m.x, m.y);
     return { key: `c${i}`, index: i, character: m.character, member: m, outfit: spec?.outfit || null, colour: spec?.colour || '#ffffff',
@@ -499,7 +501,12 @@ export function memberAt(model, beat, actor, t, speaking) {
   // A fall (fx) drops the member: z = -0.5 * 13 * t^2 from its start, flailing.
   for (const f of model.fx) if (f.kind === 'fall' && f.on === actor.index) {
     const t0 = timeOf(beat, f.at);
-    if (t >= t0) { const k = t - t0; z -= .5 * 13 * k * k; pose = 'flail'; mood = mood === 'neutral' ? 'scared' : mood; y -= .9 * Math.min(k, .5); }
+    if (t >= t0) {
+      const k = t - t0; z -= .5 * 13 * k * k; pose = 'flail'; mood = mood === 'neutral' ? 'scared' : mood; y -= .9 * Math.min(k, .5);
+      // A long fall (2.3.0 polish holds the shot longer) stops at the valley floor instead of passing through it.
+      const floor = model.world.marks.drop ? (model.world.marks.edge?.z ?? 0) - model.world.marks.drop : null;
+      if (floor !== null && z < floor) z = floor;
+    }
   }
   let splat = false;
   for (const f of model.fx) if (f.kind === 'splat' && f.on === actor.index && t >= timeOf(beat, f.at) + .05) { splat = true; }
@@ -588,13 +595,24 @@ export function storyCamera(model, beat, t, poses, w, h) {
   else if (sh.shot === 'medium') { target = other && sh.with !== null ? mid(chest, [other.x, other.y, other.z + 18 * P]) : [chest[0], chest[1], chest[2] + 2 * P]; distance = other && sh.with !== null ? 4.6 : 3.9; height = .35; }
   else if (sh.shot === 'wide') { target = other ? mid(chest, [other.x, other.y, other.z + 14 * P]) : chest; distance = 9 + (other ? Math.hypot(other.x - subject.x, other.y - subject.y) * .7 : 0); height = 2.4; }
   else if (sh.shot === 'low') { target = [head[0], head[1], head[2] - 2 * P]; distance = 3.1; height = -1.7; }
-  else if (sh.shot === 'top') { target = [subject.x, subject.y - .25, subject.z + 26 * P]; distance = .55; height = 3.6; }
-  else { target = [head[0], head[1], head[2] - 6 * P]; distance = 3.7; height = -.35; }
-  distance -= sh.push * p * (sh.shot === 'wide' ? 1.6 : 1);
+  else if (sh.shot === 'top') {
+    // The high angle (2.3.0 polish): from above and in front, looking down at about 45 degrees past the face to the ledge,
+    // so the frame holds the grass edge with the hands on it, the upturned face, and the cliff face dropping below the
+    // kicking legs. Straight down (as before) read only as a head and hands at a grey strip.
+    target = [subject.x, subject.y + .2, subject.z + 24 * P]; distance = 2.1; height = 2.3; dir = [.26, -.97];
+  }
+  else { target = [head[0], head[1], head[2] - 6 * P]; distance = 4.6; height = .4; }
+  distance -= sh.push * p * (sh.shot === 'wide' ? 1.6 : sh.shot === 'orbit' ? 0 : 1);
   let pos;
   if (sh.shot === 'orbit') {
-    const a = -Math.PI / 2 - .55 + (t - start) * .9;      // swings across his front, the cliff face behind him
-    pos = [target[0] + Math.cos(a) * distance, target[1] + Math.sin(a) * distance, target[2] + height];
+    // The fall (2.3.0 polish): a longer, wider swing. It starts beside him with the cliff face behind, sweeps 1.6 radians
+    // across his front over the shot (eased, staying on the valley side so the cliff stays behind him), pulls back from 4.6
+    // to 8 blocks and rises 3.6, looking down on him so the drop and the valley floor fill the background.
+    const k = smoothstep((t - start) / Math.max(.5, end - start));
+    const a = -Math.PI / 2 - 1 + 1.6 * k, d = distance + 3.4 * k;
+    // Follow him down, but never below the valley floor: once he is down there, the frame holds the valley and the cliff.
+    if (model.world.marks.drop) target[2] = Math.max(target[2], (model.world.marks.edge?.z ?? 0) - model.world.marks.drop + 1.2);
+    pos = [target[0] + Math.cos(a) * d, target[1] + Math.sin(a) * d, target[2] + height + 3.6 * k];
   } else pos = [target[0] + dir[0] * distance, target[1] + dir[1] * distance, target[2] + height];
   // Shakes: a panicky close jitters on held keys; a blast shakes the whole picture.
   let shake = sh.shake ? .035 : 0;
@@ -604,9 +622,52 @@ export function storyCamera(model, beat, t, poses, w, h) {
     const jx = (rnd('shake', k, 0) - .5) * 2 * shake, jy = (rnd('shake', k, 1) - .5) * 2 * shake, jz = (rnd('shake', k, 2) - .5) * 2 * shake;
     pos = [pos[0] + jx, pos[1] + jy, pos[2] + jz]; target = [target[0] + jx * .6, target[1] + jy * .6, target[2] + jz * .6];
   }
-  return { pos: pos.map(round), target: target.map(round), fov, up: sh.shot === 'top' ? [0, 1, 0] : [0, 0, 1], shot: sh.shot, index: shotAt(beat, t).index, subject: sh.on };
+  return { pos: pos.map(round), target: target.map(round), fov, up: [0, 0, 1], shot: sh.shot, index: shotAt(beat, t).index, subject: sh.on };
 }
 const mid = (a, b) => a.map((v, i) => (v + b[i]) / 2);
+
+// Shot lights (2.3.0 polish): the sun stays the key; a soft fill comes from just above and beside the camera so a face
+// turned away from the sun still reads (low shots most: the sky behind them), and a rim from behind the subject separates
+// it from the background. Intensities in the renderer's units, scaled by the place's world light (dimmer at dusk, little
+// in a cave, where the lanterns light it). static/motion/classic3d.js places them per frame.
+export const SHOT_LIGHT = { close: [.75, .8], medium: [.5, .6], wide: [.3, .45], low: [1.15, .95], top: [.6, .5], orbit: [.65, .7] };
+export function shotLights(camera, sky = SKY.day) {
+  const [fill, rim] = SHOT_LIGHT[camera.shot] || SHOT_LIGHT.medium, scale = (sky.world ?? .6) / .6;
+  const f = [camera.target[0] - camera.pos[0], camera.target[1] - camera.pos[1]], l = Math.hypot(...f) || 1, fx = f[0] / l, fy = f[1] / l;
+  // Fill: up 1.2 and a little to the camera's right (the sun is to its left); rim: 5 blocks behind the target and 3.5 up.
+  return { fill: { pos: [camera.pos[0] + fy * .9, camera.pos[1] - fx * .9, camera.pos[2] + 1.2].map(round), target: camera.target, intensity: round(fill * scale) },
+    rim: { pos: [camera.target[0] + fx * 5, camera.target[1] + fy * 5, camera.target[2] + 3.5].map(round), target: camera.target, intensity: round(rim * scale) } };
+}
+
+// Coverage balance (2.3.0 polish): a Story Short that keeps cutting to closes of one character reads as the same shot
+// again and again. When one character's closes pass a fifth of the video's story shots (at least two are always kept),
+// the extra ones play as mediums: a two-shot with someone else on that shot when there is one (the speaker first), else a
+// looser medium on the same character. The first close stays; the ones turned are spread out (every other one). Applied
+// once to the normalized beats (static/motion/layout.js), so the player, the checks and the editor's preview agree;
+// the shot keeps `balanced` so the editor can say why. Nothing stored changes.
+export const MAX_CLOSE_SHARE = .2;
+export function balanceCoverage(beats) {
+  const all = [];
+  for (const b of beats || []) if (b?.kind === 'story' && b.story?.shots) b.story.shots.forEach((s, i) => all.push({ b, s, i }));
+  const quota = Math.max(2, Math.floor(MAX_CLOSE_SHARE * all.length)), closes = new Map(), changed = [];
+  all.forEach((x, n) => {
+    const id = x.s.shot === 'close' ? x.b.story.cast[x.s.on]?.character : null;
+    if (id) { if (!closes.has(id)) closes.set(id, []); closes.get(id).push(n); }
+  });
+  for (const [id, list] of closes) {
+    const need = list.length - quota;
+    if (need <= 0) continue;
+    const turn = list.slice(1).map((n, k) => ({ n, k })).sort((a, c) => (a.k % 2) - (c.k % 2) || a.k - c.k).slice(0, need);
+    for (const { n } of turn) {
+      const { b, s, i } = all[n], cast = b.story.cast;
+      const speaker = cast.findIndex(m => m.character === b.speaker);
+      const other = speaker >= 0 && speaker !== s.on ? speaker : cast.findIndex((m, k) => k !== s.on);
+      Object.assign(s, { shot: 'medium', with: other >= 0 ? other : null, balanced: { from: 'close', character: id, closes: list.length, shots: all.length } });
+      changed.push({ beat: b.id, shot: i, character: id });
+    }
+  }
+  return changed;
+}
 
 // A world point to pixels with a vertical field of view: [x, y from the top, depth], for labels and the checks.
 export function projectV(camera, point, w, h) {
@@ -694,7 +755,7 @@ export function storyFaces(model, beat, pose, t) {
     q.open = i === speaker && !!open[frame];
     q.blink = !q.open && blinking(`${beat.id}:${i}`, t) && q.mood !== 'crying' && q.mood !== 'splat';
     q.look = 0;
-    if (speaker >= 0 && i !== speaker && q.pose !== 'hang' && q.pose !== 'flail') {
+    if (speaker >= 0 && i !== speaker && q.pose !== 'hang' && q.pose !== 'slip' && q.pose !== 'flail') {
       const s = pose.poses[speaker], want = Math.atan2(s.x - q.x, -(s.y - q.y));
       let d = want - q.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
       q.q.head[2] += clamp(Math.round(d / .3) * .3, -.6, .6);

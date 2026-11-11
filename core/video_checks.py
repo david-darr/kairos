@@ -172,6 +172,7 @@ def caption_clear_notes(layouts):
 
 
 STORY_SHOT_MAX = 2.5     # the reference: no shot over 2.5 s
+STORY_ORBIT_MAX = 4.5    # an orbit keeps moving, so the fall may hold longer
 
 
 def story_notes(project, layouts=None):
@@ -183,8 +184,11 @@ def story_notes(project, layouts=None):
         if b["kind"] != "story":
             continue
         length = seconds_of(b, project["bpm"])
-        cuts = len((b.get("story") or {}).get("shots", [])) or 1
-        if length / cuts > STORY_SHOT_MAX + .3 and cuts == 1:
+        shots = (b.get("story") or {}).get("shots", [])
+        cuts = len(shots) or 1
+        # An orbit never stops moving (the fall swings out over the drop), so it may hold up to STORY_ORBIT_MAX.
+        most = STORY_ORBIT_MAX if cuts == 1 and shots and shots[0].get("shot") == "orbit" else STORY_SHOT_MAX
+        if length / cuts > most + .3 and cuts == 1:
             notes.append(f"Beat {b['id']} holds one shot for {length:.1f} s; the format keeps shots under {STORY_SHOT_MAX:g} s, so add a cut on a word.")
     for sample in layouts or []:
         for box in sample.get("elements", []):

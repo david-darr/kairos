@@ -149,17 +149,29 @@
 .sc-pub-link a { color: var(--accent); overflow-wrap: anywhere; }
 .sc-week-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
 .sc-week-title { margin: 0 auto 0 0; font-size: 14px; order: -1; flex: 1 1 200px; }
-.sc-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; align-items: start; }
-.sc-day { border: 1px solid var(--border); border-radius: 12px; padding: 8px; min-height: 140px; display: grid; gap: 6px; align-content: start; background: rgba(var(--ink-rgb), .015); }
+/* The week: seven narrow columns of compact entries, every line one line high (cut with an ellipsis, full text in the
+   tooltip), so a week reads at 1440 px beside the rail. */
+.sc-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; align-items: start; }
+.sc-day { border: 1px solid var(--border); border-radius: 10px; padding: 6px; min-height: 120px; min-width: 0; display: grid; gap: 4px; align-content: start; background: rgba(var(--ink-rgb), .015); }
 .sc-day.is-today { border-color: var(--accent); }
-.sc-day-title { margin: 0 0 2px; font-size: 12px; color: var(--text-dim); }
-.sc-cal { display: grid; gap: 3px; width: 100%; text-align: left; padding: 7px 8px; border: 1px solid var(--border); border-left: 3px solid var(--border-strong); border-radius: 8px; background: var(--bg-panel-solid); color: var(--text); font: inherit; cursor: pointer; }
+.sc-day-title { margin: 0 0 2px 2px; font-size: 11.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-cal { display: grid; gap: 1px; width: 100%; min-width: 0; text-align: left; padding: 5px 6px; border: 1px solid var(--border); border-left: 3px solid var(--border-strong); border-radius: 6px; background: var(--bg-panel-solid); color: var(--text); font: inherit; line-height: 1.3; cursor: pointer; }
 .sc-cal:hover { border-color: var(--border-strong); }
 .sc-cal:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.sc-cal-time { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
-.sc-cal-title { font-size: 12.5px; overflow-wrap: anywhere; }
-.sc-cal-meta { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
-.sc-cal-meta .set-pill { font-size: 10.5px; }
+.sc-cal-top { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.sc-cal-time { flex: 0 0 auto; font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.sc-cal-glyph { flex: 0 0 auto; padding: 0 3px; border: 1px solid var(--border-strong); border-radius: 3px; font-size: 9px; font-weight: 650; line-height: 13px; color: var(--text-dim); }
+.sc-cal-handle { min-width: 0; font-size: 11px; color: var(--text-faint); }
+.sc-cal-title { font-size: 12.5px; font-weight: 550; }
+.sc-cal-state { font-size: 11px; color: var(--text-dim); }
+.sc-cal-handle, .sc-cal-title, .sc-cal-state { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-cal-state.tone-warn { color: var(--warn); }
+.sc-cal-state.tone-ok { color: var(--success); }
+.sc-cal-state.tone-error { color: var(--danger); }
+.sc-cal-state.tone-accent { color: var(--accent); }
+.sc-glyph-youtube { border-color: var(--chart-2); }
+.sc-glyph-tiktok { border-color: var(--chart-8); }
+.sc-glyph-instagram { border-color: var(--chart-6); }
 .sc-prepared .sc-post-pills { margin: 4px 0 2px; }
 .sc-prepared .sc-block { position: relative; }
 .sc .sc-copy { min-height: 28px; padding: 0 10px; font-size: 12px; margin-top: 4px; }
@@ -168,7 +180,7 @@
 .sc-check { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 10px; align-items: start; font-size: 12.5px; line-height: 1.5; overflow-wrap: anywhere; }
 .sc-check .set-pill { justify-self: start; }
 [data-page-reads] .set-row-control input[type=checkbox] { width: 36px; height: 20px; }
-@media (max-width: 1300px) { .sc-week { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); } }
+@media (max-width: 1080px) { .sc-week { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); } }
 @media (max-width: 768px) {
   .sc-week { grid-template-columns: 1fr; }
   .sc-day { min-height: 0; }
@@ -176,9 +188,8 @@
   .sc .sc-filters .btn, .sc .sc-seg .btn, .sc .sc-week-nav .btn { min-height: 44px; }
 }
 /* The shipped-tab restyle makes every button a pill; a calendar entry and a Copy button keep their own shape. */
-.kairos-redesign [data-view][data-custom-tab] .sc .sc-cal { display: grid; gap: 3px; min-height: 0; padding: 7px 8px; border-radius: 8px !important; background-color: var(--rd-surface-solid) !important; border-color: var(--rd-line) !important; text-align: left; white-space: normal; }
+.kairos-redesign [data-view][data-custom-tab] .sc .sc-cal { display: grid; gap: 1px; min-height: 0; min-width: 0; padding: 5px 6px; border-radius: 6px !important; background-color: var(--rd-surface-solid) !important; border-color: var(--rd-line) !important; text-align: left; white-space: nowrap; }
 .kairos-redesign [data-view][data-custom-tab] .sc .sc-cal:hover { border-color: var(--rd-line-strong) !important; }
-.kairos-redesign [data-view][data-custom-tab] .sc .sc-cal .set-pill { white-space: normal; text-align: left; }
 .kairos-redesign [data-view][data-custom-tab] .sc .sc-copy { min-height: 28px; padding: 0 10px; font-size: 12px; }
 .kairos-redesign [data-view][data-custom-tab] .sc .sc-cal { border-left-width: 3px; }
 .kairos-redesign [data-view][data-custom-tab] .sc .sc-cal:is(.sc-pub-waiting_for_you, .sc-pub-awaiting_approval) { border-left-color: rgba(var(--warn-rgb), .8) !important; }
@@ -205,7 +216,13 @@
 .sc-rail-count { flex: 0 0 auto; min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--accent); color: var(--bg-panel-solid); font-size: 11px; font-weight: 600; line-height: 20px; text-align: center; font-variant-numeric: tabular-nums; }
 .sc-avatar { flex: 0 0 auto; width: 32px; height: 32px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 13px; font-weight: 600; color: var(--text); border: 1px solid var(--border);
   background: color-mix(in srgb, hsl(var(--avatar-hue, 40) 55% 55%) 34%, var(--bg-panel-solid)); }
+.sc-avatar { position: relative; }
+.sc-avatar[data-avatar] { font-size: 12px; letter-spacing: .02em; background: color-mix(in srgb, hsl(var(--avatar-hue, 40) 60% 52%) 42%, var(--bg-panel-solid)); }
+.sc-avatar-glyph { position: absolute; right: -5px; bottom: -3px; padding: 0 2px; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--bg-panel-solid);
+  font-size: 8px; font-weight: 700; line-height: 11px; letter-spacing: 0; color: var(--text-dim); }
 .sc-avatar-big { width: 56px; height: 56px; font-size: 22px; }
+.sc-avatar-big[data-avatar] { font-size: 19px; }
+.sc-avatar-big .sc-avatar-glyph { right: -4px; bottom: -2px; padding: 0 4px; font-size: 10.5px; line-height: 15px; }
 .sc-avatar-all { background: var(--surface-2); grid-template-columns: repeat(2, 7px); gap: 3px; place-content: center; }
 .sc-avatar-all > span { width: 7px; height: 7px; border-radius: 2px; background: var(--text-dim); }
 .sc-avatar-big.sc-avatar-all { grid-template-columns: repeat(2, 12px); gap: 5px; }
@@ -232,6 +249,7 @@
 .sc-stat-value { font-size: 20px; line-height: 1.2; font-variant-numeric: tabular-nums; color: var(--text); overflow-wrap: anywhere; }
 .sc-stat-label { font-size: 11.5px; color: var(--text-faint); }
 .sc-list, .sc-needs { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.sc-needs { gap: 0; }
 .sc-list > li + li { border-top: 1px solid var(--border); }
 .sc .sc-line { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; width: 100%; padding: 8px 4px; border: none; border-radius: 8px; background: none; box-shadow: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
 .sc .sc-line:hover { background: var(--surface-2); }
@@ -244,12 +262,24 @@
 .sc-latest-text { display: grid; gap: 2px; flex: 1 1 auto; min-width: 0; }
 .sc-latest-numbers { font-size: 12.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .sc-latest-title { font-size: 15px; font-weight: 550; overflow-wrap: anywhere; }
-.sc .sc-need { display: block; width: 100%; min-height: 36px; padding: 6px 8px 6px 22px; border: none; border-radius: 8px; background: none; box-shadow: none; color: var(--text); font-size: 13px; text-align: left; position: relative; white-space: normal; }
+.sc .sc-need { display: block; width: 100%; min-height: 30px; padding: 4px 8px 4px 22px; line-height: 1.35; border: none; border-radius: 8px; background: none; box-shadow: none; color: var(--text); font-size: 13px; text-align: left; position: relative; white-space: normal; }
 .sc .sc-need::before { content: ""; position: absolute; left: 8px; top: 50%; width: 7px; height: 7px; margin-top: -3.5px; border-radius: 50%; background: var(--warn); }
 .sc .sc-need:hover { background: var(--surface-2); }
 .sc-report-line { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .sc .sc-routes .set-row-control > .btn { white-space: nowrap; }
 @media (max-width: 1100px) { .sc-shell { grid-template-columns: 200px minmax(0, 1fr); gap: 16px; } }
+/* The calendar folds the rail to avatars and icons (names in the tooltips), so the week gets the width. */
+@media (min-width: 769px) {
+  .sc-shell.is-narrow-rail { grid-template-columns: 60px minmax(0, 1fr); gap: 16px; }
+  .is-narrow-rail .sc-rail { padding: 8px 6px; align-items: center; }
+  .is-narrow-rail .sc-rail-top, .is-narrow-rail .sc-rail-lower { justify-items: center; }
+  .is-narrow-rail :is(.sc-rail-text, .sc-rail-heading, .sc-rail-none) { display: none; }
+  .is-narrow-rail .sc-rail-lower { border-top: 1px solid var(--border); padding-top: 8px; width: 100%; }
+  .sc .is-narrow-rail :is(.sc-rail-item, .sc-rail-lib, .sc-rail-add) { position: relative; justify-content: center; width: 44px; padding: 6px 0; gap: 0; font-size: 0; }
+  .sc .is-narrow-rail .sc-rail-count { position: absolute; top: 0; right: -2px; min-width: 16px; padding: 0 4px; font-size: 10px; line-height: 16px; }
+  .is-narrow-rail .sc-rail-icon { width: 32px; }
+  .kairos-redesign [data-view][data-custom-tab] .sc .is-narrow-rail :is(.sc-rail-item, .sc-rail-lib, .sc-rail-add) { padding: 6px 0; justify-content: center; }
+}
 @media (max-width: 768px) {
   .sc-shell { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .sc-rail { display: none; }
@@ -264,7 +294,7 @@
 .kairos-redesign [data-view][data-custom-tab] .sc .sc-title { font: 600 22px/1.2 var(--rd-font-ui); font-style: normal; color: var(--rd-ink); }
 .kairos-redesign [data-view][data-custom-tab] .sc .sc-tile-title { font-size: 15px; font-weight: 600; }
 .kairos-redesign [data-view][data-custom-tab] .sc :is(.sc-rail-item, .sc-rail-lib, .sc-rail-add, .sc-line, .sc-need) { border-radius: 10px !important; background-color: transparent !important; border-color: transparent !important; min-height: 40px; padding: 6px 10px; text-align: left; justify-content: flex-start; white-space: normal; }
-.kairos-redesign [data-view][data-custom-tab] .sc .sc-need { padding-left: 22px; }
+.kairos-redesign [data-view][data-custom-tab] .sc .sc-need { padding: 4px 8px 4px 22px; min-height: 30px; line-height: 1.35; }
 .kairos-redesign [data-view][data-custom-tab] .sc .sc-line { display: grid; padding: 8px 4px; }
 .kairos-redesign [data-view][data-custom-tab] .sc :is(.sc-rail-item, .sc-rail-lib, .sc-rail-add, .sc-line, .sc-need):hover { background-color: var(--surface-2) !important; }
 .kairos-redesign [data-view][data-custom-tab] .sc .sc-rail-item.is-on { background-color: rgba(var(--ink-rgb), .07) !important; }

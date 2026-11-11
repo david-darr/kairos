@@ -326,6 +326,19 @@ class Story(unittest.TestCase):
         self.assertTrue(any("holds one shot" in n for n in notes), notes)
         self.assertTrue(any("one word at a time" in n for n in notes), notes)
 
+    def test_the_fall_orbit_may_hold_longer_and_a_slip_validates(self):
+        """2.3.0 polish: an orbit keeps moving, so a single orbit shot may hold up to 4.5 s; slip is a story pose."""
+        self.assertIn("slip", style_packs.STORY_POSES)
+        say = "Hit like and subscribe, everybody!"
+        fall = {**story_beat(self.ids[0]), "say": say, "gap": 1.5, "story": {"place": "cliff", "cast": [{"character": self.ids[0], "pose": "hang",
+                "changes": [{"at": {"word": 1}, "pose": "slip"}]}], "shots": [{"shot": "orbit"}], "fx": [{"kind": "fall", "on": 0, "at": {"t": 0}}]}}
+        p = self.create([fall])
+        self.assertGreater(p["beats"][0]["seconds"], video_checks.STORY_SHOT_MAX + .3)
+        self.assertLessEqual(p["beats"][0]["seconds"], video_checks.STORY_ORBIT_MAX + .3)
+        self.assertEqual(video_checks.story_notes(p), [], "the orbit holds without a note")
+        held = self.create([{**fall, "story": {**fall["story"], "shots": [{"shot": "close"}]}}])
+        self.assertTrue(any("holds one shot" in n for n in video_checks.story_notes(held)), "a still close of the same length is still named")
+
 
 class PackAndFormat(unittest.TestCase):
     def test_block_classic_is_built_in_and_its_starter_is_generic(self):
@@ -347,6 +360,11 @@ class PackAndFormat(unittest.TestCase):
         self.assertGreaterEqual(len({b["story"]["place"] for b in beats}), 3)
         self.assertEqual(sum(1 for i, b in enumerate(beats) if b.get("flashback") and not (i and beats[i - 1].get("flashback"))), 2)
         self.assertGreaterEqual(sum(len(b["story"]["shots"]) for b in beats), 18)
+        # 2.3.0 polish: the slip loses a hand on the third "no" under the high angle; the fall holds 1.5 s after its line.
+        by_id = {b["id"]: b for b in beats}
+        self.assertEqual(by_id["slip"]["story"]["cast"][0]["changes"], [{"at": {"word": 2}, "pose": "slip"}])
+        self.assertEqual([s["shot"] for s in by_id["slip"]["story"]["shots"]], ["close", "top"])
+        self.assertEqual((by_id["fall"]["gap"], by_id["fall"]["story"]["shots"][0]["shot"]), (1.5, "orbit"))
         project = video_store.create(style_pack_sample.TITLE_STORY, owner="t", beats=beats, **style_pack_sample.project_options(data, meta["id"], 1))
         self.assertTrue(20 <= video_store.duration(project) <= 48, video_store.duration(project))
         self.assertEqual(style_pack_store.rule_notes(project, data), [])

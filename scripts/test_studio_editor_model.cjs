@@ -80,6 +80,11 @@ const { pathToFileURL } = require('node:url');
   assert.equal(k('s', { ctrlKey: true }), null); assert.equal(k('q'), null);
   for (const [keys] of M.SHORTCUTS) assert.ok(!keys.includes('—'), 'No em-dashes');
   assert.equal(M.isTyping({ tagName: 'INPUT', type: 'text' }), true); assert.equal(M.isTyping({ tagName: 'INPUT', type: 'range' }), false);
+  const slider = { tagName: 'INPUT', type: 'range' };
+  assert.equal(M.sliderKey({ target: slider, key: 'ArrowRight' }), true, 'a focused slider keeps its arrows');
+  assert.equal(M.sliderKey({ target: slider, key: ' ' }), false, 'Space still plays from a slider');
+  assert.equal(M.sliderKey({ target: slider, key: 'ArrowRight', altKey: true }), false, 'Alt + arrows still move the beat');
+  assert.equal(M.sliderKey({ target: { tagName: 'DIV' }, key: 'ArrowRight' }), false);
   assert.equal(M.isTyping({ tagName: 'TEXTAREA' }), true); assert.equal(M.isTyping({ tagName: 'BUTTON' }), false);
   assert.equal(M.edgeTime(list, 3, 1), 5.4); assert.equal(M.edgeTime(list, 5.4, -1), 2); assert.equal(M.edgeTime(list, 0, -1), 0); assert.equal(M.edgeTime(list, 9.4, 1), 9.4);
 
@@ -169,5 +174,14 @@ const { pathToFileURL } = require('node:url');
   const vid = M.videoClip(q, 1, 'media/' + 'f'.repeat(64), { seconds: 42 });
   assert.deepEqual([vid.kind, vid.out, vid.fit, vid.start], ['video', 30, 'cover', 1], 'A video clip lasts its file, at most 30 s');
   assert.equal(M.clipLabel(vid, {}, { [vid.video]: { title: 'Waves' } }), 'Waves');
+  // The story form's words and moments (core/video_store.py clause_words): punctuation alone is not a word.
+  assert.deepEqual(M.clauseWords('Help me, I am - slipping!'), ['Help', 'me,', 'I', 'am', 'slipping!']);
+  assert.deepEqual(M.clauseWords('Ça va? Ünïcode ok'), ['Ça', 'va?', 'Ünïcode', 'ok']);
+  assert.deepEqual(M.clauseWords(''), []);
+  assert.equal(M.momentText({ word: 1 }, 'Help me now'), 'word 2 (me)');
+  assert.equal(M.momentText({ word: 2, after: .4 }, 'Help me now'), 'word 3 (now) + 0.4 s');
+  assert.equal(M.momentText({ t: 1.2 }, ''), '1.2 s in');
+  assert.deepEqual(M.keysFrom(' edge, help ,, sorry'), ['edge', 'help', 'sorry']);
+  assert.equal(M.keysText(['edge', 'help']), 'edge, help');
   console.log('studio editor model ok');
 })().catch(error => { console.error(error); process.exit(1); });

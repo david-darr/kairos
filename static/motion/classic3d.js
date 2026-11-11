@@ -8,7 +8,7 @@
 // and no depth of field. A story frame (Story Short) is two pictures in one: the avatar room on top, the scene below.
 import * as THREE from 'three';
 import { BLOCKS, TEX, blockTexture, skinTexture, hairSlab, faceTexture } from './blocks.js';
-import { meshWorld, blockCharacter, ROOM, roomModel, P } from './classic.js';
+import { meshWorld, blockCharacter, ROOM, roomModel, P, shotLights } from './classic.js';
 
 const lin = c => new THREE.Color(c[0] / 255, c[1] / 255, c[2] / 255).convertSRGBToLinear();
 const DEG = Math.PI / 180;
@@ -242,7 +242,10 @@ export class ClassicRenderer {
     const lights = [];
     for (const l of model.world.lanterns) { const pl = new THREE.PointLight(lin([255, 210, 140]), 6, 14, 1.6); pl.position.set(...l); root.add(pl); lights.push(pl); }
     const sun = this._sun(scene, sky);
-    const built = { scene, root, dome, actors, blastGroups, fx, sun };
+    // Shot lights (classic.js shotLights): a fill from beside the camera and a rim from behind the subject, no shadows.
+    const shotFill = new THREE.DirectionalLight(lin([255, 246, 236]), 0), shotRim = new THREE.DirectionalLight(lin(sky.sun.map(v => v * 255)), 0);
+    scene.add(shotFill, shotFill.target, shotRim, shotRim.target);
+    const built = { scene, root, dome, actors, blastGroups, fx, sun, shotFill, shotRim, sky };
     this.scenes.set(key, built);
     while (this.scenes.size > 6) {
       const [old, value] = this.scenes.entries().next().value;
@@ -312,6 +315,12 @@ export class ClassicRenderer {
       const t = new THREE.Vector3(sunAt[0], sunAt[2], -sunAt[1]);
       built.sun.target.position.copy(t); built.sun.position.copy(t).add(new THREE.Vector3(-6, 30, 20));
       built.sun.target.updateMatrixWorld();
+    }
+    if (built.shotFill && cam.shot) {
+      const v = p => new THREE.Vector3(p[0], p[2], -p[1]), lights = shotLights(cam, built.sky);
+      for (const [light, spec] of [[built.shotFill, lights.fill], [built.shotRim, lights.rim]]) {
+        light.intensity = spec.intensity; light.position.copy(v(spec.pos)); light.target.position.copy(v(spec.target)); light.target.updateMatrixWorld();
+      }
     }
     built.scene.updateMatrixWorld();
     r.setViewport(rect.x * ss, H - (rect.y + rect.h) * ss, rect.w * ss, rect.h * ss);

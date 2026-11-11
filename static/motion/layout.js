@@ -1,7 +1,7 @@
 import { clamp, range, inOut, hash } from './kit.js';
 import { normalizeStage } from './stage.js';
 import { normalizeVoxel } from './voxel.js';
-import { normalizeStory } from './classic.js';
+import { normalizeStory, balanceCoverage } from './classic.js';
 
 export const SIZES = { '16:9': [1920, 1080], '9:16': [1080, 1920], '1:1': [1080, 1080] };
 export const KINDS = ['title', 'statement', 'big-number', 'list', 'image', 'quote', 'split', 'logo', 'end', 'scene', 'stage', 'voxel', 'story'];
@@ -79,6 +79,8 @@ export function normalizeProject(input = {}) {
     }
     start = end; return result;
   });
+  // Story Shorts vary their coverage: too many closes of one character play partly as two-shots (classic.js).
+  balanceCoverage(beats);
   const characters = input.characters && typeof input.characters === 'object' ? input.characters : {};
   return { id: str(input.id, 64), title: str(input.title, 180), look: str(input.look, 64), bpm, bar, fps: input.fps === 60 ? 60 : 30, captionStyle, renderer: input.renderer === 'blender' ? 'blender' : 'threejs',
     palette: str(input.palette, 24) || 'dawn', characters, pack: normalizePack(input.pack),
