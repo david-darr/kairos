@@ -506,6 +506,7 @@ async def _tick() -> None:
             except Exception:
                 logger.exception("scheduler: the pass for account %s failed", account_id)
     _youtube_daily(loop)
+    _social_daily(loop)
     _page_reads_due(loop)
     _check_mcp_servers(loop)
     try:
@@ -531,7 +532,22 @@ def _youtube_daily(loop) -> None:
     _youtube["task"] = loop.create_task(youtube.sync_all_due())
 
 
-_page_reads = {"task": None, "last": 0.0}
+_social = {"task": None, "last": 0.0}
+
+
+def _social_daily(loop) -> None:
+    """Content Studio's daily official TikTok and Instagram numbers (services/content_studio/social.py): every 15
+    minutes look at each account, and sync the ones with a connected channel that are due."""
+    import time as clock
+    running = _social["task"]
+    if (running is not None and not running.done()) or clock.time() - _social["last"] < YOUTUBE_LOOK_EVERY_SECONDS:
+        return
+    _social["last"] = clock.time()
+    from services.content_studio import social
+    _social["task"] = loop.create_task(social.sync_all_due())
+
+
+_page_reads ={"task": None, "last": 0.0}
 
 
 def _page_reads_due(loop) -> None:

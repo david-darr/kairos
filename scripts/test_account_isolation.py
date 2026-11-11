@@ -148,6 +148,9 @@ def fill(account):
         studio.record_page_read("tiktok", "not_yours", post["id"], "https://www.tiktok.com/tiktokstudio/analytics/1", f"{m} read")
     account.ids.setdefault("preparation", []).append(str(prep["id"]))
     account.seeded["prepared posts"] = "file"
+    # Official TikTok and Instagram apps (2026-11-10): each account's own app keys through the route, the marker as the client
+    # key (shown back to its owner) and the account's secret as the app secret (never shown to anyone).
+    account.seed("tiktok app", "PUT", "/api/content-studio/social/apps/tiktok", {"key": m, "secret": account.secret})
     # Pack A characters (Video Styles unit 3) are made through their route; the marker is the character's name.
     account.seed("characters", "POST", "/api/characters", {"family": "round", "name": m}, "character")
     # User-made style packs: the starter pack through its route, then a copy named with the marker (a brief needs a model).
@@ -440,6 +443,27 @@ class AccountIsolation(unittest.TestCase):
         with accounts.as_account(auth_manager.account_id("bea")):
             self.assertTrue(reach_me.paused())
         call(bea.client, "POST", "/api/reach-me/pause", json={"paused": False})
+
+    def test_social_apps_and_connections_are_each_accounts_own(self):
+        # TikTok and Instagram apps and channel connections (services/content_studio/social_auth.py) live in each account's
+        # own folder, sealed with its own key: the owner sees their key and never a secret; the other account sees neither.
+        david, bea = self.accounts["david"], self.accounts["bea"]
+        for me, other in ((david, bea), (bea, david)):
+            self.assertEqual(me.seeded.get("tiktok app"), "ok", f"{me.name} saves a TikTok app")
+            r, err = call(me.client, "GET", "/api/content-studio/social/status")
+            self.assertIsNone(err)
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertEqual(r.json()["apps"]["tiktok"]["key"], me.mark)
+            self.assertTrue(r.json()["apps"]["tiktok"]["has_secret"])
+            self.assertNotIn(me.secret, r.text, "an app secret is never returned")
+            for mark in other.markers():
+                self.assertNotIn(mark, r.text, f"{me.name} read {other.name}'s app via /social/status")
+        from core import accounts
+        from services.content_studio import social_auth
+        with accounts.as_account(auth_manager.account_id("bea")):
+            raw = Path(social_auth._path()).read_text(encoding="utf-8")
+            self.assertNotIn(bea.secret, raw, "sealed on disk")
+            self.assertNotIn(david.mark, raw)
 
     def test_system_status_names_only_the_callers_discord_bots(self):
         from core.channels import discord_channel

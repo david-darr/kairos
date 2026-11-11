@@ -56,8 +56,8 @@ from urllib.parse import urlsplit
 
 from core.tool_registry import READ, WRITE, register
 from core.untrusted import wrap_untrusted
-from services.content_studio import (StudioError, delivery, formats, page_reads, pipeline, policy, prepare, publishing, review,
-                                     studio, team, youtube, youtube_publish)
+from services.content_studio import (StudioError, delivery, formats, instagram_api, page_reads, pipeline, policy, prepare,
+                                     publishing, review, studio, team, youtube, youtube_publish)
 
 
 def _obj(properties, required=()):
@@ -448,6 +448,12 @@ async def _publish(args, ctx, bot, role):
     return _data(ctx, "content studio upload", {k: result[k] for k in ("video_id", "url", "privacy", "asked_privacy")}) + note
 
 
+async def _publish_instagram(args, ctx, bot, role):
+    result = await instagram_api.publish(studio, args["post_id"], bot["name"])
+    note = (" " + result["note"]) if result.get("note") else ""
+    return _data(ctx, "content studio instagram post", {k: result.get(k) for k in ("state", "url", "media_id")}) + note
+
+
 def _prepare(args, ctx, bot, role):
     prep = prepare.prepare(studio, args["post_id"], bot["name"], args.get("schedule_at"))
     package = prep["package"]
@@ -457,8 +463,13 @@ def _prepare(args, ctx, bot, role):
              "checklist": [f"[{c['by']}] {c['text']}" for c in package["checklist"]]}
     if package["problems"]:
         tail = " It cannot go out as it is: tell the Producer the problem; the fix is the team's (a new render or a redraft)."
+    elif "api" in package["routes"] and package["platform"] == "tiktok":
+        tail = (" Ready, and the person has been told. TikTok posting is the person's own press (they choose who can see it and agree "
+                "to TikTok's terms each time): they press Post to TikTok in Studio > Content > Publishing. "
+                + (package.get("api_note") or ""))
     elif "api" in package["routes"]:
-        tail = (" Ready. You may post it with content_studio_publish_youtube, or the person presses Open upload page in Studio > Content > "
+        tool = "content_studio_publish_youtube" if package["platform"] == "youtube" else "content_studio_publish_instagram"
+        tail = (f" Ready. You may post it with {tool}, or the person presses Open upload page in Studio > Content > "
                 "Publishing. Tell the Producer it is ready.")
     else:
         tail = (" Ready, and the person has been told. Only the person opens the upload page (Studio > Content > Publishing): Kairos fills it "
@@ -731,6 +742,11 @@ _add("content_studio_publish_youtube", "Publisher: upload an approved YouTube po
      "connected Google project, and record its link. Only works when the person connected YouTube posting. YouTube may keep it private. "
      "A schedule set on the prepared post becomes YouTube's scheduled publish.",
      _obj({"post_id": _int()}, ("post_id",)), WRITE, ("publisher",), _publish)
+_add("content_studio_publish_instagram", "Publisher: post an approved Instagram post as a Reel exactly as approved, with Meta's AI label, "
+     "through the person's own connected Meta app, and record its link. Only works when the person connected the channel to "
+     "Instagram. Instagram's API has no schedule: a post planned for later is refused until then. TikTok has no such tool: "
+     "the person posts to TikTok themselves.",
+     _obj({"post_id": _int()}, ("post_id",)), WRITE, ("publisher",), _publish_instagram)
 _add("content_studio_prepare_post", "Publisher or Producer: prepare an approved post for its platform: the file in the platform's aspect and length "
      "(the editor's export of the approved version, 9:16 for Shorts, Reels and TikTok), the title, the description with YouTube chapters, "
      "hashtags within the platform's count, the platform's AI-content label (always on), the thumbnail or cover, the schedule and a "

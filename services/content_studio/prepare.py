@@ -11,8 +11,9 @@ For an approved post Kairos assembles, for the post's platform (each channel is 
   does by hand.
 
 Then one of two routes:
-- YouTube's own API, already built (youtube_publish.py), when the person connected posting through their own Google
-  project. The schedule becomes YouTube's scheduled publish.
+- The platform's official API, when the channel is connected through the person's own app: YouTube (youtube_publish.py,
+  the schedule becomes YouTube's scheduled publish), TikTok (tiktok_api.py, Direct Post; private-only until TikTok
+  audits the app) and Instagram (instagram_api.py, Reels). The API is first in `routes` when ready (social.py).
 - The person's own upload page in the Kairos Browser. The person presses "Open upload page" in Studio; the desktop app
   opens the platform's page in a Browse tab on their own sign-in and fills what it can (electron/studio-prepare.js).
   It never presses Post, Publish, Share, Next or Schedule, never solves a CAPTCHA and never types a password: if the
@@ -283,8 +284,8 @@ def assemble(store, post_id, scheduled_at=None, probe_fn=None, api_ready=None):
 
     # Routes and the last steps, always the person's.
     routes = ["browser"]
-    if platform == "youtube" and (api_ready if api_ready is not None else _api_ready(store, post_id)):
-        routes.insert(0, "api")
+    if api_ready if api_ready is not None else _api_ready(store, post_id):
+        routes.insert(0, "api")   # the official API first when the channel is connected; the upload page stays the fallback
     item("check", "Read the page once: every field as approved, nothing added by the platform you do not want.", "you")
     item("post", f"Press {rules['post_button']} yourself. Kairos never presses it.", "you")
     item("link", "Paste the live link in Kairos (Mark posted), or the Publisher records it, so the numbers can be tracked.", "you")
@@ -293,12 +294,21 @@ def assemble(store, post_id, scheduled_at=None, probe_fn=None, api_ready=None):
             "ai_label": {"on": True, "name": label["name"], "how": label["how"]}, "cover": cover, "schedule": schedule,
             "checklist": checklist, "problems": problems, "routes": routes, "upload_url": rules["upload_url"],
             "post_button": rules["post_button"], "rules_note": platforms.RULES_NOTE, "rules_checked": platforms.RULES_CHECKED,
+            "api_note": _api_note(platform) if "api" in routes else "",
             "approved_by": post.get("approved_by"), "approved_at": post.get("approved_at")}
 
 
 def _api_ready(store, post_id):
-    from . import youtube_publish
-    return youtube_publish.check(store, post_id) is None
+    from . import social, youtube_publish
+    platform = store.get_channel(store.get_post(post_id)["channel_id"])["platform"]
+    if platform == "youtube":
+        return youtube_publish.check(store, post_id) is None
+    return social.api_ready(store, post_id)
+
+
+def _api_note(platform):
+    from . import social
+    return social.api_note(platform)
 
 
 def _gate(store, post_id):
@@ -344,7 +354,7 @@ def _tell(store, prep, post, channel, notifier, now):
             return False
         name = platforms.rules(channel["platform"])["name"]
         body = (f"\"{post['title']}\" is ready to post on {name} ({channel['handle']}). In Studio > Content > Publishing, "
-                + ("press Post to YouTube, or " if prep["route"] == "api" else "")
+                + (f"press Post to {name}, or " if prep["route"] == "api" else "")
                 + f"press Open upload page: Kairos fills the page and stops before {platforms.rules(channel['platform'])['post_button']}, "
                 "which you press yourself.")
         if delivery._send(store, "Ready for you to post", body, False, notifier):
@@ -379,6 +389,9 @@ def fill_plan(store, prep_id, now=None):
     package = prep["package"]
     if package.get("problems"):
         raise PrepareError("This post has a problem to fix before it can go on the page: " + package["problems"][0], 409)
+    from . import social_auth
+    if social_auth.published(post["id"]):
+        raise PrepareError("This post was already sent through the platform's API. Check the platform before posting it again.", 409)
     found, folder = candidates(post["render_ref"])
     chosen = next((f for f in found if f["name"] == package["file"]["name"]), None)
     if chosen is None:

@@ -6,7 +6,8 @@ watch time, likes, comments, shares, follows) from the page that shows them to i
 sign-in in the Kairos Browser, and adds them to the scoring record as page-read snapshots (source "page-read").
 
 The rules:
-- Off until the person turns each platform on (Studio > Content > Channels). YouTube stays on its own API.
+- Off until the person turns each platform on (Studio > Content > Channels). YouTube stays on its own API, and so does
+  any TikTok or Instagram channel connected through the person's own app (social.py): page reads are the fallback.
 - Only the person's own posts: the page address is built from a post's recorded link on a channel they registered
   (a TikTok link must name that channel's handle, platforms.analytics_url), the page must still be on the platform
   after loading (a sign-in page means signed out), and it must show the channel's handle, or nothing is stored.
@@ -298,8 +299,11 @@ def _paused(rows, reset_at, now):
 
 
 def _due(store, platform, now, ignore_spacing=False):
+    # A channel connected to the platform's official API gets its numbers from there (social.py); page reads are only the
+    # fallback for channels that are not.
+    from . import social_auth
     posts = [p for p in store.list_posts(state="posted") if p["platform"] == platform and p.get("posted_url")
-             and (p.get("posted_at") or 0) > now - MAX_AGE_DAYS * DAY]
+             and (p.get("posted_at") or 0) > now - MAX_AGE_DAYS * DAY and not social_auth.connected(p["channel_id"], platform)]
     if ignore_spacing:
         return posts
     out = []

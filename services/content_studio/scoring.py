@@ -49,6 +49,28 @@ def seven_day_snapshot(posted_at, snapshots, days=7, tolerance_days=SNAPSHOT_TOL
     return best[1] if best else None
 
 
+OFFICIAL_SOURCES = ("youtube_api", "tiktok_api", "instagram_api")
+
+
+def official(snap):
+    """True for numbers from a platform's own API, as opposed to page reads, imports or manual entry."""
+    return snap.get("source") in OFFICIAL_SOURCES
+
+
+def best_snapshot(posted_at, snapshots, days=7, tolerance_days=SNAPSHOT_TOLERANCE_DAYS):
+    """The 7 day snapshot, official numbers first (section 12: page reads are the fallback). TikTok's API gives no watch
+    time, so an official TikTok snapshot keeps the watch time of a page read taken near the same mark, when there is one."""
+    chosen = seven_day_snapshot(posted_at, [s for s in snapshots if official(s)], days, tolerance_days)
+    if chosen is None:
+        return seven_day_snapshot(posted_at, snapshots, days, tolerance_days)
+    if chosen.get("source") == "tiktok_api" and not chosen["avg_view_duration_s"]:
+        read = seven_day_snapshot(posted_at, [s for s in snapshots if s.get("source") == "page-read" and s["avg_view_duration_s"]],
+                                  days, tolerance_days)
+        if read is not None:
+            chosen = {**chosen, "avg_view_duration_s": read["avg_view_duration_s"]}
+    return chosen
+
+
 def post_parts(snap, follow_weight=5):
     """The three raw numbers a post is ranked on."""
     length = snap["video_length_s"]

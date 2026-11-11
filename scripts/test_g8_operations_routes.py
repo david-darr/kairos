@@ -54,6 +54,8 @@ BY_DESIGN = {
     "/api/design-render/result/{job_id}": "same",
     "/api/content-studio/page-reads/jobs": "Electron page-read worker (Content Studio); _worker() checks the same render token",
     "/api/content-studio/page-reads/result/{job_id}": "same",
+    # Added 2026-11-10: the TikTok and Instagram sign-in return, like Google's: state-checked, 400 without one.
+    "/api/content-studio/social/callback/{platform}": "browser redirect from TikTok or Meta; state-checked, 400 without it",
     "/api/cli/local-path": "paired Kairos CLI on loopback; checks inside the handler (422 here is body validation first)",
 }
 # Add-on gate runs as a router dependency BEFORE the auth dependency, so an

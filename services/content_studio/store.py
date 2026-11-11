@@ -54,7 +54,7 @@ LATER_COLUMNS = {"snapshots": {"source": "TEXT NOT NULL DEFAULT 'manual'"},
 AUDIENCE = {"": None, "no": 0, "yes": 1}
 # What a post keeps as appeal evidence (Video Styles build spec section 7): the person's approval, the shot plan,
 # the sources behind its facts, and the policy checks it passed.
-EVIDENCE_KINDS = ("approval", "shot_plan", "sources", "policy_check", "port", "plan_approval")
+EVIDENCE_KINDS = ("approval", "shot_plan", "sources", "policy_check", "port", "plan_approval", "api_post")
 VOICE_ID = re.compile(r"^[a-z]{2}_[a-z0-9]{1,30}$")
 # Long-form (Video Styles section 7, V3, locked): one long video a week per YouTube channel, plus daily Shorts. The cap is
 # set per channel (0 to 7) and is soft: the person can change it on the channel; the team plans long videos within it.

@@ -48,8 +48,10 @@ def next_action(state, post, prep, step=None):
         if problems:
             return "you", problems[0]
         if prep.get("route") == "api":
-            return "you", "Press Post to YouTube, or Open upload page to post it yourself."
+            return "you", f"Press Post to {name}, or Open upload page to post it yourself."
         return "you", f"Press Open upload page: Kairos fills the {name} page and stops before {button}."
+    if state == "waiting_for_you" and (prep.get("fill") or {}).get("stage") == "api_pending":
+        return "you", prep["fill"].get("note") or f"{name} has it; Kairos records the link when {name} gives one."
     if state == "waiting_for_you":
         return "you", f"Check the {name} page and press {button} yourself, then paste the live link (Mark posted)."
     if state == "failed":

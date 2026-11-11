@@ -15,16 +15,17 @@ import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.middleware import require_user
 from core.middleware import local_api_base
-from services.content_studio import (StudioError, delivery, formats, page_reads, pipeline, prepare, publishing, report, review,
-                                     studio, youtube, youtube_publish)
+from services.content_studio import (StudioError, delivery, formats, instagram_api, page_reads, pipeline, prepare, publishing,
+                                     report, review, social, social_auth, studio, tiktok_api, youtube, youtube_publish)
 
 router = APIRouter(prefix="/api/content-studio", tags=["content-studio"])
 worker_router = APIRouter(tags=["content-studio"])
+social_router = APIRouter(tags=["content-studio"])   # the TikTok and Instagram sign-in return (no session, state-checked)
 
 
 class Body(BaseModel):
@@ -279,8 +280,10 @@ def get_post(post_id: int, user: str = Depends(require_user)):
     post = _run(studio.get_post, post_id)
     direct = youtube_publish.check(studio, post_id) if post["state"] == "approved" and post["platform"] == "youtube" else None
     from services.content_studio.store import youtube_chapters
-    return {**post, "metrics": studio.snapshots(post_id), "direct_post_blocker": direct, "evidence": studio.evidence(post_id),
-            "chapters": youtube_chapters(post)}
+    from services.content_studio.scoring import official
+    metrics = [{**m, "official": official(m)} for m in studio.snapshots(post_id)]
+    return {**post, "metrics": metrics, "direct_post_blocker": direct, "evidence": studio.evidence(post_id),
+            "chapters": youtube_chapters(post), "api_connected": social.api_ready(studio, post_id)}
 
 
 @router.get("/posts/{post_id}/evidence")
@@ -490,6 +493,152 @@ async def publish_youtube(post_id: int, user: str = Depends(require_user)):
         return await youtube_publish.publish(studio, post_id, user)
     except StudioError as exc:
         raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+
+
+# -- TikTok and Instagram through the person's own registered apps (section 12, David 2026-11-10) ---------------------
+
+class SocialAppBody(Body):
+    key: Optional[str] = Field(None, max_length=200)          # TikTok client key, or Meta app ID
+    secret: Optional[str] = Field(None, max_length=300)       # sealed at once; never returned
+    audited: Optional[bool] = None                            # TikTok: the person says the app passed TikTok's audit
+    redirect: Optional[str] = Field(None, max_length=10)      # Instagram: "loopback" or "paste"
+    config_id: Optional[str] = Field(None, max_length=40)     # Instagram: optional Facebook Login for Business configuration
+
+
+class SocialConnectBody(Body):
+    channel_id: int
+
+
+class SocialPasteBody(Body):
+    address: str = Field(max_length=4000)
+
+
+class TikTokPostBody(Body):
+    privacy_level: Optional[str] = Field(None, max_length=30)   # no default: the person chooses each time (TikTok's rule)
+    allow_comment: bool = False
+    allow_duet: bool = False
+    allow_stitch: bool = False
+    consent: bool = False                                       # the person agreed to TikTok's Music Usage Confirmation
+
+
+class SocialSyncBody(Body):
+    platform: Optional[str] = Field(None, max_length=10)
+
+
+def _social_platform(platform: str) -> str:
+    if platform not in social_auth.PLATFORMS:
+        raise HTTPException(404, "Not found")
+    return platform
+
+
+@router.get("/social/status")
+def social_status(user: str = Depends(require_user)):
+    """The person's TikTok and Instagram apps (never a secret), each channel's connection, and the redirect URIs to
+    register with each platform."""
+    return social_auth.status(local_api_base())
+
+
+@router.put("/social/apps/{platform}")
+def social_save_app(platform: str, body: SocialAppBody, user: str = Depends(require_user)):
+    _social_platform(platform)
+    given = _given(body)
+    _run(social_auth.save_app, platform, given.get("key"), given.get("secret"), given.get("audited"),
+         given.get("redirect"), given.get("config_id"))
+    return social_auth.status(local_api_base())
+
+
+@router.delete("/social/apps/{platform}")
+def social_remove_app(platform: str, user: str = Depends(require_user)):
+    return _run(social_auth.remove_app, _social_platform(platform))
+
+
+@router.post("/social/{platform}/connect")
+def social_connect(platform: str, body: SocialConnectBody, user: str = Depends(require_user)):
+    """The platform's sign-in page for one channel, made for the person's own app. Open it in the browser."""
+    _social_platform(platform)
+    channel = _run(studio.get_channel, body.channel_id)
+    return {"url": _run(social_auth.start, platform, channel, local_api_base(), user),
+            "redirect_uri": social_auth.redirect_uri(platform, local_api_base())}
+
+
+@router.post("/social/instagram/paste")
+async def social_paste(body: SocialPasteBody, user: str = Depends(require_user)):
+    """The paste route for a Meta app set to return to Facebook's own success page: the person pastes its address."""
+    try:
+        state, code, error = social_auth.from_pasted(body.address)
+        return {"account": await social_auth.finish("instagram", state, code, error), **social_auth.status(local_api_base())}
+    except StudioError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+
+
+@router.delete("/social/channels/{channel_id}")
+async def social_disconnect(channel_id: int, user: str = Depends(require_user)):
+    _run(studio.get_channel, channel_id)
+    return await social_auth.disconnect(channel_id)
+
+
+@router.get("/posts/{post_id}/tiktok-post-form")
+async def tiktok_post_form(post_id: int, user: str = Depends(require_user)):
+    """What the person sees before Post to TikTok: creator name, who-can-see-it choices, interactions, consent line."""
+    try:
+        return await tiktok_api.post_form(studio, post_id)
+    except StudioError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+
+
+@router.post("/posts/{post_id}/publish-tiktok")
+async def publish_tiktok(post_id: int, body: TikTokPostBody, user: str = Depends(require_user)):
+    """Posts an approved post to TikTok with the person's own choices (the person's press only; bots have no TikTok tool)."""
+    try:
+        return await tiktok_api.publish(studio, post_id, user, body.privacy_level, body.allow_comment, body.allow_duet,
+                                        body.allow_stitch, body.consent)
+    except StudioError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+
+
+@router.post("/posts/{post_id}/publish-instagram")
+async def publish_instagram(post_id: int, user: str = Depends(require_user)):
+    """Posts an approved post to Instagram as a Reel, exactly as approved, with Meta's AI label."""
+    try:
+        return await instagram_api.publish(studio, post_id, user)
+    except StudioError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+
+
+@router.post("/analytics/social/sync")
+async def social_sync(body: SocialSyncBody = SocialSyncBody(), user: str = Depends(require_user)):
+    """Reads the official numbers now for connected TikTok and Instagram channels (otherwise once a day)."""
+    if body.platform is not None:
+        _social_platform(body.platform)
+    try:
+        return {"result": await social.sync(studio, body.platform), **social_auth.status(local_api_base())}
+    except StudioError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+
+
+@social_router.get("/api/content-studio/social/callback/{platform}", response_class=HTMLResponse)
+async def social_callback(platform: str, state: str = "", code: Optional[str] = None, error: Optional[str] = None):
+    # No Kairos session here, deliberately (like /api/google/oauth/callback): the platform sends the person back to this
+    # loopback address in their own browser, which may have no Kairos cookie. The defence is the state (unguessable,
+    # single use, ten minutes, bound to the Kairos account and channel that started it), TikTok's PKCE, the app secret
+    # for the exchange, and that the address only answers on this computer.
+    import html as html_text
+    from core import accounts
+    if platform not in social_auth.PLATFORMS:
+        raise HTTPException(404, "Not found")
+    started_by = social_auth.pending_account(state)
+    name = "TikTok" if platform == "tiktok" else "Instagram"
+    try:
+        if started_by is None:
+            raise social_auth.SocialError("This sign-in expired or was not started here. Connect again from Kairos.")
+        with accounts.as_account(started_by):
+            account = await social_auth.finish(platform, state, code, error)
+        message, status_code = f"Connected {html_text.escape(account)} to Kairos. Return to Kairos.", 200
+    except StudioError as exc:
+        message, status_code = html_text.escape(exc.detail), exc.status
+    return HTMLResponse(f"<!doctype html><meta charset=utf-8><title>Kairos {name} connection</title>"
+                        f"<body style='font-family:system-ui;max-width:34rem;margin:4rem auto;padding:1rem'>"
+                        f"<h1>{name}</h1><p>{message}</p></body>", status_code=status_code)
 
 
 # -- Prepare post and the publishing dashboard ---------------------------------------------------------------------

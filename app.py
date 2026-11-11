@@ -383,6 +383,7 @@ app.include_router(design_routes.render_router)
 from routes import library_routes; app.include_router(library_routes.router)  # shared library (Multi-Account phase 5)
 from routes import content_studio_routes; app.include_router(content_studio_routes.router)  # Content Studio team: scoring record, pipeline, approvals
 app.include_router(content_studio_routes.worker_router)  # the desktop app's page-read worker (per-launch render token)
+app.include_router(content_studio_routes.social_router)  # TikTok and Instagram sign-in return (state-checked, no session)
 
 # Developer Mode (David's ask 2026-09-01) — the only app.py edit a custom
 # tab ever needs. Eligible folder tabs and approved legacy routes get

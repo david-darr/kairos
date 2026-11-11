@@ -25,7 +25,7 @@ def post_scores(store, now):
             by_post.setdefault(snap["post_id"], []).append(snap)
     items = []
     for post in posted:
-        snap = scoring.seven_day_snapshot(post["posted_at"], by_post.get(post["id"], []), s["score_after_days"])
+        snap = scoring.best_snapshot(post["posted_at"], by_post.get(post["id"], []), s["score_after_days"])
         if snap:
             items.append({"id": post["id"], "platform": post["platform"], **scoring.post_parts(snap, s["follow_weight"])})
     return posted, scoring.score_posts(items, s["weights"])

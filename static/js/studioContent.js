@@ -475,7 +475,8 @@ export async function mountContent(host, { signal, openVideos } = {}) {
     if (item.state === 'approved') out.push(btn('Prepare post', after(() => prepareItem(item)), 'primary', { 'aria-label': `Prepare ${label}` }));
     if (['prepared', 'waiting_for_you', 'failed'].includes(item.state)) {
       const blocked = item.problems?.length;
-      if (item.routes?.includes('api') && !blocked) out.push(btn('Post to YouTube', after(() => postToYouTube(item)), 'primary', { 'aria-label': `Post ${label} to YouTube` }));
+      // TikTok and Instagram API posting gets its own controls in the channel's settings (official-social, after the Content redesign).
+      if (item.platform === 'youtube' && item.routes?.includes('api') && !blocked) out.push(btn('Post to YouTube', after(() => postToYouTube(item)), 'primary', { 'aria-label': `Post ${label} to YouTube` }));
       if (!blocked) out.push(btn(item.state === 'waiting_for_you' ? 'Open upload page again' : 'Open upload page', after(() => openUpload(item)), item.routes?.includes('api') ? '' : 'primary', { 'aria-label': `Open the upload page for ${label}` }));
       if (!inDialog) out.push(btn('Checklist', () => preparedDialog(item), '', { 'aria-label': `Checklist for ${label}` }));
       out.push(btn('Schedule', after(() => scheduleDialog(item)), 'quiet', { 'aria-label': `Schedule ${label}` }));

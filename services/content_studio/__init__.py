@@ -10,8 +10,8 @@ import os
 
 from core import accounts
 
-from . import (delivery, formats, page_reads, pipeline, platforms, prepare, publishing, report, review, scoring, team, youtube,
-               youtube_publish)
+from . import (delivery, formats, instagram_api, page_reads, pipeline, platforms, prepare, publishing, report, review, scoring,
+               social, social_auth, team, tiktok_api, youtube, youtube_publish)
 from .store import StudioError, Store
 
 
@@ -29,5 +29,6 @@ def close_all():
     studio.forget()
 
 
-__all__ = ["studio", "close_all", "StudioError", "Store", "delivery", "formats", "page_reads", "pipeline", "platforms", "prepare",
-           "publishing", "report", "review", "scoring", "team", "youtube", "youtube_publish"]
+__all__ = ["studio", "close_all", "StudioError", "Store", "delivery", "formats", "instagram_api", "page_reads", "pipeline",
+           "platforms", "prepare", "publishing", "report", "review", "scoring", "social", "social_auth", "team", "tiktok_api",
+           "youtube", "youtube_publish"]
