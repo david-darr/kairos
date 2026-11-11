@@ -390,6 +390,14 @@ class SafetyNet(unittest.TestCase):
         self.assertFalse((self.data / ".layout" / "journal.json").exists())
         self.assertEqual(placed(self.data, 2), self.before)
 
+    def test_a_data_folder_that_does_not_exist_yet_gets_its_layout(self):
+        """2.3.0-beta.3's macOS build check imported the app with no data folder: layout.json.tmp had nowhere to go."""
+        fresh = Path(self.root.name) / "not-made-yet" / "data"
+        result = migration.run(str(fresh), STEPS, account=ACCOUNT)
+        self.assertTrue(result["ok"])
+        self.assertEqual(json.loads((fresh / "layout.json").read_text(encoding="utf-8"))["version"], FINAL)
+        self.assertIsNone(migration.run(str(fresh), STEPS, account=ACCOUNT), "a second start has nothing to do")
+
     def test_a_later_start_has_nothing_to_do(self):
         self.assertTrue(self.run_steps()["ok"])
         self.assertIsNone(self.run_steps())

@@ -375,6 +375,9 @@ def _replace_durably(source: str, destination: str) -> None:
 
 def _write_durably(path: str, data) -> None:
     """Write JSON so that the file is either the old one or the whole new one, and on the disk."""
+    # A brand-new data folder may not exist yet (a backend started without the desktop app, or the macOS
+    # build check: 2.3.0-beta.3's first build stopped here). write_json_atomic made it; this must too.
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     temporary = path + ".tmp"
     with open(temporary, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=1)
