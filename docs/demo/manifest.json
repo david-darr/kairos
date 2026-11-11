@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "8ed97bcef20c9636030c483ae28e2845666acb4f75aa59cf8cbd759526e3478e",
+  "app.js": "27ae5b7259983b65c3f6d0a3a155f4174f41593dfb11d4174e888c2aa6818eee",
   "fixtures.js": "98682c9314d850ddd7d6b9cdeeb72562f295069b0d681eaf7e5f81ae22b61414",
   "index.html": "c2d216301aae8fa4b2c0bd67aa81b0bedd2fc114251448f7c1de1e54cf4a143a",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -1333,7 +1333,7 @@
   "static/js/botsPackagePreview.js": "d59e43bf7507a2d2a3c0aa6ac4b6111f4dc60c1e8592b892bffff941608e7e9e",
   "static/js/botsPanel.js": "8c5333a233fc505784e48f219236f3a53c7fecf814be4dffe687ddbcc187fc74",
   "static/js/botsPanelHost.js": "c75f92f420ab73daccaf894ed6be8075dc25a933e84c3f22855be1bfcfcb67af",
-  "static/js/botsPanelSections.js": "9e25d2c063656a22bc301a5b07b0672f70cd11b9f93baa7a2b45717ba5e4191e",
+  "static/js/botsPanelSections.js": "4a0e1914843cdad7baea0e7b64b1ff9556fd7ffdc7458f748bcc761a2dc84164",
   "static/js/botsPatchQueue.js": "5ee5dba78d2c8843521af2223e4345668345bcfcd1102fa50e65fe7622b73fd9",
   "static/js/botsPeerApprovalCard.js": "4a7561c2420bc700366e05b77a1f6810e90d1a57bf0a66b45cfdb61acc269346",
   "static/js/botsPlaceChooser.js": "24d6f2669d73d8464703b32f33a8c653f74fdf5ccccf82c9e7d68eac9af6c899",
@@ -1358,7 +1358,7 @@
   "static/js/botsSectionMake.js": "3b7188b90ab11cea76380724e2a042f44c9a4462015a9e6637305b5df4f0d455",
   "static/js/botsSectionMemory.js": "5bf3a039c948424275d00f836b4cf5e31cdc6cd254834ab4fec8d6cb252dc012",
   "static/js/botsSectionMemoryActivity.js": "a10a305c7052798ccb97343adbaef71fd04bda20d26324e0d6a89aef39b5ca27",
-  "static/js/botsSectionPermissions.js": "a34aa981bcc7b8e824d4bcdef4edc52911842732813a4187d6bb3ae1e32d0cd1",
+  "static/js/botsSectionPermissions.js": "3c7171191f176074f08f47478bc2ed03da5eb848836856baec82016f76535dfd",
   "static/js/botsSectionReach.js": "7ab97da8b621824f6effc8034942af3fbf5e6ffa0a1973689fd9094f7cfce653",
   "static/js/botsSectionRoutines.js": "3a5f41f59180f0b12eabd9ce7d48f11b50b5951eabc3b4b1f8b3e3bee28cc50a",
   "static/js/botsSectionSites.js": "fe14f2596fc38d6afcf02024937cd59743b2330ddbf6cc9e3d11501366bc2b13",
