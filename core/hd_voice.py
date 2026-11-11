@@ -62,7 +62,7 @@ IDLE_SECONDS = 300                    # stop the sidecar (and free the graphics 
 START_TIMEOUT = 20.0                  # a queued sentence must start within this (the queue ahead of it renders fast)
 FIRST_AUDIO_TIMEOUT = 2.5             # and sound within this once started (measured about 0.2 s), else Kokoro speaks
 LOAD_TIMEOUT = 120.0
-WATCH_INTERVAL = 5.0                  # how often the idle watcher looks
+WATCH_INTERVAL = 1.0                  # how often the idle watcher looks
 
 # Tests point these at their own folders, manifest, sidecar command and GPU answer.
 HD_DIR = None
