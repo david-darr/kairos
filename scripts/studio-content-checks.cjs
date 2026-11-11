@@ -91,6 +91,16 @@ const formatsData = () => ({
     premise: 'Every city shows a hidden number.', subject: 'Cities', mascot: 'none', style_pack: 'glossy-3d', thumbnail: 'A city skyline', example_title: 'Cities and their numbers',
     checks: { ok: false, findings: [{ check: 'cost', result: 'reject', reason: 'Glossy 3D mascot cannot be made yet.' }], cost: { units: 30, ratio: 10 } } }],
   style_packs: [{ id: 'motion-type', name: 'Motion type', available: true, note: 'Exists today.' }, { id: 'glossy-3d', name: 'Glossy 3D mascot', available: false, note: 'Not built yet (build unit 5).' }] });
+store.social = { apps: { tiktok: { key: '', has_secret: false, audited: false }, instagram: { key: '', has_secret: false, redirect: 'loopback' } }, connections: [] };
+const socialData = () => ({
+  apps: { tiktok: { configured: !!(store.social.apps.tiktok.key && store.social.apps.tiktok.has_secret), key: store.social.apps.tiktok.key, has_secret: store.social.apps.tiktok.has_secret,
+    audited: !!store.social.apps.tiktok.audited, scopes: ['user.info.basic', 'user.info.profile', 'video.publish', 'video.list'],
+    note: 'TikTok keeps every post from an app it has not audited private (only you can see it), and only lets it post to a private account.',
+    redirect_uri: 'http://127.0.0.1:*/api/content-studio/social/callback/tiktok' },
+  instagram: { configured: !!(store.social.apps.instagram.key && store.social.apps.instagram.has_secret), key: store.social.apps.instagram.key, has_secret: store.social.apps.instagram.has_secret,
+    redirect: store.social.apps.instagram.redirect, config_id: '', note: 'Instagram posts go out through your own Meta app.',
+    redirect_uri: 'http://localhost:8420/api/content-studio/social/callback/instagram' } },
+  connections: store.social.connections });
 const reportData = () => ({ from: now - 7 * 86400, to: now, text: 'Content Studio weekly report\n\nWhat won: Travel (71.5).\n  Best script writer strategy: Hook first (60.0).\nRetiring: Cooking (awaiting user).\nSpend this month: $12.00 (all bots $14.00, cap $50).' });
 function content(method, p, body) {
   if (store.forbidden && method === 'GET') return [403, { detail: 'Forbidden' }];
@@ -109,6 +119,26 @@ function content(method, p, body) {
     return [200, { channels: store.channels }];
   }
   if (/^\/channels\/\d+\/edit$/.test(p)) { Object.assign(channel, body); return [200, channel]; }
+  // Official TikTok and Instagram through the person's own apps (services/content_studio/social_auth.py).
+  if (p === '/social/status') return [200, socialData()];
+  if (/^\/social\/apps\/(tiktok|instagram)$/.test(p)) {
+    const platform = p.split('/').pop();
+    if (method === 'DELETE') { store.social.apps[platform] = { key: '', has_secret: false }; return [200, socialData()]; }
+    const app = store.social.apps[platform];
+    Object.assign(app, { key: body.key, has_secret: app.has_secret || !!body.secret }, 'audited' in body ? { audited: body.audited } : {}, body.redirect ? { redirect: body.redirect } : {});
+    return [200, socialData()];
+  }
+  if (/^\/social\/(tiktok|instagram)\/connect$/.test(p)) return [200, { url: `https://www.tiktok.com/v2/auth/authorize/?client_key=${store.social.apps.tiktok.key}&state=s`, redirect_uri: 'http://127.0.0.1:8420/api/content-studio/social/callback/tiktok' }];
+  if (/^\/social\/channels\/\d+$/.test(p)) { store.social.connections = store.social.connections.filter(c => c.channel_id !== id); return [200, socialData()]; }
+  if (p === '/analytics/social/sync') return [200, { result: { tiktok: { stored: 2, posted_now: 0, skipped: {}, stopped: null } }, ...socialData() }];
+  if (/^\/posts\/\d+\/tiktok-post-form$/.test(p)) return [200, { post_id: id, channel: '@cooks.tt', creator: { nickname: 'Cooks', username: 'cooks.tt', avatar_url: '' },
+    privacy_options: [{ value: 'SELF_ONLY', name: 'Only you' }], privacy_default: null,
+    interactions: { comment: { disabled: false, on: false }, duet: { disabled: true, on: false }, stitch: { disabled: true, on: false } },
+    caption: 'Rain on a tin roof. #rain', file: { name: '9-16-v1.mp4' }, ai_label: true, max_video_post_duration_sec: 600, audited: false,
+    audit_note: 'TikTok keeps every post from an app it has not audited private (only you can see it).', consent: 'By posting, you agree to TikTok\'s Music Usage Confirmation.',
+    processing_note: 'TikTok takes a few minutes to process a post before it shows on the profile.', blockers: [] }];
+  if (/^\/posts\/\d+\/publish-tiktok$/.test(p)) return [200, { state: 'waiting', url: null, privacy: body.privacy_level, note: 'TikTok posted it as Only you.' }];
+  if (/^\/posts\/\d+\/publish-instagram$/.test(p)) return [200, { state: 'posted', url: 'https://www.instagram.com/reel/ABCDEFGHIJK/', note: '' }];
   if (p === '/analytics/youtube/status') return [200, store.yt];
   if (p === '/posting/youtube/status') return [200, store.ytPost];
   if (p === '/posting/youtube/privacy') { store.ytPost.privacy = body.privacy; return [200, store.ytPost]; }
@@ -711,7 +741,8 @@ app.whenReady().then(async () => {
     await capture('channel-publishing'); await noOverflow(); await labels();
     await scopeTo(2); await tab('publishing');
     await wait("!!document.querySelector('.sc-routes')");
-    assert.deepEqual(await js("[...document.querySelectorAll('[data-publish-route]')].map(n=>n.dataset.publishRoute)"), ['prepare', 'page-reads']);
+    assert.deepEqual(await js("[...document.querySelectorAll('[data-publish-route]')].map(n=>n.dataset.publishRoute)"), ['prepare', 'tiktok-api', 'page-reads']);
+    assert.ok(await js("document.querySelector('[data-publish-route=\"tiktok-api\"]').textContent.includes('No app yet')"), 'TikTok API route without an app');
     // Connections: the TikTok and Instagram page-read switches, off until the person turns them on.
     await scopeTo('lib:connections');
     await wait("!!document.querySelector('[data-page-reads=tiktok]')");
@@ -728,6 +759,59 @@ app.whenReady().then(async () => {
     await wait("!!document.querySelector('button[aria-label=\"Try Instagram page reads again\"]')");
     assert.ok(await js("document.querySelector('[data-page-reads=instagram]').textContent.includes('may have changed its page')"));
     await keep('publishing-page-reads'); await noOverflow(); await labels();
+
+    // 5a. Official TikTok and Instagram through the person's own apps: the app keys in Connections (secret never shown),
+    // the channel's connection in its Settings, the API row in Publishing, and the TikTok posting form (no defaults).
+    assert.ok(await js("document.querySelector('[data-redirect-uri=tiktok]').textContent.includes('http://127.0.0.1:*/api/content-studio/social/callback/tiktok')"));
+    assert.ok(await js("document.querySelector('[data-redirect-uri=instagram]').textContent.includes('http://localhost:8420/api/content-studio/social/callback/instagram')"));
+    assert.equal(await js("document.querySelector('[aria-label=\"TikTok app Client secret\"]').type"), 'password');
+    await click('.sc button', 'Save the TikTok app');
+    await wait("document.querySelector('.sc-social-tiktok .set-error').textContent.includes('client key')");
+    await fill('TikTok app Client key', 'awtiktokkey123'); await fill('TikTok app Client secret', 'secret-value-123');
+    await click('.sc button', 'Save the TikTok app');
+    for (let n = 0; n < 100 && !last('/social/apps/tiktok', 'PUT'); n++) await pause(50);
+    assert.deepEqual(last('/social/apps/tiktok', 'PUT').body, { key: 'awtiktokkey123', secret: 'secret-value-123', audited: false });
+    await wait("document.querySelector('[aria-label=\"TikTok app Client secret\"]')?.placeholder.includes('Saved')");
+    assert.equal(await js("document.querySelector('[aria-label=\"TikTok app Client secret\"]').value"), '', 'The secret is never shown back');
+    await capture('library-connections-social'); await noOverflow(); await labels();
+    // The channel connects in its own Settings: the sign-in opens in the browser.
+    await scopeTo(2); await tab('settings');
+    await wait("!!document.querySelector('[data-social-connection=tiktok]')");
+    assert.ok(await js("document.querySelector('[data-social-connection=tiktok]').textContent.includes('Not connected')"));
+    await js("window.__opened = []; window.open = (u) => { window.__opened.push(u); return null; }; true");
+    await click('.sc button', 'Connect @cooks.tt to TikTok');
+    for (let n = 0; n < 100 && !last('/social/tiktok/connect'); n++) await pause(50);
+    assert.deepEqual(last('/social/tiktok/connect').body, { channel_id: 2 });
+    await wait("window.__opened.length === 1");
+    assert.ok(await js("window.__opened[0].startsWith('https://www.tiktok.com/v2/auth/authorize/')"));
+    await capture('channel-settings-tiktok'); await noOverflow(); await labels();
+    // Connected (the sign-in came back): Publishing shows the API first and page reads as the fallback; Post to TikTok.
+    store.social.connections = [{ channel_id: 2, platform: 'tiktok', account: '@cooks.tt', connected: true, error: '', scopes: [], connected_at: now, expires_at: now + 7200,
+      reconnect_by: now + 170 * 86400, reconnect_soon: false, last_sync: null, last_result: null, last_error: null }];
+    store.pubItems.push(pubItem(37, 'Rain sounds', 'tiktok', 'prepared', { prep_id: 11, route: 'api', routes: ['api', 'browser'], approved_at: at(2, 12) }));
+    await openContent(); await scopeTo(2); await tab('publishing');
+    await wait("document.querySelector('[data-publish-route=\"tiktok-api\"]')?.textContent.includes('Connected as @cooks.tt')");
+    assert.ok(await js("document.querySelector('[data-publish-route=\"page-reads\"]').textContent.includes('Fallback')"));
+    await click('.sc button', 'Post Rain sounds on TikTok to TikTok');
+    await wait("!!document.querySelector('[aria-label=\"Who can see this video\"] option[value=SELF_ONLY]')");
+    assert.deepEqual(await js("[...document.querySelector('[aria-label=\"Who can see this video\"]').options].map(o=>o.value)"), ['', 'SELF_ONLY']);
+    assert.equal(await js("document.querySelector('[aria-label=\"Who can see this video\"]').value"), '', 'No default for who can see it');
+    assert.deepEqual(await js("['comments','Duet','Stitch'].map(k=>{const b=document.querySelector(`[aria-label=\"Allow ${k}\"]`);return [b.checked,b.disabled];})"), [[false, false], [false, true], [false, true]]);
+    assert.ok((await js("document.querySelector('.sc-tiktok-post').textContent")).includes("Music Usage Confirmation"));
+    await capture('tiktok-post-form'); await labels();
+    await click('.sc-dialog-panel button', 'Post to TikTok');
+    await wait("document.querySelector('.sc-tiktok-post .set-error')?.textContent.includes('Choose who can see it')");
+    assert.equal(writes.filter(w => w.path.endsWith('/publish-tiktok')).length, 0, 'Nothing is sent without the person\'s choices');
+    await fill('Who can see this video', 'SELF_ONLY');
+    await js("document.querySelector('[aria-label=\"Allow comments\"]').click()");
+    await click('.sc-dialog-panel button', 'Post to TikTok');
+    await wait("document.querySelector('.sc-tiktok-post .set-error')?.textContent.includes('Music Usage')");
+    await js("document.querySelector('[aria-label=\"I agree to TikTok\\'s Music Usage Confirmation\"]').click()");
+    await click('.sc-dialog-panel button', 'Post to TikTok');
+    for (let n = 0; n < 100 && !last('/publish-tiktok'); n++) await pause(50);
+    assert.deepEqual(last('/publish-tiktok').body, { privacy_level: 'SELF_ONLY', allow_comment: true, allow_duet: false, allow_stitch: false, consent: true });
+    store.pubItems = store.pubItems.filter(i => i.post_id !== 37); store.social.connections = [];
+    await openContent();
 
     // 5b. Formats: cards with every number and its date, ports with what changes and the checks. It only reads.
     await scopeTo('lib:formats');

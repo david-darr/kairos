@@ -11,6 +11,9 @@ import { ICONS } from './icons.js';
 // fill the platform's page in the Kairos Browser and stop before the final button, which the person presses. A YouTube
 // post can also go out through the person's own Google project when they connect posting (Channels tab). Channels also
 // holds the TikTok and Instagram page-read switches (read-only numbers from the person's own signed-in pages).
+// Official TikTok and Instagram (services/content_studio/social_auth.py, tiktok_api.py, instagram_api.py): the person's own
+// app keys in the Connections library, each channel's sign-in in its Settings tab, an API row in Publishing's "How posts
+// go out", and Post to TikTok (the person's own choices each time, as TikTok requires) and Post to Instagram on posts.
 // Formats shows the Researcher's format cards and the ports the Evaluator checked; the bots write them, this only reads.
 // Characters (Pack A) lists each character's versions with their reference sheets: a sheet waiting for you is also in
 // Approvals, and only you approve it (routes/character_routes.py). A video may only use an approved version.
@@ -41,6 +44,13 @@ async function openGoogle(url) {
   if (window.jarvis?.openGoogleSignIn) { if (!await window.jarvis.openGoogleSignIn(url)) throw new Error('Could not open Google sign-in.'); return; }
   window.open(url, '_blank', 'noopener');
 }
+// TikTok's and Meta's sign-in for the person's own app opens in the system browser (the desktop app checks the address)
+// or a new tab; the platform sends them back to Kairos on this computer.
+async function openSocialSignIn(url) {
+  if (window.jarvis?.openSocialSignIn) { if (!await window.jarvis.openSocialSignIn(url)) throw new Error('Could not open the sign-in page.'); return; }
+  window.open(url, '_blank', 'noopener');
+}
+const SOCIAL_NAMES = { tiktok: 'TikTok', instagram: 'Instagram' };
 const say = error => toast(M.loadFailure(error), 'error');
 const longDate = seconds => new Date(seconds * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
@@ -89,7 +99,7 @@ export async function mountContent(host, { signal, openVideos } = {}) {
   const alive = () => !disposed && root.isConnected;
 
   async function loadCore() {
-    const names = ['niches', 'channels', 'pipeline', 'approvals', 'watch', 'settings', 'analytics/youtube/status', 'posting/youtube/status', 'publishing', 'decisions'];
+    const names = ['niches', 'channels', 'pipeline', 'approvals', 'watch', 'settings', 'analytics/youtube/status', 'posting/youtube/status', 'publishing', 'decisions', 'social/status'];
     const [results, styles] = await Promise.all([Promise.allSettled(names.map(n => get('/' + n))), api(STYLES).catch(() => null)]);
     if (!alive()) return;
     if (results.every(r => r.status === 'rejected')) {
@@ -104,8 +114,8 @@ export async function mountContent(host, { signal, openVideos } = {}) {
       styles, findings: value('watch', { findings: [] }).findings,
       hasTeam: (value('settings', {}).team_bot_ids || []).length > 0, settings: value('settings', {}),
       yt: value('analytics/youtube/status', null), ytPost: value('posting/youtube/status', null), pub: value('publishing', null),
-      decisions: value('decisions', { decisions: [] }).decisions || [],
-      failed: names.filter((n, i) => results[i].status === 'rejected' && !n.includes('youtube')) };
+      decisions: value('decisions', { decisions: [] }).decisions || [], social: value('social/status', null),
+      failed: names.filter((n, i) => results[i].status === 'rejected' && !n.includes('youtube') && !n.startsWith('social')) };
     numbers = new Map();
     if (typeof scope === 'number' && !data.channels.some(c => c.id === scope)) { scope = 'all'; tab = null; }
     await draw();
@@ -198,7 +208,7 @@ export async function mountContent(host, { signal, openVideos } = {}) {
     const out = [];
     const cap = data.maxLive ? ` At most ${data.maxLive} niches can be live at once.` : '';
     out.push(el('div', { class: 'sc-bar' }, [note('How Kairos reads your numbers and posts for you. Channels you created are in the list on the left. Kairos never creates accounts.' + cap), btn('Add a channel', () => addChannelDialog())]));
-    out.push(youtubeGroup());
+    out.push(youtubeGroup(), socialAppGroup('tiktok'), socialAppGroup('instagram'));
     const reads = pageReadsGroup();
     if (reads) out.push(reads);
     const niches = M.groupChannels(data.niches, data.channels).map(({ niche, channels }) => row({ title: niche.name, attrs: { 'data-niche-id': niche.id },
@@ -239,6 +249,115 @@ export async function mountContent(host, { signal, openVideos } = {}) {
     rows.push(row({ title: 'Posting', description: M.postingText(p), control: pControls, attrs: { 'data-youtube': 'posting' },
       below: p ? el('p', { class: 'sc-dim sc-notice', text: p.notice }) : null }));
     return group({ title: 'YouTube', description: 'Your own Google project. Analytics only reads; posting only sends posts you approved.' }, rows);
+  }
+
+  // The person's own TikTok or Meta app (services/content_studio/social_auth.py): its key and secret (sealed, never shown
+  // again), TikTok's audit switch, Meta's sign-in return, and the redirect URI to register. Each channel then connects
+  // in its own Settings tab.
+  function socialAppGroup(platform) {
+    const app = data.social?.apps?.[platform], tiktok = platform === 'tiktok';
+    const title = tiktok ? 'TikTok app' : 'Instagram (Meta) app';
+    if (!app) return group({ title }, [empty(`The ${SOCIAL_NAMES[platform]} app settings could not load. Try again in a moment.`)]);
+    const keyName = tiktok ? 'Client key' : 'App ID', secretName = tiktok ? 'Client secret' : 'App secret';
+    const key = textInput(`${title} ${keyName}`, { value: app.key || '', maxlength: '200' });
+    const secret = el('input', { type: 'password', 'aria-label': `${title} ${secretName}`, autocomplete: 'off', maxlength: '300',
+      placeholder: app.has_secret ? 'Saved. Paste a new one to replace it.' : '' });
+    const status = el('p', { class: 'set-error', role: 'alert' });
+    const rows = [
+      row({ title: keyName, control: key, stack: true, attrs: { 'data-social-key': platform } }),
+      row({ title: secretName, description: app.has_secret ? 'Saved and sealed. Kairos never shows it again.' : 'Sealed as soon as you save it. Kairos never shows it again.', control: secret, stack: true })];
+    let audited = null, redirect = null, config = null;
+    if (tiktok) {
+      audited = el('input', { type: 'checkbox', role: 'switch', 'aria-label': 'My app passed TikTok\'s audit' });
+      audited.checked = !!app.audited;
+      rows.push(row({ title: 'My app passed TikTok\'s audit', control: audited, attrs: { 'data-social-audit': '' },
+        description: app.audited ? 'You choose who can see each post. If TikTok still refuses as unaudited, Kairos turns this off and says so.' : app.note }));
+    } else {
+      redirect = selectOf('Sign-in return', [['loopback', 'Back to Kairos on this computer'], ['paste', 'Paste the address from Facebook']], app.redirect || 'loopback');
+      config = textInput('Facebook Login for Business configuration ID', { value: app.config_id || '', maxlength: '40', placeholder: 'Optional' });
+      rows.push(row({ title: 'Sign-in return', description: 'If Meta will not save the localhost address, choose Paste: after signing in you paste the address of Facebook\'s Success page here.', control: redirect }),
+        row({ title: 'Configuration ID', description: 'Only if Facebook Login for Business asks you for a configuration instead of permissions.', control: config, stack: true }));
+    }
+    if (app.redirect_uri) rows.push(row({ title: 'Redirect URI to register', description: app.redirect_uri, attrs: { 'data-redirect-uri': platform },
+      control: btn('Copy', async () => { await navigator.clipboard.writeText(app.redirect_uri); toast('Redirect URI copied.'); }, 'quiet', { 'aria-label': `Copy the ${SOCIAL_NAMES[platform]} redirect URI` }) }));
+    const save = btn('Save app', async () => {
+      status.textContent = '';
+      const body = { key: key.value.trim() };
+      if (secret.value.trim()) body.secret = secret.value.trim();
+      if (audited) body.audited = audited.checked;
+      if (redirect) { body.redirect = redirect.value; body.config_id = config.value.trim(); }
+      if (!body.key) { status.textContent = `Enter the ${keyName.toLowerCase()} first.`; return; }
+      if (!app.has_secret && !body.secret) { status.textContent = `Paste the ${secretName.toLowerCase()} too.`; return; }
+      try { data.social = await put(`/social/apps/${platform}`, body); } catch (error) { status.textContent = M.loadFailure(error); return; }
+      secret.value = ''; toast(`${title} saved.`); await reload();
+    }, 'primary', { 'aria-label': `Save the ${title}` });
+    const drop = app.key ? btn('Remove app', async () => {
+      const ok = await confirmDialog({ title: `Remove the ${title}?`, message: `Kairos forgets its keys and every ${SOCIAL_NAMES[platform]} channel connection made with it. To remove the grant on ${SOCIAL_NAMES[platform]} itself, use its own settings.`, confirmLabel: 'Remove app', danger: true });
+      if (!ok) return;
+      await remove(`/social/apps/${platform}`); toast(`${title} removed.`); await reload();
+    }, 'quiet', { 'aria-label': `Remove the ${title}` }) : null;
+    rows.push(status, el('div', { class: 'sc-actions' }, [save, drop]));
+    const description = tiktok ? 'Your own TikTok for Developers app: Kairos posts and reads numbers through TikTok\'s official API. Connect each TikTok channel in its Settings.'
+      : 'Your own Meta app (Instagram API with Facebook Login): Kairos posts Reels and reads insights. Connect each Instagram channel in its Settings.';
+    return group({ title, description, cls: `sc-social-app sc-social-${platform}` }, rows);
+  }
+
+  // One TikTok or Instagram channel's official connection, in its Settings tab: connect (sign in as the channel's own
+  // account in the browser), the account it is connected as, renew-by date, Sync numbers now, Disconnect.
+  function socialConnectionGroup(channel) {
+    const platform = channel.platform, name = SOCIAL_NAMES[platform];
+    const app = data.social?.apps?.[platform];
+    if (!app) return group({ title: `${name} connection` }, [empty('The connection could not load. Try again in a moment.')]);
+    const conn = (data.social.connections || []).find(c => c.channel_id === channel.id) || null;
+    const rows = [];
+    if (!app.configured) {
+      rows.push(row({ title: `Your ${name} app first`, description: `Enter your own ${platform === 'tiktok' ? 'TikTok' : 'Meta'} app's keys in Connections, then connect this channel here.`,
+        control: btn('Connections', () => go('lib:connections'), 'quiet', { 'aria-label': `Open ${name} app settings` }) }));
+      return group({ title: `${name} connection`, description: 'Optional. Without it, Prepare post fills the upload page and page reads bring the numbers.', cls: 'sc-social-conn' }, rows);
+    }
+    const connect = async () => {
+      const out = await send(`/social/${platform}/connect`, { channel_id: channel.id });
+      await openSocialSignIn(out.url);
+      if (app.redirect === 'paste' && platform === 'instagram') { pasteDialog(); return; }
+      reloadOnReturn(); toast(`Sign in to ${name} as ${channel.handle} in the browser, then come back here.`);
+    };
+    const controls = [];
+    if (conn?.connected) {
+      controls.push(pill(`Connected as ${conn.account}`, 'ok'),
+        btn('Sync numbers now', async () => { const out = await send('/analytics/social/sync', { platform }); toast(socialSyncText(out.result?.[platform])); await reload(); }, '', { 'aria-label': `Sync ${name} numbers now` }),
+        btn('Disconnect', async () => { await remove(`/social/channels/${channel.id}`); toast(`${channel.handle} disconnected from ${name}. Numbers already stored stay.`); await reload(); }, 'quiet', { 'aria-label': `Disconnect ${channel.handle} from ${name}` }));
+    } else {
+      controls.push(pill(conn ? 'Needs reconnecting' : 'Not connected', conn ? 'warn' : 'muted'),
+        btn(conn ? 'Reconnect' : 'Connect', connect, 'primary', { 'aria-label': `Connect ${channel.handle} to ${name}` }));
+    }
+    const facts = conn ? [conn.error, conn.reconnect_soon ? `Sign in again before ${longDate(conn.reconnect_by)} to keep it working.` : '',
+      conn.last_sync ? `Numbers read ${M.timeText(conn.last_sync)}.` : '', conn.last_error && !conn.error ? conn.last_error : ''].filter(Boolean).join(' ') : '';
+    rows.push(row({ title: `Official ${name}`, control: controls, attrs: { 'data-social-connection': platform },
+      description: (platform === 'tiktok' ? `Posts go through your TikTok app; you choose who can see each one. ${app.audited ? '' : 'Until TikTok audits the app, posts are Only you, on a private account.'}`
+        : 'Approved posts go out as Reels through your Meta app, with Meta\'s AI label, and insights come back as official numbers.') + (facts ? ` ${facts}` : '') }));
+    return group({ title: `${name} connection`, description: 'Sign in as this channel\'s own account. Kairos keeps the connection only for that account.', cls: 'sc-social-conn' }, rows);
+  }
+
+  // Meta's Paste return: the person pastes the address Facebook's Success page showed.
+  function pasteDialog() {
+    const address = textInput('Address of Facebook\'s Success page', { placeholder: 'https://www.facebook.com/connect/login_success.html?...', maxlength: '4000' });
+    const status = el('p', { class: 'set-error', role: 'alert' });
+    const save = btn('Connect', async () => {
+      status.textContent = '';
+      try { const out = await send('/social/instagram/paste', { address: address.value.trim() }); dialog.close(); toast(`Connected ${out.account}.`); await reload(); }
+      catch (error) { status.textContent = M.loadFailure(error); }
+    }, 'primary');
+    const dialog = openPanelDialog({ title: 'Finish connecting Instagram', className: 'sc-dialog-panel', footer: el('div', {}, [save]),
+      body: el('div', { class: 'sc-dialog' }, [note('After you sign in, Facebook shows a page that says Success. Copy that page\'s whole address and paste it here.'),
+        group({}, [row({ title: 'Address', control: address, stack: true })]), status]) });
+    address.focus();
+  }
+
+  function socialSyncText(result) {
+    if (!result) return 'Nothing to read yet.';
+    if (result.stopped === 'rate_limited') return `Stored ${result.stored}; the platform's rate limit stopped the rest until the next sync.`;
+    if (result.stopped) return result.error || 'The sync stopped.';
+    return `Stored ${result.stored} number set${result.stored === 1 ? '' : 's'}${result.posted_now ? `; ${result.posted_now} post${result.posted_now === 1 ? '' : 's'} now has its link` : ''}.`;
   }
 
   // -- one channel's Settings: its state (archive, restore, a platform warning), then how its videos are made -----------
@@ -311,7 +430,8 @@ export async function mountContent(host, { signal, openVideos } = {}) {
   }
 
   function settingsView(channel) {
-    return [channelStatusGroup(channel), ...(channel.status === 'archived' ? [note('An archived channel keeps its history. Restore it to change its settings.')] : lookForm(channel))];
+    if (channel.status === 'archived') return [channelStatusGroup(channel), note('An archived channel keeps its history. Restore it to change its settings.')];
+    return [channelStatusGroup(channel), ...(SOCIAL_NAMES[channel.platform] ? [socialConnectionGroup(channel)] : []), ...lookForm(channel)];
   }
 
   // -- pipeline --------------------------------------------------------------------------------
@@ -436,6 +556,54 @@ export async function mountContent(host, { signal, openVideos } = {}) {
     toast(M.publishText(await send(`/posts/${item.post_id}/publish-youtube`))); await reload();
   }
 
+  async function postToInstagram(item) {
+    const ok = await confirmDialog({ title: 'Post to Instagram?', message: `"${item.title}" goes out now as a Reel, exactly as approved, through your own Meta app, with Meta's AI label. Instagram's API has no schedule.`, confirmLabel: 'Post to Instagram', danger: false });
+    if (!ok) return;
+    const out = await send(`/posts/${item.post_id}/publish-instagram`);
+    toast(out.state === 'posted' ? `Posted on Instagram.${out.note ? ` ${out.note}` : ''}` : out.note); await reload();
+  }
+
+  // Post to TikTok: TikTok's own rules for apps that post for a creator. The creator's name; who can see it, picked by the
+  // person each time (no default; only Only you while the app is unaudited); comments, Duet and Stitch off until turned on
+  // (greyed out when the account has them off); the Music Usage Confirmation; a note that processing takes a few minutes.
+  async function tiktokPostDialog(item) {
+    const body = el('div', { class: 'sc-dialog sc-tiktok-post' }, [el('p', { role: 'status', text: 'Asking TikTok for this account\'s options...' })]);
+    const status = el('p', { class: 'set-error', role: 'alert' });
+    let form = null;
+    const privacy = el('select', { 'aria-label': 'Who can see this video' });
+    const toggles = {};
+    const consent = el('input', { type: 'checkbox', 'aria-label': 'I agree to TikTok\'s Music Usage Confirmation' });
+    const post = btn('Post to TikTok', async () => {
+      status.textContent = '';
+      if (!privacy.value) { status.textContent = 'Choose who can see it.'; return; }
+      if (!consent.checked) { status.textContent = 'Agree to TikTok\'s Music Usage Confirmation first.'; return; }
+      let out;
+      try {
+        out = await send(`/posts/${item.post_id}/publish-tiktok`, { privacy_level: privacy.value, allow_comment: toggles.comment.checked,
+          allow_duet: toggles.duet.checked, allow_stitch: toggles.stitch.checked, consent: true });
+      } catch (error) { status.textContent = M.loadFailure(error); return; }
+      dialog.close(); toast(out.state === 'posted' ? 'Posted on TikTok.' : out.note); await reload();
+    }, 'primary', { disabled: '' });
+    const dialog = openPanelDialog({ title: `Post to TikTok: ${item.title}`, className: 'sc-dialog-panel', body, footer: el('div', {}, [post]) });
+    try { form = await get(`/posts/${item.post_id}/tiktok-post-form`); } catch (error) { body.replaceChildren(el('p', { role: 'alert', text: M.loadFailure(error) })); return; }
+    privacy.replaceChildren(el('option', { value: '', text: 'Choose who can see it' }), ...form.privacy_options.map(o => el('option', { value: o.value, text: o.name })));
+    privacy.value = '';
+    const interaction = (key, label) => {
+      const box = el('input', { type: 'checkbox', 'aria-label': `Allow ${label}` });
+      box.checked = false; box.disabled = !!form.interactions[key].disabled; toggles[key] = box;
+      return row({ title: `Allow ${label}`, description: box.disabled ? `Off in this TikTok account's settings.` : '', control: box });
+    };
+    body.replaceChildren(...[
+      form.blockers.length ? el('div', { class: 'sc-warning', role: 'alert' }, [el('strong', { text: 'Cannot post through the API now: ' }), form.blockers.join(' ')]) : null,
+      note(`Posting as ${form.creator.nickname || form.creator.username} (@${form.creator.username}). ${form.audit_note}`.trim()),
+      group({}, [row({ title: 'Who can see this video', control: privacy }), interaction('comment', 'comments'), interaction('duet', 'Duet'), interaction('stitch', 'Stitch'),
+        row({ title: 'Caption', description: form.caption || '(none)', stack: true }),
+        row({ title: 'AI-generated content', description: 'On: TikTok labels this video as AI-generated.', control: pill('On', 'accent') }),
+        row({ title: form.consent, control: consent, attrs: { 'data-tiktok-consent': '' } })]),
+      el('p', { class: 'sc-dim', text: form.processing_note }), status].filter(Boolean));
+    if (!form.blockers.length) post.removeAttribute('disabled');
+  }
+
   function markPostedDialog(item) {
     const link = textInput('Link to the live post', { placeholder: 'https://', maxlength: '500' });
     const status = el('p', { class: 'set-error', role: 'alert' });
@@ -475,8 +643,15 @@ export async function mountContent(host, { signal, openVideos } = {}) {
     if (item.state === 'approved') out.push(btn('Prepare post', after(() => prepareItem(item)), 'primary', { 'aria-label': `Prepare ${label}` }));
     if (['prepared', 'waiting_for_you', 'failed'].includes(item.state)) {
       const blocked = item.problems?.length;
-      // TikTok and Instagram API posting gets its own controls in the channel's settings (official-social, after the Content redesign).
+      const apiPending = item.fill?.stage === 'api_pending';   // sent through TikTok's API, waiting for its link
       if (item.platform === 'youtube' && item.routes?.includes('api') && !blocked) out.push(btn('Post to YouTube', after(() => postToYouTube(item)), 'primary', { 'aria-label': `Post ${label} to YouTube` }));
+      if (item.platform === 'tiktok' && item.routes?.includes('api') && !blocked && !apiPending) out.push(btn('Post to TikTok', after(() => tiktokPostDialog(item)), 'primary', { 'aria-label': `Post ${label} to TikTok` }));
+      if (item.platform === 'instagram' && item.routes?.includes('api') && !blocked) out.push(btn('Post to Instagram', after(() => postToInstagram(item)), 'primary', { 'aria-label': `Post ${label} to Instagram` }));
+      if (apiPending) {
+        out.push(btn('Mark posted', after(() => markPostedDialog(item)), 'primary', { 'aria-label': `Mark ${label} posted` }));
+        if (!inDialog) out.push(btn('Checklist', () => preparedDialog(item), '', { 'aria-label': `Checklist for ${label}` }));
+        return out;
+      }
       if (!blocked) out.push(btn(item.state === 'waiting_for_you' ? 'Open upload page again' : 'Open upload page', after(() => openUpload(item)), item.routes?.includes('api') ? '' : 'primary', { 'aria-label': `Open the upload page for ${label}` }));
       if (!inDialog) out.push(btn('Checklist', () => preparedDialog(item), '', { 'aria-label': `Checklist for ${label}` }));
       out.push(btn('Schedule', after(() => scheduleDialog(item)), 'quiet', { 'aria-label': `Schedule ${label}` }));
@@ -538,8 +713,8 @@ export async function mountContent(host, { signal, openVideos } = {}) {
   const pubFailed = () => [el('p', { role: 'alert', class: 'sc-error', text: 'The publishing dashboard did not load. Try again in a moment.' }), btn('Try again', reload)];
 
   // How one channel's posts leave Kairos, one row per route (data-publish-route). Prepare post works on every platform;
-  // YouTube adds direct posting through the person's own Google project; TikTok and Instagram add page-read numbers.
-  // A new route (for example an official TikTok or Instagram connection) adds its own row here.
+  // YouTube adds direct posting through the person's own Google project; TikTok and Instagram add their official API
+  // through the person's own app (first choice once the channel is connected) and page-read numbers as the fallback.
   function publishRoutesGroup(channel) {
     const rows = [row({ title: 'Prepare post', attrs: { 'data-publish-route': 'prepare' }, control: pill('Every post', 'ok'),
       description: `Kairos assembles each approved post for ${M.platformName(channel.platform)} and fills its upload page in the Kairos Browser. You press ${M.POST_BUTTONS[channel.platform] || 'Post'} yourself.` })];
@@ -548,9 +723,23 @@ export async function mountContent(host, { signal, openVideos } = {}) {
       rows.push(row({ title: 'Post straight to YouTube', description: M.postingText(p), attrs: { 'data-publish-route': 'youtube-api' }, control: [pill(label, tone),
         btn('Connections', () => go('lib:connections'), 'quiet', { 'aria-label': 'Open YouTube connections' })] }));
     }
+    const official = SOCIAL_NAMES[channel.platform];
+    let connected = false;
+    if (official) {
+      const app = data.social?.apps?.[channel.platform];
+      const conn = (data.social?.connections || []).find(c => c.channel_id === channel.id) || null;
+      connected = !!conn?.connected;
+      const [label, tone] = !app ? ['Unknown', 'muted'] : connected ? [`Connected as ${conn.account}`, 'ok'] : conn ? ['Needs reconnecting', 'warn'] : app.configured ? ['Not connected', 'muted'] : ['No app yet', 'muted'];
+      const description = channel.platform === 'tiktok'
+        ? `Post to TikTok through your own TikTok app, first choice once connected; you choose who can see each post. ${app?.audited ? '' : 'Until TikTok audits the app, posts are Only you, on a private account.'} Numbers come from TikTok's API.`
+        : 'Post approved Reels through your own Meta app, first choice once connected, with Meta\'s AI label. Insights come back as official numbers.';
+      rows.push(row({ title: `Post straight to ${official}`, description, attrs: { 'data-publish-route': `${channel.platform}-api` }, control: [pill(label, tone),
+        btn(connected || app?.configured ? 'Settings' : 'Connections', () => (connected || app?.configured ? go(channel.id, 'settings') : go('lib:connections')), 'quiet',
+          { 'aria-label': `Open the ${official} connection of ${M.channelName(channel)}` })] }));
+    }
     const reads = data.pub?.page_reads?.platforms?.[channel.platform];
-    if (reads) rows.push(row({ title: `${reads.name} numbers`, description: M.pageReadText(reads), attrs: { 'data-publish-route': 'page-reads' },
-      control: [pill(reads.on ? 'On' : 'Off', reads.on ? 'ok' : 'muted'), btn('Connections', () => go('lib:connections'), 'quiet', { 'aria-label': `Open ${reads.name} connections` })] }));
+    if (reads) rows.push(row({ title: `${reads.name} numbers`, description: connected ? `Not needed: this channel's numbers come from ${official}'s API. Page reads stay as the fallback if you disconnect.` : M.pageReadText(reads), attrs: { 'data-publish-route': 'page-reads' },
+      control: [pill(connected ? 'Fallback' : reads.on ? 'On' : 'Off', connected ? 'muted' : reads.on ? 'ok' : 'muted'), btn('Connections', () => go('lib:connections'), 'quiet', { 'aria-label': `Open ${reads.name} connections` })] }));
     return group({ title: 'How posts go out', description: 'Nothing is posted without you.', cls: 'sc-routes' }, rows);
   }
 
@@ -1264,7 +1453,7 @@ export async function mountContent(host, { signal, openVideos } = {}) {
   // -- layout ------------------------------------------------------------------------------------
 
   const LIB_TEXT = { formats: 'Format cards the Researcher found and the ports the Evaluator checked.', styles: 'Style packs: how a channel\'s videos look and sound.',
-    characters: 'Characters for the Flat 2D pack, each version with its reference sheet.', connections: 'Your YouTube project, TikTok and Instagram page reads, and the niches.' };
+    characters: 'Characters for the Flat 2D pack, each version with its reference sheet.', connections: 'Your YouTube project, your TikTok and Meta apps, TikTok and Instagram page reads, and the niches.' };
   let focusAfter = null;
   // Go to a scope: 'all', a channel id or 'lib:<library>'. Each scope opens on its first tab.
   function go(next, nextTab = null) { scope = M.parseScope(next); tab = nextTab; focusAfter = `[data-scope="${scope}"]`; draw(); }

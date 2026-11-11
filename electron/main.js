@@ -775,6 +775,19 @@ ipcMain.handle("google:open-sign-in", async (event, url) => {
   return true;
 });
 
+// Content Studio's TikTok and Instagram sign-in for the person's own app (services/content_studio/social_auth.py): only
+// TikTok's authorize page or Facebook's OAuth dialog, opened in the system browser, which returns to Kairos on loopback.
+ipcMain.handle("social:open-sign-in", async (event, url) => {
+  if (!fromAppWindow(event)) return false;
+  let target;
+  try { target = new URL(url); } catch { return false; }
+  const tiktok = target.hostname === "www.tiktok.com" && target.pathname === "/v2/auth/authorize/";
+  const meta = target.hostname === "www.facebook.com" && /^\/v\d{1,2}\.\d\/dialog\/oauth$/.test(target.pathname);
+  if (target.protocol !== "https:" || target.username || target.password || !(tiktok || meta)) return false;
+  await shell.openExternal(target.toString());
+  return true;
+});
+
 // Browse's channels (browser-ipc.js): app window only, arguments checked there.
 installBrowseIpc({ ipcMain, fromAppWindow, getBrowse: () => browseProfiles.get(), resolveBrowse: () => browseProfiles.resolve(), preparePost,
   // Import a password CSV into the signed-in account (cookie-only route).

@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld("jarvis", {
   // Liquid glass's see-through window; main.js checks the platform and the sender.
   setSeeThrough: on => ipcRenderer.send("window:see-through", !!on),
   openGoogleSignIn: (url) => ipcRenderer.invoke("google:open-sign-in", url),
+  openSocialSignIn: (url) => ipcRenderer.invoke("social:open-sign-in", url),
 
   screenGrab: {
     capture: () => ipcRenderer.invoke("screen-grab:capture"),
