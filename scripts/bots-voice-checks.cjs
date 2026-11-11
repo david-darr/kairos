@@ -117,6 +117,15 @@ module.exports = async ({ js, waitFor, delay, navigate, win, demoState, base, ca
     await js("document.dispatchEvent(new KeyboardEvent('keydown',{key:'h',ctrlKey:true,shiftKey:true,bubbles:true,cancelable:true}))");
     await waitFor(`!${pill}`);
     await waitFor("document.querySelector('.agent-call-open')?.textContent==='Call'");
+    // A pill destroyed while a re-place is queued stays gone (2026-11-11: a hang-up during a page change left a hidden
+    // pill in the page, because the frame queued by the page's mutations put it back after destroy()).
+    assert.equal(await js(`(async()=>{const {mountCallBar}=await import('/static/js/botsCallBar.js');
+      const bar=mountCallBar({agent:{name:'Pill check',roomId:'pill-check'},members:[],snapshot:()=>({active:true,minimized:true,startedAt:Date.now()}),mute(){},hangup(){},restore(){}});
+      await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+      document.body.classList.add('pill-check'); await Promise.resolve(); await Promise.resolve();
+      bar.destroy(); document.body.classList.remove('pill-check');
+      await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))); await new Promise(r=>setTimeout(r,50));
+      return bar.root.isConnected})()`), false, 'a destroyed pill is never put back by a frame queued before destroy');
     await navigate('botsShell', { agentId: botId, sessionId: sid });
     await waitFor("!!document.querySelector('.bots-chat-host .bots-composer')");
     // Exercise the real read-aloud endpoint and device queue.

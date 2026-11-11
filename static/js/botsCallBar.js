@@ -24,7 +24,7 @@ export function mountCallBar({ agent, members = null, snapshot, mute, hangup, re
   const face = createMascot({ agent: agent.roomId ? undefined : agent, state: 'idle' });
   const name = h('span', { class: 'call-pill-name', text: agent.name });
   const clock = h('span', { class: 'call-pill-clock', 'data-call-clock': '', role: 'timer' });
-  let dragged = false, drag = null, lastMuted = null, lastState = '';
+  let dragged = false, drag = null, lastMuted = null, lastState = '', destroyed = false;
   const back = h('button', { type: 'button', class: 'call-pill-back', 'aria-label': `Return to call with ${agent.name}` },
     [h('span', { class: 'call-pill-face' }, [face]), h('span', { class: 'call-pill-text' }, [name, clock])]);
   back.addEventListener('click', event => { if (dragged) { event.preventDefault(); return; } restore(); });
@@ -65,7 +65,8 @@ export function mountCallBar({ agent, members = null, snapshot, mute, hangup, re
     return { left: Math.round(Math.max(gap, Math.min(left, innerWidth - r.width - gap))), top: Math.round(top) };
   }
   function place() {
-    if (root.hasAttribute('data-dragging')) return;
+    // Never after destroy(): a frame queued by the page's mutations (or the stylesheet arriving) would put it back.
+    if (destroyed || root.hasAttribute('data-dragging')) return;
     const host = topDialog() || document.body;
     if (root.parentNode !== host) host.append(root);
     const panels = [...document.querySelectorAll(MODAL_PANELS)].filter(node => !root.contains(node) && node.getClientRects().length).map(node => node.getBoundingClientRect());
@@ -97,6 +98,7 @@ export function mountCallBar({ agent, members = null, snapshot, mute, hangup, re
   watch.observe(document.body, { childList: true, attributes: true, attributeFilter: ['open', 'class'], subtree: false });
   for (const node of document.querySelectorAll('body > .modal-backdrop, body > dialog')) watch.observe(node, watched);
   function refresh() {
+    if (destroyed) return;
     const state = snapshot();
     const seconds = Math.max(0, Math.floor((Date.now() - state.startedAt) / 1000));
     clock.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
@@ -143,7 +145,7 @@ export function mountCallBar({ agent, members = null, snapshot, mute, hangup, re
   return {
     root, refresh, place,
     level(name, value) { root.style.setProperty(name, value); },
-    destroy() { clearInterval(timer); watch.disconnect(); document.removeEventListener('keydown', key); removeEventListener('resize', place); root.remove(); },
+    destroy() { destroyed = true; clearInterval(timer); watch.disconnect(); document.removeEventListener('keydown', key); removeEventListener('resize', place); root.remove(); },
   };
 }
 
