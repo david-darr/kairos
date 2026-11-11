@@ -629,5 +629,48 @@ class FifthReview(TeamCase):
         bot_departments.set_flags(crew["id"], self.user, paused=False)
 
 
+class SixthReview(TeamCase):
+    """Codex's sixth review of 2026-11-11: the cap itself holds at the last check, and Google's own kinds of change."""
+
+    def test_the_last_check_holds_risky_steps_at_the_cap(self):
+        from services import bot_spend
+        bot = make_bot("Capped")
+        bot_spend._held.clear()
+        with patch.object(bot_spend, "budget", return_value={"capped": True, "spend_unknown": False}):
+            for kind in (bot_policy.OUTBOUND, bot_policy.DESTRUCTIVE, bot_policy.EXECUTE, bot_policy.OPAQUE):
+                self.assertIn("cap is reached", bot_policy.still_allowed(kind, bot_id=bot), kind)
+            self.assertIsNone(bot_policy.still_allowed(bot_policy.EDIT, bot_id=bot))
+        with patch.object(bot_spend, "budget", return_value={"capped": False, "spend_unknown": False}):
+            self.assertIsNone(bot_policy.still_allowed(bot_policy.OUTBOUND, bot_id=bot))
+        bot_spend._held.clear()
+
+    def test_google_changes_are_judged_by_what_they_do(self):
+        from core import google_workspace as google
+        cases = [("drive", "DELETE", "/files/f", None, bot_policy.DESTRUCTIVE),
+                 ("drive", "PATCH", "/files/f", {"trashed": True}, bot_policy.DESTRUCTIVE),
+                 ("drive", "PATCH", "/files/f", {"trashed": False}, None),
+                 ("sheets", "POST", "/spreadsheets/s:batchUpdate", {"requests": [{"deleteSheet": {"sheetId": 1}}]}, bot_policy.DESTRUCTIVE),
+                 ("sheets", "POST", "/spreadsheets/s:batchUpdate", {"requests": [{"addSheet": {}}]}, None),
+                 ("forms", "POST", "/forms/f:batchUpdate", {"requests": [{"deleteItem": {}}]}, bot_policy.DESTRUCTIVE),
+                 ("forms", "POST", "/forms/f:setPublishSettings", {"publishSettings": {}}, bot_policy.OUTBOUND),
+                 ("gmail", "POST", "/users/me/messages/send", {"raw": "x"}, bot_policy.OUTBOUND)]
+        for api, method, path, body, expected in cases:
+            self.assertEqual(google.request_kind(api, method, path, body), expected, (api, method, path, body))
+
+    async def test_a_capped_bot_cannot_trash_a_drive_file_at_the_last_check(self):
+        from unittest.mock import AsyncMock
+        import httpx
+        from core import google_workspace as google
+        from services import bot_spend
+        bot = make_bot("Trasher")
+        bot_spend._held.clear()
+        sent = AsyncMock(side_effect=AssertionError("trashed at the cap"))
+        with patch.object(bot_spend, "budget", return_value={"capped": True}), patch.object(google, "_token", AsyncMock(return_value="t")), \
+                patch.object(httpx.AsyncClient, "request", sent), bot_policy.bot_call(bot):
+            with self.assertRaises(google.GoogleError):
+                await google.request("drive", "PATCH", "/files/abc", body={"trashed": True}, account="a")
+        bot_spend._held.clear()
+
+
 if __name__ == "__main__":
     unittest.main()

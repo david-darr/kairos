@@ -613,7 +613,7 @@ async def request(api: str, method: str, path: str, *, params: dict | None = Non
     url = HOSTS[api] + path
     if before is None and method.upper() != "GET":
         # A bot's send, delete or change re-checks pause right before it goes; a send or a deletion also spend.
-        kind = "destructive" if method.upper() == "DELETE" else "outbound" if path.rstrip("/").endswith("/send") else None
+        kind = request_kind(api, method, path, body)
         before = lambda: _bot_still_allowed(kind)  # noqa: E731
     for retry in range(2):
         token = await _token(account, force=bool(retry))
@@ -648,6 +648,23 @@ async def request(api: str, method: str, path: str, *, params: dict | None = Non
             return response.json()
         return response.content
     raise GoogleError("Google authorization expired; reconnect the account", 401)
+
+
+def request_kind(api: str, method: str, path: str, body) -> str | None:
+    """What a Google change is, for the last check's spend rule (sixth review, 2026-11-11): a DELETE, a Drive trash, or
+    a batch with any delete request is a deletion; a Gmail send or a Forms publish is a send; anything else None."""
+    from core import bot_policy
+    method, body = method.upper(), body if isinstance(body, dict) else {}
+    if method == "DELETE":
+        return bot_policy.DESTRUCTIVE
+    if api == "drive" and body.get("trashed") is True:
+        return bot_policy.DESTRUCTIVE
+    if bot_policy._batch_deletes(body):
+        return bot_policy.DESTRUCTIVE
+    tail = path.rstrip("/")
+    if tail.endswith("/send") or tail.endswith(":setPublishSettings"):
+        return bot_policy.OUTBOUND
+    return None
 
 
 def _bot_still_allowed(kind=None):

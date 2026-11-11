@@ -1405,7 +1405,8 @@ def _alert_spend_unknown(bot_id: str, text: str) -> None:
     _spend_alerted.add(month)
     try:
         from services.agent_service import agent_service
-        item = agent_service.add_item(bot_id, "report", "Bot spend is not fully known", text)
+        title = "Bot spend cap reached" if "cap is reached" in text else "Bot spend is not fully known"
+        item = agent_service.add_item(bot_id, "report", title, text)
         agent_service.notify(item)
     except Exception:
         logger.exception("could not report unknown spend")

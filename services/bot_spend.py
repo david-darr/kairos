@@ -35,6 +35,8 @@ def budget(now=None):
 
 UNKNOWN_TEXT = ("This month's bot spend is not fully known (some runs have no price), and a spend cap is set, so steps "
                 "that send, delete or run things wait until it is known. Reads and edits go on. " + CAP_TEXT)
+CAPPED_TEXT = ("This month's bot spend cap is reached, so steps that send, delete or run things stop. Reads and edits go "
+               "on. " + CAP_TEXT)
 _held: dict = {}   # account -> (when read, reason or "")
 HOLD_CACHE_S = 30
 
@@ -51,7 +53,9 @@ def spend_hold(now=None, fresh=False):
     if not fresh and now - at < HOLD_CACHE_S and value is not None:
         return value or None
     try:
-        value = UNKNOWN_TEXT if budget(now).get("spend_unknown") else ""
+        state = budget(now)
+        # Known spend at the cap holds the same steps as unknown spend (sixth review, 2026-11-11).
+        value = CAPPED_TEXT if state.get("capped") else UNKNOWN_TEXT if state.get("spend_unknown") else ""
     except Exception:
         value = ""   # the cap's own admission check still applies; no cap reading, no new hold
     _held[key] = (now, value)
