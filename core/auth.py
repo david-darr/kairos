@@ -160,6 +160,33 @@ def auth_enabled() -> bool:
 # core/middleware.py closes the websockets and streams opened with them.
 revoke_listeners: list = []
 
+# Called with a user name when its password changes (by the person, an admin or a reset code) or the account is
+# deleted: every other kind of sign-in that hangs off the account ends too (paired phones, core/phone_devices.py).
+credential_listeners: list = []
+
+
+def _credentials_changed(username: str) -> None:
+    for listener in list(credential_listeners):
+        try:
+            listener(username)
+        except Exception:
+            pass
+
+
+# What a wrong user name is checked against, so "no such user" takes as long as "wrong password" (a sign-in that
+# answers faster for unknown names tells a caller which names exist). Made once, on first use.
+_absent_user_hash: Optional[bytes] = None
+
+
+def _spend_a_password_check(password: str) -> None:
+    global _absent_user_hash
+    if _absent_user_hash is None:
+        _absent_user_hash = bcrypt.hashpw(secrets.token_urlsafe(16).encode("utf-8"), bcrypt.gensalt())
+    try:
+        bcrypt.checkpw(password.encode("utf-8"), _absent_user_hash)
+    except ValueError:
+        pass
+
 
 def _digest(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
@@ -328,6 +355,7 @@ class AuthManager:
     def verify_password(self, username: str, password: str) -> bool:
         user = self._users["users"].get(username)
         if not user:
+            _spend_a_password_check(password)
             return False
         return bcrypt.checkpw(password.encode("utf-8"), user["password_hash"].encode("utf-8"))
 
@@ -373,6 +401,7 @@ class AuthManager:
             raise KeyError(f"no such user: {username}")
         user["password_hash"] = bcrypt.hashpw(new_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
         write_json_atomic(AUTH_FILE, self._users)
+        _credentials_changed(username)
 
     def drop_sessions(self, username: str) -> None:
         """End every open session for one account (after an admin resets its password)."""
@@ -398,6 +427,7 @@ class AuthManager:
             raise ValueError("can't delete the last admin")
         del self._users["users"][username]
         write_json_atomic(AUTH_FILE, self._users)
+        _credentials_changed(username)
         # Any live sessions for this user stop authenticating on next use
         # anyway (validate_session re-checks the user exists), but drop them
         # now so /api/auth/users reflects reality immediately.
