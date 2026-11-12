@@ -15,6 +15,8 @@ where state lives. Routes and services call into it; it never imports `tabs/`.
   serves the tools to Claude; `memory_tools.py` holds the shared-memory tools.
 - **Safety:** `permissions.py` (the one approval gate), `turn_taint.py` and
   `untrusted.py` (outside content), `middleware.py` and `auth.py` (accounts),
+  `phone_devices.py` (the iPhone app's pairing codes and device tokens) and
+  `try_limits.py` (limits on wrong sign-in and pairing tries),
   `task_scope.py` (trusted owner of a background run), `workspace.py`,
   `secret_storage.py`, and the contained runtimes `sandbox.py` and `computer.py`.
 - **Sessions and runs:** `session_manager.py` over `session_manager_store.py`
@@ -25,7 +27,9 @@ where state lives. Routes and services call into it; it never imports `tabs/`.
   `context_breakdown.py` (what fills a local or API chat's window, by part).
 - **Integrations:** `integrations.py`, `mcp_client.py`, `mcp_bridge.py`,
   `mcp_oauth.py`, `connectors/`, `channels/`, `email_send.py`,
-  `google_workspace.py`, `dav_client.py`.
+  `google_workspace.py`, `dav_client.py`. Push to devices: `mobile_activity.py`
+  (the outbox and enrollments), `web_push.py` (browsers), `phone_push.py` (the
+  iPhone app, through the push relay; `specs/phone-api.md`).
 - **Tabs contract:** `tab_api.py` (stable, versioned), `tab_hooks.py`,
   `tab_folders.py`, `tab_install.py`, `tab_checks.py`, `custom_tabs.py`,
   `home_cards.py`.
@@ -47,6 +51,10 @@ where state lives. Routes and services call into it; it never imports `tabs/`.
 - Tool results that carry outside text are wrapped and taint the turn.
 - Tests: `scripts/test_tools.py`, `scripts/test_chat.py`,
   `scripts/test_permissions.py`, `scripts/test_owner_isolation.py`.
+- Every sign-in goes through `middleware.py`'s `get_current_user()`: a session
+  cookie or a paired phone's token. Do not read a credential anywhere else.
+  A phone token never opens `phone_devices.DESKTOP_ONLY`; add a route there
+  when it mints or manages a sign-in.
 
 ## Bots redesign, Phases 1 to 3
 

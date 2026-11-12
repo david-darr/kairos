@@ -4,7 +4,7 @@ Last updated: 2.0.0, 2026-10-09
 
 ## Scope
 
-`core/auth.py`, `core/middleware.py`, `routes/auth_routes.py`; Forge, model setup and contained computer access described below.
+`core/auth.py`, `core/middleware.py`, `core/phone_devices.py`, `routes/auth_routes.py`; Forge, model setup and contained computer access described below.
 
 ## Trust Model
 
@@ -20,6 +20,12 @@ Kairos ships in two access modes. `core/auth.py` enables accounts when either th
 `AuthManager` (`core/auth.py`) owns `data/auth.json` (users) and `data/sessions.json` (session tokens), both written atomically via `core/atomic_io.py`. Sessions are looked up by opaque token; `validate_session()` re-checks the backing user still exists on every call, so a deleted account's cookie stops authenticating on its next use rather than continuing to work — same as Odysseus's own `validate_token` behavior.
 
 First-run account setup has a real UI in `static/js/auth.js`. Password reset sends an expiring, single-use code through configured email. A successful reset invalidates existing sessions. The logged-out request returns the same wording whether the account/email matches or delivery succeeds.
+
+## Paired Phones and the Sign-in Try Limit
+
+The Kairos iPhone app signs in with a device token, `Authorization: Bearer kph_...`, in place of the session cookie (2026-11-12). `get_current_user()` in `core/middleware.py` reads it first and answers the account's user name, so every later check is the one a browser session gets; rights are read from the account each time. A phone is paired with a six-digit code a signed-in browser makes (ten minutes, one use, memory only) and the phone claims with no sign-in; wrong codes are limited per address and per code. Only the token's SHA-256 is stored (`data/phone_devices.json`). A token never opens the routes that mint or manage sign-ins, the remote access switches, or the whole-install backup and wipe. Unpairing, a password change or reset and deleting the account end it at once and close its streams and websockets. `specs/phone-api.md` holds the routes, every decision and the push relay.
+
+`POST /api/auth/login` limits wrong tries over ten minutes: five from one address, and ten for one user name from all addresses together (that second count never locks out this computer itself). A locked caller is answered 429 before the password is looked at. A user name that does not exist now costs the same password check as one that does.
 
 ## Codex's Tool Token
 
@@ -86,7 +92,8 @@ With accounts off, the Electron-launched backend requires its UI cookie for ordi
 
 ## Known Gaps
 
-- No rate limiting on `/api/auth/login` yet.
+- Session cookies are not marked `Secure`.
+- The current-password checks on `/api/auth/password` and `/api/auth/account/switch-pin` are not rate limited (they need a live session).
 - TOTP backup codes are not implemented.
 - Accounts-off mode has one admin identity, not privilege separation among local people or processes with app access.
 - Approved custom tabs run in Kairos's Python process with its privileges; source review and scans are trust gates, not a Python sandbox.

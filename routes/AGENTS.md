@@ -14,7 +14,10 @@ Chat: `chat_routes.py`, `session_routes.py`, `background_task_routes.py`,
 `email_routes.py`. Models: `model_routes.py`, `model_setup_routes.py`,
 `cookbook_routes.py`. Accounts and settings: `auth_routes.py`,
 `settings_routes.py`, `permission_routes.py`, `system_routes.py`,
-`remote_routes.py`. Tools for Codex: `tool_routes.py`.
+`remote_routes.py`. Tools for Codex: `tool_routes.py`. The Kairos iPhone app:
+`phone_app_routes.py` (pairing, session, paired phones, home, native push;
+`specs/phone-api.md`). It shares the `/api/phone` prefix with the telephone
+connection, `phone_routes.py`, and nothing else.
 
 ## Rules
 

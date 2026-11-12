@@ -23,7 +23,9 @@ Domain logic behind the routes. Routes stay thin and call these; these call
 - **Personal data:** `notes_service.py`, `calendar_service.py`,
   `email_service.py`, `documents_service.py`, `home_week.py`.
 - **Models and devices:** `model_setup.py`, `cookbook_service.py`,
-  `mobile_notifications.py`, `bot_push.py`, `github_account.py`.
+  `mobile_notifications.py` (the one push sender: Web Push to browsers, the
+  push relay to paired iPhones), `bot_push.py`, `github_account.py`,
+  `phone_home.py` (the iPhone app's Home at a glance).
 
 ## Rules
 

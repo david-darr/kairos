@@ -9,6 +9,7 @@ per tab (`views/chat.js`, `views/settings.js`, `views/tool-store.js` and so on).
 - `chat*`: the chat surface; `chatStream.js` mirrors live turns from the
   server, `chatActivity.js` draws the activity chip.
 - `mobile*` and `phone*`: the phone layout. `redesign*`: the desktop redesign.
+- `iphonePairing.js`: "Pair the iPhone app" in Settings > Remote Access (the native app, not the phone layout).
 - `bots*` and `views/botsHome.js`, `views/botsShell.js`: the Bots mode (2026-10-28):
   `appModes.js` holds the three modes; `botsUi.js` the row kit; `static/css/bots.css` its tokens.
 - `studioContent*.js`: the Content section of the Studio tab (Content Studio team: channels, pipeline, approvals, scoreboard, report).
