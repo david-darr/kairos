@@ -45,6 +45,9 @@ def database():
           permission_id TEXT, payload TEXT NOT NULL, expires REAL NOT NULL,
           attempts INTEGER NOT NULL DEFAULT 0, next_attempt REAL NOT NULL, status TEXT NOT NULL DEFAULT 'pending');
         CREATE INDEX IF NOT EXISTS outbox_due ON outbox(status, next_attempt);
+        CREATE TABLE IF NOT EXISTS relay_removals (
+          install_id TEXT PRIMARY KEY, url TEXT NOT NULL, secret TEXT NOT NULL, created REAL NOT NULL,
+          attempts INTEGER NOT NULL DEFAULT 0, next_attempt REAL NOT NULL);
         """)
         with db:
             yield db
@@ -135,6 +138,8 @@ def publish(run_id, payload, state=None):
         snap["updated_at"] = time.time()
         db.execute("UPDATE activity SET state=?,snapshot=?,revision=?,updated=? WHERE id=?",
                    (snap["state"], json.dumps(snap), snap["revision"], snap["updated_at"], run_id))
+        if snap["state"] != row["state"]:
+            _enqueue_activity(db, run_id, row["owner"], snap)
         db.execute("INSERT INTO events VALUES(?,?,?)", (run_id, snap["revision"], json.dumps(payload)))
         db.execute("DELETE FROM events WHERE run_id=? AND revision<=?", (run_id, snap["revision"] - EVENT_LIMIT))
     return snap
@@ -229,7 +234,7 @@ def enroll(owner, subscription, session_binding):
             # An endpoint belongs to one account. It must be removed before
             # another account can claim it, even if a user copies its URL.
             raise ValueError("This device is enrolled for another account. Disable its notifications first.")
-        if not row and db.execute("SELECT COUNT(*) FROM devices WHERE owner=?", (owner,)).fetchone()[0] >= 10:
+        if not row and db.execute("SELECT COUNT(*) FROM devices WHERE owner=? AND endpoint NOT LIKE ?", (owner, PHONE_ROWS)).fetchone()[0] >= 10:
             raise ValueError("Remove an old device before adding another (10 device limit)")
         device_id = row["id"] if row else uuid.uuid4().hex
         prefs = row["preferences"] if row else json.dumps({"completed": True, "failed": True, "permission": True,
@@ -241,15 +246,19 @@ def enroll(owner, subscription, session_binding):
 
 
 def devices(owner, session_binding=None):
+    """The account's Web Push enrollments (browsers). A paired phone's native push is not one of these: it is
+    listed with the phone itself (GET /api/phone/devices) and ends with it."""
     with database() as db:
         return [{"id": r["id"], "preferences": json.loads(r["preferences"]), "created_at": r["created"],
                  "last_status": r["last_status"], "last_delivery": r["last_delivery"],
                  "current_login": r["binding"] == session_binding if session_binding else True}
-                for r in db.execute("SELECT * FROM devices WHERE owner=?", (owner,))]
+                for r in db.execute("SELECT * FROM devices WHERE owner=? AND endpoint NOT LIKE ?", (owner, PHONE_ROWS))]
 
 
 def change_device(owner, device_id, preferences=None):
     with database() as db:
+        if db.execute("SELECT 1 FROM devices WHERE owner=? AND id=? AND endpoint LIKE ?", (owner, device_id, PHONE_ROWS)).fetchone():
+            return False    # a paired phone's push: only that phone (or unpairing it) changes it
         if preferences is None:
             db.execute("DELETE FROM outbox WHERE device_id IN (SELECT id FROM devices WHERE owner=? AND id=?)", (owner, device_id))
             cursor = db.execute("DELETE FROM devices WHERE owner=? AND id=?", (owner, device_id))
@@ -273,8 +282,214 @@ def rebind(old_binding, new_binding):
 def revoke(*, owner=None, session_binding=None):
     with database() as db:
         field, value = ("owner", owner) if owner is not None else ("binding", session_binding)
+        _forget_at_relay(db, db.execute(f"SELECT * FROM devices WHERE {field}=? AND endpoint LIKE ?", (value, PHONE_ROWS)).fetchall())
         db.execute(f"DELETE FROM outbox WHERE device_id IN (SELECT id FROM devices WHERE {field}=?)", (value,))
         db.execute(f"DELETE FROM devices WHERE {field}=?", (value,))
+
+
+# -- a paired phone's native push (Kairos iPhone app, 2026-11-12; specs/phone-api.md) -------------------------
+# A phone that registers for push gets a row in `devices` like a browser does, so every notification kind above
+# reaches it through the same outbox, the same preferences and the same checks at send time. What differs is the
+# last hop: its `subscription` holds the phone's Apple tokens and its registration at the Kairos push relay
+# (core/phone_push.py), and services/mobile_notifications.py posts to the relay instead of a browser push
+# service. Its row id is the paired phone's id (core/phone_devices.py) and its binding is "phone:<id>": it is
+# valid exactly as long as that phone stays paired. With no relay address set, nothing is queued for a phone.
+PHONE_ENDPOINT = "kairos-phone:"
+PHONE_ROWS = PHONE_ENDPOINT + "%"
+MAX_ACTIVITIES = 8
+ACTIVITY_KEEP_SECONDS = 12 * 3600
+REMOVAL_KEEP_SECONDS = 7 * 86400
+_DEFAULT_PREFERENCES = {"completed": True, "failed": True, "permission": True,
+                        "bot_needs_you": True, "bot_results": True, "bot_calls": True}
+
+
+def is_phone(row) -> bool:
+    return str(row["endpoint"] or "").startswith(PHONE_ENDPOINT)
+
+
+def _phone_ready() -> bool:
+    from core import phone_push
+    return phone_push.relay_url() is not None
+
+
+def _phone_row(db, device_id):
+    return db.execute("SELECT * FROM devices WHERE id=? AND endpoint=?", (device_id, PHONE_ENDPOINT + device_id)).fetchone()
+
+
+def _forget_at_relay(db, rows) -> None:
+    """These phone rows are going away: remember their relay registrations so the sender can ask the relay to
+    delete them (it keeps a phone's tokens until told, or until Apple says they are dead)."""
+    now = time.time()
+    for row in rows:
+        relay = json.loads(row["subscription"]).get("relay") or {}
+        if relay.get("install_id") and relay.get("secret") and relay.get("url"):
+            db.execute("INSERT OR REPLACE INTO relay_removals(install_id,url,secret,created,next_attempt) VALUES(?,?,?,?,?)",
+                       (relay["install_id"], relay["url"], relay["secret"], now, now))
+
+
+def phone_register(owner, device_id, registration) -> None:
+    """A paired phone's push tokens: one registration per phone, replaced when sent again. The relay
+    registration it already has is kept and marked to be updated with the new tokens before the next push."""
+    with database() as db:
+        row = _phone_row(db, device_id)
+        if row and row["owner"] != owner:
+            raise ValueError("That phone is paired to another account.")
+        old = json.loads(row["subscription"]) if row else {}
+        new = {"phone": device_id, "apns_token": registration["apns_token"].lower(),
+               "voip_token": (registration.get("voip_token") or "").lower() or None,
+               "environment": registration["environment"], "locale": registration.get("locale") or "",
+               "activities": old.get("activities") or {}}
+        relay = old.get("relay")
+        if relay:
+            same = all(old.get(key) == new[key] for key in ("apns_token", "voip_token", "environment"))
+            if relay.get("install_id"):
+                new["relay"] = {**relay, "synced": bool(relay.get("synced")) and same}
+            elif same:
+                new["relay"] = relay    # the relay refused these very tokens: do not ask again until they change
+        _save_phone(db, owner, device_id, new, row)
+
+
+def _save_phone(db, owner, device_id, subscription, row) -> None:
+    if row:
+        db.execute("UPDATE devices SET subscription=? WHERE id=?", (json.dumps(subscription), device_id))
+    else:
+        db.execute("INSERT INTO devices(id,owner,endpoint,subscription,binding,preferences,created) VALUES(?,?,?,?,?,?,?)",
+                   (device_id, owner, PHONE_ENDPOINT + device_id, json.dumps(subscription), "phone:" + device_id,
+                    json.dumps(_DEFAULT_PREFERENCES), time.time()))
+
+
+def phone_unregister(device_id) -> bool:
+    """The phone turned push off, or was unpaired: its row, anything queued for it and its Live Activity tokens go,
+    and its relay registration is queued for removal."""
+    with database() as db:
+        row = _phone_row(db, device_id)
+        if not row:
+            return False
+        _forget_at_relay(db, [row])
+        db.execute("DELETE FROM outbox WHERE device_id=?", (device_id,))
+        db.execute("DELETE FROM devices WHERE id=?", (device_id,))
+        return True
+
+
+def phone_registration(device_id) -> dict | None:
+    with database() as db:
+        row = _phone_row(db, device_id)
+        return json.loads(row["subscription"]) if row else None
+
+
+def phone_set_relay(device_id, relay) -> None:
+    """Keep (or, with None, drop) what the relay answered for this phone. The secret arrives already encrypted."""
+    with database() as db:
+        row = _phone_row(db, device_id)
+        if row:
+            subscription = json.loads(row["subscription"])
+            if relay is None:
+                subscription.pop("relay", None)
+            else:
+                subscription["relay"] = relay
+            db.execute("UPDATE devices SET subscription=? WHERE id=?", (json.dumps(subscription), device_id))
+
+
+def phone_set_activity(owner, device_id, activity_id, kind, push_token) -> None:
+    """A Live Activity's own push token, for one of this person's own chat runs. LookupError when the run is not
+    theirs (or not there). A run that already ended gets its closing update at once."""
+    now = time.time()
+    with database() as db:
+        run = db.execute("SELECT * FROM activity WHERE id=? AND owner=?", (activity_id, owner)).fetchone()
+        if not run:
+            raise LookupError(activity_id)
+        row = _phone_row(db, device_id)
+        if row and row["owner"] != owner:
+            raise LookupError(activity_id)
+        subscription = json.loads(row["subscription"]) if row else {"phone": device_id, "apns_token": None, "voip_token": None,
+                                                                    "environment": "production", "locale": ""}
+        kept = {k: v for k, v in (subscription.get("activities") or {}).items() if v.get("at", 0) > now - ACTIVITY_KEEP_SECONDS and k != activity_id}
+        for stale in sorted(kept, key=lambda k: kept[k]["at"])[:max(0, len(kept) - (MAX_ACTIVITIES - 1))]:
+            del kept[stale]
+        kept[activity_id] = {"kind": kind, "push_token": push_token.lower(), "at": now}
+        subscription["activities"] = kept
+        _save_phone(db, owner, device_id, subscription, row)
+        if run["state"] in TERMINAL:
+            _enqueue_activity(db, activity_id, owner, json.loads(run["snapshot"]))
+
+
+def phone_drop_activity(device_id, push_token) -> None:
+    """Apple said this Live Activity token is dead."""
+    with database() as db:
+        row = _phone_row(db, device_id)
+        if row:
+            subscription = json.loads(row["subscription"])
+            subscription["activities"] = {k: v for k, v in (subscription.get("activities") or {}).items() if v.get("push_token") != push_token}
+            db.execute("UPDATE devices SET subscription=? WHERE id=?", (json.dumps(subscription), device_id))
+
+
+def _enqueue_activity(db, run_id, owner, snap) -> None:
+    """A chat run changed state (running, waiting on a permission, finished): one update for each of the owner's
+    phones showing a Live Activity for it. The state object is generic on purpose: a phase, a count of steps and
+    a time. Never text from the chat."""
+    if not _phone_ready():
+        return
+    now = time.time()
+    ended = snap["state"] in TERMINAL
+    for device in db.execute("SELECT * FROM devices WHERE owner=? AND endpoint LIKE ?", (owner, PHONE_ROWS)).fetchall():
+        subscription = json.loads(device["subscription"])
+        activity = (subscription.get("activities") or {}).get(run_id)
+        if not activity:
+            continue
+        payload = {"kind": "activity", "event": "end" if ended else "update", "push_token": activity["push_token"],
+                   "activity_kind": activity.get("kind") or "chat_run",
+                   "content_state": {"phase": snap["state"], "steps": len(snap.get("tool_steps") or []),
+                                     "updated_at": int(snap.get("updated_at") or now)}}
+        event_id = hashlib.sha256(f"{device['id']}:activity:{run_id}:{snap.get('revision')}:{payload['event']}".encode()).hexdigest()
+        expiry = now + (3600 if ended else 300)
+        db.execute("INSERT OR IGNORE INTO outbox(id,device_id,run_id,kind,permission_id,payload,expires,next_attempt) VALUES(?,?,?,?,?,?,?,?)",
+                   (event_id, device["id"], run_id, "activity", None, json.dumps(payload), expiry, now))
+        if ended:
+            del subscription["activities"][run_id]
+            db.execute("UPDATE devices SET subscription=? WHERE id=?", (json.dumps(subscription), device["id"]))
+
+
+def relay_removals_due(url):
+    """Relay registrations waiting to be deleted at this relay address. Ones for another address, or older than
+    a week, are not sent anywhere: the old ones are dropped."""
+    now = time.time()
+    with database() as db:
+        db.execute("DELETE FROM relay_removals WHERE created<?", (now - REMOVAL_KEEP_SECONDS,))
+        return [dict(r) for r in db.execute("SELECT * FROM relay_removals WHERE url=? AND next_attempt<=? ORDER BY next_attempt LIMIT 10", (url, now))]
+
+
+def relay_removal_result(install_id, done) -> None:
+    with database() as db:
+        if done:
+            db.execute("DELETE FROM relay_removals WHERE install_id=?", (install_id,))
+        else:
+            row = db.execute("SELECT attempts FROM relay_removals WHERE install_id=?", (install_id,)).fetchone()
+            if row:
+                attempts = row["attempts"] + 1
+                db.execute("UPDATE relay_removals SET attempts=?,next_attempt=? WHERE install_id=?",
+                           (attempts, time.time() + min(3600, 2 ** attempts * 30), install_id))
+
+
+def phone_result(item, outcome, retry_after=0) -> None:
+    """How one relay push ended: "sent", "retry" (the relay or Apple is busy), "failed" (it will never go),
+    "skipped" (nothing to send for this kind) or "gone" (Apple no longer knows this phone: its registration goes)."""
+    with database() as db:
+        if outcome == "gone":
+            row = _phone_row(db, item["device_id"])
+            if row:
+                _forget_at_relay(db, [row])
+            db.execute("DELETE FROM outbox WHERE device_id=?", (item["device_id"],))
+            db.execute("DELETE FROM devices WHERE id=?", (item["device_id"],))
+            return
+        attempts = item["attempts"] + 1
+        if outcome == "retry" and attempts >= 5:
+            outcome = "failed"
+        state = {"sent": "sent", "retry": "pending", "failed": "failed", "skipped": "skipped"}[outcome]
+        if outcome in ("sent", "failed", "retry"):
+            db.execute("UPDATE devices SET last_status=?,last_delivery=? WHERE id=?",
+                       ({"sent": 200, "failed": 400, "retry": 503}[outcome], time.time(), item["device_id"]))
+        delay = min(900, max(2 ** attempts * 5, int(retry_after or 0)))
+        db.execute("UPDATE outbox SET status=?,attempts=?,next_attempt=? WHERE id=?", (state, attempts, time.time() + delay, item["id"]))
 
 
 def enqueue(run_id, kind, permission=None):
@@ -290,12 +505,19 @@ def enqueue(run_id, kind, permission=None):
             text = "A chat is waiting for your answer. Tap to respond."
         payload = {"title": "Kairos", "body": text, "url": "/?chat=" + run["session_id"],
                    "tag": "kairos-" + run_id, "kind": kind, "expires_at": expiry}
+        # A phone's push carries no text at all (the relay writes the sentence): only what kind, and ids to open.
+        phone_payload = {"kind": kind, "session_id": run["session_id"], "collapse_id": "kairos-" + run_id, "expires_at": expiry,
+                         **({"ask": "question"} if kind == "permission" and (permission or {}).get("kind") == "question" else {})}
+        phones = _phone_ready()
         for device in db.execute("SELECT * FROM devices WHERE owner=?", (run["owner"],)).fetchall():
             if kind != "test" and not json.loads(device["preferences"]).get(kind):
                 continue
+            if is_phone(device) and not phones:
+                continue
             event_id = hashlib.sha256(f"{device['id']}:{run_id}:{kind}:{(permission or {}).get('id', '')}".encode()).hexdigest()
             db.execute("INSERT OR IGNORE INTO outbox(id,device_id,run_id,kind,permission_id,payload,expires,next_attempt) VALUES(?,?,?,?,?,?,?,?)",
-                       (event_id, device["id"], run_id, kind, (permission or {}).get("id"), json.dumps(payload), expiry, now))
+                       (event_id, device["id"], run_id, kind, (permission or {}).get("id"),
+                        json.dumps(phone_payload if is_phone(device) else payload), expiry, now))
 
 
 BOT_KINDS = {"bot_needs_you", "bot_results", "bot_call", "bot_call_end"}
@@ -304,7 +526,7 @@ RING_REPEATS = (0, 20, 40)
 RING_END_SECONDS = 600
 
 
-def enqueue_bot(kind, agent_id, allowed_owner):
+def enqueue_bot(kind, agent_id, allowed_owner, who=None, account=None):
     """A bot needs the person or has results (Agents 2.0, 2026-10-14). Bots
     belong to admins, so only devices whose owner passes allowed_owner get it.
     Pushes coalesce: one pending push per device, bot and kind per minute,
@@ -315,13 +537,28 @@ def enqueue_bot(kind, agent_id, allowed_owner):
     now = time.time()
     bucket = int(now // 60)
     payload = {"kind": kind, "url": "/?agent=" + agent_id, "tag": "kairos-bot-" + agent_id, "expires_at": now + 3600}
+    # A phone's push names the bot ("Kip needs you"; the sender looks the name up in the owner's own account), so
+    # it goes only to phones of the account the bot belongs to: `account`, else the one this work is running as.
+    # With no account known, to no phone at all.
+    phone_payload = {"kind": kind, "agent_id": agent_id, "who": who or "", "collapse_id": "kairos-bot-" + agent_id, "expires_at": now + 3600}
+    phones = _phone_ready()
+    if account is None:
+        from core import accounts
+        account = accounts.current_account()
     with database() as db:
         for device in db.execute("SELECT * FROM devices").fetchall():
             if not allowed_owner(device["owner"]) or not json.loads(device["preferences"]).get(kind, True):
                 continue
+            if is_phone(device) and not (phones and account and _account_of(device["owner"]) == account):
+                continue
             event_id = hashlib.sha256(f"{device['id']}:bot:{agent_id}:{kind}:{bucket}".encode()).hexdigest()
             db.execute("INSERT OR IGNORE INTO outbox(id,device_id,run_id,kind,permission_id,payload,expires,next_attempt) VALUES(?,?,?,?,?,?,?,?)",
-                       (event_id, device["id"], "", kind, None, json.dumps(payload), now + 3600, now + 10))
+                       (event_id, device["id"], "", kind, None, json.dumps(phone_payload if is_phone(device) else payload), now + 3600, now + 10))
+
+
+def _account_of(owner):
+    from core import accounts
+    return accounts.account_for_user(owner)
 
 
 def ring_payload(ring):
@@ -345,9 +582,19 @@ def enqueue_ring(owner, ring):
     now = time.time()
     expiry = float(ring["expires_at"])
     payload = json.dumps(ring_payload(ring))
+    # A phone rings once, as a real incoming call (who is calling and until when, never why); no repeats.
+    phone_payload = json.dumps({"kind": "bot_call", "ring_id": ring["id"], "agent_id": ring["agent_id"],
+                                "who": str(ring.get("bot_name") or "A bot")[:60], "expires_at": expiry})
+    phones = _phone_ready()
     with database() as db:
         for device in db.execute("SELECT * FROM devices WHERE owner=?", (owner,)).fetchall():
             if not json.loads(device["preferences"]).get("bot_calls", True):
+                continue
+            if is_phone(device):
+                if phones:
+                    event_id = hashlib.sha256(f"{device['id']}:ring:{ring['id']}".encode()).hexdigest()
+                    db.execute("INSERT OR IGNORE INTO outbox(id,device_id,run_id,kind,permission_id,payload,expires,next_attempt) VALUES(?,?,?,?,?,?,?,?)",
+                               (event_id, device["id"], ring["id"], "bot_call", None, phone_payload, expiry, now))
                 continue
             for number, delay in enumerate(RING_REPEATS):
                 if now + delay >= expiry:
@@ -366,8 +613,10 @@ def close_ring(ring_id, outcome="", bot_name=""):
         db.execute("UPDATE outbox SET status='expired' WHERE run_id=? AND kind='bot_call' AND status='pending'", (ring_id,))
         if not outcome:
             return
-        rung = [row[0] for row in db.execute("SELECT DISTINCT device_id FROM outbox WHERE run_id=? AND kind='bot_call' "
-                                             "AND status='sent'", (ring_id,))]
+        # Browsers only: the relay has no "that call ended" push, so a phone asks GET /api/rings/{id} instead.
+        rung = [row[0] for row in db.execute("SELECT DISTINCT o.device_id FROM outbox o JOIN devices d ON d.id=o.device_id "
+                                             "WHERE o.run_id=? AND o.kind='bot_call' AND o.status='sent' AND d.endpoint NOT LIKE ?",
+                                             (ring_id, PHONE_ROWS))]
         name = str(bot_name or "A bot")[:60]
         payload = json.dumps({"kind": "bot_call_end", "ring_id": ring_id, "tag": "kairos-ring-" + ring_id, "outcome": outcome,
                               "bot_name": name, "url": "/", "expires_at": now + RING_END_SECONDS})
@@ -380,13 +629,13 @@ def close_ring(ring_id, outcome="", bot_name=""):
 def due():
     with database() as db:
         db.execute("UPDATE outbox SET status='expired' WHERE status='pending' AND expires<=?", (time.time(),))
-        return [dict(r) for r in db.execute("SELECT o.*,d.subscription,d.owner,d.binding FROM outbox o JOIN devices d ON d.id=o.device_id "
+        return [dict(r) for r in db.execute("SELECT o.*,d.subscription,d.owner,d.binding,d.endpoint FROM outbox o JOIN devices d ON d.id=o.device_id "
                                           "WHERE o.status='pending' AND o.next_attempt<=? ORDER BY o.next_attempt LIMIT 20", (time.time(),))]
 
 
 def enqueue_test(owner, device_id):
     with database() as db:
-        device = db.execute("SELECT id FROM devices WHERE id=? AND owner=?", (device_id, owner)).fetchone()
+        device = db.execute("SELECT id FROM devices WHERE id=? AND owner=? AND endpoint NOT LIKE ?", (device_id, owner, PHONE_ROWS)).fetchone()
         if not device:
             return False
         now = time.time()
@@ -412,3 +661,14 @@ def delivery_result(item, status, retry_after=0):
         state = "sent" if 200 <= status < 300 else "pending" if retry else "failed"
         delay = min(900, max(2 ** attempts * 5, retry_after))
         db.execute("UPDATE outbox SET status=?,attempts=?,next_attempt=? WHERE id=?", (state, attempts, time.time() + delay, item["id"]))
+
+
+def _phones_ended(device_ids) -> None:
+    for device_id in device_ids:
+        phone_unregister(device_id)
+
+
+# A phone that is unpaired (or whose account password changed) loses its push with it. Registered here, at the
+# bottom, so the store above exists first; core/phone_devices.py imports nothing from this module.
+from core import phone_devices as _phone_devices  # noqa: E402
+_phone_devices.ended_listeners.append(_phones_ended)

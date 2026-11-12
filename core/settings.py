@@ -93,6 +93,9 @@ DEFAULTS: dict[str, Any] = {
     # call order that was never saved, moved into reach_me.json the first time it is read (core/reach_me.py). Nothing
     # writes it any more; "When a bot calls you" reads and sets Reach me's first call way.
     "ring_preference": "app",
+    # Where native push for paired iPhones is sent: the Kairos push relay's address (core/phone_push.py). None:
+    # no phone push is queued or sent. Set in Settings > Remote Access by an admin; this whole Kairos shares it.
+    "phone_push_relay_url": None,
 }
 
 
