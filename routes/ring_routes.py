@@ -26,7 +26,15 @@ async def pending(user: str = Depends(require_user)):
     return reply
 
 
+@router.get("/{ring_id}")
+async def ring_state(ring_id: str = _ID, user: str = Depends(require_user)):
+    """One of this user's rings, as it stands: ringing (with the seconds left), answered, declined or expired.
+    Another account's ring id answers 404, like one that never existed."""
+    return rings.state(accounts.effective_account(), user, ring_id)
+
+
 @router.post("/{ring_id}/answer")
+
 async def answer(ring_id: str = _ID, via: str = "", user: str = Depends(require_user)):
     """`via=link`: the push notification's Answer or its deep link, which answers only a call still ringing."""
     return rings.answer(accounts.effective_account(), user, ring_id, via_link=via == "link")

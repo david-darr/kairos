@@ -399,6 +399,12 @@ def is_running() -> bool:
     return _server_task is not None and not _server_task.done()
 
 
+def current_url() -> Optional[str]:
+    """The address other devices reach this Kairos at right now, or None while the listener is not running.
+    For the phone pairing screen (routes/phone_app_routes.py): cheap, no Tailscale call."""
+    return _current_url if is_running() else None
+
+
 def is_watching() -> bool:
     return _watchdog_task is not None and not _watchdog_task.done()
 

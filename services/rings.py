@@ -248,7 +248,22 @@ def claim_opening(account: str, user: str, ring_id: str, agent_id: str, with_ask
         return ring["reason"]
 
 
+def state(account: str, user: str, ring_id: str, now: Optional[float] = None) -> dict:
+    """One ring as its own user sees it now, so a phone can take its call screen down once the ring was answered
+    somewhere else or ran out (GET /api/rings/{id}). The status is in the phone's words: ringing, answered,
+    declined, or expired (nobody answered in time). Never the reason: a call screen says who, not why."""
+    now = time.time() if now is None else now
+    with _lock:
+        rings = _load(account)
+        _sweep(account, rings, now)
+        ring = _find(rings, ring_id, user)
+        status = "expired" if ring["status"] == MISSED else ring["status"]
+        return {"id": ring["id"], "agent_id": ring["agent_id"], "bot_name": ring["bot_name"], "status": status,
+                "seconds_left": max(0, round(ring["expires_at"] - now)) if ring["status"] == RINGING else 0}
+
+
 def outcome(account: str, ring_id: str, now: Optional[float] = None) -> str:
+
     now = time.time() if now is None else now
     with _lock:
         rings = _load(account)

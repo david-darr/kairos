@@ -312,6 +312,7 @@ app.include_router(call_routes.router)
 from routes import voice_engine_routes; app.include_router(voice_engine_routes.router)
 app.include_router(ring_routes.router)
 app.include_router(phone_routes.router)
+from routes import phone_app_routes; app.include_router(phone_app_routes.router)  # the Kairos iPhone app: pairing, home, push
 from routes import reach_me_routes; app.include_router(reach_me_routes.router)  # Settings > Reach me
 app.include_router(workspace_routes.router)
 app.include_router(forge_routes.router)
