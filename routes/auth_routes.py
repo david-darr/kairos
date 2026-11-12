@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from core import accounts
 from core import auth as auth_module
+from core import try_limits
 from core.auth import auth_manager, auth_enabled, SESSION_COOKIE_NAME, SESSION_TTL_SECONDS, SINGLE_USER, UI_COOKIE_NAME
 from core.auth import ACCOUNT_COLORS, ACCOUNTS_COOKIE_NAME, DEVICE_COOKIE_NAME, MAX_DEVICE_ACCOUNTS, REMEMBER_SHOWN_AFTER_EXPIRY_SECONDS
 from core.middleware import get_current_user, require_admin, require_user
@@ -313,14 +314,56 @@ async def setup(body: SetupRequest, request: Request, response: Response) -> dic
     return {"username": body.username, "is_admin": True}
 
 
+# Wrong sign-in tries are limited (2026-11-12: a paired phone makes this desktop reachable from outside, and the
+# sign-in had no limit at all). Two counts, each over LOGIN_WINDOW_SECONDS, of failures only:
+# - per caller address (an IPv6 caller by its /64): LOGIN_TRIES_PER_ADDRESS wrong tries, whatever names it tried;
+# - per user name, from every address together: LOGIN_TRIES_PER_USERNAME wrong tries, so many addresses cannot
+#   share out one account's guesses. This count never locks out this computer itself (loopback): someone on the
+#   network must not be able to keep the owner out of their own desktop. Loopback keeps the per-address count.
+# A locked caller is answered 429 before the password is looked at, so a locked try can never be the right guess,
+# and it adds nothing to either count. A wrong two-step code counts like a wrong password; a missing one does
+# not. A right sign-in clears nothing (core/try_limits.py says why).
+LOGIN_WINDOW_SECONDS = 10 * 60
+LOGIN_TRIES_PER_ADDRESS = 5
+LOGIN_TRIES_PER_USERNAME = 10
+_login_by_address = try_limits.TryLimit(LOGIN_TRIES_PER_ADDRESS, LOGIN_WINDOW_SECONDS)
+_login_by_username = try_limits.TryLimit(LOGIN_TRIES_PER_USERNAME, LOGIN_WINDOW_SECONDS)
+LOGIN_LOCKED = "Too many wrong sign-in tries. Wait a few minutes and try again."
+
+
+def _login_caller(request: Request, username: str) -> tuple[str, str, bool]:
+    host = request.client.host if request.client else None
+    # The name as the account store would match it, bounded: a long name is one key, not a way to fill memory.
+    return try_limits.address_key(host), "user:" + username[:200], try_limits.is_loopback(host)
+
+
+def _login_wait(request: Request, username: str) -> int:
+    address, name, local = _login_caller(request, username)
+    return max(_login_by_address.wait(address), 0 if local else _login_by_username.wait(name))
+
+
+def _login_failed(request: Request, username: str) -> None:
+    address, name, _ = _login_caller(request, username)
+    _login_by_address.add(address)
+    _login_by_username.add(name)
+
+
 @router.post("/login")
 async def login(body: LoginRequest, request: Request, response: Response) -> dict:
     if not auth_enabled():
         raise HTTPException(status_code=400, detail="AUTH_ENABLED is false — no login needed")
+    wait = _login_wait(request, body.username)
+    if wait:
+        raise HTTPException(status_code=429, detail=LOGIN_LOCKED, headers={"Retry-After": str(wait)})
     if not auth_manager.verify_password(body.username, body.password):
+        _login_failed(request, body.username)
         raise HTTPException(status_code=401, detail="invalid username or password")
     if auth_manager.totp_enabled(body.username):
         if not body.totp_code or not auth_manager.verify_totp(body.username, body.totp_code):
+            # The sign-in page sends the password alone first and shows the code field on this answer, so a
+            # missing code is not a wrong try (the password was right; no code was guessed). A wrong code is.
+            if body.totp_code:
+                _login_failed(request, body.username)
             raise HTTPException(status_code=401, detail="invalid or missing 2FA code")
     # Joins this device's switcher (signing in with another account open is "Add another account").
     _sign_in_here(request, response, body.username)

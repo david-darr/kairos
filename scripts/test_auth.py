@@ -31,10 +31,10 @@ from services.email_service import email_service
 GENERIC = auth_routes._FORGOT_PASSWORD_GENERIC_RESPONSE
 
 
-def make_client() -> TestClient:
+def make_client(address=("testclient", 50000)) -> TestClient:
     app = FastAPI()
     app.include_router(auth_routes.router)
-    return TestClient(app)
+    return TestClient(app, client=address)
 
 
 class AuthTests(unittest.TestCase):
@@ -42,6 +42,9 @@ class AuthTests(unittest.TestCase):
         auth_manager._users = {"users": {}}
         auth_manager._sessions = {}
         auth_manager._resets = {}
+        # Wrong sign-in tries are counted in memory per address and per name; each test starts with none.
+        auth_routes._login_by_address.clear()
+        auth_routes._login_by_username.clear()
         self.client = make_client()
         self.sent = []
         self.addCleanup(patch.stopall)
@@ -54,8 +57,8 @@ class AuthTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response
 
-    def login(self, username, password, totp_code=None):
-        client = make_client()
+    def login(self, username, password, totp_code=None, address=("testclient", 50000)):
+        client = make_client(address)
         body = {"username": username, "password": password}
         if totp_code is not None:
             body["totp_code"] = totp_code
@@ -89,6 +92,82 @@ class AuthTests(unittest.TestCase):
         client, ok = self.login("david", "first-password")
         self.assertEqual(ok.status_code, 200)
         self.assertEqual(client.get("/api/auth/status").json()["username"], "david")
+
+    # -- wrong sign-in tries are limited (2026-11-12) ------------------------
+    def test_five_wrong_tries_from_one_address_lock_it_out_even_for_the_right_password(self):
+        self.setup_admin()
+        for _ in range(auth_routes.LOGIN_TRIES_PER_ADDRESS):
+            self.assertEqual(self.login("david", "nope", address=("10.0.0.7", 1))[1].status_code, 401)
+        locked = self.login("david", "first-password", address=("10.0.0.7", 1))[1]
+        self.assertEqual((locked.status_code, locked.json()), (429, {"detail": auth_routes.LOGIN_LOCKED}))
+        self.assertGreater(int(locked.headers["retry-after"]), 0)
+        other_name = self.login("nobody", "nope", address=("10.0.0.7", 1))[1]
+        self.assertEqual((other_name.status_code, other_name.json()), (429, {"detail": auth_routes.LOGIN_LOCKED}),
+                         "the lock is on the address, whatever name it tries, and reads the same for a name that does not exist")
+        self.assertEqual(self.login("david", "first-password", address=("10.0.0.8", 1))[1].status_code, 200, "another address still signs in")
+        for _ in range(20):  # a locked address's tries are not looked at and do not count against the name
+            self.login("david", "nope", address=("10.0.0.7", 1))
+        self.assertEqual(self.login("david", "first-password", address=("10.0.0.9", 1))[1].status_code, 200)
+
+    def test_the_lock_lifts_when_the_ten_minutes_pass(self):
+        self.setup_admin()
+        start = time.time()
+        with patch("core.try_limits.time.time", return_value=start):
+            for _ in range(auth_routes.LOGIN_TRIES_PER_ADDRESS):
+                self.login("david", "nope", address=("10.0.1.1", 1))
+            self.assertEqual(self.login("david", "first-password", address=("10.0.1.1", 1))[1].status_code, 429)
+        with patch("core.try_limits.time.time", return_value=start + auth_routes.LOGIN_WINDOW_SECONDS - 5):
+            self.assertEqual(self.login("david", "first-password", address=("10.0.1.1", 1))[1].status_code, 429)
+        with patch("core.try_limits.time.time", return_value=start + auth_routes.LOGIN_WINDOW_SECONDS + 1):
+            self.assertEqual(self.login("david", "first-password", address=("10.0.1.1", 1))[1].status_code, 200)
+
+    def test_a_right_sign_in_does_not_wipe_the_count(self):
+        self.setup_admin()
+        self.add_member()
+        for _ in range(auth_routes.LOGIN_TRIES_PER_ADDRESS - 1):
+            self.assertEqual(self.login("david", "nope", address=("10.0.2.1", 1))[1].status_code, 401)
+        self.assertEqual(self.login("member", "member-password", address=("10.0.2.1", 1))[1].status_code, 200,
+                         "one's own account still signs in")
+        self.assertEqual(self.login("david", "nope", address=("10.0.2.1", 1))[1].status_code, 401)
+        self.assertEqual(self.login("david", "first-password", address=("10.0.2.1", 1))[1].status_code, 429,
+                         "signing in to one's own account buys no more guesses at another")
+
+    def test_many_addresses_cannot_share_out_one_accounts_guesses(self):
+        self.setup_admin()
+        self.add_member()
+        for n in range(auth_routes.LOGIN_TRIES_PER_USERNAME):
+            self.assertEqual(self.login("david", "nope", address=(f"10.0.3.{n + 1}", 1))[1].status_code, 401)
+        locked = self.login("david", "first-password", address=("10.0.3.200", 1))[1]
+        self.assertEqual((locked.status_code, locked.json()), (429, {"detail": auth_routes.LOGIN_LOCKED}))
+        self.assertEqual(self.login("member", "member-password", address=("10.0.3.200", 1))[1].status_code, 200, "only that name is held")
+        for local in ("127.0.0.1", "::1"):
+            self.assertEqual(self.login("david", "first-password", address=(local, 1))[1].status_code, 200,
+                             "the owner at this computer is never locked out by tries from the network")
+
+    def test_this_computer_is_still_held_to_the_per_address_count(self):
+        self.setup_admin()
+        for _ in range(auth_routes.LOGIN_TRIES_PER_ADDRESS):
+            self.assertEqual(self.login("david", "nope", address=("127.0.0.1", 1))[1].status_code, 401)
+        self.assertEqual(self.login("david", "first-password", address=("127.0.0.1", 1))[1].status_code, 429)
+
+    def test_a_wrong_two_step_code_counts_and_a_missing_one_does_not(self):
+        self.setup_admin()
+        totp = self.enroll(self.client)
+        self.client.post("/api/auth/totp/confirm", json={"code": totp.now()})
+        wrong = "123456" if totp.now() != "123456" else "654321"
+        for _ in range(8):  # the sign-in page sends the password alone first, every time
+            self.assertEqual(self.login("david", "first-password", address=("10.0.4.1", 1))[1].status_code, 401)
+        self.assertEqual(self.login("david", "first-password", totp.now(), address=("10.0.4.1", 1))[1].status_code, 200)
+        for _ in range(auth_routes.LOGIN_TRIES_PER_ADDRESS):
+            self.assertEqual(self.login("david", "first-password", wrong, address=("10.0.4.1", 1))[1].status_code, 401)
+        self.assertEqual(self.login("david", "first-password", totp.now(), address=("10.0.4.1", 1))[1].status_code, 429)
+
+    def test_an_unknown_name_costs_a_password_check_like_a_known_one(self):
+        self.setup_admin()
+        with patch.object(auth_module.bcrypt, "checkpw", wraps=auth_module.bcrypt.checkpw) as checked:
+            self.login("nobody", "nope", address=("10.0.5.1", 1))
+            self.login("david", "nope", address=("10.0.5.2", 1))
+        self.assertEqual(checked.call_count, 2, "no faster answer for a name that does not exist")
 
     def test_logout_ends_the_session_for_good(self):
         self.setup_admin()
