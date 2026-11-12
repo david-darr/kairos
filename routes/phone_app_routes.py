@@ -105,7 +105,8 @@ async def pair_claim(body: ClaimBody, request: Request, response: Response) -> d
     """The phone's side of pairing. No sign-in: the code is the proof. Answers the token, once."""
     address = request.client.host if request.client else None
     try:
-        made = phone_devices.claim(body.code.strip(), address, body.device_name, body.device_model, body.app_version)
+        # The settings page shows the code as "482 913"; spaces a person typed along with it are not part of it.
+        made = phone_devices.claim("".join(body.code.split()), address, body.device_name, body.device_model, body.app_version)
     except phone_devices.PairError as error:
         headers = {"Retry-After": str(error.retry_after)} if error.retry_after else None
         raise HTTPException(status_code=error.status, detail=error.detail, headers=headers)

@@ -163,7 +163,7 @@ class Pairing(Base):
 
     def test_a_code_works_once(self):
         code = self.start()["code"]
-        self.assertEqual(self.claim(code).status_code, 200)
+        self.assertEqual(self.claim(f" {code[:3]} {code[3:]} ").status_code, 200, "typed with the space the settings page shows")
         again = self.claim(code)
         self.assertEqual((again.status_code, again.json()), (400, WRONG))
 
@@ -230,7 +230,7 @@ class Pairing(Base):
 
     def test_a_code_of_the_wrong_shape_is_a_wrong_try_not_a_free_one(self):
         self.start()
-        for bad in ("", "12345", "1234567", "abcdef", "１２３４５６", "12 34 56"):
+        for bad in ("", "12345", "1234567", "abcdef", "１２３４５６", "12-34-56"):
             reset_limits()
             self.start()
             r = self.claim(bad)
