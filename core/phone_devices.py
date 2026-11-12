@@ -295,7 +295,12 @@ def token_hash(token: str) -> str:
 
 
 def route_allowed(path: str) -> bool:
-    """May a phone token open this path at all? (What the account may do there is the route's own check.)"""
+    """May a phone token open this path at all? (What the account may do there is the route's own check.)
+    The path is judged as the router would come to see it: doubled slashes folded and a trailing slash dropped
+    (the router redirects one to the other), so no spelling of a desktop-only path reads as some other path."""
+    path = re.sub(r"/{2,}", "/", path or "")
+    if len(path) > 1:
+        path = path.rstrip("/")
     return not any(rule.fullmatch(path) for rule in DESKTOP_ONLY)
 
 

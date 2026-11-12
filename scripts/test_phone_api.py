@@ -359,6 +359,20 @@ class TokenSignIn(Base):
         self.assertFalse(phone_devices.pairing_waiting("ana"), "a phone cannot start pairing another phone")
         self.assertEqual(self.ana.get("/api/auth/status").status_code, 200, "who am I stays open")
 
+    def test_no_spelling_of_a_desktop_only_path_slips_past(self):
+        for path in ("/api/auth/users/", "/api/auth//users", "//api/auth/users", "/api/remote/", "/api/remote",
+                     "/api/auth/status/x", "/api/system/backup", "/api/system/backup/full/", "/api/phone/pair/start/",
+                     "/api/phone//pair/start", "/api/auth/cli/session"):
+            self.assertFalse(phone_devices.route_allowed(path), path)
+        for path in ("/api/auth/status", "/api/auth/status/", "/api/notes", "/api/phone/pair/claim", "/api/phone/devices", "/api/system/status",
+                     "/api/authors", "/api/remotes"):
+            self.assertTrue(phone_devices.route_allowed(path), path)
+        for path in ("/api/auth/users/", "/api/remote/status/", "/api/phone/pair/start/"):
+            r = self.ana.request("POST" if path.endswith("start/") else "GET", path, follow_redirects=False)
+            self.assertEqual(r.status_code, 403, path)
+        self.assertEqual(self.ana.get("/api/auth/users%2F").status_code, 403)
+        self.assertNotEqual(self.ana.get("/api/%61uth/users").status_code, 200, "an escaped letter is the same path to the server")
+
     def test_the_route_dependency_refuses_a_desktop_only_path_even_without_the_middleware(self):
         from fastapi import Depends, FastAPI
         bare = FastAPI()

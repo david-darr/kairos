@@ -304,7 +304,12 @@ _DEFAULT_PREFERENCES = {"completed": True, "failed": True, "permission": True,
 
 
 def is_phone(row) -> bool:
-    return str(row["endpoint"] or "").startswith(PHONE_ENDPOINT)
+    """Is this devices row (or outbox item joined to one) a paired phone's? A row with no endpoint is not."""
+    try:
+        endpoint = row["endpoint"]
+    except (KeyError, IndexError):
+        return False
+    return str(endpoint or "").startswith(PHONE_ENDPOINT)
 
 
 def _phone_ready() -> bool:
