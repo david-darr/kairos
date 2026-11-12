@@ -160,7 +160,9 @@ class PushRegistration(BaseModel):
 
 class ActivityRegistration(BaseModel):
     activity_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
-    kind: str = Field(pattern=r"^chat_run$")
+    # The phone's own names for live work (its ActivityKind), "chat_run" from the contract's example, and "start"
+    # for the token that starts an activity from outside.
+    kind: str = Field(pattern=r"^(chat_run|reply|task|team|render|forge|call|start)$")
     push_token: str = Field(pattern=r"^[0-9a-fA-F]{32,512}$")
 
 
@@ -185,8 +187,12 @@ async def push_unregister(request: Request, user: str = Depends(require_user)) -
 @router.post("/push/activity", status_code=204)
 async def push_activity(body: ActivityRegistration, request: Request, user: str = Depends(require_user)) -> Response:
     """A Live Activity's own push token, so this desktop can update it while the app is closed. `activity_id` is
-    the chat turn's id (the live stream's `turnId`), and it must be one of this account's own."""
+    the chat turn's id (the live stream's `turnId`), and it must be one of this account's own: the desktop follows
+    chat turns, whatever kind the phone calls them. The one other id is "push-to-start" (kind "start"), the token
+    for starting an activity from outside; it is kept and not used yet."""
     device = _this_phone(request)
+    if (body.kind == "start") != (body.activity_id == mobile_activity.PUSH_TO_START):
+        raise HTTPException(status_code=422, detail="The push-to-start token is sent as activity push-to-start, kind start.")
     try:
         mobile_activity.phone_set_activity(user, device["id"], body.activity_id, body.kind, body.push_token)
     except LookupError:

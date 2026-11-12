@@ -121,6 +121,8 @@
 .set-mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 11.5px; }
 /* Pair the iPhone app (Remote Access, static/js/iphonePairing.js): the address and the six digits someone reads
    off this screen and types into a phone, so both are large, spaced and selectable. */
+/* The setup checklist ends in a note; the pairing sections follow it. */
+.set-note + .set-section.set-pair { margin-top: 24px; }
 .set-pair-label { margin-top: 10px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-faint); }
 .set-pair-address { font-size: 13px; color: var(--text); overflow-wrap: anywhere; user-select: all; }
 .set-pair-code {

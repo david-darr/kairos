@@ -395,19 +395,30 @@ def phone_set_relay(device_id, relay) -> None:
             db.execute("UPDATE devices SET subscription=? WHERE id=?", (json.dumps(subscription), device_id))
 
 
+PUSH_TO_START = "push-to-start"
+
+
 def phone_set_activity(owner, device_id, activity_id, kind, push_token) -> None:
     """A Live Activity's own push token, for one of this person's own chat runs. LookupError when the run is not
-    theirs (or not there). A run that already ended gets its closing update at once."""
+    theirs (or not there). A run that already ended gets its closing update at once.
+
+    The phone also sends the token that lets a Live Activity be started for it from outside, as the activity
+    "push-to-start". It is kept with the phone and not used yet: when to start one, and what its title may say
+    to the relay, is not decided (specs/phone-api.md)."""
     now = time.time()
     with database() as db:
-        run = db.execute("SELECT * FROM activity WHERE id=? AND owner=?", (activity_id, owner)).fetchone()
-        if not run:
+        run = None if activity_id == PUSH_TO_START else db.execute("SELECT * FROM activity WHERE id=? AND owner=?", (activity_id, owner)).fetchone()
+        if not run and activity_id != PUSH_TO_START:
             raise LookupError(activity_id)
         row = _phone_row(db, device_id)
         if row and row["owner"] != owner:
             raise LookupError(activity_id)
         subscription = json.loads(row["subscription"]) if row else {"phone": device_id, "apns_token": None, "voip_token": None,
                                                                     "environment": "production", "locale": ""}
+        if activity_id == PUSH_TO_START:
+            subscription["push_to_start"] = {"push_token": push_token.lower(), "at": now}
+            _save_phone(db, owner, device_id, subscription, row)
+            return
         kept = {k: v for k, v in (subscription.get("activities") or {}).items() if v.get("at", 0) > now - ACTIVITY_KEEP_SECONDS and k != activity_id}
         for stale in sorted(kept, key=lambda k: kept[k]["at"])[:max(0, len(kept) - (MAX_ACTIVITIES - 1))]:
             del kept[stale]
@@ -430,8 +441,7 @@ def phone_drop_activity(device_id, push_token) -> None:
 
 def _enqueue_activity(db, run_id, owner, snap) -> None:
     """A chat run changed state (running, waiting on a permission, finished): one update for each of the owner's
-    phones showing a Live Activity for it. The state object is generic on purpose: a phase, a count of steps and
-    a time. Never text from the chat."""
+    phones showing a Live Activity for it. Only the phase travels, never text from the chat."""
     if not _phone_ready():
         return
     now = time.time()
@@ -441,10 +451,10 @@ def _enqueue_activity(db, run_id, owner, snap) -> None:
         activity = (subscription.get("activities") or {}).get(run_id)
         if not activity:
             continue
+        # Only the state and when the run began: core/phone_push.py turns them into the phone's own content state.
         payload = {"kind": "activity", "event": "end" if ended else "update", "push_token": activity["push_token"],
-                   "activity_kind": activity.get("kind") or "chat_run",
-                   "content_state": {"phase": snap["state"], "steps": len(snap.get("tool_steps") or []),
-                                     "updated_at": int(snap.get("updated_at") or now)}}
+                   "activity_kind": activity.get("kind") or "reply", "state": snap["state"],
+                   "started_at": snap.get("started_at") or now}
         event_id = hashlib.sha256(f"{device['id']}:activity:{run_id}:{snap.get('revision')}:{payload['event']}".encode()).hexdigest()
         expiry = now + (3600 if ended else 300)
         db.execute("INSERT OR IGNORE INTO outbox(id,device_id,run_id,kind,permission_id,payload,expires,next_attempt) VALUES(?,?,?,?,?,?,?,?)",
@@ -511,7 +521,8 @@ def enqueue(run_id, kind, permission=None):
         payload = {"title": "Kairos", "body": text, "url": "/?chat=" + run["session_id"],
                    "tag": "kairos-" + run_id, "kind": kind, "expires_at": expiry}
         # A phone's push carries no text at all (the relay writes the sentence): only what kind, and ids to open.
-        phone_payload = {"kind": kind, "session_id": run["session_id"], "collapse_id": "kairos-" + run_id, "expires_at": expiry,
+        phone_payload = {"kind": kind, "session_id": run["session_id"], "run_id": run_id, "collapse_id": "kairos-" + run_id,
+                         "expires_at": expiry, **({"request_id": permission["id"]} if (permission or {}).get("id") else {}),
                          **({"ask": "question"} if kind == "permission" and (permission or {}).get("kind") == "question" else {})}
         phones = _phone_ready()
         for device in db.execute("SELECT * FROM devices WHERE owner=?", (run["owner"],)).fetchall():
@@ -618,10 +629,13 @@ def close_ring(ring_id, outcome="", bot_name=""):
         db.execute("UPDATE outbox SET status='expired' WHERE run_id=? AND kind='bot_call' AND status='pending'", (ring_id,))
         if not outcome:
             return
-        # Browsers only: the relay has no "that call ended" push, so a phone asks GET /api/rings/{id} instead.
+        # A phone is told too, once the relay can send it a background push (never a call push: each of those must
+        # show an incoming call). Until then a phone asks GET /api/rings/{id} and nothing is queued for it.
+        from core import phone_push
+        phones = PHONE_ROWS if not (_phone_ready() and "ring_end" in phone_push.RELAY_KINDS) else ""
         rung = [row[0] for row in db.execute("SELECT DISTINCT o.device_id FROM outbox o JOIN devices d ON d.id=o.device_id "
                                              "WHERE o.run_id=? AND o.kind='bot_call' AND o.status='sent' AND d.endpoint NOT LIKE ?",
-                                             (ring_id, PHONE_ROWS))]
+                                             (ring_id, phones))]
         name = str(bot_name or "A bot")[:60]
         payload = json.dumps({"kind": "bot_call_end", "ring_id": ring_id, "tag": "kairos-ring-" + ring_id, "outcome": outcome,
                               "bot_name": name, "url": "/", "expires_at": now + RING_END_SECONDS})

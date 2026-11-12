@@ -738,6 +738,7 @@ class Relay:
     def __init__(self):
         self.installs, self.seen, self.denied, self.pushes, self.deleted = {}, [], 0, [], []
         self.answers = []           # statuses to answer the next pushes with, instead of sending
+        self.takes_ring_end = False
         relay = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -806,6 +807,8 @@ class Relay:
         """What the real relay refuses (its apns.js builders), so a shape it would reject fails here too."""
         allowed = {"alert": {"kind", "what", "who", "collapse_id"}, "ring": {"kind", "ring_id", "expires_at", "who"},
                    "activity": {"kind", "event", "push_token", "content_state", "stale_date", "dismissal_date"}}
+        if self.takes_ring_end:     # not in the real relay yet; switched on by the one test that looks ahead
+            allowed["ring_end"] = {"kind", "ring_id", "outcome"}
         if body.get("kind") not in allowed or set(body) - allowed[body["kind"]]:
             return 400, {"error": "bad_kind", "message": "x"}
         if body["kind"] == "alert" and body.get("what") not in self.ALERTS:
@@ -1050,6 +1053,58 @@ class Push(Base):
         self.assertEqual(len(self.relay.pushes), 1)
         self.assertEqual(self.ana.get(f"/api/rings/{ring['id']}").json()["status"], "declined")
 
+    def test_the_end_of_a_ring_is_never_a_call_push(self):
+        # The phone wants the end of a ring as a background push (every call push must show an incoming call). The relay
+        # has no such push yet, so today nothing is queued or sent for it; the day it has one, this is what goes out.
+        self.assertIsNone(phone_push.message_for("bot_call_end", {"ring_id": "r1", "outcome": "answered"}, {"voip_token": VOIP}))
+        self.register(voip_token=VOIP)
+        account = auth_manager.account_id("ana")
+        now = time.time()
+        ring = {"id": uuid.uuid4().hex, "bot_id": "bot1", "agent_id": "bot1", "bot_name": "Kip", "owner": "ana", "reason": "x",
+                "created_at": now, "expires_at": now + 60, "status": rings.RINGING, "invocation_id": "i9"}
+        with rings._lock:
+            rings._save(account, [ring])
+        self.relay.takes_ring_end = True
+        self.addCleanup(setattr, self.relay, "takes_ring_end", False)
+        with patch.object(phone_push, "RELAY_KINDS", phone_push.RELAY_KINDS | {"ring_end"}):
+            mobile_activity.enqueue_ring("ana", ring)
+            self.deliver()
+            with patch.object(rings, "_missed_item"):
+                rings.decline(account, "ana", ring["id"])
+            self.assertEqual([row["kind"] for row in self.outbox()], ["bot_call", "bot_call_end"])
+            self.deliver()
+        self.assertEqual([body["kind"] for _, body in self.relay.pushes], ["ring", "ring_end"])
+        self.assertEqual(self.relay.pushes[-1][1], {"kind": "ring_end", "ring_id": ring["id"], "outcome": "declined"})
+        self.assertEqual(self.relay.denied, 0)
+
+    def test_what_the_phone_reads_is_built_and_only_what_the_relay_takes_is_sent(self):
+        # kairos-ios docs/coverage/native.md "Push payload": the fields a tap and the action buttons need.
+        approval = phone_push.native_alert("permission", {"session_id": "s1", "run_id": "t1", "request_id": "p1", "agent_id": "b1"})
+        self.assertEqual(approval, {"native_kind": "approval", "category": "kairos.approval", "link": "kairos-agents://approval/p1?bot=b1",
+                                    "interruption_level": "time-sensitive", "thread_id": "bot-b1", "request_id": "p1",
+                                    "activity_id": "t1", "activity_kind": "reply"})
+        question = phone_push.native_alert("permission", {"session_id": "s1", "request_id": "q1", "ask": "question"})
+        self.assertEqual((question["category"], question["link"]), ("kairos.question", "kairos-agents://approval/q1"))
+        self.assertEqual(phone_push.native_alert("completed", {"session_id": "s1", "run_id": "t1"})["link"], "kairos-agents://chat/s1")
+        self.assertEqual(phone_push.native_alert("completed", {"session_id": "s1"})["category"], "kairos.replyReady")
+        self.assertEqual(phone_push.native_alert("failed", {"session_id": "s1"})["category"], "kairos.workFailed")
+        self.assertEqual(phone_push.native_alert("bot_results", {"agent_id": "b1"}),
+                         {"native_kind": "workDone", "category": "kairos.workDone", "link": "kairos-agents://bot/b1",
+                          "interruption_level": "active", "thread_id": "bot-b1"})
+        self.assertEqual(phone_push.native_alert("bot_needs_you", {"agent_id": "b1"})["category"], "kairos.question")
+        # Today the relay takes four alert fields and three ring fields; the rest stays here.
+        payload = {"session_id": "s1", "run_id": "t1", "request_id": "p1", "agent_id": "b1", "who": "Scout", "collapse_id": "kairos-t1"}
+        self.assertEqual(phone_push.message_for("permission", payload, {}),
+                         {"kind": "alert", "what": "approval", "who": "Scout", "collapse_id": "kairos-t1"})
+        ring = phone_push.message_for("bot_call", {"ring_id": "r1", "agent_id": "b1", "who": "Kip", "expires_at": time.time() + 60}, {"voip_token": VOIP})
+        self.assertEqual(set(ring), {"kind", "ring_id", "who", "expires_at"})
+        with patch.dict(phone_push.RELAY_FIELDS, {"alert": phone_push.RELAY_FIELDS["alert"] | {"link", "category", "request_id"},
+                                                  "ring": phone_push.RELAY_FIELDS["ring"] | {"agent_id", "bot_name"}}):
+            wider = phone_push.message_for("permission", payload, {})
+            self.assertEqual((wider["link"], wider["category"], wider["request_id"]), ("kairos-agents://approval/p1?bot=b1", "kairos.approval", "p1"))
+            ring = phone_push.message_for("bot_call", {"ring_id": "r1", "agent_id": "b1", "who": "Kip", "expires_at": time.time() + 60}, {"voip_token": VOIP})
+            self.assertEqual((ring["agent_id"], ring["bot_name"]), ("b1", "Kip"))
+
     def test_a_ring_that_already_ended_is_not_sent_and_a_phone_without_a_call_token_gets_an_alert(self):
         self.register()   # no VoIP token
         account = auth_manager.account_id("ana")
@@ -1077,9 +1132,16 @@ class Push(Base):
         self.assertEqual(BROWSERS["ana"].post("/api/phone/push/activity", json=body).status_code, 403, "a phone's own call")
         self.assertEqual(self.ana.post("/api/phone/push/activity", json={**body, "activity_id": bens_run}).status_code, 404, "not her run")
         self.assertEqual(self.ana.post("/api/phone/push/activity", json={**body, "activity_id": "nosuchrun"}).status_code, 404)
-        for bad in ({**body, "kind": "anything"}, {**body, "push_token": "xyz"}, {**body, "activity_id": "a/b"}):
+        for bad in ({**body, "kind": "anything"}, {**body, "push_token": "xyz"}, {**body, "activity_id": "a/b"},
+                    {**body, "kind": "start"}, {**body, "activity_id": "push-to-start"}):
             self.assertEqual(self.ana.post("/api/phone/push/activity", json=bad).status_code, 422, bad)
-        r = self.ana.post("/api/phone/push/activity", json=body)
+        for kind in ("task", "team", "render", "forge", "call"):   # the phone's other kinds: taken for a run that is hers
+            self.assertEqual(self.ana.post("/api/phone/push/activity", json={**body, "kind": kind}).status_code, 204, kind)
+            self.assertEqual(self.ana.post("/api/phone/push/activity", json={**body, "kind": kind, "activity_id": "ring-or-job-1"}).status_code, 404, kind)
+        start = self.ana.post("/api/phone/push/activity", json={"activity_id": "push-to-start", "kind": "start", "push_token": "e5" * 40})
+        self.assertEqual(start.status_code, 204, "the push-to-start token is kept with the phone")
+        self.assertEqual(mobile_activity.phone_registration(self.device)["push_to_start"]["push_token"], "e5" * 40)
+        r = self.ana.post("/api/phone/push/activity", json={**body, "kind": "reply"})
         self.assertEqual((r.status_code, r.content), (204, b""))
         mobile_activity.publish(run_id, {"chunk": "MORE-PRIVATE-TEXT"})                     # no change of state: no push
         mobile_activity.publish(run_id, {"permission": {"id": "p1", "expires_at": time.time() + 300}})
@@ -1089,11 +1151,16 @@ class Push(Base):
         mobile_activity.publish(run_id, {}, "completed")
         self.deliver()
         sent = [body for _, body in self.relay.pushes]
-        self.assertEqual([(b["kind"], b["event"], b["content_state"]["phase"]) for b in sent],
-                         [("activity", "update", "awaiting_permission"), ("activity", "update", "running"), ("activity", "end", "completed")])
+        self.assertEqual([(b["kind"], b["event"], b["content_state"]["phase"], b["content_state"]["step"]) for b in sent],
+                         [("activity", "update", "waiting", "Waiting for you"), ("activity", "update", "running", "Working"),
+                          ("activity", "end", "done", "Done")])
         self.assertEqual({b["push_token"] for b in sent}, {ACTIVITY_TOKEN})
-        self.assertEqual(set(sent[-1]["content_state"]), {"phase", "steps", "updated_at"})
-        self.assertEqual(sent[-1]["content_state"]["steps"], 1)
+        # Every key the phone's ContentState decodes (kairos-ios KairosActivity.swift), and nothing of the chat's.
+        state = sent[-1]["content_state"]
+        self.assertEqual(set(state), {"phase", "step", "detail", "stage", "helpers", "startedAt", "muted"})
+        self.assertEqual((state["detail"], state["stage"], state["helpers"], state["muted"]), ("", 0, [], False))
+        started = mobile_activity.read_run(run_id)["snapshot"]["started_at"]
+        self.assertAlmostEqual(state["startedAt"], started - 978307200, places=3, msg="seconds since 2001, as ActivityKit reads a Date")
         self.assertIn("stale_date", sent[0])
         self.assertIn("dismissal_date", sent[-1])
         for private in ("MORE-PRIVATE-TEXT", "PRIVATE-STEP", "THE-PRIVATE-CHAT-TITLE"):

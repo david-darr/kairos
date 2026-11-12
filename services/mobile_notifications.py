@@ -184,7 +184,8 @@ async def _deliver_phone(client, item, session):
         return
     registration = json.loads(item["subscription"])
     payload = json.loads(item["payload"])
-    message = phone_push.message_for(item["kind"], {**payload, "who": _who(item, payload, session)}, registration)
+    bot_id = payload.get("agent_id") or (session or {}).get("agent_id")
+    message = phone_push.message_for(item["kind"], {**payload, "who": _who(item, payload, session), "agent_id": bot_id}, registration)
     if message is None:
         store.phone_result(item, "skipped")
         return

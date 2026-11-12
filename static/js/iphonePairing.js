@@ -28,7 +28,7 @@ function lastUsed(iso) {
 // remote access is off (the server sends its own value with each code; this one is for the note before one is made).
 export function iphonePairing({ ready, address }) {
   if (!ready) {
-    return [group({ title: "Pair the iPhone app" }, [row({
+    return [group({ title: "Pair the iPhone app", cls: "set-pair" }, [row({
       title: "Set up remote access first",
       description: "The Kairos iPhone app signs in to your Kairos login and reaches this computer through remote access. Finish the steps above, then pair your phone here.",
       control: pill("Not ready", "muted") })])];
@@ -41,7 +41,7 @@ export function iphonePairing({ ready, address }) {
 
   // -- the code ---------------------------------------------------------------------------------------------
   const codeRow = el("div");
-  const pairSection = group({ title: "Pair the iPhone app",
+  const pairSection = group({ title: "Pair the iPhone app", cls: "set-pair",
     description: "Sign the Kairos iPhone app in to your account with a one-time code. Your password is never typed on the phone." }, [codeRow]);
 
   function showStart(message) {

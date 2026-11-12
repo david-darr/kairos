@@ -156,13 +156,42 @@ posts to the Kairos push relay at the address in settings (`phone_push_relay_url
 | bot needs you (`bot_needs_you`) | alert `needs_you` |
 | bot results (`bot_results`) | alert `done` |
 | a bot rings (`bot_call`) | `ring` with `ring_id`, `expires_at`, `who`; once, not the browser's three |
-| a ring ended (`bot_call_end`) | nothing; the phone asks `GET /api/rings/{id}` |
+| a ring ended (`bot_call_end`) | nothing yet (see below); the phone asks `GET /api/rings/{id}` |
 | a chat run changes state | `activity` `update` or `end` to that Live Activity's own token |
 
 `who` is the bot's name (looked up in the owner's own account) or "Kairos". A bot's push goes only to phones of the
-account the bot belongs to. The Live Activity `content_state` is `{"phase", "steps", "updated_at"}`: phase is
-`running`, `awaiting_permission`, `completed`, `failed`, `stopped` or `interrupted`; steps is a count; nothing from
-the chat. Updates are sent on a change of phase, not per step or per word.
+account the bot belongs to.
+
+### Built to the phone's native contract
+
+The phone's side is `docs/coverage/native.md` in `kairos-ios` ("Push payload"). `core/phone_push.py` `message_for()`
+builds each push in full to that contract, then keeps only the fields the relay accepts today (`RELAY_KINDS`,
+`RELAY_FIELDS`). When the relay learns a field or a kind, it is added to those two constants and nothing else changes.
+
+- **Live Activity content state** is the phone's `KairosActivityAttributes.ContentState`, every key it decodes:
+  `{"phase", "step", "detail", "stage", "helpers", "startedAt", "muted"}`. Phase: running is `running`, waiting on a
+  permission is `waiting`, completed is `done`, failed is `failed`, stopped or interrupted is `stopped`. `step` is
+  one of five fixed phrases ("Working", "Waiting for you", "Done", "Couldn't finish", "Stopped"); `detail` is empty,
+  `helpers` is empty, there is no `progress`: those would be the chat's own words. `startedAt` is seconds since
+  2001-01-01, which is how ActivityKit reads a date. Updates go out on a change of phase, not per step or per word.
+- **Which activities.** The desktop follows chat turns (the phone's `reply` kind). `push/activity` takes the
+  phone's kind names (`reply`, `task`, `team`, `render`, `forge`, `call`, and `chat_run` from the contract's example)
+  for an `activity_id` that is one of the caller's own chat turns; any other id answers `404`. Task, team, render,
+  forge and call activities have nothing on the desktop that pushes their state yet.
+- **Push-to-start.** The phone sends its push-to-start token as activity `push-to-start`, kind `start`. It is stored
+  with the phone and not used: the desktop sends no `start` push. Open decisions: when a turn is long enough to start
+  one, and what title and link may go to the relay in the activity's attributes.
+- **The end of a ring** is built as a background push, `{"kind": "ring_end", "ring_id", "outcome"}`, never a call
+  (VoIP) push, because every call push must show an incoming call. The relay has no background push, so `ring_end`
+  is not in `RELAY_KINDS`: nothing is queued or sent for a phone today. The relay request shape is the desktop's
+  proposal; the Apple payload the phone reads is `{"kind": "bot_call_end", "ring_id", "outcome"}` with outcome
+  `answered`, `declined` or `missed`.
+- **Alerts.** For each alert the desktop works out what the phone reads: its kind and category (`kairos.replyReady`,
+  `workFailed`, `approval`, `question`, `workDone`), the link a tap opens (`kairos-agents://chat/<id>`, `bot/<id>`,
+  `approval/<request>?bot=<id>`), `request_id`, `activity_id`, `thread_id` and the interruption level
+  (`native_alert()`). None of it is sent: the relay writes the Apple payload itself from `what` and `who`.
+- **Rings.** The phone reads `ring_id`, `agent_id`, `bot_name`, `expires_at`. The desktop builds all four; the relay
+  takes `ring_id`, `expires_at` and `who`.
 
 Relay answers: `200` sent; `401` forget the install and register again on the retry; `409`, `422` and other `4xx`
 dropped; `410` drops the phone's push registration (for an activity push, only that activity's token); `429`, `5xx`
@@ -180,31 +209,53 @@ and no answer retry with backoff, at most five times.
 4. **`next_event.starts_at` is a date (`YYYY-MM-DD`) when `all_day` is true**, and a UTC time otherwise.
 5. **`GET /api/phone/session` answers a browser session too**, with `device_id: null`.
 6. **`locale` is stored and not used.** The relay writes the sentence and has no locale.
-7. **`push/activity` accepts only `kind: "chat_run"`**, and `activity_id` must be the chat turn's id (`turnId` on
-   the live stream), for a run the caller owns.
+7. **`push/activity` takes more kinds than the contract's example**: the phone's own (`reply`, `task`, `team`,
+   `render`, `forge`, `call`), `chat_run`, and `start` with the id `push-to-start`. Except for `push-to-start`,
+   `activity_id` must be a chat turn's id (`turnId` on the live stream) for a run the caller owns, else `404`.
 8. **`server.version` is the full version string**, for example `2.3.0-beta.4`.
 
-## Where the relay's shapes do not fit
+## Where the relay carries less than the phone asks for
 
-1. No alert word for a failed chat or a test: sent as `needs_you` and `message`.
-2. No "that call ended" push, so a phone's call screen has to poll `GET /api/rings/{id}`.
-3. A ring needs a VoIP token. A phone that registered none gets a `needs_you` alert instead of a call.
-4. Live Activity `start` needs a push-to-start token, which PHONE-API.md has no route for. The desktop sends only
-   `update` and `end` to tokens of activities the app started itself.
-5. The relay accepts no locale, so alert text is English.
-6. The relay limits 30 pushes a minute per phone. The desktop sends well under that, but does not count for itself.
-7. `POST /v1/installs` is open and limited to 10 an hour per address; a desktop that keeps getting `401` would
-   re-register on each retry. The desktop retries a push at most five times, so this is bounded.
-8. The install id is part of the request address, so it appears in `httpx`'s request log lines. It is an
-   identifier, not a secret: requests still need the signature.
+The phone's contract (`native.md`) and the relay were written apart. These are the places they do not meet. Each is
+a change to the relay or the phone, not to the desktop, which already builds the missing fields.
+
+1. **A tap cannot open the exact chat or approval.** The phone reads `link`, `request_id`, `activity_id`,
+   `activity_kind` and `kind` from an alert, and `aps.category`, `thread-id` and `interruption-level`. The relay's
+   alert payload has a fixed title and sentence, a sound, and `kind` set to its own word (`message`, `needs_you`,
+   `approval`, `done`). So an alert opens the app at Home, shows no Approve, Deny or Reply buttons, is never time
+   sensitive and is not grouped by bot.
+2. **The relay's four words are not the phone's kinds.** The phone has `replyReady`, `workDone`, `workFailed`,
+   `approval`, `question` and eleven more (team, posted, spend, calendar, usage and so on). A failed chat goes out
+   as `needs_you`, a question as `needs_you`, a test as `message`. The desktop has no source yet for the phone's
+   other kinds (team updates, posts, spend, calendar reminders, the morning brief, Forge, usage).
+3. **The call screen gets no bot id and the wrong key for the name.** The relay's call payload is
+   `{kind, ring_id, expires_at, caller}`. The phone reads `agent_id` and `bot_name`, so it shows "A bot" and treats
+   the caller as Kip.
+4. **The end of a ring cannot be pushed.** The relay has no background push. Until it has, a phone's call screen
+   for a ring answered elsewhere ends when the phone asks `GET /api/rings/{id}` or the ring's own time runs out.
+5. **A ring needs a VoIP token.** A phone that registered none gets a `needs_you` alert instead of a call.
+6. **Live Activity details.** The phone's content state has a step in the work's own words, a detail line, progress
+   and helper chips. The desktop sends fixed words and leaves the rest empty, on purpose (the relay's own rule is "a
+   phase name, a percentage"). Whether the person may opt in to more is a product decision; nothing reads the phone's
+   "Show a preview" setting on the desktop.
+7. **Push-to-start is not used** (see above), and the relay's `start` adds its own alert text, "<who> is working".
+8. The relay accepts no locale, so alert text is English.
+9. The relay limits 30 pushes a minute per phone. The desktop sends well under that, but does not count for itself.
+10. `POST /v1/installs` is open and limited to 10 an hour per address; a desktop that keeps getting `401` would
+    re-register on each retry. The desktop retries a push at most five times, so this is bounded.
+11. The install id is part of the request address, so it appears in `httpx`'s request log lines. It is an
+    identifier, not a secret: requests still need the signature.
 
 ## Not verified
 
 - No real phone has paired, signed in, held a stream or a call. The Swift side has not been run against this.
 - No real relay and no Apple delivery: the sender is tested against a local stand-in written from the relay's
   README (same routes, same signature check, the same refusals), not against the deployed Worker.
-- The Live Activity `content_state` keys are the desktop's choice; the app's `ContentState` must match them.
-- The settings section was not opened in the app window or checked by eye; its Electron checks were not run.
+- The Live Activity content state was written from the phone's Swift source by reading it; no phone has decoded one.
+- The settings section was looked at once, in the offline website demo with made-up answers for its routes (remote
+  access on and off, a code showing, two phones listed). It has not been used against a real backend in the app window.
+- The other sign-in routes were not given try limits: `/api/auth/reset-password` allows five guesses per emailed code
+  and a new code every minute, and that is unchanged.
 - Tailscale's real listener: the try limits were tested with addresses the test client supplies, not over the tailnet.
 - No Cloudflare Tunnel exists yet. Behind any proxy every caller would share the proxy's address, and the
   per-address limits would need the proxy's forwarded address, trusted only from that proxy.

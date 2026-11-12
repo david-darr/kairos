@@ -39,8 +39,35 @@ ALERT_WHAT = {"completed": "message", "test": "message", "failed": "needs_you", 
               "bot_needs_you": "needs_you", "bot_results": "done"}
 RING_MIN_SECONDS_LEFT = 3       # the relay refuses a ring with less left than this, or further ahead than the max
 RING_MAX_SECONDS_AHEAD = 300
-ACTIVITY_STALE_SECONDS = 10 * 60
+ACTIVITY_STALE_SECONDS = 15 * 60    # the phone's own Live Activities go stale after fifteen minutes too
 ACTIVITY_DISMISS_SECONDS = 15 * 60
+
+# What the phone's native layer reads from a push (kairos-ios docs/coverage/native.md, "Push payload"), and
+# what the relay carries of it today. message_for() builds each push in full, to the phone's contract, and then
+# keeps only the fields the relay accepts: the relay writes the Apple payload itself and takes no free text, so
+# a link or a request id sent now would be dropped there. When the relay learns a field or a kind, it is added
+# here and nothing else changes. Until then (specs/phone-api.md lists each gap): an alert opens the app, not the
+# exact chat or approval, and has no action buttons; a call screen shows the relay's "caller" and no bot id;
+# and the end of a ring cannot be pushed at all, so the phone asks GET /api/rings/{id}.
+RELAY_KINDS = frozenset({"alert", "ring", "activity"})          # no "ring_end" (a background push) yet
+RELAY_FIELDS = {
+    "alert": frozenset({"kind", "what", "who", "collapse_id"}),
+    "ring": frozenset({"kind", "ring_id", "expires_at", "who"}),
+    "ring_end": frozenset({"kind", "ring_id", "outcome"}),
+    "activity": frozenset({"kind", "event", "push_token", "content_state", "stale_date", "dismissal_date"}),
+}
+LINK = "kairos-agents://"
+# The desktop's kinds as the phone's notification kinds (its category is "kairos.<kind>").
+NATIVE_KIND = {"completed": "replyReady", "failed": "workFailed", "permission": "approval",
+               "bot_needs_you": "question", "bot_results": "workDone"}
+TIME_SENSITIVE = frozenset({"approval", "question"})
+# A chat run's state as the phone's Live Activity phase (KairosActivityAttributes.ContentState.phase), and the
+# few fixed words shown as its step. Never words from the chat.
+ACTIVITY_PHASE = {"running": "running", "awaiting_permission": "waiting", "completed": "done", "failed": "failed",
+                  "stopped": "stopped", "interrupted": "stopped"}
+ACTIVITY_STEP = {"running": "Working", "waiting": "Waiting for you", "done": "Done", "failed": "Couldn't finish",
+                 "stopped": "Stopped"}
+APPLE_EPOCH = 978307200     # ActivityKit reads a Date as seconds since 2001-01-01, not since 1970
 
 
 def check_relay_url(url) -> str:
@@ -110,42 +137,83 @@ def install_body(registration: dict) -> Optional[dict]:
             "environment": registration.get("environment") if registration.get("environment") in ENVIRONMENTS else "production"}
 
 
-def message_for(kind: str, payload: dict, registration: dict, now: Optional[float] = None) -> Optional[dict]:
-    """One queued notification as a relay push body, or None when there is nothing to send for it.
+def native_alert(kind: str, payload: dict) -> dict:
+    """The fields the phone reads from an alert so a tap opens the exact chat or approval and the right buttons
+    show: its kind and category, where the tap goes, the request an Approve or Reply answers, the run a Retry
+    restarts. Opaque ids only. The relay carries none of these today (RELAY_FIELDS)."""
+    native = NATIVE_KIND.get(kind)
+    if kind == "permission" and payload.get("ask") == "question":
+        native = "question"
+    if native is None:
+        return {}
+    bot, session, request = payload.get("agent_id"), payload.get("session_id"), payload.get("request_id")
+    if native in ("approval", "question") and request:
+        link = f"{LINK}approval/{request}" + (f"?bot={bot}" if bot else "")
+    elif session:
+        link = f"{LINK}chat/{session}"
+    elif bot:
+        link = f"{LINK}bot/{bot}"
+    else:
+        link = f"{LINK}home"
+    fields = {"native_kind": native, "category": "kairos." + native, "link": link,
+              "interruption_level": "time-sensitive" if native in TIME_SENSITIVE else "active"}
+    if bot:
+        fields["thread_id"] = "bot-" + str(bot)
+    if request and native in ("approval", "question"):
+        fields["request_id"] = str(request)
+    if payload.get("run_id"):
+        fields["activity_id"], fields["activity_kind"] = str(payload["run_id"]), "reply"
+    return fields
 
-    A ring goes out as a call (the phone's call screen) when the phone gave a call token, else as a
-    "needs you" alert. The end of a ring has no push at the relay: the phone asks GET /api/rings/{id}."""
+
+def activity_state(payload: dict, now: float) -> dict:
+    """A chat run's state as the phone's ContentState, every key it decodes: the phase, fixed words for the
+    step, and when the run began. No detail, no progress and no helper chips: those would be the chat's own words."""
+    phase = ACTIVITY_PHASE.get(str(payload.get("state") or ""), "running")
+    return {"phase": phase, "step": ACTIVITY_STEP[phase], "detail": "", "stage": 0, "helpers": [],
+            "startedAt": float(payload.get("started_at") or now) - APPLE_EPOCH, "muted": False}
+
+
+def message_for(kind: str, payload: dict, registration: dict, now: Optional[float] = None) -> Optional[dict]:
+    """One queued notification as a relay push body, or None when there is nothing to send for it (or nothing
+    the relay can carry yet).
+
+    A ring goes out as a call (the phone's call screen) when the phone gave a call token, else as a "needs you"
+    alert. The end of a ring is a background push, never a call push: every call push must show an incoming call."""
     now = time.time() if now is None else now
     who = clean_who(payload.get("who"))
+    body = None
     if kind == "bot_call":
         expires_at = int(float(payload.get("expires_at") or 0))
         if expires_at - now < RING_MIN_SECONDS_LEFT or not payload.get("ring_id"):
             return None
-        if not registration.get("voip_token"):
-            return {"kind": "alert", "what": "needs_you", "who": who, "collapse_id": _collapse("ring-" + str(payload["ring_id"]))}
-        return {"kind": "ring", "ring_id": str(payload["ring_id"]), "who": who,
-                "expires_at": min(expires_at, int(now) + RING_MAX_SECONDS_AHEAD)}
-    if kind == "activity":
+        ring_id, bot = str(payload["ring_id"]), payload.get("agent_id")
+        if registration.get("voip_token"):
+            body = {"kind": "ring", "ring_id": ring_id, "who": who, "expires_at": min(expires_at, int(now) + RING_MAX_SECONDS_AHEAD),
+                    "agent_id": bot, "bot_name": who}
+        else:
+            body = {"kind": "alert", "what": "needs_you", "who": who, "collapse_id": _collapse("ring-" + ring_id),
+                    "link": f"{LINK}ring/{ring_id}" + (f"?bot={bot}" if bot else "")}
+    elif kind == "bot_call_end":
+        if not payload.get("ring_id"):
+            return None
+        body = {"kind": "ring_end", "ring_id": str(payload["ring_id"]), "outcome": str(payload.get("outcome") or "")}
+    elif kind == "activity":
         token = str(payload.get("push_token") or "")
         if payload.get("event") not in ("update", "end") or not ACTIVITY_TOKEN.fullmatch(token):
             return None
-        body = {"kind": "activity", "event": payload["event"], "push_token": token,
-                "content_state": payload.get("content_state") if isinstance(payload.get("content_state"), dict) else {}}
+        body = {"kind": "activity", "event": payload["event"], "push_token": token, "content_state": activity_state(payload, now)}
         if payload["event"] == "end":
             body["dismissal_date"] = int(now) + ACTIVITY_DISMISS_SECONDS
         else:
             body["stale_date"] = int(now) + ACTIVITY_STALE_SECONDS
-        return body
-    what = ALERT_WHAT.get(kind)
-    if what is None:
+    elif kind in ALERT_WHAT:
+        what = "needs_you" if kind == "permission" and payload.get("ask") == "question" else ALERT_WHAT[kind]
+        body = {"kind": "alert", "what": what, "who": who, "collapse_id": _collapse(payload.get("collapse_id")),
+                **native_alert(kind, payload)}
+    if body is None or body["kind"] not in RELAY_KINDS:
         return None
-    if kind == "permission" and payload.get("ask") == "question":
-        what = "needs_you"
-    body = {"kind": "alert", "what": what, "who": who}
-    collapse = _collapse(payload.get("collapse_id"))
-    if collapse:
-        body["collapse_id"] = collapse
-    return body
+    return {key: value for key, value in body.items() if key in RELAY_FIELDS[body["kind"]] and value is not None}
 
 
 def _collapse(value) -> Optional[str]:

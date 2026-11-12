@@ -57,6 +57,9 @@ BY_DESIGN = {
     # Added 2026-11-10: the TikTok and Instagram sign-in return, like Google's: state-checked, 400 without one.
     "/api/content-studio/social/callback/{platform}": "browser redirect from TikTok or Meta; state-checked, 400 without it",
     "/api/cli/local-path": "paired Kairos CLI on loopback; checks inside the handler (422 here is body validation first)",
+    # Added 2026-11-12: the Kairos iPhone app trades a one-time pairing code for its device token. The code is the only
+    # proof (six digits, ten minutes, one use) and wrong tries are limited per address and per code (scripts/test_phone_api.py).
+    "/api/phone/pair/claim": "the iPhone app's pairing claim; the code is the proof, 400 or 429 without the right one (422 here is the empty body)",
 }
 # Add-on gate runs as a router dependency BEFORE the auth dependency, so an
 # anonymous caller gets 409 (add-on off) instead of 401. Nothing is executed;
