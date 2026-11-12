@@ -6,6 +6,7 @@ resolves to the single local user with admin rights — no login screen, no
 friction, matching the "single trusted user on their own machine" case.
 """
 import asyncio
+import json
 import re
 import secrets
 from typing import Optional
@@ -14,6 +15,7 @@ from fastapi import Request, HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from core import auth as auth_module
+from core import phone_devices
 from core.auth import auth_manager, auth_enabled, SESSION_COOKIE_NAME, SINGLE_USER, UI_COOKIE_NAME
 from core.constants import APP_PORT
 
@@ -174,17 +176,38 @@ def get_current_user(request: Request) -> Optional[str]:
     if not auth_enabled():
         return SINGLE_USER if local_access_open(request) else None
 
+    # A paired phone (core/phone_devices.py) signs in with "Authorization: Bearer kph_..." in place of the
+    # session cookie. It is that account and nothing more: every check after this one is the same as for a
+    # browser. A request that shows a phone token is judged by the token alone, never by a cookie beside it,
+    # so a removed phone gets "sign in again" and not somebody else's open session.
+    phone_token = phone_devices.presented_token(request)
+    if phone_token is not None:
+        device = phone_devices.resolve(phone_token)
+        if device is None or not phone_devices.route_allowed(request.scope.get("path") or ""):
+            return None
+        return device["username"]
+
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if not token:
         return None
     return auth_manager.validate_session(token)
 
 
-# Long-lived connections end with their session (account switcher review, 2026-11-11). A websocket (a realtime call)
+def phone_device(request: Request) -> Optional[dict]:
+    """The paired phone this request is signed in as (its id, name and account), or None for a browser
+    session or nobody. For the few routes that act on the calling phone itself (routes/phone_app_routes.py)."""
+    if not auth_enabled():
+        return None
+    return phone_devices.device_for(request)
+
+
+# Long-lived connections end with their sign-in (account switcher review, 2026-11-11; paired phones, 2026-11-12). A websocket (a realtime call)
 # or a streamed response (the live chat feed) is signed in once, when it opens; switching accounts, signing out or a
 # password change ends that session, and the connection must not keep serving the old account. Every connection
 # opened with a session is registered here; core/auth.py tells us when sessions end, and each connection is also
-# re-checked every SESSION_RECHECK_SECONDS (an expired session, a deleted account).
+# re-checked every SESSION_RECHECK_SECONDS (an expired session, a deleted account). A connection opened with a
+# paired phone's token is registered the same way, under "phone:<device id>" (a key no session token can equal:
+# session tokens have no colon), and ends when that phone is unpaired or its account's password changes.
 SESSION_RECHECK_SECONDS = 15
 _STREAM_TYPES = {b"text/event-stream", b"application/x-ndjson", b"application/jsonl"}
 _live_sessions: dict = {}  # session token -> set of (event loop, asyncio.Event)
@@ -200,6 +223,7 @@ def _sessions_ended(tokens) -> None:
 
 
 auth_module.revoke_listeners.append(_sessions_ended)
+phone_devices.ended_listeners.append(lambda device_ids: _sessions_ended(["phone:" + d for d in device_ids]))
 
 
 class _SessionGuard:
@@ -208,8 +232,10 @@ class _SessionGuard:
     and the app reads a disconnect, so the stream stops. Any other reply goes out whole: the switch and sign-out
     routes end the very session they came with, and their answers must still arrive."""
 
-    def __init__(self, scope, receive, send, session):
+    def __init__(self, scope, receive, send, session, still_valid=None):
         self.kind, self.session = scope["type"], session
+        # How the periodic re-check asks "is this sign-in still good": a session cookie by default.
+        self.still_valid = still_valid or (lambda: auth_manager.validate_session(session) is not None)
         self._receive, self._send = receive, send
         self.ended = asyncio.Event()
         self.entry = (asyncio.get_running_loop(), self.ended)
@@ -223,7 +249,7 @@ class _SessionGuard:
             try:
                 await asyncio.wait_for(self.ended.wait(), SESSION_RECHECK_SECONDS)
             except asyncio.TimeoutError:
-                if auth_manager.validate_session(self.session) is None:
+                if not self.still_valid():
                     self.ended.set()
 
     async def _finish(self):
@@ -287,7 +313,10 @@ class AccountContextMiddleware:
     from the same sign-in check the routes use, or a model tool call's turn token. No sign-in, no account:
     personal data is then refused, never guessed. A plain ASGI layer, so the account follows the request
     into the endpoint and any work it starts; it is added outermost in app.py. A connection signed in with a
-    session cookie is also guarded: it ends when that session does (_SessionGuard)."""
+    session cookie or a paired phone's token is also guarded: it ends when that sign-in does (_SessionGuard).
+
+    A phone token that is unknown or removed is answered 401 here, on every /api route, and one aimed at a
+    desktop-only route 403 (core/phone_devices.py DESKTOP_ONLY), before any route runs."""
 
     def __init__(self, app):
         self.app = app
@@ -297,12 +326,24 @@ class AccountContextMiddleware:
             return await self.app(scope, receive, send)
         from starlette.requests import HTTPConnection
         from core import accounts
-        session = None
+        session = still_valid = None
+        refusal = None
         try:
             connection = HTTPConnection(scope)
-            user = get_current_user(connection)
+            phone_token = phone_devices.presented_token(connection) if auth_enabled() else None
+            if phone_token is not None:
+                refusal = self._phone_refusal(scope, phone_token)
+            user = None if refusal else get_current_user(connection)
             account = accounts.account_for_user(user)
-            if user is not None and auth_enabled():
+            if user is not None and phone_token is not None:
+                device = phone_devices.resolve(phone_token)
+                if device is None:  # removed between the two looks
+                    user = account = None
+                else:
+                    digest = phone_devices.token_hash(phone_token)
+                    session = "phone:" + device["id"]
+                    still_valid = lambda: phone_devices.still_valid(device["id"], digest)  # noqa: E731
+            elif user is not None and auth_enabled():
                 session = connection.cookies.get(SESSION_COOKIE_NAME)
             if account is None and connection.headers.get("X-JARVIS-Tool-Token"):
                 # A model's tool call (mcp_servers/hive_mind_cli.py, the bot MCP proxy) carries its turn's
@@ -312,8 +353,11 @@ class AccountContextMiddleware:
                 account = grant.account if grant else None
         except Exception:  # an unreadable sign-in is no sign-in, never a crashed request
             account = None
+            session = None
+        if refusal:
+            return await self._refuse(send, *refusal)
         token = accounts.set_current(account)
-        guard = _SessionGuard(scope, receive, send, session) if session else None
+        guard = _SessionGuard(scope, receive, send, session, still_valid) if session else None
         try:
             if guard:
                 await self.app(scope, guard.receive, guard.send)
@@ -323,6 +367,28 @@ class AccountContextMiddleware:
             if guard:
                 guard.close()
             accounts.reset_current(token)
+
+    @staticmethod
+    def _phone_refusal(scope, phone_token):
+        """(status, message) when a request carrying a phone token is answered here; None to let it through.
+        Only /api requests: a websocket is refused by its own route (it reads as nobody signed in), and the
+        claim route takes no sign-in at all, so a phone pairing again with an old token still in hand gets in."""
+        path = scope.get("path") or ""
+        if scope["type"] != "http" or not path.startswith("/api/") or path == phone_devices.CLAIM_PATH:
+            return None
+        if phone_devices.resolve(phone_token) is None:
+            return 401, "authentication required"
+        if not phone_devices.route_allowed(path):
+            return 403, phone_devices.DESKTOP_ONLY_MESSAGE
+        return None
+
+    @staticmethod
+    async def _refuse(send, status, detail):
+        body = json.dumps({"detail": detail}).encode("utf-8")
+        await send({"type": "http.response.start", "status": status, "headers": [
+            (b"content-type", b"application/json"), (b"content-length", str(len(body)).encode()),
+            (b"cache-control", b"no-store"), (b"x-content-type-options", b"nosniff")]})
+        await send({"type": "http.response.body", "body": body})
 
 
 def require_user(request: Request) -> str:

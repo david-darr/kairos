@@ -122,6 +122,8 @@ _SECRET_PATTERNS = (
     (re.compile(r"\bAIza[0-9A-Za-z_-]{35}"), "***"),
     (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}"), "***"),
     (re.compile(r"\bxox[abposr]-[A-Za-z0-9-]{10,}"), "***"),
+    # A paired phone's sign-in token (core/phone_devices.py). Nothing logs one on purpose; this is the net under it.
+    (re.compile(r"\bkph_[A-Za-z0-9_-]{8,}"), "kph_***"),
 )
 
 # Only for text going to a model (the compaction summariser), where a password
