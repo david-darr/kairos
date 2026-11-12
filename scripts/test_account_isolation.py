@@ -324,6 +324,47 @@ class AccountIsolation(unittest.TestCase):
             for mark in david.markers():
                 self.assertNotIn(mark, r.text, f"bea read david's data via {path}")
 
+    def test_a_paired_phone_is_its_account_and_nothing_more(self):
+        # The Kairos iPhone app signs in with a device token in place of the session cookie (core/phone_devices.py,
+        # 2026-11-12). The same sweep as the browsers', run with each account's phone against the other account's
+        # data: every GET route, then every edit and delete route with the other's ids. Each phone is named with
+        # its account's marker, so a list of phones that showed another account's would be caught too.
+        import copy
+        paths = kairos.app.openapi()["paths"]
+        phones, device_ids = {}, {}
+        for name, account in self.accounts.items():
+            started = call(account.client, "POST", "/api/phone/pair/start")[0]
+            self.assertEqual(started.status_code, 200, started.text)
+            claimed = call(TestClient(kairos.app), "POST", "/api/phone/pair/claim",
+                           json={"code": started.json()["code"], "device_name": f"{account.mark} phone"})[0]
+            self.assertEqual(claimed.status_code, 200, claimed.text)
+            self.assertEqual(claimed.json()["account"]["username"], name)
+            self.assertEqual(claimed.json()["account"]["is_admin"], name == "david")
+            phones[name] = copy.copy(account)
+            phones[name].client = TestClient(kairos.app, headers={"Authorization": "Bearer " + claimed.json()["token"]})
+            device_ids[name] = claimed.json()["device_id"]
+        david, bea = self.accounts["david"], self.accounts["bea"]
+        for me, other in ((phones["david"], bea), (phones["bea"], david)):
+            mine = call(me.client, "GET", "/api/notes")[0]
+            self.assertIn(me.mark, mine.text, f"{me.name}'s phone reads {me.name}'s own notes")
+            listed = call(me.client, "GET", "/api/phone/devices")[0]
+            self.assertIn(me.mark, listed.text)
+            self.assertNotIn(other.mark, listed.text, f"{me.name}'s phone lists {other.name}'s phone")
+            self.assertEqual(call(me.client, "DELETE", f"/api/phone/devices/{device_ids[other.name]}")[0].status_code, 404)
+        found = leaks_for(phones["bea"], david, paths) | leaks_for(phones["david"], bea, paths)
+        for methods in (("patch", "put"), ("delete",)):
+            found |= changes_for(phones["bea"], david, paths, methods) | changes_for(phones["david"], bea, paths, methods)
+        self.assertEqual(sorted(found - set(self.known("leaks"))), [], "a phone token reached another account's data")
+        # A member's phone is no more an admin than her browser, and the routes that manage sign-ins stay shut to both.
+        self.assertEqual(call(phones["bea"].client, "POST", "/api/settings/computer-use", json={"enabled": True})[0].status_code, 403)
+        for me in phones.values():
+            for method, path in (("POST", "/api/phone/pair/start"), ("GET", "/api/auth/users"), ("GET", "/api/system/backup/full")):
+                self.assertEqual(call(me.client, method, path)[0].status_code, 403, f"{me.name}'s phone on {method} {path}")
+        # Unpaired, the token is nobody.
+        for name, account in self.accounts.items():
+            self.assertEqual(call(account.client, "DELETE", f"/api/phone/devices/{device_ids[name]}")[0].status_code, 204)
+            self.assertEqual(call(phones[name].client, "GET", "/api/notes")[0].status_code, 401)
+
     def test_a_non_admin_makes_and_sees_only_her_own_bots_hooks_triggers_and_connections(self):
         # Phase 4c: bea created her own bot, hook, trigger and model connection in fill(); each list shows hers
         # and none of david's, and david's shows none of hers.
