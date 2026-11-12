@@ -74,7 +74,8 @@ Each is the stricter of the choices that were open.
    code. It counts against every waiting code, and a code is cancelled after five, from any addresses at all. A code
    therefore faces at most five guesses in a million, however many addresses the guesser has. The cost: someone who
    can reach the desktop can cancel a waiting code by guessing. The person makes a new one.
-9. **A wrongly shaped code is a wrong try**, not a validation error that costs nothing.
+9. **A wrongly shaped code is a wrong try**, not a validation error that costs nothing. Spaces typed with the code
+   are dropped first (the settings page shows it as "482 913").
 10. **Codes are compared in constant time**, against every waiting code, with no early exit.
 11. **Desktop-only routes.** A phone token never opens: `POST /api/phone/pair/start`, `/api/phone/push/relay`, all
     of `/api/auth/*` except `GET /api/auth/status`, all of `/api/remote/*`, `/api/system/backup/*`,
@@ -253,7 +254,9 @@ a change to the relay or the phone, not to the desktop, which already builds the
   README (same routes, same signature check, the same refusals), not against the deployed Worker.
 - The Live Activity content state was written from the phone's Swift source by reading it; no phone has decoded one.
 - The settings section was looked at once, in the offline website demo with made-up answers for its routes (remote
-  access on and off, a code showing, two phones listed). It has not been used against a real backend in the app window.
+  access on and off, a code showing, two phones listed). It has not been used against a real backend in the app window,
+  and the Electron checks `test_changed.py` picks for the settings files (boot, g7, g8, a14-settings, app-shell,
+  bots-connections, bots-onboarding, g1, mascot) were not run. Run them before this merges.
 - The other sign-in routes were not given try limits: `/api/auth/reset-password` allows five guesses per emailed code
   and a new code every minute, and that is unchanged.
 - Tailscale's real listener: the try limits were tested with addresses the test client supplies, not over the tailnet.
