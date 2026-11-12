@@ -119,6 +119,14 @@
   padding: 2px 7px; border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 6px; background: rgba(var(--ink-rgb), .04);
 }
 .set-mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 11.5px; }
+/* Pair the iPhone app (Remote Access, static/js/iphonePairing.js): the address and the six digits someone reads
+   off this screen and types into a phone, so both are large, spaced and selectable. */
+.set-pair-label { margin-top: 10px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-faint); }
+.set-pair-address { font-size: 13px; color: var(--text); overflow-wrap: anywhere; user-select: all; }
+.set-pair-code {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 30px; line-height: 1.25; letter-spacing: .14em;
+  font-variant-numeric: tabular-nums; color: var(--text); user-select: all; margin-bottom: 6px;
+}
 .set-section .btn, .set-header .btn { padding: 6px 12px; font-size: 12px; }
 .btn.quiet.danger { color: var(--danger); }
 .btn.quiet.danger:hover { background: rgba(var(--danger-rgb), .08); color: var(--danger); }

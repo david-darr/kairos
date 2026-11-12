@@ -17,6 +17,7 @@ import { renderHooksPanel } from "./settingsHooks.js";
 import { pageHeader, group, row, field, toggle, pill, note, empty, badge, hueFor, staggerEntrance } from "../settingsKit.js";
 import { addReaIntegration } from "../reaSetup.js";
 import { renderNotificationsPanel } from './settingsNotifications.js';
+import { iphonePairing } from "../iphonePairing.js";
 import { setSettingsOpen } from "../settingsOpen.js";
 
 // The side browser's page is a NATIVE view composited above the HTML in the
@@ -161,7 +162,7 @@ const SECTION_GROUPS = [
                    "mattermost", "irc", "line", "teams", "google chat", "ntfy", "webhook", "connector", "channel override", "announcements", "dm"] },
       { id: "remote", label: "Remote Access", render: renderRemotePanel,
         description: "Reach this Kairos from your phone or another computer over Tailscale, a private network between your own devices. Nothing is exposed to the public internet.",
-        keywords: ["tailscale", "remote", "phone", "https", "certificate", "tunnel", "sign in", "account login", "url"] },
+        keywords: ["tailscale", "remote", "phone", "iphone", "pair", "pairing code", "https", "certificate", "tunnel", "sign in", "account login", "url"] },
     ],
   },
   {
@@ -1504,6 +1505,8 @@ async function renderRemotePanel(body) {
           } }),
         ],
       })]));
+      // Remote access is on, so a login exists: the iPhone app can be paired (static/js/iphonePairing.js).
+      parts.push(...iphonePairing({ ready: true, address: s.url }));
       body.replaceChildren(...parts);
       return;
     }
@@ -1638,6 +1641,8 @@ async function renderRemotePanel(body) {
       description: allReady ? "Nothing is reachable until you do. It stays on across restarts." : "This unlocks once Tailscale is signed in and you have a login.",
       control: [el("button", { class: "btn", text: "Refresh", onclick: refresh }), enable] })]));
     parts.push(note("The first time, Kairos asks Tailscale for an HTTPS certificate so your browser trusts the connection. If your tailnet hasn't enabled HTTPS certificates, you'll be told where to switch them on."));
+    // Pairing works as soon as a login exists; the phone can only reach this computer once remote access is on.
+    parts.push(...iphonePairing({ ready: !!s.auth_ready, address: null }));
     body.replaceChildren(...parts);
   }
   await refresh();
