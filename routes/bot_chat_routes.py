@@ -7,14 +7,19 @@ already over is a successful no-op.
 """
 import contextlib
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from core import bot_chat_store, bot_message_tree
-from core.middleware import require_user
+from core.middleware import phone_device, require_user
 from services import bot_chat_service as service, bot_goal_runs
 
 router = APIRouter(prefix="/api/bot-chat", tags=["bot-chat"])
+
+
+def _by_hand(request: Request) -> dict:
+    """A send from the desktop marks a turn a person started there (core/mobile_activity.py _quiet_reply)."""
+    return {} if phone_device(request) is not None else {"by_hand": True}
 
 
 class Body(BaseModel):
@@ -134,9 +139,9 @@ async def get_messages(session_id: str, limit: int = 50, before: str | None = No
 
 
 @router.post("/{session_id}/send", status_code=202)
-async def send(session_id: str, body: SendBody, user: str = Depends(require_user)) -> dict:
+async def send(session_id: str, body: SendBody, request: Request, user: str = Depends(require_user)) -> dict:
     with _guard():
-        return await service.send(user, session_id, body.model_dump())
+        return await service.send(user, session_id, {**body.model_dump(), **_by_hand(request)})
 
 
 @router.get("/{session_id}/queue")
@@ -183,16 +188,17 @@ async def stop_goal(session_id: str, body: GoalStopBody, user: str = Depends(req
 
 
 @router.post("/{session_id}/messages/{message_id}/edit", status_code=202)
-async def edit_message(session_id: str, message_id: str, body: EditBody, user: str = Depends(require_user)) -> dict:
-    data = body.model_dump(exclude_unset=True)
+async def edit_message(session_id: str, message_id: str, body: EditBody, request: Request,
+                       user: str = Depends(require_user)) -> dict:
+    data = {**body.model_dump(exclude_unset=True), **_by_hand(request)}
     with _guard():
         return await service.edit_message(user, session_id, message_id, data)
 
 
 @router.post("/{session_id}/regenerate", status_code=202)
-async def regenerate(session_id: str, body: RegenerateBody, user: str = Depends(require_user)) -> dict:
+async def regenerate(session_id: str, body: RegenerateBody, request: Request, user: str = Depends(require_user)) -> dict:
     with _guard():
-        return await service.regenerate(user, session_id, body.model_dump())
+        return await service.regenerate(user, session_id, {**body.model_dump(), **_by_hand(request)})
 
 
 @router.post("/{session_id}/active-branch")

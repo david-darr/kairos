@@ -891,7 +891,7 @@ class Push(Base):
         # (mobile_activity.QUIET_REPLY_SECONDS).
         session = client.post("/api/sessions", json={"title": title}).json()
         run_id = uuid.uuid4().hex
-        mobile_activity.create_run(run_id, session, owner, None, "fp", who=who, from_phone=from_phone)
+        mobile_activity.create_run(run_id, session, owner, None, "fp", who=who, from_phone=from_phone, by_hand=not from_phone)
         mobile_activity.publish(run_id, {"chunk": "THE-PRIVATE-REPLY-TEXT"})
         return run_id, session["id"]
 
@@ -1050,6 +1050,33 @@ class Push(Base):
             bot_chat_service._launch("ana", "s1", {"id": "bot1"}, payload, 0, "g1", "")
             bot_chat_service._launch("ana", "s1", {"id": "bot1"}, {**payload, "from_phone": False}, 0, "g2", "")
         self.assertEqual(started, [True, False])
+
+    def test_a_turn_sent_at_the_desktop_is_marked_by_hand_and_a_drained_one_is_not(self):
+        from services import bot_chat_service
+        payload = bot_chat_service._clean_payload({"send_id": "x" * 8, "text": "hi", "mode": None, "by_hand": True})
+        self.assertTrue(payload["by_hand"])
+        self.assertNotIn("by_hand", bot_chat_service._shown(payload))
+        phone = bot_chat_service._clean_payload({"send_id": "x" * 8, "text": "hi", "mode": None, "from_phone": True, "by_hand": True})
+        self.assertNotIn("by_hand", phone)
+        started = []
+        with patch.object(bot_chat_service, "_context_note", return_value=""), patch.object(bot_chat_service, "_runtime"), \
+                patch.object(bot_chat_service.chat_live, "start", lambda *a, **k: started.append(k.get("by_hand"))):
+            bot_chat_service._launch("ana", "s1", {"id": "bot1"}, payload, 0, "g1", "", by_hand=True)
+            bot_chat_service._launch("ana", "s1", {"id": "bot1"}, payload, 0, "g2", "")   # a queued message drained later
+        self.assertEqual(started, [True, False])
+
+    def test_a_quick_bot_turn_at_the_desktop_sends_nothing_and_one_the_bot_launched_sends_one(self):
+        self.register()
+        quick, _ = self.run_for(self.ana, "ana", from_phone=False)
+        mobile_activity.enqueue(quick, "completed")
+        mobile_activity.enqueue_bot("bot_results", "bot1", auth_manager.is_admin, account=auth_manager.account_id("ana"), turn_id=quick)
+        self.assertEqual(self.outbox(), [], "the person started it at the desktop and is there")
+        session = self.ana.post("/api/sessions", json={"title": "Goal"}).json()
+        step = uuid.uuid4().hex
+        mobile_activity.create_run(step, session, "ana", None, "fp")   # a goal step the bot launched itself
+        mobile_activity.enqueue(step, "completed")
+        mobile_activity.enqueue_bot("bot_results", "bot1", auth_manager.is_admin, account=auth_manager.account_id("ana"), turn_id=step)
+        self.assertEqual([row["kind"] for row in self.outbox()], ["completed"], "one notification, not none and not two")
 
     def test_a_quick_reply_at_the_desktop_is_not_pushed_but_a_long_one_a_phones_and_the_rest_are(self):
         self.register()

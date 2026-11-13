@@ -120,13 +120,16 @@ def _clean_payload(body: dict) -> dict:
     # A turn a paired phone started always gets its "reply ready" push (core/mobile_activity.py _quiet_reply).
     if body.get("from_phone") is True:
         payload["from_phone"] = True
+    # A person sending from the desktop right now; only such a turn can have its push held (_quiet_reply).
+    elif body.get("by_hand") is True:
+        payload["by_hand"] = True
     return payload
 
 
 def _shown(payload: dict) -> dict:
     """What identifies a send for retry matching. The leaf the person saw is left out:
     a lost-response retry is the same message however far the thread has moved."""
-    return {key: value for key, value in payload.items() if key not in ("expected_leaf_id", "from_phone")}
+    return {key: value for key, value in payload.items() if key not in ("expected_leaf_id", "from_phone", "by_hand")}
 
 
 def _row_by_id(sid: str, message_id: str) -> dict | None:
@@ -240,7 +243,8 @@ def _admit(owner: str, sid: str, bot: dict, payload: dict, context: str, *, dire
             _announce(sid, owner, "queued", result["queue_id"])
             return result
         try:
-            _launch(owner, sid, bot, payload, result["message_index"], generation, context)
+            _launch(owner, sid, bot, payload, result["message_index"], generation, context,
+                    by_hand=payload.get("by_hand") is True)
         except BaseException:
             chat_service.release_session(sid)
             store.fail_dispatch(sid, generation)
@@ -248,8 +252,10 @@ def _admit(owner: str, sid: str, bot: dict, payload: dict, context: str, *, dire
         return result
 
 
-def _launch(owner: str, sid: str, bot: dict, payload: dict, index: int, generation: str, context: str) -> None:
-    """Start the turn for a message that is saved and recorded. The session claim is held."""
+def _launch(owner: str, sid: str, bot: dict, payload: dict, index: int, generation: str, context: str,
+            *, by_hand: bool = False) -> None:
+    """Start the turn for a message that is saved and recorded. The session claim is held. `by_hand` is a turn a
+    person started from the desktop just now; a queued message drained later is not one."""
     from core import chat_references
     from services import bot_goal_runs
     note = _context_note(sid, payload)
@@ -260,7 +266,8 @@ def _launch(owner: str, sid: str, bot: dict, payload: dict, index: int, generati
     references = chat_references.metadata(payload.get("references") or [])
     chat_live.start(sid, payload["text"], payload.get("attachment_ids") or [], True, context, references,
                     user=owner, turn_id=generation, accepted_index=index, claimed=True,
-                    turn_note=note, chunk_filter=chunk_filter, from_phone=payload.get("from_phone") is True)
+                    turn_note=note, chunk_filter=chunk_filter, from_phone=payload.get("from_phone") is True,
+                    by_hand=by_hand)
     _runtime(sid, owner, bot["id"], "started", generation)
     if payload.get("mode") == "goal":
         from core import session_manager_store
@@ -734,7 +741,8 @@ async def regenerate(owner: str, sid: str, body: dict) -> dict:
     payload = {"send_id": body["send_id"], "text": row_text, "expected_leaf_id": body.get("expected_leaf_id"),
                "attachment_ids": [a["id"] for a in question.get("attachments") or []],
                "reply_to_id": question.get("reply_to_id"), "citations": question.get("citations") or [],
-               "references": [], "mode": None, "regenerate_of": path[-1]["bot_message_id"]}
+               "references": [], "mode": None, "regenerate_of": path[-1]["bot_message_id"],
+               **({"by_hand": True} if body.get("by_hand") is True else {})}
     chat_service.validate_image_attachments(sid, payload["attachment_ids"])
     await _quiet(sid)
     return _admit(owner, sid, bot, payload, "", direct_only=True, claimed=True,

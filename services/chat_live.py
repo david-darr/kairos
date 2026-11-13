@@ -286,7 +286,8 @@ def _model_display_name(session_id: str) -> str:
 def start(session_id: str, text: str, attachment_ids: list[str], is_admin: bool,
           reference_context: str, references: list[dict], *, user: str = SINGLE_USER,
           request_id: str | None = None, turn_id: str | None = None, accepted_index: int | None = None,
-          claimed: bool = False, turn_note: str = "", chunk_filter=None, from_phone: bool = False) -> dict:
+          claimed: bool = False, turn_note: str = "", chunk_filter=None, from_phone: bool = False,
+          by_hand: bool = False) -> dict:
     """Begin a server-owned turn. The Bots admission door (services/bot_chat_service.py)
     passes the pieces it already settled: `turn_id` (its generation), the saved
     message's `accepted_index` (so the turn does not append it again), `claimed`
@@ -320,7 +321,7 @@ def start(session_id: str, text: str, attachment_ids: list[str], is_admin: bool,
         # A phone push names the model for a model chat; a bot's chat is named after the bot at send time.
         mobile_activity.create_run(run["turnId"], session, user, request_id, fingerprint,
                                    who="" if run.get("_agent_id") else _model_display_name(session_id),
-                                   from_phone=from_phone)
+                                   from_phone=from_phone, by_hand=by_hand)
         task = asyncio.create_task(_run(session_id, run, attachment_ids, is_admin, reference_context, references,
                                         accepted_index, turn_note))
     except Exception:

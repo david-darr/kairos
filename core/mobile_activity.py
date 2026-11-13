@@ -71,13 +71,14 @@ def config(create=False, subject=None) -> dict | None:
         return dict(row) if row else None
 
 
-def create_run(run_id, session, owner, request_id, fingerprint, *, who="", from_phone=False):
+def create_run(run_id, session, owner, request_id, fingerprint, *, who="", from_phone=False, by_hand=False):
     """`who` is the model's name for a model chat (a phone push's title); `from_phone` marks a turn a paired phone
-    started, whose "reply ready" push always goes (QUIET_REPLY_SECONDS)."""
+    started, whose "reply ready" push always goes (QUIET_REPLY_SECONDS); `by_hand` marks a turn a person started
+    from the desktop, the only kind the quiet rule can hold back."""
     now = time.time()
     snapshot = {"id": run_id, "session_id": session["id"], "state": "running", "text": "",
                 "title": session.get("title", "Chat"), "forge": bool(session.get("forge")),
-                "who": str(who or ""), "from_phone": bool(from_phone),
+                "who": str(who or ""), "from_phone": bool(from_phone), "by_hand": bool(by_hand),
                 "started_at": now, "updated_at": now, "revision": 0,
                 "permissions": [], "tool_steps": [], "tool_events": []}
     with database() as db:
@@ -181,7 +182,8 @@ def project_live(packet):
         snap = publish(run_id, payload, state)
         if payload.get("permission", {}).get("expires_at"):
             enqueue(run_id, "permission", payload["permission"])
-        if state in ("completed", "failed") and not snap.get("handoffs"):
+        # A failure always notifies; a finished turn with hand-offs leaves its notice to the bot (enqueue_bot).
+        if state == "failed" or (state == "completed" and not snap.get("handoffs")):
             enqueue(run_id, state)
 
 
@@ -532,7 +534,9 @@ def enqueue(run_id, kind, permission=None):
                          "expires_at": expiry, "title": snap.get("title") or "", "who": snap.get("who") or "",
                          **({"request_id": permission["id"]} if (permission or {}).get("id") else {}),
                          **({"ask": "question"} if kind == "permission" and (permission or {}).get("kind") == "question" else {})}
-        phones = _phone_ready() and not _quiet_reply(kind, snap, now)
+        quiet = _quiet_reply(kind, snap, now)
+        phones = _phone_ready() and not quiet
+        queued = False
         for device in db.execute("SELECT * FROM devices WHERE owner=?", (run["owner"],)).fetchall():
             if kind != "test" and not json.loads(device["preferences"]).get(kind):
                 continue
@@ -547,17 +551,23 @@ def enqueue(run_id, kind, permission=None):
             db.execute("INSERT OR IGNORE INTO outbox(id,device_id,run_id,kind,permission_id,payload,expires,next_attempt) VALUES(?,?,?,?,?,?,?,?)",
                        (event_id, device["id"], run_id, kind, (permission or {}).get("id"),
                         json.dumps(sent), expiry, now))
+            queued = True
+        if kind in ("completed", "failed"):
+            # What became of this turn's chat push, read by enqueue_bot: one notification per turn, never none.
+            snap["push"] = "queued" if queued else ("quiet" if quiet else "none")
+            db.execute("UPDATE activity SET snapshot=? WHERE id=?", (json.dumps(snap), run_id))
 
 
 # Quieter replies (2026-11-12): a short turn started at the desktop finished while the person was plainly there,
 # so its "reply ready" push to a phone is skipped. Model chats have no presence or focus signal on the desktop, so
-# the rule is time: the push goes when the turn ran this long or longer, or a paired phone started it. Approvals,
-# questions, failures and calls always go. Browsers (Web Push) are not affected.
+# the rule is time: the push goes when the turn ran this long or longer, or a paired phone started it. Only a turn a
+# person started from the desktop (`by_hand`) is held: one a bot launched itself or a queued message drained later
+# never is. Approvals, questions, failures and calls always go. Browsers (Web Push) are not affected.
 QUIET_REPLY_SECONDS = 30
 
 
 def _quiet_reply(kind, snap, now) -> bool:
-    if kind != "completed" or snap.get("from_phone"):
+    if kind != "completed" or snap.get("from_phone") or not snap.get("by_hand"):
         return False
     return now - float(snap.get("started_at") or now) < QUIET_REPLY_SECONDS
 
@@ -575,15 +585,18 @@ def enqueue_bot(kind, agent_id, allowed_owner, who=None, account=None, turn_id=N
     held ten seconds for the burst to settle, so six results are one push.
     The text is generic, as for chats: nothing a lock screen should not show.
 
-    One finished turn is one notification (2026-11-12). A bot's turn in its chat
-    answers a message the person sent there, and that chat run already sends
-    its own "reply ready" (or "could not finish") through enqueue(); so a
-    result for a `turn_id` that is a chat run here queues nothing. "Finished a
-    task" is for work the bot ran on its own (a routine, a delegated task)."""
+    One finished turn is one notification (2026-11-12). A result for a `turn_id`
+    that is a chat run here queues nothing when that run's own "reply ready" (or
+    "could not finish") was queued, or was held back because the person started
+    the turn at the desktop and it was short (they are there). When the chat
+    push was skipped for any other reason (hand-offs, no device took it), this
+    notice goes, so a finished turn is never silent."""
     if kind not in BOT_KINDS - {"bot_call_end"}:
         raise ValueError(kind)
-    if kind == "bot_results" and turn_id and read_run(str(turn_id)):
-        return
+    if kind == "bot_results" and turn_id:
+        run = read_run(str(turn_id))
+        if run and run["snapshot"].get("push") in ("queued", "quiet"):
+            return
     now = time.time()
     bucket = int(now // 60)
     payload = {"kind": kind, "url": "/?agent=" + agent_id, "tag": "kairos-bot-" + agent_id, "expires_at": now + 3600}

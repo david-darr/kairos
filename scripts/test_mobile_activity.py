@@ -344,12 +344,64 @@ class MobileTests(unittest.IsolatedAsyncioTestCase):
         from services import bot_push
         await self.enroll()
         store.create_run("turn-1", self.session, "local", "one-push", "fixture")
+        store.enqueue("turn-1", "completed")
+        self.assertEqual(store.read_run("turn-1")["snapshot"]["push"], "queued")
         store.enqueue_bot("bot_results", "a1", lambda owner: True, account="any", turn_id="turn-1")
         with patch.object(bot_push, "kind_for", return_value="bot_results"):
             bot_push.on_event({"type": "bot.turn_done", "agent_id": "a1", "turn_id": "turn-1"})
         self.assertEqual(self.bot_rows(), [], "a chat turn's result is the chat's own push")
         bot_push.on_event({"type": "agent.review", "agent_id": "a1"})
         self.assertEqual([r["kind"] for r in self.bot_rows()], ["bot_results"], "work the bot ran on its own still notifies")
+
+    def finish(self, rid, status, handoffs=None):
+        changes = {"status": status, **({"handoffs": handoffs} if handoffs else {})}
+        store.project_live({"type": "update", "turnId": rid, "changes": changes})
+
+    async def test_a_turn_whose_chat_push_was_held_as_quiet_sends_no_bot_notice(self):
+        # Started by hand at the desktop and short: the person is there, so neither notice goes.
+        store.create_run("quiet-1", self.session, "local", "quiet-1", "fixture", by_hand=True)
+        self.finish("quiet-1", "done")
+        self.assertEqual(store.read_run("quiet-1")["snapshot"]["push"], "quiet")
+        await self.enroll()
+        store.enqueue_bot("bot_results", "a1", lambda owner: True, account="any", turn_id="quiet-1")
+        self.assertEqual(self.bot_rows(), [])
+
+    async def test_a_turn_with_hand_offs_lets_the_bot_notice_through(self):
+        await self.enroll()
+        store.create_run("handoff-1", self.session, "local", "handoff-1", "fixture", by_hand=True)
+        self.finish("handoff-1", "done", handoffs=[{"to": "a2"}])
+        self.assertNotIn("push", store.read_run("handoff-1")["snapshot"])
+        store.enqueue_bot("bot_results", "a1", lambda owner: True, account="any", turn_id="handoff-1")
+        self.assertEqual([r["kind"] for r in self.bot_rows()], ["bot_results"], "a finished turn is never silent")
+
+    async def test_a_turn_nobody_started_by_hand_is_never_held_and_notifies_once(self):
+        # A goal step the bot launched itself, or a queued message drained later: short, but nobody is there.
+        await self.enroll()
+        store.create_run("goal-step-1", self.session, "local", "goal-step-1", "fixture")
+        self.assertFalse(store._quiet_reply("completed", store.read_run("goal-step-1")["snapshot"], time.time()))
+        self.finish("goal-step-1", "done")
+        self.assertEqual(store.read_run("goal-step-1")["snapshot"]["push"], "queued")
+        store.enqueue_bot("bot_results", "a1", lambda owner: True, account="any", turn_id="goal-step-1")
+        with store.database() as db:
+            kinds = [r[0] for r in db.execute("SELECT kind FROM outbox WHERE run_id IN ('goal-step-1','')")]
+        self.assertEqual(kinds, ["completed"], "one notification, from the chat run")
+
+    async def test_a_chat_push_no_device_took_lets_the_bot_notice_through(self):
+        store.create_run("none-1", self.session, "local", "none-1", "fixture")
+        self.finish("none-1", "done")
+        self.assertEqual(store.read_run("none-1")["snapshot"]["push"], "none")
+        await self.enroll()
+        store.enqueue_bot("bot_results", "a1", lambda owner: True, account="any", turn_id="none-1")
+        self.assertEqual([r["kind"] for r in self.bot_rows()], ["bot_results"])
+
+    async def test_a_failure_always_notifies_even_with_hand_offs_or_by_hand(self):
+        await self.enroll()
+        store.create_run("fail-1", self.session, "local", "fail-1", "fixture", by_hand=True)
+        self.finish("fail-1", "failed", handoffs=[{"to": "a2"}])
+        with store.database() as db:
+            kinds = [r[0] for r in db.execute("SELECT kind FROM outbox WHERE run_id='fail-1'")]
+        self.assertEqual(kinds, ["failed"])
+        self.assertFalse(store._quiet_reply("failed", store.read_run("fail-1")["snapshot"], time.time()))
 
     async def test_questions_and_results_map_to_their_own_kinds(self):
         from services import bot_push

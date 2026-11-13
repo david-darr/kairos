@@ -244,7 +244,7 @@ async def start_live_chat(body: ChatRequest, request: Request, user: str = Depen
         raise HTTPException(422, str(error))
     return chat_live.start(body.session_id, body.message, body.attachment_ids, is_admin,
                            context, chat_references.metadata(body.references), user=user, request_id=body.request_id,
-                           from_phone=phone_device(request) is not None)
+                           from_phone=phone_device(request) is not None, by_hand=phone_device(request) is None)
 
 
 async def _start_bot_turn(body: ChatRequest, session: dict, user: str, is_admin: bool, *, from_phone: bool = False) -> dict:
@@ -261,7 +261,7 @@ async def _start_bot_turn(body: ChatRequest, session: dict, user: str, is_admin:
         result = await bot_chat_service.send(user, body.session_id, {
             "send_id": send_id, "text": body.message, "expected_leaf_id": leaf,
             "attachment_ids": body.attachment_ids, "references": body.references,
-            **({"from_phone": True} if from_phone else {})})
+            **({"from_phone": True} if from_phone else {"by_hand": True})})
     except ValueError as error:
         status = 409 if isinstance(error, bot_chat_store.Conflict) else 422
         raise HTTPException(status, str(error))
