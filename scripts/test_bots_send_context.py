@@ -67,9 +67,9 @@ class ContextTests(unittest.IsolatedAsyncioTestCase):
         seen = {}
         real = service._launch
 
-        def spy(owner, sid, bot, payload, index, generation, context):
+        def spy(owner, sid, bot, payload, index, generation, context, **kwargs):
             seen["context"] = context
-            return real(owner, sid, bot, payload, index, generation, context)
+            return real(owner, sid, bot, payload, index, generation, context, **kwargs)
 
         with patch.object(service, "_launch", side_effect=spy):
             await self.h.send(self.sid, "Why is this so high?", pointed=[{"tag": "td", "label": "March"}])
