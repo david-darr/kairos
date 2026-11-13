@@ -149,8 +149,8 @@ posts to the Kairos push relay at the address in settings (`phone_push_relay_url
   the model's name as the model picker shows it for a model chat, such as "Opus 5.5", else "Kairos"), the chat's title
   unless the phone is set to Private, a `kairos-agents://` link and opaque
   ids (session, request, turn). Never a message, a file name or the reason for a call. The relay turns these into the
-  notification (relay `README.md` in `kairos-ios`): the name is the title, a fixed line says what kind ("Kip wants your
-  approval", "Your reply is ready"), the chat's title is the subtitle.
+  notification (relay `README.md` in `kairos-ios`): the name is the title, a fixed line says what kind ("Wants your
+  approval", "Your reply is ready") and never repeats the name, the chat's title is the subtitle.
 - **Privacy level.** The phone sends its notice level as `detail` with `push/register`, and registers again when the
   person changes it. With `hideTitles` (Private) the desktop leaves the chat's title out of every relay call, checked
   when the push is queued and again when it is sent (`phone_push.hides_titles`). An older phone that sends no level
@@ -173,6 +173,11 @@ posts to the Kairos push relay at the address in settings (`phone_push_relay_url
 | a bot rings (`bot_call`) | `ring` with `ring_id`, `expires_at`, `who`; once, not the browser's three |
 | a ring ended (`bot_call_end`) | nothing yet (see below); the phone asks `GET /api/rings/{id}` |
 | a chat run changes state | `activity` `update` or `end` to that Live Activity's own token |
+
+One finished turn is one notification. A bot's turn in its chat answers the person, so its chat run sends the
+"reply ready" (or "could not finish") push and the bot's own result for that turn sends nothing
+(`mobile_activity.enqueue_bot` with the turn's id); `bot_results` is for work the bot ran on its own. An `end` is
+silent and carries a `dismissal_date`: five minutes for done or stopped, thirty for failed (`phone_push.ACTIVITY_DISMISS_SECONDS`).
 
 `who` is the bot's name (looked up in the owner's own account) or "Kairos". A bot's push goes only to phones of the
 account the bot belongs to.

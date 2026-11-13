@@ -1179,6 +1179,15 @@ class Push(Base):
         self.assertEqual(self.relay.pushes[-1][1], {"kind": "ring_end", "ring_id": ring["id"], "outcome": "declined"})
         self.assertEqual(self.relay.denied, 0)
 
+    def test_an_ended_live_activity_leaves_on_its_own_and_is_silent(self):
+        def end(state):
+            return phone_push.message_for("activity", {"event": "end", "push_token": ACTIVITY_TOKEN, "state": state}, {}, now=1000)
+        self.assertEqual(end("completed")["dismissal_date"], 1000 + 5 * 60)
+        self.assertEqual(end("stopped")["dismissal_date"], 1000 + 5 * 60)
+        self.assertEqual(end("failed")["dismissal_date"], 1000 + 30 * 60)
+        for state in ("completed", "failed", "stopped"):
+            self.assertFalse({"what", "notice", "who", "alert"} & set(end(state)), "no alert rides on an end")
+
     def test_what_the_phone_reads_is_built_and_only_what_the_relay_takes_is_sent(self):
         # kairos-ios docs/coverage/native.md "Push payload": the fields a tap and the action buttons need.
         approval = phone_push.native_alert("permission", {"session_id": "s1", "run_id": "t1", "request_id": "p1", "agent_id": "b1",
@@ -1268,6 +1277,7 @@ class Push(Base):
         self.assertAlmostEqual(state["startedAt"], started - 978307200, places=3, msg="seconds since 2001, as ActivityKit reads a Date")
         self.assertIn("stale_date", sent[0])
         self.assertIn("dismissal_date", sent[-1])
+        self.assertNotIn("alert", sent[-1], "the end of a Live Activity is silent")
         for private in ("MORE-PRIVATE-TEXT", "PRIVATE-STEP", "THE-PRIVATE-CHAT-TITLE"):
             self.assertNotIn(private, json.dumps(self.relay.seen))
         self.assertEqual(mobile_activity.phone_registration(self.device)["activities"], {}, "an ended activity's token is forgotten")

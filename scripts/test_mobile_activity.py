@@ -338,6 +338,19 @@ class MobileTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sorted(json.loads(r["payload"])["url"] for r in rows), ["/?agent=a1", "/?agent=a2"])
         self.assertTrue(all(r["next_attempt"] > time.time() + 5 for r in rows), "held for the burst to settle")
 
+    async def test_a_finished_chat_turn_is_one_notification_not_two(self):
+        # A bot answering the person in its chat: the chat run sends "reply ready"; the bot's own
+        # "finished a task" is for work it ran on its own, never for the same turn.
+        from services import bot_push
+        await self.enroll()
+        store.create_run("turn-1", self.session, "local", "one-push", "fixture")
+        store.enqueue_bot("bot_results", "a1", lambda owner: True, account="any", turn_id="turn-1")
+        with patch.object(bot_push, "kind_for", return_value="bot_results"):
+            bot_push.on_event({"type": "bot.turn_done", "agent_id": "a1", "turn_id": "turn-1"})
+        self.assertEqual(self.bot_rows(), [], "a chat turn's result is the chat's own push")
+        bot_push.on_event({"type": "agent.review", "agent_id": "a1"})
+        self.assertEqual([r["kind"] for r in self.bot_rows()], ["bot_results"], "work the bot ran on its own still notifies")
+
     async def test_questions_and_results_map_to_their_own_kinds(self):
         from services import bot_push
         self.assertEqual(bot_push.kind_for({"type": "agent.inbox", "item_kind": "question"}), "bot_needs_you")

@@ -45,7 +45,9 @@ ALERT_WHAT = {"completed": "message", "test": "message", "failed": "needs_you", 
 RING_MIN_SECONDS_LEFT = 3       # the relay refuses a ring with less left than this, or further ahead than the max
 RING_MAX_SECONDS_AHEAD = 300
 ACTIVITY_STALE_SECONDS = 15 * 60    # the phone's own Live Activities go stale after fifteen minutes too
-ACTIVITY_DISMISS_SECONDS = 15 * 60
+# After an end the card leaves the Lock Screen on its own: soon for done or stopped, later for failed so the person
+# sees it. The same times as the phone's own `finish` (kairos-ios KairosAgents/Native/LiveActivities.swift).
+ACTIVITY_DISMISS_SECONDS = {"done": 5 * 60, "stopped": 5 * 60, "failed": 30 * 60}
 
 # What the phone's native layer reads from a push (kairos-ios docs/coverage/native.md, "Push payload"), and
 # what the relay carries of it. message_for() builds each push in full, to the phone's contract, and then keeps
@@ -230,9 +232,11 @@ def message_for(kind: str, payload: dict, registration: dict, now: Optional[floa
         token = str(payload.get("push_token") or "")
         if payload.get("event") not in ("update", "end") or not ACTIVITY_TOKEN.fullmatch(token):
             return None
-        body = {"kind": "activity", "event": payload["event"], "push_token": token, "content_state": activity_state(payload, now)}
+        state = activity_state(payload, now)
+        body = {"kind": "activity", "event": payload["event"], "push_token": token, "content_state": state}
         if payload["event"] == "end":
-            body["dismissal_date"] = int(now) + ACTIVITY_DISMISS_SECONDS
+            # An end is silent (the relay adds no alert or sound to it); the one notification is the chat's own.
+            body["dismissal_date"] = int(now) + ACTIVITY_DISMISS_SECONDS.get(state["phase"], ACTIVITY_DISMISS_SECONDS["done"])
         else:
             body["stale_date"] = int(now) + ACTIVITY_STALE_SECONDS
     elif kind in ALERT_WHAT:

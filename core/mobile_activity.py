@@ -568,14 +568,22 @@ RING_REPEATS = (0, 20, 40)
 RING_END_SECONDS = 600
 
 
-def enqueue_bot(kind, agent_id, allowed_owner, who=None, account=None):
+def enqueue_bot(kind, agent_id, allowed_owner, who=None, account=None, turn_id=None):
     """A bot needs the person or has results (Agents 2.0, 2026-10-14). Bots
     belong to admins, so only devices whose owner passes allowed_owner get it.
     Pushes coalesce: one pending push per device, bot and kind per minute,
     held ten seconds for the burst to settle, so six results are one push.
-    The text is generic, as for chats: nothing a lock screen should not show."""
+    The text is generic, as for chats: nothing a lock screen should not show.
+
+    One finished turn is one notification (2026-11-12). A bot's turn in its chat
+    answers a message the person sent there, and that chat run already sends
+    its own "reply ready" (or "could not finish") through enqueue(); so a
+    result for a `turn_id` that is a chat run here queues nothing. "Finished a
+    task" is for work the bot ran on its own (a routine, a delegated task)."""
     if kind not in BOT_KINDS - {"bot_call_end"}:
         raise ValueError(kind)
+    if kind == "bot_results" and turn_id and read_run(str(turn_id)):
+        return
     now = time.time()
     bucket = int(now // 60)
     payload = {"kind": kind, "url": "/?agent=" + agent_id, "tag": "kairos-bot-" + agent_id, "expires_at": now + 3600}

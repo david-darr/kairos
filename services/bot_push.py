@@ -51,9 +51,12 @@ def on_event(event: dict) -> None:
             kinds = set()       # STOP (Settings > Reach me): the feed is kept, no device alert
     except Exception:
         logger.exception("reach me pause unreadable")
+    # A finished chat turn names its turn: its chat run sends the one notification for it (enqueue_bot skips).
+    data = event.get("data") if isinstance(event.get("data"), dict) else {}
+    turn_id = event.get("turn_id") or data.get("turn_id")
     for kind in kinds:
         try:
-            mobile_activity.enqueue_bot(kind, agent_id, auth_manager.is_admin)
+            mobile_activity.enqueue_bot(kind, agent_id, auth_manager.is_admin, turn_id=turn_id)
         except Exception:
             logger.exception("bot push not queued")
 
