@@ -805,14 +805,18 @@ class Relay:
 
     def check(self, body, install):
         """What the real relay refuses (its apns.js builders), so a shape it would reject fails here too."""
-        allowed = {"alert": {"kind", "what", "who", "collapse_id"}, "ring": {"kind", "ring_id", "expires_at", "who"},
+        allowed = {"alert": {"kind", "what", "who", "collapse_id", "notice", "title", "link", "request_id", "thread_id",
+                             "activity_id", "activity_kind"},
+                   "ring": {"kind", "ring_id", "expires_at", "who"},
                    "activity": {"kind", "event", "push_token", "content_state", "stale_date", "dismissal_date"}}
         if self.takes_ring_end:     # not in the real relay yet; switched on by the one test that looks ahead
             allowed["ring_end"] = {"kind", "ring_id", "outcome"}
         if body.get("kind") not in allowed or set(body) - allowed[body["kind"]]:
             return 400, {"error": "bad_kind", "message": "x"}
-        if body["kind"] == "alert" and body.get("what") not in self.ALERTS:
+        if body["kind"] == "alert" and "notice" not in body and body.get("what") not in self.ALERTS:
             return 400, {"error": "bad_what", "message": "x"}
+        if body["kind"] == "alert" and "notice" in body and body["notice"] not in ("approval", "question", "replyReady", "workDone", "workFailed"):
+            return 400, {"error": "bad_notice", "message": "x"}
         if body["kind"] == "ring":
             if not isinstance(body.get("expires_at"), int) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", str(body.get("ring_id"))):
                 return 400, {"error": "bad_ring", "message": "x"}
@@ -882,10 +886,12 @@ class Push(Base):
         with mobile_activity.database() as db:
             return [dict(r) for r in db.execute("SELECT kind,status,attempts FROM outbox WHERE device_id=? ORDER BY rowid", (device or self.device,))]
 
-    def run_for(self, client, owner, title="THE-PRIVATE-CHAT-TITLE"):
+    def run_for(self, client, owner, title="THE-PRIVATE-CHAT-TITLE", from_phone=True, who=""):
+        # Started from the phone unless a test says otherwise, so a quick "reply ready" is not held back
+        # (mobile_activity.QUIET_REPLY_SECONDS).
         session = client.post("/api/sessions", json={"title": title}).json()
         run_id = uuid.uuid4().hex
-        mobile_activity.create_run(run_id, session, owner, None, "fp")
+        mobile_activity.create_run(run_id, session, owner, None, "fp", who=who, from_phone=from_phone)
         mobile_activity.publish(run_id, {"chunk": "THE-PRIVATE-REPLY-TEXT"})
         return run_id, session["id"]
 
@@ -953,7 +959,7 @@ class Push(Base):
         self.assertEqual(self.relay.seen, [], "not even the goodbye is sent anywhere")
 
     # -- sending --------------------------------------------------------------------------------------------------
-    def test_a_finished_chat_reaches_the_phone_through_the_relay_signed_and_with_no_content(self):
+    def test_a_finished_chat_reaches_the_phone_through_the_relay_signed_and_with_no_message_text(self):
         self.register()
         self.register(self.ben)
         run_id, session_id = self.run_for(self.ana, "ana")
@@ -965,14 +971,43 @@ class Push(Base):
         self.assertEqual(json.loads(self.relay.seen[0][2]), {"apns_token": APNS, "voip_token": None, "environment": "sandbox"})
         self.assertEqual(len(self.relay.installs), 1, "only the phone with something due is registered")
         install_id = next(iter(self.relay.installs))
-        self.assertEqual(self.relay.pushes, [(install_id, {"kind": "alert", "what": "message", "who": "Kairos", "collapse_id": "kairos-" + run_id})])
+        # Who, what kind, the chat's title (the phone's Private level does not reach the desktop) and ids to open it.
+        self.assertEqual(self.relay.pushes, [(install_id, {
+            "kind": "alert", "what": "message", "who": "Kairos", "collapse_id": "kairos-" + run_id, "notice": "replyReady",
+            "link": "kairos-agents://chat/" + session_id, "thread_id": "chat-" + session_id, "title": "THE-PRIVATE-CHAT-TITLE",
+            "activity_id": run_id, "activity_kind": "reply"})])
         self.assertEqual(self.outbox(), [{"kind": "completed", "status": "sent", "attempts": 1}])
         self.assertEqual(self.outbox(self.ben_device), [], "ben's phone gets nothing of ana's")
         everything = json.dumps(self.relay.seen)
-        for private in ("THE-PRIVATE-CHAT-TITLE", "THE-PRIVATE-REPLY-TEXT", session_id, "ana", self.token, self.device):
+        for private in ("THE-PRIVATE-REPLY-TEXT", "ana", self.token, self.device):
             self.assertNotIn(private, everything)
         self.deliver()
         self.assertEqual(len(self.relay.pushes), 1, "sent once")
+
+    def test_a_quick_reply_at_the_desktop_is_not_pushed_but_a_long_one_a_phones_and_the_rest_are(self):
+        self.register()
+        quick, _ = self.run_for(self.ana, "ana", from_phone=False, who="Claude Opus")
+        mobile_activity.enqueue(quick, "completed")
+        self.assertEqual(self.outbox(), [], "under 30 seconds and started at the desktop: the person was there")
+        mobile_activity.enqueue(quick, "failed")
+        mobile_activity.enqueue(quick, "permission", {"id": "p9", "expires_at": time.time() + 300})
+        self.assertEqual([row["kind"] for row in self.outbox()], ["failed", "permission"], "failures and approvals always go")
+        long_run, _ = self.run_for(self.ana, "ana", from_phone=False, who="Claude Opus")
+        with mobile_activity.database() as db:
+            row = db.execute("SELECT snapshot FROM activity WHERE id=?", (long_run,)).fetchone()
+            snap = json.loads(row[0])
+            snap["started_at"] -= mobile_activity.QUIET_REPLY_SECONDS
+            db.execute("UPDATE activity SET snapshot=? WHERE id=?", (json.dumps(snap), long_run))
+        mobile_activity.enqueue(long_run, "completed")
+        phone_run, _ = self.run_for(self.ana, "ana", from_phone=True)
+        mobile_activity.enqueue(phone_run, "completed")
+        self.assertEqual([row["kind"] for row in self.outbox()], ["failed", "permission", "completed", "completed"])
+        self.deliver()
+        sent = [body for _, body in self.relay.pushes]
+        self.assertEqual([(b["notice"], b["who"]) for b in sent],
+                         [("workFailed", "Claude Opus"), ("approval", "Claude Opus"), ("replyReady", "Claude Opus"), ("replyReady", "Kairos")])
+        self.assertEqual(sent[1]["request_id"], "p9")
+        self.assertTrue(sent[1]["link"].startswith("kairos-agents://chat/"), "a model chat's approval opens the chat")
 
     def test_the_relays_secret_is_kept_encrypted_and_never_shown(self):
         self.register()
@@ -1079,29 +1114,30 @@ class Push(Base):
 
     def test_what_the_phone_reads_is_built_and_only_what_the_relay_takes_is_sent(self):
         # kairos-ios docs/coverage/native.md "Push payload": the fields a tap and the action buttons need.
-        approval = phone_push.native_alert("permission", {"session_id": "s1", "run_id": "t1", "request_id": "p1", "agent_id": "b1"})
-        self.assertEqual(approval, {"native_kind": "approval", "category": "kairos.approval", "link": "kairos-agents://approval/p1?bot=b1",
-                                    "interruption_level": "time-sensitive", "thread_id": "bot-b1", "request_id": "p1",
-                                    "activity_id": "t1", "activity_kind": "reply"})
+        approval = phone_push.native_alert("permission", {"session_id": "s1", "run_id": "t1", "request_id": "p1", "agent_id": "b1",
+                                                          "title": "Plan\nthe launch"})
+        self.assertEqual(approval, {"notice": "approval", "link": "kairos-agents://approval/p1?bot=b1", "thread_id": "bot-b1",
+                                    "title": "Plan the launch", "request_id": "p1", "activity_id": "t1", "activity_kind": "reply"})
+        # A model chat's approval or question opens the chat, where it is shown, and keeps its request for the buttons.
         question = phone_push.native_alert("permission", {"session_id": "s1", "request_id": "q1", "ask": "question"})
-        self.assertEqual((question["category"], question["link"]), ("kairos.question", "kairos-agents://approval/q1"))
+        self.assertEqual((question["notice"], question["link"], question["request_id"], question["thread_id"]),
+                         ("question", "kairos-agents://chat/s1", "q1", "chat-s1"))
         self.assertEqual(phone_push.native_alert("completed", {"session_id": "s1", "run_id": "t1"})["link"], "kairos-agents://chat/s1")
-        self.assertEqual(phone_push.native_alert("completed", {"session_id": "s1"})["category"], "kairos.replyReady")
-        self.assertEqual(phone_push.native_alert("failed", {"session_id": "s1"})["category"], "kairos.workFailed")
+        self.assertEqual(phone_push.native_alert("completed", {"session_id": "s1"})["notice"], "replyReady")
+        self.assertEqual(phone_push.native_alert("failed", {"session_id": "s1"})["notice"], "workFailed")
         self.assertEqual(phone_push.native_alert("bot_results", {"agent_id": "b1"}),
-                         {"native_kind": "workDone", "category": "kairos.workDone", "link": "kairos-agents://bot/b1",
-                          "interruption_level": "active", "thread_id": "bot-b1"})
-        self.assertEqual(phone_push.native_alert("bot_needs_you", {"agent_id": "b1"})["category"], "kairos.question")
-        # Today the relay takes four alert fields and three ring fields; the rest stays here.
-        payload = {"session_id": "s1", "run_id": "t1", "request_id": "p1", "agent_id": "b1", "who": "Scout", "collapse_id": "kairos-t1"}
+                         {"notice": "workDone", "link": "kairos-agents://bot/b1", "thread_id": "bot-b1"})
+        self.assertEqual(phone_push.native_alert("bot_needs_you", {"agent_id": "b1"})["notice"], "question")
+        # The relay takes the kind, who, the chat title, the link and the ids (relay/README.md); never message text.
+        payload = {"session_id": "s1", "run_id": "t1", "request_id": "p1", "agent_id": "b1", "who": "Scout", "collapse_id": "kairos-t1",
+                   "title": "Plan the launch", "text": "SECRET", "body": "SECRET"}
         self.assertEqual(phone_push.message_for("permission", payload, {}),
-                         {"kind": "alert", "what": "approval", "who": "Scout", "collapse_id": "kairos-t1"})
+                         {"kind": "alert", "what": "approval", "who": "Scout", "collapse_id": "kairos-t1", "notice": "approval",
+                          "link": "kairos-agents://approval/p1?bot=b1", "thread_id": "bot-b1", "title": "Plan the launch",
+                          "request_id": "p1", "activity_id": "t1", "activity_kind": "reply"})
         ring = phone_push.message_for("bot_call", {"ring_id": "r1", "agent_id": "b1", "who": "Kip", "expires_at": time.time() + 60}, {"voip_token": VOIP})
         self.assertEqual(set(ring), {"kind", "ring_id", "who", "expires_at"})
-        with patch.dict(phone_push.RELAY_FIELDS, {"alert": phone_push.RELAY_FIELDS["alert"] | {"link", "category", "request_id"},
-                                                  "ring": phone_push.RELAY_FIELDS["ring"] | {"agent_id", "bot_name"}}):
-            wider = phone_push.message_for("permission", payload, {})
-            self.assertEqual((wider["link"], wider["category"], wider["request_id"]), ("kairos-agents://approval/p1?bot=b1", "kairos.approval", "p1"))
+        with patch.dict(phone_push.RELAY_FIELDS, {"ring": phone_push.RELAY_FIELDS["ring"] | {"agent_id", "bot_name"}}):
             ring = phone_push.message_for("bot_call", {"ring_id": "r1", "agent_id": "b1", "who": "Kip", "expires_at": time.time() + 60}, {"voip_token": VOIP})
             self.assertEqual((ring["agent_id"], ring["bot_name"]), ("b1", "Kip"))
 
@@ -1115,7 +1151,9 @@ class Push(Base):
             rings._save(account, [ring])
         mobile_activity.enqueue_ring("ana", ring)
         self.deliver()
-        self.assertEqual([body for _, body in self.relay.pushes], [{"kind": "alert", "what": "needs_you", "who": "Kip", "collapse_id": "ring-" + ring["id"]}])
+        # The old style "Kip needs you" (no notice kind for a ring); the relay passes a link on only with a notice.
+        self.assertEqual([body for _, body in self.relay.pushes], [{"kind": "alert", "what": "needs_you", "who": "Kip", "collapse_id": "ring-" + ring["id"],
+                                                                    "link": f"kairos-agents://ring/{ring['id']}?bot=bot1"}])
         self.relay.pushes.clear()
         ended = {**ring, "id": uuid.uuid4().hex, "status": rings.ANSWERED, "invocation_id": "i3"}
         with rings._lock:

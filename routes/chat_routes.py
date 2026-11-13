@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from core import bot_chat_store, attachments, chat_artifacts, chat_files, chat_references, cli_access, office_preview
 from core.auth import auth_manager
-from core.middleware import require_user, get_current_user
+from core.middleware import require_user, get_current_user, phone_device
 from services import chat_live, chat_service
 from services import chat_summary
 
@@ -232,7 +232,7 @@ async def live_chat_events(request: Request = None, user: str = Depends(require_
 
 
 @router.post("/live")
-async def start_live_chat(body: ChatRequest, user: str = Depends(require_user)) -> dict:
+async def start_live_chat(body: ChatRequest, request: Request, user: str = Depends(require_user)) -> dict:
     is_admin = auth_manager.is_admin(user)
     session = chat_live.require_session(body.session_id, user)
     if session.get("agent_id"):
@@ -243,7 +243,8 @@ async def start_live_chat(body: ChatRequest, user: str = Depends(require_user)) 
     except ValueError as error:
         raise HTTPException(422, str(error))
     return chat_live.start(body.session_id, body.message, body.attachment_ids, is_admin,
-                           context, chat_references.metadata(body.references), user=user, request_id=body.request_id)
+                           context, chat_references.metadata(body.references), user=user, request_id=body.request_id,
+                           from_phone=phone_device(request) is not None)
 
 
 async def _start_bot_turn(body: ChatRequest, session: dict, user: str, is_admin: bool) -> dict:

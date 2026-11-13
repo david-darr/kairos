@@ -145,17 +145,29 @@ posts to the Kairos push relay at the address in settings (`phone_push_relay_url
   `"<ts>\n<METHOD>\n<path>\n<sha256hex(body)>"`, keyed with the hex text of `sha256(secret)`.
 - **The relay address** must be `https://host[:port]` with no path, sign-in, query or fragment (plain `http` only
   for this computer itself). Redirects are never followed and proxy settings are not used.
-- **What the relay is told:** the phone's tokens once, then per push a kind and at most a name. Never a message, a
-  chat title, a session id or the reason for a call.
+- **What the relay is told:** the phone's tokens once, then per alert its kind, who it is from (the bot's name, or
+  the model's endpoint name for a model chat, else "Kairos"), the chat's title, a `kairos-agents://` link and opaque
+  ids (session, request, turn). Never a message, a file name or the reason for a call. The relay turns these into the
+  notification (relay `README.md` in `kairos-ios`): the name is the title, a fixed line says what kind ("Kip wants your
+  approval", "Your reply is ready"), the chat's title is the subtitle.
+- **Privacy level.** The phone's Private setting ("hide titles") is kept on the phone and never sent here, so the
+  desktop always sends the chat's title. Remote alerts are drawn by iOS, so the phone cannot hide it either. Open:
+  send the level with `push/register` and leave the title out for Private.
+- **Quieter replies.** A "reply ready" push to a phone goes only when the turn ran 30 seconds or longer, or a
+  paired phone started it (`mobile_activity.QUIET_REPLY_SECONDS`, `from_phone` on the turn). A short turn started at
+  the desktop finished while the person was there. Model chats have no presence or focus signal here, hence the
+  timer; bot chats follow the same rule (a turn a bot starts from the phone counts as a desktop one, since it goes
+  through the Bots admission door). Approvals, questions, failures, bot pushes and rings always go. Browsers (Web
+  Push) are not affected.
 
-| Desktop kind | Relay push |
+| Desktop kind | Relay push (`notice`, and the old `what` kept for an older relay) |
 |---|---|
-| chat reply ready (`completed`) | alert `message` |
-| chat needs a permission (`permission`) | alert `approval` |
-| chat asks a question (`permission`, kind question) | alert `needs_you` |
-| chat failed (`failed`) | alert `needs_you` |
-| bot needs you (`bot_needs_you`) | alert `needs_you` |
-| bot results (`bot_results`) | alert `done` |
+| chat reply ready (`completed`) | alert `replyReady` (`message`) |
+| chat needs a permission (`permission`) | alert `approval` (`approval`) |
+| chat asks a question (`permission`, kind question) | alert `question` (`needs_you`) |
+| chat failed (`failed`) | alert `workFailed` (`needs_you`) |
+| bot needs you (`bot_needs_you`) | alert `question` (`needs_you`) |
+| bot results (`bot_results`) | alert `workDone` (`done`) |
 | a bot rings (`bot_call`) | `ring` with `ring_id`, `expires_at`, `who`; once, not the browser's three |
 | a ring ended (`bot_call_end`) | nothing yet (see below); the phone asks `GET /api/rings/{id}` |
 | a chat run changes state | `activity` `update` or `end` to that Live Activity's own token |
@@ -166,7 +178,7 @@ account the bot belongs to.
 ### Built to the phone's native contract
 
 The phone's side is `docs/coverage/native.md` in `kairos-ios` ("Push payload"). `core/phone_push.py` `message_for()`
-builds each push in full to that contract, then keeps only the fields the relay accepts today (`RELAY_KINDS`,
+builds each push in full to that contract, then keeps only the fields the relay accepts (`RELAY_KINDS`,
 `RELAY_FIELDS`). When the relay learns a field or a kind, it is added to those two constants and nothing else changes.
 
 - **Live Activity content state** is the phone's `KairosActivityAttributes.ContentState`, every key it decodes:
@@ -187,10 +199,13 @@ builds each push in full to that contract, then keeps only the fields the relay 
   is not in `RELAY_KINDS`: nothing is queued or sent for a phone today. The relay request shape is the desktop's
   proposal; the Apple payload the phone reads is `{"kind": "bot_call_end", "ring_id", "outcome"}` with outcome
   `answered`, `declined` or `missed`.
-- **Alerts.** For each alert the desktop works out what the phone reads: its kind and category (`kairos.replyReady`,
-  `workFailed`, `approval`, `question`, `workDone`), the link a tap opens (`kairos-agents://chat/<id>`, `bot/<id>`,
-  `approval/<request>?bot=<id>`), `request_id`, `activity_id`, `thread_id` and the interruption level
-  (`native_alert()`). None of it is sent: the relay writes the Apple payload itself from `what` and `who`.
+- **Alerts.** For each alert the desktop sends what the phone reads (`native_alert()`): `notice`, the phone's kind
+  (`replyReady`, `workFailed`, `approval`, `question`, `workDone`; the relay makes the category `kairos.<notice>`,
+  which gives Approve, Deny and Reply, and the interruption level), the link a tap opens (`kairos-agents://chat/<id>`,
+  `bot/<id>`, and `approval/<request>?bot=<id>` for a bot's approval or question; a model chat's opens the chat),
+  `thread_id` (`bot-<id>` or `chat-<id>`, so one chat's notifications group), `request_id` for Approve, Deny and
+  Reply, `activity_id` and `activity_kind` for Try again, and `title`. A ring sent as an alert (no VoIP token) stays
+  the old "Kip needs you".
 - **Rings.** The phone reads `ring_id`, `agent_id`, `bot_name`, `expires_at`. The desktop builds all four; the relay
   takes `ring_id`, `expires_at` and `who`.
 
@@ -220,15 +235,11 @@ and no answer retry with backoff, at most five times.
 The phone's contract (`native.md`) and the relay were written apart. These are the places they do not meet. Each is
 a change to the relay or the phone, not to the desktop, which already builds the missing fields.
 
-1. **A tap cannot open the exact chat or approval.** The phone reads `link`, `request_id`, `activity_id`,
-   `activity_kind` and `kind` from an alert, and `aps.category`, `thread-id` and `interruption-level`. The relay's
-   alert payload has a fixed title and sentence, a sound, and `kind` set to its own word (`message`, `needs_you`,
-   `approval`, `done`). So an alert opens the app at Home, shows no Approve, Deny or Reply buttons, is never time
-   sensitive and is not grouped by bot.
-2. **The relay's four words are not the phone's kinds.** The phone has `replyReady`, `workDone`, `workFailed`,
-   `approval`, `question` and eleven more (team, posted, spend, calendar, usage and so on). A failed chat goes out
-   as `needs_you`, a question as `needs_you`, a test as `message`. The desktop has no source yet for the phone's
-   other kinds (team updates, posts, spend, calendar reminders, the morning brief, Forge, usage).
+1. **Alerts are carried in full since 2026-11-12** (relay `notice`): a tap opens the exact chat or approval, the
+   buttons show, approvals and questions are time sensitive, and a chat's notifications group. A relay older than
+   that ignores the new fields and sends the old generic line, so nothing breaks while it is redeployed.
+2. **Only five of the phone's kinds.** The phone has eleven more (team, posted, spend, calendar, usage and so on).
+   The desktop has no source yet for them. A test push still goes out as the old `message`.
 3. **The call screen gets no bot id and the wrong key for the name.** The relay's call payload is
    `{kind, ring_id, expires_at, caller}`. The phone reads `agent_id` and `bot_name`, so it shows "A bot" and treats
    the caller as Kip.

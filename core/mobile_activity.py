@@ -71,10 +71,13 @@ def config(create=False, subject=None) -> dict | None:
         return dict(row) if row else None
 
 
-def create_run(run_id, session, owner, request_id, fingerprint):
+def create_run(run_id, session, owner, request_id, fingerprint, *, who="", from_phone=False):
+    """`who` is the model's name for a model chat (a phone push's title); `from_phone` marks a turn a paired phone
+    started, whose "reply ready" push always goes (QUIET_REPLY_SECONDS)."""
     now = time.time()
     snapshot = {"id": run_id, "session_id": session["id"], "state": "running", "text": "",
                 "title": session.get("title", "Chat"), "forge": bool(session.get("forge")),
+                "who": str(who or ""), "from_phone": bool(from_phone),
                 "started_at": now, "updated_at": now, "revision": 0,
                 "permissions": [], "tool_steps": [], "tool_events": []}
     with database() as db:
@@ -520,11 +523,13 @@ def enqueue(run_id, kind, permission=None):
             text = "A chat is waiting for your answer. Tap to respond."
         payload = {"title": "Kairos", "body": text, "url": "/?chat=" + run["session_id"],
                    "tag": "kairos-" + run_id, "kind": kind, "expires_at": expiry}
-        # A phone's push carries no text at all (the relay writes the sentence): only what kind, and ids to open.
+        # A phone's push carries no message text (the relay writes the sentence): what kind, who (the model's name;
+        # a bot's is looked up at send time), the chat's title, and ids to open.
         phone_payload = {"kind": kind, "session_id": run["session_id"], "run_id": run_id, "collapse_id": "kairos-" + run_id,
-                         "expires_at": expiry, **({"request_id": permission["id"]} if (permission or {}).get("id") else {}),
+                         "expires_at": expiry, "title": snap.get("title") or "", "who": snap.get("who") or "",
+                         **({"request_id": permission["id"]} if (permission or {}).get("id") else {}),
                          **({"ask": "question"} if kind == "permission" and (permission or {}).get("kind") == "question" else {})}
-        phones = _phone_ready()
+        phones = _phone_ready() and not _quiet_reply(kind, snap, now)
         for device in db.execute("SELECT * FROM devices WHERE owner=?", (run["owner"],)).fetchall():
             if kind != "test" and not json.loads(device["preferences"]).get(kind):
                 continue
@@ -534,6 +539,19 @@ def enqueue(run_id, kind, permission=None):
             db.execute("INSERT OR IGNORE INTO outbox(id,device_id,run_id,kind,permission_id,payload,expires,next_attempt) VALUES(?,?,?,?,?,?,?,?)",
                        (event_id, device["id"], run_id, kind, (permission or {}).get("id"),
                         json.dumps(phone_payload if is_phone(device) else payload), expiry, now))
+
+
+# Quieter replies (2026-11-12): a short turn started at the desktop finished while the person was plainly there,
+# so its "reply ready" push to a phone is skipped. Model chats have no presence or focus signal on the desktop, so
+# the rule is time: the push goes when the turn ran this long or longer, or a paired phone started it. Approvals,
+# questions, failures and calls always go. Browsers (Web Push) are not affected.
+QUIET_REPLY_SECONDS = 30
+
+
+def _quiet_reply(kind, snap, now) -> bool:
+    if kind != "completed" or snap.get("from_phone"):
+        return False
+    return now - float(snap.get("started_at") or now) < QUIET_REPLY_SECONDS
 
 
 BOT_KINDS = {"bot_needs_you", "bot_results", "bot_call", "bot_call_end"}

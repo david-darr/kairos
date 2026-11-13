@@ -9,8 +9,10 @@ and how one queued notification (core/mobile_activity.py's outbox, the same one 
 one relay request. Sending and storing are services/mobile_notifications.py and core/mobile_activity.py.
 
 What the relay is told, and no more: the phone's push tokens (once, when it registers), and per push a
-kind and at most a name: "Kip needs you". Never a message, a chat title, a file name or the reason for a
-call. The relay builds the sentence itself from a fixed list and takes no free text.
+kind, who it is from (a bot's or model's name), the chat's title, and opaque ids and a kairos-agents:// link so a
+tap opens the right chat or approval. Never a message, a file name or the reason for a call. The relay builds
+the sentence itself from a fixed list ("Kip wants your approval"); the name is the title and the chat's title the
+subtitle. The phone's Private level does not reach this desktop (specs/phone-api.md), so the title is always sent.
 
 With no relay address in settings (phone_push_relay_url), nothing is queued for phones and nothing is sent.
 """
@@ -43,15 +45,16 @@ ACTIVITY_STALE_SECONDS = 15 * 60    # the phone's own Live Activities go stale a
 ACTIVITY_DISMISS_SECONDS = 15 * 60
 
 # What the phone's native layer reads from a push (kairos-ios docs/coverage/native.md, "Push payload"), and
-# what the relay carries of it today. message_for() builds each push in full, to the phone's contract, and then
-# keeps only the fields the relay accepts: the relay writes the Apple payload itself and takes no free text, so
-# a link or a request id sent now would be dropped there. When the relay learns a field or a kind, it is added
-# here and nothing else changes. Until then (specs/phone-api.md lists each gap): an alert opens the app, not the
-# exact chat or approval, and has no action buttons; a call screen shows the relay's "caller" and no bot id;
-# and the end of a ring cannot be pushed at all, so the phone asks GET /api/rings/{id}.
+# what the relay carries of it. message_for() builds each push in full, to the phone's contract, and then keeps
+# only the fields the relay accepts (relay/README.md in kairos-ios): the relay writes the Apple payload itself.
+# An alert carries its kind as `notice` (the relay sets the category, so the right buttons show, and the
+# thread), who, the chat title, the link, the request an Approve or Reply answers, and the run a Retry restarts.
+# Still missing (specs/phone-api.md): a call screen shows the relay's "caller" and no bot id, and the end of a
+# ring cannot be pushed at all, so the phone asks GET /api/rings/{id}.
 RELAY_KINDS = frozenset({"alert", "ring", "activity"})          # no "ring_end" (a background push) yet
 RELAY_FIELDS = {
-    "alert": frozenset({"kind", "what", "who", "collapse_id"}),
+    "alert": frozenset({"kind", "what", "who", "collapse_id", "notice", "title", "link", "request_id", "thread_id",
+                        "activity_id", "activity_kind"}),
     "ring": frozenset({"kind", "ring_id", "expires_at", "who"}),
     "ring_end": frozenset({"kind", "ring_id", "outcome"}),
     "activity": frozenset({"kind", "event", "push_token", "content_state", "stale_date", "dismissal_date"}),
@@ -60,7 +63,7 @@ LINK = "kairos-agents://"
 # The desktop's kinds as the phone's notification kinds (its category is "kairos.<kind>").
 NATIVE_KIND = {"completed": "replyReady", "failed": "workFailed", "permission": "approval",
                "bot_needs_you": "question", "bot_results": "workDone"}
-TIME_SENSITIVE = frozenset({"approval", "question"})
+TITLE_LIMIT = 80             # the relay cuts a chat title to this too
 # A chat run's state as the phone's Live Activity phase (KairosActivityAttributes.ContentState.phase), and the
 # few fixed words shown as its step. Never words from the chat.
 ACTIVITY_PHASE = {"running": "running", "awaiting_permission": "waiting", "completed": "done", "failed": "failed",
@@ -137,28 +140,39 @@ def install_body(registration: dict) -> Optional[dict]:
             "environment": registration.get("environment") if registration.get("environment") in ENVIRONMENTS else "production"}
 
 
+def clean_title(value) -> str:
+    return " ".join(re.sub(r"[\x00-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069]", " ", str(value or "")).split())[:TITLE_LIMIT]
+
+
 def native_alert(kind: str, payload: dict) -> dict:
     """The fields the phone reads from an alert so a tap opens the exact chat or approval and the right buttons
-    show: its kind and category, where the tap goes, the request an Approve or Reply answers, the run a Retry
-    restarts. Opaque ids only. The relay carries none of these today (RELAY_FIELDS)."""
+    show: its kind (the relay makes the category from it), where the tap goes, the thread it groups in, the
+    request an Approve or Reply answers, the run a Retry restarts, and the chat's title. Opaque ids only.
+
+    A bot's approval or question opens that bot's inbox (approval/<request>?bot=<id>); a model chat's opens the
+    chat itself, where the request is shown."""
     native = NATIVE_KIND.get(kind)
     if kind == "permission" and payload.get("ask") == "question":
         native = "question"
     if native is None:
         return {}
     bot, session, request = payload.get("agent_id"), payload.get("session_id"), payload.get("request_id")
-    if native in ("approval", "question") and request:
-        link = f"{LINK}approval/{request}" + (f"?bot={bot}" if bot else "")
+    if native in ("approval", "question") and request and bot:
+        link = f"{LINK}approval/{request}?bot={bot}"
     elif session:
         link = f"{LINK}chat/{session}"
     elif bot:
         link = f"{LINK}bot/{bot}"
     else:
         link = f"{LINK}home"
-    fields = {"native_kind": native, "category": "kairos." + native, "link": link,
-              "interruption_level": "time-sensitive" if native in TIME_SENSITIVE else "active"}
+    fields = {"notice": native, "link": link}
     if bot:
         fields["thread_id"] = "bot-" + str(bot)
+    elif session:
+        fields["thread_id"] = "chat-" + str(session)
+    title = clean_title(payload.get("title"))
+    if title:
+        fields["title"] = title
     if request and native in ("approval", "question"):
         fields["request_id"] = str(request)
     if payload.get("run_id"):
@@ -213,7 +227,10 @@ def message_for(kind: str, payload: dict, registration: dict, now: Optional[floa
                 **native_alert(kind, payload)}
     if body is None or body["kind"] not in RELAY_KINDS:
         return None
-    return {key: value for key, value in body.items() if key in RELAY_FIELDS[body["kind"]] and value is not None}
+    out = {key: value for key, value in body.items() if key in RELAY_FIELDS[body["kind"]] and value is not None}
+    if out.get("thread_id") and not _collapse(out["thread_id"]):
+        out.pop("thread_id")        # the relay takes up to 64 plain characters; it groups by chat link without one
+    return out
 
 
 def _collapse(value) -> Optional[str]:
