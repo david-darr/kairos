@@ -157,6 +157,9 @@ class PushRegistration(BaseModel):
     voip_token: Optional[str] = Field(default=None, pattern=r"^[0-9a-fA-F]{64,200}$")
     environment: str = Field(pattern=r"^(sandbox|production)$")
     locale: str = Field(default="", max_length=35, pattern=r"^[A-Za-z0-9_-]*$")
+    # The phone's notice level: "generic" or "hideTitles" (Private: no chat titles in pushes). Optional; an older
+    # phone sends none and an unknown value counts as generic.
+    detail: Optional[str] = Field(default=None, max_length=20, pattern=r"^[A-Za-z]*$")
 
 
 class ActivityRegistration(BaseModel):

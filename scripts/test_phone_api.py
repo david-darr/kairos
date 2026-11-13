@@ -971,7 +971,7 @@ class Push(Base):
         self.assertEqual(json.loads(self.relay.seen[0][2]), {"apns_token": APNS, "voip_token": None, "environment": "sandbox"})
         self.assertEqual(len(self.relay.installs), 1, "only the phone with something due is registered")
         install_id = next(iter(self.relay.installs))
-        # Who, what kind, the chat's title (the phone's Private level does not reach the desktop) and ids to open it.
+        # Who, what kind, the chat's title (the phone is not set to Private) and ids to open it.
         self.assertEqual(self.relay.pushes, [(install_id, {
             "kind": "alert", "what": "message", "who": "Kairos", "collapse_id": "kairos-" + run_id, "notice": "replyReady",
             "link": "kairos-agents://chat/" + session_id, "thread_id": "chat-" + session_id, "title": "THE-PRIVATE-CHAT-TITLE",
@@ -983,6 +983,73 @@ class Push(Base):
             self.assertNotIn(private, everything)
         self.deliver()
         self.assertEqual(len(self.relay.pushes), 1, "sent once")
+
+    def test_private_on_the_phone_keeps_the_chat_title_out_of_every_push(self):
+        self.register()
+        self.assertEqual(mobile_activity.phone_registration(self.device)["detail"], "generic", "an older phone sends no level")
+        self.register(detail="somethingNew")
+        self.assertEqual(mobile_activity.phone_registration(self.device)["detail"], "generic", "an unknown level counts as generic")
+        self.assertEqual(self.ana.post("/api/phone/push/register", json={"apns_token": APNS, "environment": "sandbox",
+                                                                          "detail": "x; drop"}).status_code, 422)
+        self.register(detail="hideTitles")
+        self.assertEqual(mobile_activity.phone_registration(self.device)["detail"], "hideTitles")
+        run_id, _ = self.run_for(self.ana, "ana")
+        mobile_activity.publish(run_id, {}, "completed")
+        mobile_activity.enqueue(run_id, "completed")
+        mobile_activity.enqueue(run_id, "permission", {"id": "p7", "expires_at": time.time() + 300})
+        self.deliver()
+        self.assertEqual([body["notice"] for _, body in self.relay.pushes], ["replyReady", "approval"])
+        for _, body in self.relay.pushes:
+            self.assertNotIn("title", body)
+        self.assertNotIn("THE-PRIVATE-CHAT-TITLE", json.dumps(self.relay.seen), "the relay never receives the title")
+        with mobile_activity.database() as db:
+            self.assertNotIn("THE-PRIVATE-CHAT-TITLE", json.dumps([r[0] for r in db.execute("SELECT payload FROM outbox")]))
+        # Queued while generic, sent after the person turned Private on: the title still stays home.
+        self.register(detail="generic")
+        queued, _ = self.run_for(self.ana, "ana")
+        mobile_activity.publish(queued, {}, "completed")
+        mobile_activity.enqueue(queued, "completed")
+        self.register(detail="hideTitles")
+        self.deliver()
+        self.assertNotIn("title", self.relay.pushes[-1][1])
+        # And back to generic: titles return.
+        self.register(detail="generic")
+        later, _ = self.run_for(self.ana, "ana")
+        mobile_activity.publish(later, {}, "completed")
+        mobile_activity.enqueue(later, "completed")
+        self.deliver()
+        self.assertEqual(self.relay.pushes[-1][1]["title"], "THE-PRIVATE-CHAT-TITLE")
+
+    def test_a_turn_sent_from_the_phone_is_marked_on_the_model_chat_and_the_bot_chat_paths(self):
+        from services import bot_chat_service, chat_live
+        seen = []
+
+        def fake_start(*args, **kwargs):
+            seen.append(("model", kwargs.get("from_phone")))
+            return {"turn_id": "t1"}
+
+        async def fake_send(owner, sid, body):
+            seen.append(("bot", body.get("from_phone", False)))
+            return {"turn_id": "t2", "queued": False, "queue_id": None, "reason": None}
+
+        body = {"session_id": "s1", "message": "hello", "attachment_ids": [], "references": []}
+        with patch.object(chat_live, "require_session", return_value={"id": "s1"}), patch.object(chat_live, "start", fake_start):
+            self.assertEqual(self.ana.post("/api/chat/live", json=body).status_code, 200)
+            self.assertEqual(BROWSERS["ana"].post("/api/chat/live", json=body).status_code, 200)
+        bot_session = {"id": "s1", "agent_id": "bot1"}
+        with patch.object(chat_live, "require_session", return_value=bot_session),                 patch.object(bot_chat_service, "send", fake_send),                 patch("core.bot_message_tree.ensure", return_value={"thread": {"active_leaf_id": None}}):
+            self.assertEqual(self.ana.post("/api/chat/live", json=body).status_code, 200)
+            self.assertEqual(BROWSERS["ana"].post("/api/chat/live", json=body).status_code, 200)
+        self.assertEqual(seen, [("model", True), ("model", False), ("bot", True), ("bot", False)])
+        # The bot path keeps the mark through to the turn it starts, and a retry still matches the same send.
+        payload = bot_chat_service._clean_payload({"send_id": "x" * 8, "text": "hi", "mode": None, "from_phone": True})
+        self.assertTrue(payload["from_phone"])
+        self.assertNotIn("from_phone", bot_chat_service._shown(payload))
+        started = []
+        with patch.object(bot_chat_service, "_context_note", return_value=""), patch.object(bot_chat_service, "_runtime"),                 patch.object(bot_chat_service.chat_live, "start", lambda *a, **k: started.append(k.get("from_phone"))):
+            bot_chat_service._launch("ana", "s1", {"id": "bot1"}, payload, 0, "g1", "")
+            bot_chat_service._launch("ana", "s1", {"id": "bot1"}, {**payload, "from_phone": False}, 0, "g2", "")
+        self.assertEqual(started, [True, False])
 
     def test_a_quick_reply_at_the_desktop_is_not_pushed_but_a_long_one_a_phones_and_the_rest_are(self):
         self.register()

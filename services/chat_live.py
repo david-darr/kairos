@@ -265,6 +265,24 @@ def _client_error(error: Exception) -> str:
     return "The selected model failed. Check its connection or choose another model. Any partial reply has been saved."
 
 
+def _model_display_name(session_id: str) -> str:
+    """The chat's model as the desktop's model picker names it ("Opus 5.5"), for a phone push's title. A
+    connection with no catalog shows its model id, as the picker does for a local model; with nothing known the
+    push says "Kairos". Never the provider or connection id."""
+    from core import model_catalog
+    endpoint = chat_service._resolve_endpoint(session_id) or {}
+    session = chat_service.session_manager.get_session(session_id) or {}
+    model = session.get("model_override") or endpoint.get("model") or ""
+    try:
+        entry = model_catalog.get_model(endpoint.get("kind") or "", model)
+    except Exception:
+        entry = None
+    name = (entry or {}).get("display_name")
+    if not name and endpoint.get("kind") in ("local", "api"):
+        name = model
+    return str(name or "").strip() or "Kairos"
+
+
 def start(session_id: str, text: str, attachment_ids: list[str], is_admin: bool,
           reference_context: str, references: list[dict], *, user: str = SINGLE_USER,
           request_id: str | None = None, turn_id: str | None = None, accepted_index: int | None = None,
@@ -301,7 +319,8 @@ def start(session_id: str, text: str, attachment_ids: list[str], is_admin: bool,
     try:
         # A phone push names the model for a model chat; a bot's chat is named after the bot at send time.
         mobile_activity.create_run(run["turnId"], session, user, request_id, fingerprint,
-                                   who="" if run.get("_agent_id") else run["provider"], from_phone=from_phone)
+                                   who="" if run.get("_agent_id") else _model_display_name(session_id),
+                                   from_phone=from_phone)
         task = asyncio.create_task(_run(session_id, run, attachment_ids, is_admin, reference_context, references,
                                         accepted_index, turn_note))
     except Exception:

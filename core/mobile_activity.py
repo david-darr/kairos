@@ -338,6 +338,7 @@ def _forget_at_relay(db, rows) -> None:
 def phone_register(owner, device_id, registration) -> None:
     """A paired phone's push tokens: one registration per phone, replaced when sent again. The relay
     registration it already has is kept and marked to be updated with the new tokens before the next push."""
+    from core import phone_push
     with database() as db:
         row = _phone_row(db, device_id)
         if row and row["owner"] != owner:
@@ -346,6 +347,7 @@ def phone_register(owner, device_id, registration) -> None:
         new = {"phone": device_id, "apns_token": registration["apns_token"].lower(),
                "voip_token": (registration.get("voip_token") or "").lower() or None,
                "environment": registration["environment"], "locale": registration.get("locale") or "",
+               "detail": phone_push.notice_detail(registration.get("detail")),
                "activities": old.get("activities") or {}}
         relay = old.get("relay")
         if relay:
@@ -511,6 +513,7 @@ def phone_result(item, outcome, retry_after=0) -> None:
 
 
 def enqueue(run_id, kind, permission=None):
+    from core import phone_push
     with database() as db:
         run = db.execute("SELECT * FROM activity WHERE id=?", (run_id,)).fetchone()
         snap = json.loads(run["snapshot"])
@@ -535,10 +538,15 @@ def enqueue(run_id, kind, permission=None):
                 continue
             if is_phone(device) and not phones:
                 continue
+            sent = payload
+            if is_phone(device):
+                # A phone set to Private gets no chat title, so the relay never receives it.
+                hidden = phone_push.hides_titles(json.loads(device["subscription"] or "{}"))
+                sent = {**phone_payload, "title": ""} if hidden else phone_payload
             event_id = hashlib.sha256(f"{device['id']}:{run_id}:{kind}:{(permission or {}).get('id', '')}".encode()).hexdigest()
             db.execute("INSERT OR IGNORE INTO outbox(id,device_id,run_id,kind,permission_id,payload,expires,next_attempt) VALUES(?,?,?,?,?,?,?,?)",
                        (event_id, device["id"], run_id, kind, (permission or {}).get("id"),
-                        json.dumps(phone_payload if is_phone(device) else payload), expiry, now))
+                        json.dumps(sent), expiry, now))
 
 
 # Quieter replies (2026-11-12): a short turn started at the desktop finished while the person was plainly there,

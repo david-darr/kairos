@@ -117,13 +117,16 @@ def _clean_payload(body: dict) -> dict:
         payload["data_context"] = body["data_context"]
     if body.get("pointed"):
         payload["pointed"] = list(body["pointed"])[:5]
+    # A turn a paired phone started always gets its "reply ready" push (core/mobile_activity.py _quiet_reply).
+    if body.get("from_phone") is True:
+        payload["from_phone"] = True
     return payload
 
 
 def _shown(payload: dict) -> dict:
     """What identifies a send for retry matching. The leaf the person saw is left out:
     a lost-response retry is the same message however far the thread has moved."""
-    return {key: value for key, value in payload.items() if key != "expected_leaf_id"}
+    return {key: value for key, value in payload.items() if key not in ("expected_leaf_id", "from_phone")}
 
 
 def _row_by_id(sid: str, message_id: str) -> dict | None:
@@ -257,7 +260,7 @@ def _launch(owner: str, sid: str, bot: dict, payload: dict, index: int, generati
     references = chat_references.metadata(payload.get("references") or [])
     chat_live.start(sid, payload["text"], payload.get("attachment_ids") or [], True, context, references,
                     user=owner, turn_id=generation, accepted_index=index, claimed=True,
-                    turn_note=note, chunk_filter=chunk_filter)
+                    turn_note=note, chunk_filter=chunk_filter, from_phone=payload.get("from_phone") is True)
     _runtime(sid, owner, bot["id"], "started", generation)
     if payload.get("mode") == "goal":
         from core import session_manager_store

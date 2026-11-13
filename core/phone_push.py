@@ -30,6 +30,9 @@ MAX_URL = 300
 HEX_TOKEN = re.compile(r"[0-9a-fA-F]{64,200}")          # an APNs or VoIP device token, as the relay accepts it
 ACTIVITY_TOKEN = re.compile(r"[0-9a-fA-F]{32,512}")     # a Live Activity's own push token
 ENVIRONMENTS = ("sandbox", "production")
+# What the phone lets a notification say (its NoticeDetail). "hideTitles" is Private: no chat title in any push.
+# A phone that sends no level, or one this desktop does not know, is treated as generic.
+NOTICE_DETAILS = ("generic", "hideTitles")
 INSTALL_ID = re.compile(r"[A-Za-z0-9_-]{16,64}")
 WHO_LIMIT = 40
 DEFAULT_WHO = "Kairos"
@@ -140,6 +143,15 @@ def install_body(registration: dict) -> Optional[dict]:
             "environment": registration.get("environment") if registration.get("environment") in ENVIRONMENTS else "production"}
 
 
+def notice_detail(value) -> str:
+    return value if value in NOTICE_DETAILS else "generic"
+
+
+def hides_titles(registration: dict) -> bool:
+    """Is this phone set to Private? Then the chat's title is left out of the relay call."""
+    return notice_detail((registration or {}).get("detail")) == "hideTitles"
+
+
 def clean_title(value) -> str:
     return " ".join(re.sub(r"[\x00-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069]", " ", str(value or "")).split())[:TITLE_LIMIT]
 
@@ -196,6 +208,8 @@ def message_for(kind: str, payload: dict, registration: dict, now: Optional[floa
     alert. The end of a ring is a background push, never a call push: every call push must show an incoming call."""
     now = time.time() if now is None else now
     who = clean_who(payload.get("who"))
+    if hides_titles(registration):
+        payload = {key: value for key, value in payload.items() if key != "title"}
     body = None
     if kind == "bot_call":
         expires_at = int(float(payload.get("expires_at") or 0))

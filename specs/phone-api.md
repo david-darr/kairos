@@ -26,7 +26,7 @@ share the prefix and nothing else.
 | `GET /api/phone/devices` | any sign-in | The account's own paired phones; `current` marks the phone asking. |
 | `DELETE /api/phone/devices/{id}` | any sign-in, own phones only | `204`. The token dies at once, its streams and websockets close, its push registration goes. Another account's phone: `404`. |
 | `GET /api/phone/home` | any sign-in | `{usage, next_event, needs_you, running}` for the caller's account. |
-| `POST /api/phone/push/register` | a paired phone, for itself | `204`. Stores the phone's Apple tokens. One registration per phone; sending again replaces it. |
+| `POST /api/phone/push/register` | a paired phone, for itself | `204`. Stores the phone's Apple tokens and its notice level (`detail`, optional: `generic` or `hideTitles`; missing or unknown counts as `generic`). One registration per phone; sending again replaces it. |
 | `DELETE /api/phone/push/register` | a paired phone, for itself | `204`. Removes it (and asks the relay to forget the phone). |
 | `POST /api/phone/push/activity` | a paired phone, for itself | `204`. A Live Activity's push token for one of the caller's own chat runs. Someone else's run: `404`. |
 | `GET`, `PUT /api/phone/push/relay` | an admin in a browser session | The push relay's address (a setting of the whole install). Not in the contract: it is the desktop's own settings route. |
@@ -146,13 +146,15 @@ posts to the Kairos push relay at the address in settings (`phone_push_relay_url
 - **The relay address** must be `https://host[:port]` with no path, sign-in, query or fragment (plain `http` only
   for this computer itself). Redirects are never followed and proxy settings are not used.
 - **What the relay is told:** the phone's tokens once, then per alert its kind, who it is from (the bot's name, or
-  the model's endpoint name for a model chat, else "Kairos"), the chat's title, a `kairos-agents://` link and opaque
+  the model's name as the model picker shows it for a model chat, such as "Opus 5.5", else "Kairos"), the chat's title
+  unless the phone is set to Private, a `kairos-agents://` link and opaque
   ids (session, request, turn). Never a message, a file name or the reason for a call. The relay turns these into the
   notification (relay `README.md` in `kairos-ios`): the name is the title, a fixed line says what kind ("Kip wants your
   approval", "Your reply is ready"), the chat's title is the subtitle.
-- **Privacy level.** The phone's Private setting ("hide titles") is kept on the phone and never sent here, so the
-  desktop always sends the chat's title. Remote alerts are drawn by iOS, so the phone cannot hide it either. Open:
-  send the level with `push/register` and leave the title out for Private.
+- **Privacy level.** The phone sends its notice level as `detail` with `push/register`, and registers again when the
+  person changes it. With `hideTitles` (Private) the desktop leaves the chat's title out of every relay call, checked
+  when the push is queued and again when it is sent (`phone_push.hides_titles`). An older phone that sends no level
+  is treated as `generic`. "Show a preview" is not offered on the phone: the relay never reads message text.
 - **Quieter replies.** A "reply ready" push to a phone goes only when the turn ran 30 seconds or longer, or a
   paired phone started it (`mobile_activity.QUIET_REPLY_SECONDS`, `from_phone` on the turn). A short turn started at
   the desktop finished while the person was there. Model chats have no presence or focus signal here, hence the
@@ -201,9 +203,9 @@ builds each push in full to that contract, then keeps only the fields the relay 
   `answered`, `declined` or `missed`.
 - **Alerts.** For each alert the desktop sends what the phone reads (`native_alert()`): `notice`, the phone's kind
   (`replyReady`, `workFailed`, `approval`, `question`, `workDone`; the relay makes the category `kairos.<notice>`,
-  which gives Approve, Deny and Reply, and the interruption level), the link a tap opens (`kairos-agents://chat/<id>`,
+  which gives Allow, Deny and Reply, and the interruption level), the link a tap opens (`kairos-agents://chat/<id>`,
   `bot/<id>`, and `approval/<request>?bot=<id>` for a bot's approval or question; a model chat's opens the chat),
-  `thread_id` (`bot-<id>` or `chat-<id>`, so one chat's notifications group), `request_id` for Approve, Deny and
+  `thread_id` (`bot-<id>` or `chat-<id>`, so one chat's notifications group), `request_id` for Allow, Deny and
   Reply, `activity_id` and `activity_kind` for Try again, and `title`. A ring sent as an alert (no VoIP token) stays
   the old "Kip needs you".
 - **Rings.** The phone reads `ring_id`, `agent_id`, `bot_name`, `expires_at`. The desktop builds all four; the relay

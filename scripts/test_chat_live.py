@@ -339,6 +339,22 @@ class LiveChatTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(target("http://localhost:11434", kind="api"))
 
 
+class PhonePushNameTests(unittest.TestCase):
+    """A phone push's title for a model chat is the model's name as the picker shows it, never a provider id."""
+
+    def name(self, endpoint, session=None):
+        with patch.object(chat_service, "_resolve_endpoint", return_value=endpoint),                 patch.object(chat_service.session_manager, "get_session", return_value=session or {}):
+            return chat_live._model_display_name("s1")
+
+    def test_the_catalog_name_then_the_model_id_then_kairos(self):
+        claude = {"kind": "claude_cli", "name": "anthropic", "model": "claude-opus-5-5"}
+        self.assertEqual(self.name(claude), "Opus 5.5")
+        self.assertEqual(self.name(claude, {"model_override": "sonnet"}), "Sonnet 5.5", "the chat's own pick wins")
+        self.assertEqual(self.name({"kind": "api", "name": "openai", "model": "gpt-test"}), "gpt-test")
+        self.assertEqual(self.name({"kind": "claude_cli", "name": "anthropic", "model": ""}), "Kairos")
+        self.assertEqual(self.name(None), "Kairos")
+
+
 if __name__ == "__main__":
     try:
         result = unittest.main(exit=False).result

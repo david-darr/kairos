@@ -236,7 +236,7 @@ async def start_live_chat(body: ChatRequest, request: Request, user: str = Depen
     is_admin = auth_manager.is_admin(user)
     session = chat_live.require_session(body.session_id, user)
     if session.get("agent_id"):
-        return await _start_bot_turn(body, session, user, is_admin)
+        return await _start_bot_turn(body, session, user, is_admin, from_phone=phone_device(request) is not None)
     try:
         chat_service.validate_image_attachments(body.session_id, body.attachment_ids)
         context = await asyncio.to_thread(chat_references.resolve, body.session_id, body.references, is_admin, user)
@@ -247,7 +247,7 @@ async def start_live_chat(body: ChatRequest, request: Request, user: str = Depen
                            from_phone=phone_device(request) is not None)
 
 
-async def _start_bot_turn(body: ChatRequest, session: dict, user: str, is_admin: bool) -> dict:
+async def _start_bot_turn(body: ChatRequest, session: dict, user: str, is_admin: bool, *, from_phone: bool = False) -> dict:
     """A live send to a bot's conversation goes through the Bots admission door
     (slot, queue, durable receipt), like every other send to a bot."""
     import uuid
@@ -260,7 +260,8 @@ async def _start_bot_turn(body: ChatRequest, session: dict, user: str, is_admin:
     try:
         result = await bot_chat_service.send(user, body.session_id, {
             "send_id": send_id, "text": body.message, "expected_leaf_id": leaf,
-            "attachment_ids": body.attachment_ids, "references": body.references})
+            "attachment_ids": body.attachment_ids, "references": body.references,
+            **({"from_phone": True} if from_phone else {})})
     except ValueError as error:
         status = 409 if isinstance(error, bot_chat_store.Conflict) else 422
         raise HTTPException(status, str(error))
