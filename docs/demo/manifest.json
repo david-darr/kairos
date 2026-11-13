@@ -1,6 +1,6 @@
 {
  "built": {
-  "app.js": "97b3d436a8bdfce836cecbbb9e9e40faf9389c2862e163084f29121efc63ff8c",
+  "app.js": "4304a0b1f239b76ba6cfdd852a4e09abeae70bebfd0b71f9b3b4209072d27311",
   "fixtures.js": "fa8a405ec9d9c4f68fccc72a28229caf23db05533378977f803030f485adeaf2",
   "index.html": "6dbd7a651c9f5b6ccdd585a3f6cccf9f3f223f5539516b4d4d9c24cd76a31d22",
   "shim.js": "07131d01879b71ef112cf7cf57f75765a84f7c7a1cfdada3262eca820f74fd82",
@@ -1118,7 +1118,7 @@
   "static/vendor/three/examples/jsm/shaders/VerticalBlurShader.js": "67792abdf08ba2305fc2a2f45ca151f55b66a82f5aebbe45230246cdb72181d7",
   "static/vendor/three/three.core.js": "9edde002b066a9a05676a6127f67735b62baf399bdea529f2f7e31657da769e6",
   "static/vendor/three/three.module.js": "9052042d676cb0fdc1ddfefe193053f34b7ac0513a616fdac4535d49987812ea",
-  "tabs/crm/view.css": "ee6c6680949f9ff5c107ac58aad04ed22d59b5424dce8344651374352285f2c5",
+  "tabs/crm/view.css": "a8c2b6efff923c86fc63ec97db02fc087cc71d614a16cea1d754c758d34ed9d1",
   "tabs/studio/view.css": "8a0ccf87630e1d16eacdaa7dc9cc2d0ebcaae0aaabf9751b01a254a3de955c68"
  },
  "sources": {
@@ -2629,8 +2629,8 @@
   "static/vendor/three/three.core.js": "9edde002b066a9a05676a6127f67735b62baf399bdea529f2f7e31657da769e6",
   "static/vendor/three/three.module.js": "9052042d676cb0fdc1ddfefe193053f34b7ac0513a616fdac4535d49987812ea",
   "tabs/crm/tab.json": "e697fa78015b0da581c01a06f971e5754ff4fb42c71e58e958ae8d3a8b08b4ed",
-  "tabs/crm/view.css": "ee6c6680949f9ff5c107ac58aad04ed22d59b5424dce8344651374352285f2c5",
-  "tabs/crm/view.js": "dd9aa3a43db80b344ed60cf1af8939f0023983ad513f2319c1730ba13c87a5ff",
+  "tabs/crm/view.css": "a8c2b6efff923c86fc63ec97db02fc087cc71d614a16cea1d754c758d34ed9d1",
+  "tabs/crm/view.js": "c5425be00dfd67ec5b464fa12975b781643cb753b6bc359d49b72dcb732d1401",
   "tabs/school/tab.json": "97ca66d011d3f675e7e725bcc758cb9c8c77e0a132b175728979fb8145453ed0",
   "tabs/school/view.js": "ebdc4818f6ca446e2aae949af7ea3f08a7f46eaa6dc0320e7da1e4d1befc6399",
   "tabs/studio/tab.json": "28f1e091d41cb463851b41c3aeb27e8bf66adbcc98844f63423d09bada77b837",
