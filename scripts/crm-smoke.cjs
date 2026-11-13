@@ -150,7 +150,7 @@ app.whenReady().then(async () => {
     assert.ok(await js("document.querySelector('.crm-source-text').textContent.includes('<script>steal()</script>')"));
     await capture('desktop-source');
     await js("document.querySelector('.crm-source-modal button').click()");
-    await click('Mark done');
+    await click('Mark complete');
     assert.equal(state.tasks[0].status, 'done');
     await click('Reopen');
     assert.equal(state.tasks[0].status, 'active');
@@ -205,8 +205,8 @@ app.whenReady().then(async () => {
     await capture('desktop-auto-completed');
     await click('Reopen');
     assert.equal(state.tasks[0].status, 'active');
-    await click('Add task');
-    await wait("document.querySelector('.crm-detail h3').textContent==='New task'");
+    await click('New follow-up');
+    await wait("document.querySelector('.crm-detail h3').textContent==='New follow-up'");
     await js("document.querySelector('.crm-detail input').value='Call the client'; document.querySelector('.crm-detail input').dispatchEvent(new Event('input',{bubbles:true}))");
     await click('Save task');
     assert.equal(state.tasks.length, 2);
@@ -244,7 +244,7 @@ app.whenReady().then(async () => {
     await js("[...document.querySelectorAll('.crm-check')].find(l=>l.textContent.includes('Check Sent mail daily')).scrollIntoView({block:'center'})");
     await capture('mobile-daily-settings');
     assert.equal(await overflow(), false, 'Sources fit a phone');
-    await click('Tasks');
+    await click('Follow-ups');
     await capture('mobile-tasks');
     assert.equal(await overflow(), false, 'Tasks fit a phone');
     await js("document.querySelector('.crm-task').click()");

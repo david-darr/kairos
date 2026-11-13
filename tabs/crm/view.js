@@ -7,23 +7,55 @@ const labels = { active: "Active", in_progress: "In progress", waiting: "Waiting
 const priorities = ["urgent", "high", "normal", "low"];
 const cap = (text) => text ? text[0].toUpperCase() + text.slice(1) : "";
 const closed = (task) => ["done", "dismissed"].includes(task.status);
-const todayKey = () => {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-};
+const dayKey = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+const todayKey = () => dayKey(new Date());
+const daysFromToday = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return dayKey(d); };
 function dueLabel(value) {
   if (!value) return "No deadline";
   return value.length === 10 ? new Date(value + "T12:00:00").toLocaleDateString()
     : new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 }
+// Short form for list rows: "Today", "Tomorrow", "Nov 18".
+function dueShort(value) {
+  if (!value) return "No date";
+  const day = dueDay(value);
+  if (day === todayKey()) return "Today";
+  if (day === daysFromToday(1)) return "Tomorrow";
+  if (day === daysFromToday(-1)) return "Yesterday";
+  const date = new Date(day + "T12:00:00");
+  return date.toLocaleDateString([], { month: "short", day: "numeric", year: date.getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
+}
 function dueDay(value) {
   if (!value) return "";
   if (value.length === 10) return value;
-  const date = new Date(value);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  return dayKey(new Date(value));
 }
 const overdue = (task) => task.due_date && (task.due_date.length === 10
   ? task.due_date < todayKey() : new Date(task.due_date).getTime() < Date.now());
+const review = (task) => task.status === "needs_review" || !!task.proposal;
+// One status a person reads at a glance: the pill on a row and in details.
+function statusOf(task) {
+  if (task.status === "done") return ["Done", "done"];
+  if (task.status === "dismissed") return ["Dismissed", "muted"];
+  if (review(task)) return ["Review", "review"];
+  if (overdue(task)) return ["Overdue", "danger"];
+  if (task.due_date && dueDay(task.due_date) <= daysFromToday(2)) return ["Due soon", "soon"];
+  if (task.status === "in_progress") return ["In progress", "working"];
+  if (task.status === "waiting") return ["Waiting", "waiting"];
+  return ["Open", "open"];
+}
+function doneThisMonth(task) {
+  if (task.status !== "done") return false;
+  const at = task.completion?.at || task.updated_at;
+  if (!at) return false;
+  const when = new Date(at * 1000), now = new Date();
+  return when.getFullYear() === now.getFullYear() && when.getMonth() === now.getMonth();
+}
+function icon(name, cls = "crm-icon") {
+  const node = el("span", { class: cls, "aria-hidden": "true" });
+  node.insertAdjacentHTML("beforeend", ICONS[name] || "");
+  return node;
+}
 function select(options, value, name) {
   const node = customSelect({ "aria-label": name }, options.map(([id, text]) => el("option", { value: id, text })));
   node.value = value || "";
@@ -45,32 +77,42 @@ function button(text, action, kind = "") {
   });
   return node;
 }
+function pill(task) {
+  const [text, kind] = statusOf(task);
+  return el("span", { class: "crm-pill " + kind, text });
+}
 
 export async function render(container) {
   container.replaceChildren();
 
   let data, connections = { connections: [], models: [] }, agents = [];
   let mode = "tasks", filter = "open", query = "", contactFilter = "", projectFilter = "", sourceFilter = "", priorityFilter = "";
-  let selected = null, disposed = false, pollTimer = null, editing = false, closeSource = null, closeChat = () => {};
+  let selected = null, disposed = false, pollTimer = null, editing = false, closeSource = null, closeChat = () => {}, editMode = false;
   let refreshList = () => {}, refreshDetailStatus = () => {};
   const openWork = new Set();
   const wrap = el("div", { class: "view-constrained crm-view" });
-  const heading = el("div", { class: "view-header" }, [el("div", {}, [
-    el("h2", { text: "CRM" }), el("div", { class: "sub", text: "Follow through on the work your conversations create." }),
+  const heading = el("header", { class: "crm-hero" }, [el("div", { class: "crm-hero-text" }, [
+    el("h2", { class: "crm-title", text: "CRM" }), el("div", { class: "sub", text: "Every client, follow-up and next step, kept for you." }),
   ])]);
-  const headerActions = el("div", { class: "crm-actions" });
+  const headerActions = el("div", { class: "crm-actions crm-hero-actions" });
   const scanButton = button("Scan now", async () => {
     await api(BASE + "/scan", { method: "POST", body: JSON.stringify({}) });
     toast("Scan started. Results will appear as each source finishes.");
     await load();
-  });
-  headerActions.append(button("Add task", () => { mode = "tasks"; selected = {}; draw(); }, "primary"), scanButton);
+  }, "crm-ghost");
+  headerActions.append(scanButton, button("New follow-up", () => { mode = "tasks"; selected = {}; editMode = true; draw(); }, "primary crm-gold"));
   heading.append(headerActions);
-  const tabs = el("nav", { class: "crm-tabs", "aria-label": "CRM sections" });
-  const content = el("div");
+  const tabs = el("nav", { class: "crm-segmented", "aria-label": "CRM sections" });
+  const content = el("div", { class: "crm-content" });
   content.addEventListener("input", (event) => { if (event.target.closest(".crm-detail, .crm-settings, .disclosure-panel")) editing = true; });
   wrap.append(heading, tabs, content);
   container.append(wrap);
+
+  function statCounts() {
+    const open = data.tasks.filter((t) => !closed(t));
+    return [open.filter((t) => dueDay(t.due_date) === todayKey()).length, open.filter(overdue).length,
+      open.filter((t) => t.status === "waiting").length, open.filter(review).length, data.tasks.filter(doneThisMonth).length];
+  }
 
   async function load(poll = false) {
     clearTimeout(pollTimer);
@@ -94,10 +136,7 @@ export async function render(container) {
       if (changed) {
         refreshList();
         if (selected?.id) refreshDetailStatus(selected);
-        const open = data.tasks.filter((task) => !closed(task));
-        const counts = [open.filter((task) => dueDay(task.due_date) === todayKey()).length,
-          open.filter(overdue).length, open.filter((task) => task.status === "waiting").length,
-          open.filter((task) => task.status === "needs_review" || task.proposal).length];
+        const counts = statCounts();
         content.querySelectorAll('.crm-stat strong').forEach((node, index) => { node.textContent = String(counts[index]); });
       }
     }
@@ -109,8 +148,10 @@ export async function render(container) {
   function draw() {
     refreshList = () => {}; refreshDetailStatus = () => {};
     tabs.replaceChildren();
-    for (const [id, text] of [["tasks", "Tasks"], ["contacts", "Contacts"], ["sources", "Sources"]]) {
-      tabs.append(button(text, () => { mode = id; draw(); }, mode === id ? "primary" : "quiet"));
+    for (const [id, text] of [["tasks", "Follow-ups"], ["contacts", "Contacts"], ["sources", "Sources"]]) {
+      const tab = el("button", { class: "crm-seg" + (mode === id ? " active" : ""), type: "button", text, "aria-pressed": String(mode === id) });
+      tab.addEventListener("click", () => { mode = id; selected = null; editMode = false; draw(); });
+      tabs.append(tab);
     }
     scanButton.hidden = !data.can_connect;
     scanButton.textContent = data.scanning ? "Scanning…" : "Scan now";
@@ -124,84 +165,211 @@ export async function render(container) {
   }
 
   function drawTasks() {
-    const open = data.tasks.filter((t) => !closed(t));
-    const summaries = [
-      ["Today", open.filter((t) => dueDay(t.due_date) === todayKey()).length, "today"],
-      ["Overdue", open.filter(overdue).length, "overdue"],
-      ["Waiting", open.filter((t) => t.status === "waiting").length, "waiting"],
-      ["Needs review", open.filter((t) => t.status === "needs_review" || t.proposal).length, "review"],
+    const counts = statCounts();
+    const tiles = [
+      ["Due today", "today", "calendar", "gold"], ["Overdue", "overdue", "warning", "danger"],
+      ["Waiting on others", "waiting", "inbox", "working"], ["Needs review", "review", "edit", "review"], ["Done this month", "done", "check", "done"],
     ];
-    content.append(el("div", { class: "crm-summary" }, summaries.map(([name, count, id]) =>
-      el("button", { class: "glass crm-stat", type: "button", onclick: () => { filter = id; selected = null; draw(); } }, [
-        el("span", { class: "meta", text: name }), el("strong", { text: String(count) }),
+    content.append(el("div", { class: "crm-summary" }, tiles.map(([name, id, iconName, tone], index) =>
+      el("button", { class: "crm-stat tone-" + tone + (filter === id ? " active" : ""), type: "button", onclick: () => { filter = id; selected = null; editMode = false; draw(); } }, [
+        icon(iconName, "crm-stat-icon"), el("span", { class: "crm-stat-text" }, [el("strong", { text: String(counts[index]) }), el("span", { class: "crm-stat-name", text: name })]),
+        el("span", { class: "crm-stat-go", "aria-hidden": "true", text: "›" }),
       ]))));
-    const search = el("input", { type: "search", placeholder: "Search tasks, people or projects", value: query, "aria-label": "Search CRM tasks" });
-    const status = select([["open", "Open work"], ["today", "Today"], ["overdue", "Overdue"], ["upcoming", "Upcoming"],
-      ["waiting", "Waiting"], ["review", "Needs review"], ["snoozed", "Snoozed"], ["done", "Done"], ["dismissed", "Dismissed"], ["all", "All tasks"]], filter, "Task view");
+
+    const snoozed = (task) => task.snoozed_until && new Date(task.snoozed_until.length === 10 ? task.snoozed_until + "T23:59:59" : task.snoozed_until) > new Date();
+    const matches = (task, view) => {
+      if (contactFilter && task.contact !== contactFilter) return false;
+      if (projectFilter && task.project !== projectFilter) return false;
+      if (sourceFilter && task.source_id !== sourceFilter) return false;
+      if (priorityFilter && task.priority !== priorityFilter) return false;
+      if (query && ![task.title, task.contact, task.project, task.notes].join(" ").toLowerCase().includes(query.toLowerCase())) return false;
+      if (view === "all") return true;
+      if (["done", "dismissed"].includes(view)) return task.status === view;
+      if (closed(task)) return false;
+      if (view === "snoozed") return snoozed(task);
+      if (snoozed(task)) return false;
+      if (view === "today") return dueDay(task.due_date) === todayKey();
+      if (view === "overdue") return overdue(task);
+      if (view === "week") return task.due_date && dueDay(task.due_date) >= todayKey() && dueDay(task.due_date) <= daysFromToday(6);
+      if (view === "waiting") return task.status === "waiting";
+      if (view === "review") return review(task);
+      if (view === "upcoming") return task.due_date && dueDay(task.due_date) > todayKey();
+      return true;
+    };
+
+    const panel = el("section", { class: "crm-panel", "aria-label": "Follow-ups" });
+    const search = el("input", { type: "search", class: "crm-search", placeholder: "Search follow-ups, people or projects", value: query, "aria-label": "Search CRM tasks" });
+    const chips = el("div", { class: "crm-chips", role: "group", "aria-label": "Task view" });
     const priority = select([["", "All priorities"], ...priorities.map((p) => [p, cap(p)])], priorityFilter, "Priority filter");
     const project = select([["", "All projects"], ...[...new Set(data.tasks.map((t) => t.project).filter(Boolean))].sort().map((p) => [p, p])], projectFilter, "Project filter");
     const source = select([["", "All sources"], ...data.sources.map((s) => [s.id, s.label])], sourceFilter, "Source filter");
-    const controls = el("div", { class: "crm-filters" }, [search, status, priority, project, source]);
-    content.append(controls);
-    const layout = el("div", { class: "crm-layout" });
+    const activeFilters = [priorityFilter, projectFilter, sourceFilter].filter(Boolean).length;
+    const more = el("details", { class: "crm-more-filters" }, [el("summary", { text: activeFilters ? `Filters · ${activeFilters}` : "Filters" }),
+      el("div", { class: "crm-more-body" }, [priority, project, source])]);
+    panel.append(el("div", { class: "crm-toolbar" }, [search, more]), chips);
+    const head = el("div", { class: "crm-table-head", "aria-hidden": "true" }, [el("span"), el("span", { text: "Follow-up" }),
+      el("span", { text: "Project" }), el("span", { text: "Due" }), el("span", { text: "Status" })]);
     const list = el("div", { class: "crm-task-list", "aria-label": "CRM task list" });
-    const detail = el("section", { class: "glass card crm-detail", "aria-label": "Task details" });
-    layout.append(list);
+    panel.append(head, list);
+    const layout = el("div", { class: "crm-layout" });
+    const detail = el("section", { class: "crm-detail", "aria-label": "Task details" });
+    layout.append(panel);
     if (selected) layout.append(detail);
     else layout.classList.add("crm-layout-single");
     content.append(layout);
-    const snoozed = (task) => task.snoozed_until && new Date(task.snoozed_until.length === 10 ? task.snoozed_until + "T23:59:59" : task.snoozed_until) > new Date();
+
+    const views = [["open", "All open"], ["overdue", "Overdue"], ["today", "Today"], ["week", "This week"], ["upcoming", "Upcoming"],
+      ["waiting", "Waiting"], ["review", "Review"], ["snoozed", "Snoozed"], ["done", "Done"], ["dismissed", "Dismissed"], ["all", "Everything"]];
+    function fillChips() {
+      chips.replaceChildren();
+      for (const [id, text] of views) {
+        const count = data.tasks.filter((task) => matches(task, id)).length;
+        if (!count && !["open", "done", "all"].includes(id) && filter !== id) continue;
+        const chip = el("button", { class: "crm-chip" + (filter === id ? " active" : "") + (id === "overdue" && count ? " late" : ""), type: "button", "aria-pressed": String(filter === id) },
+          [text, el("span", { class: "crm-chip-count", text: String(count) })]);
+        chip.addEventListener("click", () => { filter = id; fillChips(); fillList(); });
+        chips.append(chip);
+      }
+    }
     function fillList() {
       list.replaceChildren();
-      const items = data.tasks.filter((task) => {
-        if (contactFilter && task.contact !== contactFilter) return false;
-        if (projectFilter && task.project !== projectFilter) return false;
-        if (sourceFilter && task.source_id !== sourceFilter) return false;
-        if (priorityFilter && task.priority !== priorityFilter) return false;
-        if (query && ![task.title, task.contact, task.project, task.notes].join(" ").toLowerCase().includes(query.toLowerCase())) return false;
-        if (filter === "all") return true;
-        if (["done", "dismissed"].includes(filter)) return task.status === filter;
-        if (closed(task)) return false;
-        if (filter === "snoozed") return snoozed(task);
-        if (snoozed(task)) return false;
-        if (filter === "today") return dueDay(task.due_date) === todayKey();
-        if (filter === "overdue") return overdue(task);
-        if (filter === "waiting") return task.status === "waiting";
-        if (filter === "review") return task.status === "needs_review" || !!task.proposal;
-        if (filter === "upcoming") return task.due_date && dueDay(task.due_date) > todayKey();
-        return true;
-      }).sort((a, b) => Number(!!overdue(b)) - Number(!!overdue(a)) || priorities.indexOf(a.priority) - priorities.indexOf(b.priority)
-        || (a.due_date || "9999").localeCompare(b.due_date || "9999"));
+      const items = data.tasks.filter((task) => matches(task, filter))
+        .sort((a, b) => Number(!!overdue(b)) - Number(!!overdue(a)) || priorities.indexOf(a.priority) - priorities.indexOf(b.priority)
+          || (a.due_date || "9999").localeCompare(b.due_date || "9999"));
       if (contactFilter) list.append(button(`Clear contact: ${contactFilter}`, () => { contactFilter = ""; draw(); }, "quiet"));
       if (!items.length) {
         list.append(emptyState({ icon: ICONS.notes, title: data.tasks.length ? "No matching follow-ups" : "Your follow-ups start here",
-          hint: data.tasks.length ? "Try another filter or add a task." : "Select a connection in Sources and scan it, or add a task yourself.",
+          hint: data.tasks.length ? "Try another view or add a follow-up." : "Select a connection in Sources and scan it, or add a follow-up yourself.",
           actionLabel: "Choose sources", onAction: () => { mode = "sources"; draw(); } }));
       }
       for (const task of items) {
-        const node = el("button", { class: "glass crm-task" + (selected?.id === task.id ? " selected" : ""), type: "button",
-          onclick: () => { selected = task; draw(); } }, [
-          el("div", { class: "crm-task-top" }, [el("strong", { text: task.title }), el("span", { class: "crm-priority " + task.priority, text: cap(task.priority) })]),
-          el("div", { class: "meta crm-task-meta", text: [task.contact, task.project].filter(Boolean).join(" · ") || "Personal follow-up" }),
-          el("div", { class: "crm-task-bottom" }, [el("span", { class: overdue(task) && !closed(task) ? "crm-overdue" : "meta", text: dueLabel(task.due_date) }),
-            el("span", { class: "meta", text: task.proposal ? "Change to review" : labels[task.status] })]),
+        const isClosed = closed(task);
+        const check = el("button", { class: "crm-tick" + (task.status === "done" ? " on" : ""), type: "button",
+          "aria-label": isClosed ? `Reopen ${task.title}` : `Mark ${task.title} complete` }, [icon("check", "crm-tick-mark")]);
+        check.addEventListener("click", async () => {
+          check.disabled = true;
+          try { await mutateTask(task, { status: isClosed ? "active" : "done" }); }
+          catch (error) { toast(error.message, "error"); check.disabled = false; }
+        });
+        const main = el("button", { class: "crm-task" + (selected?.id === task.id ? " selected" : ""), type: "button",
+          onclick: () => { selected = task; editMode = false; draw(); } }, [
+          el("span", { class: "crm-task-title" }, [el("strong", { text: task.title }),
+            el("span", { class: "meta crm-task-meta", text: [task.contact, task.project].filter(Boolean).join(" · ") || "Personal follow-up" })]),
+          el("span", { class: "crm-cell-project" }, task.project ? [el("span", { class: "crm-tag", text: task.project })] : [el("span", { class: "meta", text: "—" })]),
+          el("span", { class: "crm-cell-due" + (overdue(task) && !isClosed ? " late" : ""), text: dueShort(task.due_date) }),
+          el("span", { class: "crm-cell-status" }, [pill(task), task.priority === "urgent" || task.priority === "high"
+            ? el("span", { class: "crm-flag " + task.priority, title: cap(task.priority) + " priority", text: cap(task.priority) }) : ""]),
         ]);
-        list.append(node);
+        list.append(el("div", { class: "crm-row" + (isClosed ? " closed" : "") + (selected?.id === task.id ? " selected" : "") }, [check, main]));
       }
     }
-    search.addEventListener("input", () => { query = search.value; fillList(); });
-    for (const [node, setter] of [[status, (v) => filter = v], [priority, (v) => priorityFilter = v], [project, (v) => projectFilter = v], [source, (v) => sourceFilter = v]]) {
-      node.addEventListener("change", () => { setter(node.value); fillList(); });
+    search.addEventListener("input", () => { query = search.value; fillChips(); fillList(); });
+    for (const [node, setter] of [[priority, (v) => priorityFilter = v], [project, (v) => projectFilter = v], [source, (v) => sourceFilter = v]]) {
+      node.addEventListener("change", () => { setter(node.value); fillChips(); fillList(); });
     }
+    fillChips();
     fillList();
-    refreshList = fillList;
+    refreshList = () => { fillChips(); fillList(); };
     if (selected) drawDetail(detail, selected);
   }
 
+  function detailRow(iconName, label, value) {
+    return el("div", { class: "crm-info-row" }, [icon(iconName), el("span", { class: "crm-info-label", text: label }),
+      el("span", { class: "crm-info-value", text: value || "—" })]);
+  }
+
   function drawDetail(host, task) {
-    host.append(el("div", { class: "crm-detail-heading" }, [el("h3", { text: task.id ? "Follow-up" : "New task" }),
-      button("Close", () => { selected = null; draw(); }, "quiet")]));
-    const title = el("input", { value: task.title || "", maxlength: "300", required: true });
+    const isNew = !task.id;
+    const closeButton = el("button", { class: "crm-close", type: "button", "aria-label": "Close details" }, [icon("close")]);
+    closeButton.addEventListener("click", () => { selected = null; editMode = false; draw(); });
+    host.append(el("div", { class: "crm-grabber", "aria-hidden": "true" }),
+      el("div", { class: "crm-detail-heading" }, [el("p", { class: "crm-eyebrow", text: isNew ? "Add a follow-up" : "Follow-up details" }), closeButton]),
+      el("h3", { class: "crm-detail-title", text: isNew ? "New follow-up" : task.title }));
+    if (isNew || editMode) return drawEditor(host, task);
+
+    host.append(el("div", { class: "crm-detail-pills" }, [pill(task),
+      el("span", { class: "crm-due-chip" + (overdue(task) && !closed(task) ? " late" : "") }, [icon("calendar"), dueLabel(task.due_date)])]));
+    const sourceNames = [...new Set((task.evidence || []).map((e) => e.label).filter(Boolean))];
+    host.append(el("div", { class: "crm-info" }, [
+      detailRow("agents", "Contact", task.contact), detailRow("notes", "Project", task.project),
+      detailRow("warning", "Priority", cap(task.priority || "normal")), detailRow("calendar", "Deadline", dueLabel(task.due_date)),
+      detailRow("inbox", "Source", sourceNames.join(", ") || "Added manually"),
+    ]));
+    if (task.notes) host.append(el("div", { class: "crm-card" }, [el("p", { class: "crm-card-label", text: "Notes" }), el("p", { class: "crm-notes", text: task.notes })]));
+
+    const doneButton = button(closed(task) ? "Reopen" : "Mark complete", () => mutateTask(task, { status: closed(task) ? "active" : "done" }), "primary crm-gold crm-wide");
+    const editButton = button("Edit", () => { editMode = true; draw(); }, "crm-ghost crm-wide");
+    host.append(el("div", { class: "crm-detail-actions" }, [doneButton, editButton]));
+
+    const completionNote = el("p", { class: "meta crm-completion", role: "status", "aria-live": "polite" });
+    host.append(completionNote);
+    const completionLink = button("View completion email", async () => {
+      const url = new URL(task.completion?.url);
+      if (url.protocol !== "https:" || url.username || url.password) throw new Error("Invalid completion email link");
+      if (window.jarvis?.browser?.openExternal) {
+        const result = await window.jarvis.browser.openExternal(url.href);
+        if (result?.error) throw new Error(result.error);
+      } else window.open(url.href, "_blank", "noopener,noreferrer");
+    }, "quiet");
+    host.append(completionLink);
+    refreshDetailStatus = (updated) => {
+      task.status = updated.status; task.completion = updated.completion;
+      doneButton.textContent = closed(updated) ? "Reopen" : "Mark complete";
+      host.querySelector(".crm-detail-pills .crm-pill")?.replaceWith(pill(updated));
+      const receipt = updated.completion;
+      completionNote.hidden = !receipt || updated.status !== "done";
+      const completionText = receipt && updated.status === "done"
+        ? (receipt.kind === "manual" ? "Marked done by you." : receipt.kind === "agent" ? `Marked done by the agent that completed it. ${receipt.quote || ""}` : `Completed automatically from ${receipt.kind === "routine" ? "a scheduled task or agent run" : receipt.kind === "sent_email" ? "the daily Sent-mail check" : receipt.kind === "assignment" ? "the linked assignment" : receipt.kind === "source" ? "a source confirmation" : receipt.kind === "reply" ? "a sent reply" : "chat"}. ${receipt.quote || ""}`) : "";
+      completionLink.hidden = updated.status !== "done" || receipt?.kind !== "sent_email" || !receipt?.url;
+      if (completionNote.textContent !== completionText) completionNote.textContent = completionText;
+    };
+    refreshDetailStatus(task);
+
+    if (task.review_reason) host.append(el("p", { class: "crm-review", text: task.review_reason }));
+    if (task.proposal) {
+      const proposal = task.proposal;
+      host.append(el("div", { class: "crm-card crm-proposal" }, [el("p", { class: "crm-card-label", text: "Suggested change" }),
+        el("p", { text: `${proposal.title} · ${dueLabel(proposal.due_date)} · ${labels[proposal.status]}` }),
+        el("div", { class: "crm-actions" }, [button("Accept change", () => reviewTask(task, true), "primary"), button("Keep current", () => reviewTask(task, false), "quiet")])]));
+    }
+    if (task.deadline_text || task.priority_reason) {
+      host.append(el("div", { class: "crm-card" }, [el("p", { class: "crm-card-label", text: "Why Kairos set this" }),
+        task.deadline_text && el("p", { class: "meta", text: `Deadline: “${task.deadline_text}” · ${task.deadline_kind}` }),
+        task.priority_reason && el("p", { class: "meta", text: `Priority: ${task.priority_reason}` })]));
+    }
+
+    host.append(el("p", { class: "crm-section-label", text: "Source evidence" }));
+    if (!task.evidence.length) host.append(el("p", { class: "meta", text: "Added manually. No source message is attached." }));
+    for (const evidence of task.evidence) {
+      host.append(el("div", { class: "crm-card crm-evidence" }, [el("div", { class: "meta", text: evidence.label + (evidence.sent_at ? " · " + dueLabel(evidence.sent_at) : "") }),
+        el("blockquote", { text: evidence.quote }), el("div", { class: "crm-actions" }, [
+          button("Open source", () => openOriginal(evidence), "quiet"),
+          button("View captured text", () => showSource(evidence), "quiet")])]));
+    }
+
+    host.append(el("p", { class: "crm-section-label", text: "Work on it" }),
+      workPanel(task, "draft", "Draft a reply", drawReply), workPanel(task, "chat", "Chat about this task", drawChat));
+
+    const more = el("details", { class: "disclosure-panel crm-more" }, [el("summary", { text: "More" })]);
+    const snooze = el("input", { type: "date", value: task.snoozed_until?.slice(0, 10) || "" });
+    more.append(el("div", { class: "crm-pair" }, [field("Snooze until", snooze),
+      button("Set snooze", () => mutateTask(task, { snoozed_until: snooze.value || null }))]),
+      button(task.status === "dismissed" ? "Restore" : "Dismiss", () => mutateTask(task, { status: task.status === "dismissed" ? "active" : "dismissed" }), "quiet"));
+    if (data.can_connect && agents.length && !closed(task)) {
+      const agent = select(agents.map((a) => [a.id, a.name]), agents[0].id, "Agent to assign");
+      more.append(el("div", { class: "crm-assign" }, [el("p", { class: "crm-card-label", text: "Assign to an agent" }),
+        el("p", { class: "meta", text: "Creates a backlog card on the Work Board. Move it to Ready when you want the agent to begin." }),
+        agent, button(task.agent_card_id ? "View assignment" : "Create backlog card", async () => {
+          const response = await api(BASE + `/tasks/${task.id}/agent`, { method: "POST", body: JSON.stringify({ agent_id: agent.value }) });
+          toast(`Backlog card ${response.card_id} is on the Work Board`, "success");
+          await load();
+        })]));
+    }
+    host.append(more);
+  }
+
+  function drawEditor(host, task) {
+    const title = el("input", { value: task.title || "", maxlength: "300", required: true, placeholder: "What needs to happen?" });
     const notes = el("textarea", { rows: "3", text: task.notes || "" });
     const contact = el("input", { value: task.contact || "" });
     const project = el("input", { value: task.project || "" });
@@ -217,81 +385,21 @@ export async function render(container) {
     }
     due.value = inputDue();
     dateOnly.addEventListener("change", () => { const day = due.value.slice(0, 10); due.type = dateOnly.checked ? "date" : "datetime-local"; due.value = day ? day + (dateOnly.checked ? "" : "T12:00") : ""; });
-    host.append(field("Task", title), field("Contact", contact), field("Project", project),
+    host.append(el("div", { class: "crm-card crm-form" }, [field("Task", title), field("Contact", contact), field("Project", project),
       el("div", { class: "crm-pair" }, [field("Priority", priority), field("Status", status)]),
-      field("Deadline", due), el("label", { class: "crm-check" }, [dateOnly, "Date only"]), field("Notes", notes));
+      field("Deadline", due), el("label", { class: "crm-check" }, [dateOnly, "Date only"]), field("Notes", notes)]));
     const save = button("Save task", async () => {
       if (!title.value.trim()) { title.focus(); throw new Error("Give the task a title"); }
       const fields = { title: title.value.trim(), notes: notes.value, contact: contact.value, project: project.value,
         priority: priority.value, status: status.value, due_date: due.value ? (dateOnly.checked ? due.value : new Date(due.value).toISOString()) : null };
       const saved = await api(BASE + "/tasks" + (task.id ? "/" + task.id : ""), { method: task.id ? "PATCH" : "POST", body: JSON.stringify(fields) });
       selected = saved;
+      editMode = false;
       await load();
       toast("Task saved", "success");
-    }, "primary");
-    const actions = el("div", { class: "crm-actions" }, [save]);
-    let doneButton;
-    if (task.id) {
-      doneButton = button(closed(task) ? "Reopen" : "Mark done", () => mutateTask(task, { status: closed(task) ? "active" : "done" }));
-      actions.append(doneButton);
-      actions.append(button(task.status === "dismissed" ? "Restore" : "Dismiss", () => mutateTask(task, { status: task.status === "dismissed" ? "active" : "dismissed" }), "quiet"));
-    }
-    host.append(actions);
-    if (!task.id) return;
-    const completionNote = el("p", { class: "meta crm-completion", role: "status", "aria-live": "polite" });
-    host.append(completionNote);
-    const completionLink = button("View completion email", async () => {
-      const url = new URL(task.completion?.url);
-      if (url.protocol !== "https:" || url.username || url.password) throw new Error("Invalid completion email link");
-      if (window.jarvis?.browser?.openExternal) {
-        const result = await window.jarvis.browser.openExternal(url.href);
-        if (result?.error) throw new Error(result.error);
-      } else window.open(url.href, "_blank", "noopener,noreferrer");
-    }, "quiet");
-    host.append(completionLink);
-    refreshDetailStatus = (updated) => {
-      task.status = updated.status; task.completion = updated.completion;
-      status.value = updated.status;
-      doneButton.textContent = closed(updated) ? "Reopen" : "Mark done";
-      const receipt = updated.completion;
-      completionNote.hidden = !receipt || updated.status !== "done";
-      const completionText = receipt && updated.status === "done"
-        ? (receipt.kind === "manual" ? "Marked done by you." : receipt.kind === "agent" ? `Marked done by the agent that completed it. ${receipt.quote || ""}` : `Completed automatically from ${receipt.kind === "routine" ? "a scheduled task or agent run" : receipt.kind === "sent_email" ? "the daily Sent-mail check" : receipt.kind === "assignment" ? "the linked assignment" : receipt.kind === "source" ? "a source confirmation" : receipt.kind === "reply" ? "a sent reply" : "chat"}. ${receipt.quote || ""}`) : "";
-      completionLink.hidden = updated.status !== "done" || receipt?.kind !== "sent_email" || !receipt?.url;
-      if (completionNote.textContent !== completionText) completionNote.textContent = completionText;
-    };
-    refreshDetailStatus(task);
-    const snooze = el("input", { type: "date", value: task.snoozed_until?.slice(0, 10) || "" });
-    host.append(el("div", { class: "crm-pair" }, [field("Snooze until", snooze),
-      button("Set snooze", () => mutateTask(task, { snoozed_until: snooze.value || null }))]));
-    if (task.review_reason) host.append(el("p", { class: "crm-review", text: task.review_reason }));
-    if (task.deadline_text) host.append(el("p", { class: "meta", text: `Deadline evidence: “${task.deadline_text}” · ${task.deadline_kind}` }));
-    if (task.priority_reason) host.append(el("p", { class: "meta", text: `Priority: ${task.priority_reason}` }));
-    if (task.proposal) {
-      const proposal = task.proposal;
-      host.append(el("div", { class: "crm-proposal" }, [el("strong", { text: "Suggested change" }),
-        el("p", { text: `${proposal.title} · ${dueLabel(proposal.due_date)} · ${labels[proposal.status]}` }),
-        el("div", { class: "crm-actions" }, [button("Accept change", () => reviewTask(task, true)), button("Keep current", () => reviewTask(task, false), "quiet")])]));
-    }
-    host.append(el("h4", { text: "Source evidence" }));
-    if (!task.evidence.length) host.append(el("p", { class: "meta", text: "Added manually. No source message is attached." }));
-    for (const evidence of task.evidence) {
-      host.append(el("div", { class: "crm-evidence" }, [el("div", { class: "meta", text: evidence.label + (evidence.sent_at ? " · " + dueLabel(evidence.sent_at) : "") }),
-        el("blockquote", { text: evidence.quote }), el("div", { class: "crm-actions" }, [
-          button("Open source", () => openOriginal(evidence), "quiet"),
-          button("View captured text", () => showSource(evidence), "quiet")])]));
-    }
-    host.append(workPanel(task, "draft", "Draft a reply", drawReply), workPanel(task, "chat", "Chat about this task", drawChat));
-    if (data.can_connect && agents.length && !closed(task)) {
-      const agent = select(agents.map((a) => [a.id, a.name]), agents[0].id, "Agent to assign");
-      host.append(el("details", { class: "disclosure-panel" }, [el("summary", { text: "Assign to an agent" }),
-        el("p", { class: "meta", text: "Creates a backlog card on the Work Board. Move it to Ready when you want the agent to begin." }),
-        agent, button(task.agent_card_id ? "View assignment" : "Create backlog card", async () => {
-          const response = await api(BASE + `/tasks/${task.id}/agent`, { method: "POST", body: JSON.stringify({ agent_id: agent.value }) });
-          toast(`Backlog card ${response.card_id} is on the Work Board`, "success");
-          await load();
-        })]));
-    }
+    }, "primary crm-gold crm-wide");
+    const cancel = button("Cancel", () => { editMode = false; if (!task.id) selected = null; draw(); }, "crm-ghost crm-wide");
+    host.append(el("div", { class: "crm-detail-actions" }, [save, cancel]));
   }
 
   // Draft and chat sections load only when opened, and stay open across the
@@ -436,12 +544,20 @@ export async function render(container) {
       contacts.get(task.contact).push(task);
     }
     if (!contacts.size) return content.append(emptyState({ icon: ICONS.notes, title: "No contact history yet", hint: "Contacts appear as you add or scan follow-ups." }));
-    const grid = el("div", { class: "document-grid" });
+    const grid = el("div", { class: "crm-contacts" });
     for (const [contact, tasks] of [...contacts].sort(([a], [b]) => a.localeCompare(b))) {
-      grid.append(el("div", { class: "glass card" }, [el("h3", { text: contact }),
-        el("p", { class: "meta", text: `${tasks.filter((t) => !closed(t)).length} open · ${tasks.filter((t) => t.status === "waiting").length} waiting · ${tasks.filter((t) => t.status === "done").length} completed` }),
-        ...tasks.slice(-3).reverse().map((t) => el("p", { class: "meta", text: `${t.title} · ${dueLabel(t.due_date)}` })),
-        button("View follow-ups", () => { mode = "tasks"; filter = "all"; contactFilter = contact; selected = null; draw(); })]));
+      const open = tasks.filter((t) => !closed(t));
+      const initials = contact.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("");
+      const next = open.sort((a, b) => (a.due_date || "9999").localeCompare(b.due_date || "9999"))[0];
+      grid.append(el("div", { class: "crm-contact" }, [
+        el("div", { class: "crm-contact-top" }, [el("span", { class: "crm-avatar", "aria-hidden": "true", text: initials }),
+          el("div", {}, [el("h3", { text: contact }), el("p", { class: "meta", text: [...new Set(tasks.map((t) => t.project).filter(Boolean))].join(", ") || "No project" })])]),
+        el("div", { class: "crm-contact-stats" }, [
+          el("span", {}, [el("strong", { text: String(open.length) }), " open"]),
+          el("span", {}, [el("strong", { text: String(tasks.filter((t) => t.status === "waiting").length) }), " waiting"]),
+          el("span", {}, [el("strong", { text: String(tasks.filter((t) => t.status === "done").length) }), " done"])]),
+        next ? el("div", { class: "crm-contact-next" }, [el("span", { class: "crm-card-label", text: "Next" }), el("span", { text: next.title }), pill(next)]) : el("p", { class: "meta", text: "Nothing open." }),
+        button("View follow-ups", () => { mode = "tasks"; filter = "all"; contactFilter = contact; selected = null; draw(); }, "crm-ghost")]));
     }
     content.append(grid);
   }
