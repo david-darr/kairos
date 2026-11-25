@@ -770,10 +770,10 @@ function modelForm(title, subtitle, kind, onAdded) {
   const urlInput = el("input", { placeholder: kind === "local" ? "http://localhost:11434/v1" : "https://api.openrouter.ai/v1" });
   const modelInput = el("input", { placeholder: isCliKind ? (kind === "claude_cli" ? "claude-sonnet-4-5" : "gpt-5-codex") : "Model id" });
   const keyInput = el("input", { type: "password", placeholder: kind === "local" ? "Optional" : "API key", autocomplete: "off" });
-  // Context window cap (David's ask 2026-09-01, real incident: a local model
-  // loaded with no cap took its max context and ~21GB of RAM). Local only:
-  // sent as Ollama's `options.num_ctx`; other servers ignore it.
-  const ctxInput = el("input", { type: "number", placeholder: "4096" });
+  // Context window (David's ask 2026-09-01, real incident: a local model loaded
+  // with no cap took its max context and ~21GB of RAM). Local: sent as Ollama's
+  // `options.num_ctx`. API: optional, only sizes Kairos's prompt and tool list.
+  const ctxInput = el("input", { type: "number", min: "1024", step: "1024", placeholder: kind === "local" ? "16384" : "Automatic" });
   const images = toggle({ label: "Accepts images" });
   const err = el("div", { class: "set-error" });
   const addBtn = el("button", { class: "btn primary", text: "Add" });
@@ -803,6 +803,8 @@ function modelForm(title, subtitle, kind, onAdded) {
       err.textContent = "Name, URL, and model id are required.";
       return;
     }
+    const ctx = ctxInput.value.trim() ? Number(ctxInput.value.trim()) : null;
+    if (ctx !== null && (!Number.isInteger(ctx) || ctx < 1024)) { err.textContent = "Context window must be a whole number of at least 1,024 tokens."; return; }
     try {
       await api("/api/models", {
         method: "POST",
@@ -812,7 +814,7 @@ function modelForm(title, subtitle, kind, onAdded) {
           model: modelInput.value.trim(),
           api_key: keyInput.value.trim() || null,
           kind,
-          num_ctx: kind === "local" && ctxInput.value.trim() ? parseInt(ctxInput.value.trim(), 10) : null,
+          num_ctx: isCliKind ? null : ctx,
           supports_images: !isCliKind && images.checked,
         }),
       });
@@ -823,10 +825,11 @@ function modelForm(title, subtitle, kind, onAdded) {
   });
 
   const rows = kind === "local"
-    ? [field("Name", nameInput), field("Server URL", urlInput), field("Model id", modelInput), field("Context window", ctxInput, "Tokens the model may hold. Keeps a large model from filling your memory.")]
+    ? [field("Name", nameInput), field("Server URL", urlInput), field("Model id", modelInput), field("API key", keyInput, "Only if your server asks for one, such as llama.cpp started with --api-key."), field("Context window", ctxInput, "Tokens the model may hold. Keeps a large model from filling your memory.")]
     : isCliKind
       ? [field("Name", nameInput), field("Model", modelInput, "Optional. Leave empty for the CLI's own default.")]
-      : [field("Provider", providerSelect), field("Name", nameInput), field("Base URL", urlInput), field("Model id", modelInput), field("API key", keyInput)];
+      : [field("Provider", providerSelect), field("Name", nameInput), field("Base URL", urlInput), field("Model id", modelInput), field("API key", keyInput),
+        field("Context window", ctxInput, "Optional. Leave empty to use the model's known size. Set it for a self-hosted server so Kairos fits its prompt and tools.")];
   if (!isCliKind) rows.push(row({ title: "Accepts images", description: "The model can read pictures you attach.", control: images }));
   rows.push(el("div", { class: "set-row-actions" }, [err, addBtn]));
   return group({ title, description: subtitle }, rows);
@@ -878,11 +881,11 @@ async function renderAddedModelsPanel(body, _status, page) {
     } });
     const meta = ep.kind === "claude_cli" || ep.kind === "codex_cli" || ep.kind === "antigravity_cli"
       ? `Model: ${ep.model || "CLI default"}`
-      : [ep.model, ep.base_url, ep.has_api_key ? "key saved" : null, ep.kind === "local" && ep.num_ctx ? `context ${ep.num_ctx}` : null].filter(Boolean).join(" · ");
+      : [ep.model, ep.base_url, ep.has_api_key ? "key saved" : null, ep.num_ctx ? `context ${ep.num_ctx}` : null].filter(Boolean).join(" · ");
     const controls = [result];
     // Kairos's own instructions and core tools take about 2,100 tokens of
     // every request (2026-10-06, vault note "Local Model Fit (Build Spec)").
-    if (ep.kind === "local" && ep.num_ctx && ep.num_ctx < 8192) {
+    if ((ep.kind === "local" || ep.kind === "api") && ep.num_ctx && ep.num_ctx < 8192) {
       const small = pill("Small window", "warn");
       small.title = `Kairos's own instructions and core tools take about 2,100 of these ${ep.num_ctx} tokens on every message, leaving little for the conversation. 16,384 is the default for new local models.`;
       small.classList.add("small-window");

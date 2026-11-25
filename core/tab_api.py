@@ -60,7 +60,7 @@ def list_models():
 def model_context_size(endpoint_id):
     """Configured input window, used to bound source text before completion."""
     endpoint = model_endpoints.get_endpoint(endpoint_id) or {}
-    return (endpoint.get("num_ctx") or 16384) if endpoint.get("kind") == "local" else None
+    return endpoint.get("num_ctx") or (16384 if endpoint.get("kind") == "local" else None)
 
 
 _MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,127}")

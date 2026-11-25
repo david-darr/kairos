@@ -596,3 +596,12 @@
   .kairos-redesign .chat-stacked-pane .artifact-header > div { min-width: 0; overflow: hidden; }
   .kairos-redesign .chat-stacked-pane .artifact-header :is(h2, .artifact-detail) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
+
+/* 2.2.1: the phone composer's model column left the message box about 89px on a
+   375px phone, so even the placeholder wrapped and the bar grew tall. The model
+   name now truncates inside a 72px column; the message box gets the rest. */
+@media (max-width: 768px) {
+  .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .ms-conversation .chat-input-bar.ms-composer { grid-template-columns: 44px minmax(0, 1fr) minmax(0, 72px) 44px; }
+  .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .ms-conversation .ms-composer .model-picker-btn { min-width: 0; overflow: hidden; }
+  .kairos-redesign:is([data-view=chat], [data-view=mobileLaunch]) .ms-conversation .ms-composer .model-picker-btn > :not(svg) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}

@@ -317,18 +317,18 @@ class SmallWindowTests(unittest.IsolatedAsyncioTestCase):
 
     def test_the_chat_tells_the_brain_its_window(self):
         from services import chat_service
-        local = {"id": "loc", "name": "Local", "kind": "local", "model": "m"}
+        local = lambda num_ctx: {"id": "loc", "name": "Local", "kind": "local", "model": "m", "num_ctx": num_ctx}
         with patch("core.model_endpoints.resolve_runtime", return_value=("http://x", "m", None, 8192)):
-            self.assertTrue(chat_service._build_brain(local, self.sid).small_window)
+            self.assertTrue(chat_service._build_brain(local(8192), self.sid).small_window)
         with patch("core.model_endpoints.resolve_runtime", return_value=("http://x", "m", None, 16384)):
-            self.assertTrue(chat_service._build_brain(local, self.sid).small_window)
+            self.assertTrue(chat_service._build_brain(local(16384), self.sid).small_window)
         with patch("core.model_endpoints.resolve_runtime", return_value=("http://x", "m", None, None)):
-            unknown = chat_service._build_brain(local, self.sid)
+            unknown = chat_service._build_brain(local(None), self.sid)
         self.assertTrue(unknown.small_window, "a local model with no num_ctx is Ollama-class, so tools are deferred")
         self.assertIn("kairos_tool_search", [t["function"]["name"] for t in unknown.tools])
         self.assertLess(len(unknown.tools), 25, "a local chat without num_ctx must not send the full tool list")
         with patch("core.model_endpoints.resolve_runtime", return_value=("http://x", "m", None, 65536)):
-            self.assertFalse(chat_service._build_brain(local, self.sid).small_window, "a known large window keeps them all")
+            self.assertFalse(chat_service._build_brain(local(65536), self.sid).small_window, "a known large window keeps them all")
         api = {"id": "api", "name": "API", "kind": "api", "model": "gpt-x"}
         with patch("core.model_endpoints.resolve_runtime", return_value=("http://x", "gpt-x", None, None)):
             with patch("core.model_catalog.context_capacity", return_value={"window": 400000, "effective": 380000}):

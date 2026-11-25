@@ -75,11 +75,10 @@ def helper_endpoint() -> Optional[dict]:
 
 
 def _brain(endpoint: dict):
-    from core import model_catalog, model_endpoints
+    from core import model_endpoints
     from core.external_brain import ExternalBrain
     base_url, model, api_key, num_ctx = model_endpoints.resolve_runtime(endpoint["id"])
-    capacity = model_catalog.context_capacity("api", model) if endpoint["kind"] == "api" else None
-    window = num_ctx if endpoint["kind"] == "local" else (capacity or {}).get("window")
+    window = (model_endpoints.context_capacity(endpoint, model) or {}).get("window")
     return ExternalBrain(base_url, model, api_key, num_ctx=num_ctx, endpoint_id=endpoint["id"], window=window,
                          helper=True)
 
