@@ -966,6 +966,24 @@ async def _read_vault_file(args, ctx):
     return result
 
 
+# One permission for all three vault write tools, so one grant covers them.
+VAULT_WRITE = "vault_write"
+
+
+def _vault_write_choices(target: str) -> list[dict]:
+    """Once, this chat, this folder for good, or the whole vault for good."""
+    folder = target.rsplit("/", 1)[0] if "/" in target else ""
+    choices = [{"id": "once", "label": "Allow once", "behavior": "allow", "scope": "once"},
+               {"id": "session", "label": "Always in this chat (whole vault)", "behavior": "allow",
+                "scope": "session", "content": None}]
+    if folder:
+        choices.append({"id": "folder", "label": f"Always allow in {folder}/", "behavior": "allow",
+                        "scope": "forever", "content": f"{folder}/:*"})
+    return choices + [{"id": "forever", "label": "Always allow vault writes", "behavior": "allow",
+                       "scope": "forever", "content": None},
+                      {"id": "reject", "label": "Reject", "behavior": "deny", "scope": "once"}]
+
+
 async def _vault_write_refusal(ctx: ToolContext, tool: str, path, action: str) -> str | None:
     """Path sanity, then the person's approval (a bot's call was already gated in call())."""
     if not isinstance(path, str) or not path.strip():
@@ -979,9 +997,11 @@ async def _vault_write_refusal(ctx: ToolContext, tool: str, path, action: str) -
         return None
     from core import permissions
     tainted = bool(ctx.turn_taint and ctx.turn_taint.tainted)
+    target = "/".join(parts)
     decision = await permissions.decide(
-        surface=ctx.permission_surface, tool=tool, arguments={"path": path}, is_admin=ctx.is_admin,
-        title=f"{action} {path} in the vault",
+        surface=ctx.permission_surface, tool=VAULT_WRITE, arguments={"path": target, "tool": tool},
+        target=target, choices=_vault_write_choices(target), is_admin=ctx.is_admin,
+        title=f"{action} {target} in the vault",
         description=f"This turn read {ctx.turn_taint.reason}." if tainted else "", force_prompt=tainted)
     if decision.behavior != "allow":
         return f"Not saved: {decision.reason or 'the vault write was not approved'}"

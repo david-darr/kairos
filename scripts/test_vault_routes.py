@@ -386,7 +386,7 @@ class VaultWriteToolTests(unittest.TestCase):
         self.assertEqual(self.call("create_vault_file", path="New/Deep/Plan.md", content="# Plan\n"),
                          "Created New/Deep/Plan.md in the vault.")
         self.assertEqual((VAULT / "New/Deep/Plan.md").read_text(encoding="utf-8"), "# Plan\n")
-        self.assertEqual(self.asked[-1]["tool"], "create_vault_file")
+        self.assertEqual((self.asked[-1]["tool"], self.asked[-1]["arguments"]["tool"]), ("vault_write", "create_vault_file"))
         self.assertIn("already exists", self.call("create_vault_file", path="Projects/Alpha.md", content="gone"))
         self.assertIn("The quartz harmonica", (VAULT / "Projects/Alpha.md").read_text(encoding="utf-8"))
         self.assertEqual([e["source"] for e in file_checkpoints.list_events()], ["chat:s-7"])
@@ -422,6 +422,71 @@ class VaultWriteToolTests(unittest.TestCase):
         self.taint.mark("web page")
         self.call("append_vault_file", path="Orphan.md", content="x")
         self.assertTrue(self.asked[-1]["force_prompt"])
+
+
+class VaultWriteGrantTests(unittest.TestCase):
+    """The real prompt: one grant covers all three tools, for a folder or the whole vault."""
+
+    def setUp(self):
+        from core import permissions, tool_registry
+        from core.turn_taint import TurnTaint
+        build_fixture()
+        self.permissions, self.registry, self.taint = permissions, tool_registry, TurnTaint()
+        item = patch.object(file_checkpoints, "STORE", Path(_DATA.name) / ("cp-" + self.id().rsplit(".", 1)[-1]))
+        item.start()
+        self.addCleanup(item.stop)
+        self.addCleanup(lambda: [permissions.revoke(r["id"]) for r in permissions.list_rules()
+                                 if r["tool"] == tool_registry.VAULT_WRITE])
+
+    def run_calls(self, calls, answers):
+        """Runs each call in turn, answering prompts from `answers`; returns (results, prompts seen)."""
+        surface, seen = "chat:s-9", []
+
+        async def scenario():
+            queue = self.permissions.open_channel(surface)
+            try:
+                results = []
+                for name, args in calls:
+                    ctx = self.registry.ToolContext(session_id="s-9", is_admin=True, turn_taint=self.taint)
+                    task = asyncio.create_task(self.registry.call(name, args, ctx, self.registry.OPENAI))
+                    while not task.done():
+                        try:
+                            request = await asyncio.wait_for(queue.get(), 0.05)
+                        except asyncio.TimeoutError:
+                            continue
+                        if "permission_closed" in request:
+                            continue
+                        seen.append(request)
+                        self.permissions.answer(request["id"], answers.pop(0), "admin")
+                    results.append(task.result())
+                return results
+            finally:
+                self.permissions.close_channel(surface)
+        return asyncio.run(scenario()), seen
+
+    def test_always_allow_vault_writes_covers_every_tool_and_folder(self):
+        results, seen = self.run_calls([("create_vault_file", {"path": "A/One.md", "content": "1"}),
+                                        ("update_vault_file", {"path": "Orphan.md", "content": "---\nstatus: x\n---\n"}),
+                                        ("append_vault_file", {"path": "Projects/Beta.md", "content": "more"})],
+                                       ["forever"])
+        self.assertEqual(len(seen), 1)
+        self.assertIn("Always allow vault writes", [c["label"] for c in seen[0]["choices"]])
+        self.assertTrue(all(not r.startswith("Not saved") for r in results), results)
+
+    def test_a_folder_grant_covers_subfolders_only(self):
+        results, seen = self.run_calls([("create_vault_file", {"path": "Projects/New.md", "content": "1"}),
+                                        ("create_vault_file", {"path": "Projects/Deep/New.md", "content": "2"}),
+                                        ("create_vault_file", {"path": "Archive/New.md", "content": "3"})],
+                                       ["folder", "reject"])
+        self.assertEqual([s["target"] for s in seen], ["Projects/New.md", "Archive/New.md"])
+        self.assertEqual(results[2], "Not saved: vault_write was refused by the owner.")
+        self.assertFalse((VAULT / "Archive/New.md").exists())
+
+    def test_a_tainted_turn_asks_even_with_a_standing_grant(self):
+        self.run_calls([("create_vault_file", {"path": "One.md", "content": "1"})], ["forever"])
+        self.taint.mark("web page")
+        _, seen = self.run_calls([("create_vault_file", {"path": "Two.md", "content": "2"})], ["once"])
+        self.assertEqual(len(seen), 1)
 
 
 if __name__ == "__main__":

@@ -102,9 +102,9 @@ def _save(data: dict) -> None:
 
 
 def _matches(rule: dict, tool: str, target: str | None, is_admin: bool = False) -> bool:
-    """A rule with no content covers the whole tool, which is only ever used
-    for the tools this app pre-approves for itself, including admin shell.
-    A person's prompt-based grant carries content; :* is a prefix."""
+    """A rule with no content covers the whole tool: the app's own
+    pre-approvals, or a person's "always allow" on a choice that offers it.
+    Otherwise content is exact; :* is a prefix."""
     if rule["tool"] != tool:
         return False
     if rule.get("admin_only") and not is_admin:
@@ -646,7 +646,9 @@ def answer(request_id: str, choice_id: str, user: str) -> bool:
         except bot_policy.PolicyError:
             return False
     elif choice["scope"] in ("session", "forever"):
-        rule = {"id": uuid.uuid4().hex, "tool": request.tool, "content": request.target,
+        # A choice may name its own grant scope; None covers the whole tool.
+        content = choice["content"] if "content" in choice else request.target
+        rule = {"id": uuid.uuid4().hex, "tool": request.tool, "content": content,
                 "behavior": choice["behavior"], "scope": choice["scope"], "granted_at": time.time(),
                 "granted_by": user, "source": "asked"}
         if bot.get("bot_id"):
