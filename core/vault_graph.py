@@ -368,7 +368,7 @@ def _atomic_write(path: str, data: bytes) -> None:
 
 
 def save_vault_note(rel_path: str, content: str, version: str, user: str,
-                    allow_remove_properties: bool = False) -> Optional[dict]:
+                    allow_remove_properties: bool = False, source: Optional[str] = None) -> Optional[dict]:
     """Overwrites an EXISTING note only, never creates one (the kiosk's
     deliberate restriction), and only if it still matches `version`.
     Returns the new read, or None when there is no such note."""
@@ -402,7 +402,7 @@ def save_vault_note(rel_path: str, content: str, version: str, user: str,
             vault_root = os.path.realpath(resolve_vault_dir())
             name = os.path.relpath(real, vault_root).replace(os.sep, "/")
             try:
-                file_checkpoints.record_file_write(f"library:{user}", vault_root, name, raw, data, write)
+                file_checkpoints.record_file_write(source or f"library:{user}", vault_root, name, raw, data, write)
             except VersionConflict:
                 with open(real, "rb") as f:
                     raise VersionConflict(_version(f.read()))
@@ -420,6 +420,46 @@ def write_vault_note(rel_path: str, content: str) -> bool:
             raw = f.read()
         _atomic_write(real, _encode_like(raw, content))
     return True
+
+
+def create_vault_note(rel_path: str, content: str, source: str) -> str:
+    """Creates a NEW Markdown note, never overwriting, checkpointed like a Library save; returns its path."""
+    from core import file_checkpoints
+
+    real = _vault_real_path(rel_path)
+    if not real or not real.lower().endswith(".md"):
+        raise ValueError("Give a .md path inside the vault.")
+    if not isinstance(content, str):
+        raise ValueError("content is required")
+    vault_root = os.path.realpath(resolve_vault_dir())
+    rel = os.path.relpath(real, vault_root).replace(os.sep, "/")
+    data = content.replace("\r\n", "\n").encode("utf-8")
+
+    def write():
+        os.makedirs(os.path.dirname(real), exist_ok=True)
+        fd = os.open(real, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0))
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+
+    with _write_lock:
+        if os.path.exists(real):
+            raise FileExistsError(f"{rel} already exists.")
+        file_checkpoints.record_file_write(source, vault_root, rel, None, data, write)
+    return rel
+
+
+def append_vault_note(rel_path: str, text: str, source: str) -> Optional[dict]:
+    """Adds `text` to the end of an existing note on a new line, through save_vault_note's checks."""
+    if not isinstance(text, str):
+        raise ValueError("content is required")
+    note = read_vault_note_full(rel_path)
+    if note is None:
+        return None
+    if not note["editable"]:
+        raise ValueError("This note is not UTF-8 text, so it can't be edited here.")
+    current = note["content"]
+    joiner = "\n" if current and not current.endswith("\n") else ""
+    return save_vault_note(rel_path, current + joiner + text, note["version"], "", source=source)
 
 
 # -- today's note ----------------------------------------------------------------

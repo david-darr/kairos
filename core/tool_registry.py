@@ -966,6 +966,126 @@ async def _read_vault_file(args, ctx):
     return result
 
 
+# One permission for all three vault write tools, so one grant covers them.
+VAULT_WRITE = "vault_write"
+
+
+def _vault_write_choices(target: str) -> list[dict]:
+    """Once, this chat, this folder for good, or the whole vault for good."""
+    folder = target.rsplit("/", 1)[0] if "/" in target else ""
+    choices = [{"id": "once", "label": "Allow once", "behavior": "allow", "scope": "once"},
+               {"id": "session", "label": "Always in this chat (whole vault)", "behavior": "allow",
+                "scope": "session", "content": None}]
+    if folder:
+        choices.append({"id": "folder", "label": f"Always allow in {folder}/", "behavior": "allow",
+                        "scope": "forever", "content": f"{folder}/:*"})
+    return choices + [{"id": "forever", "label": "Always allow vault writes", "behavior": "allow",
+                       "scope": "forever", "content": None},
+                      {"id": "reject", "label": "Reject", "behavior": "deny", "scope": "once"}]
+
+
+async def _vault_write_refusal(ctx: ToolContext, tool: str, path, action: str) -> str | None:
+    """Path sanity, then the person's approval (a bot's call was already gated in call())."""
+    if not isinstance(path, str) or not path.strip():
+        return "Not saved: give the note's path relative to the vault, e.g. 'Projects/Plan.md'."
+    parts = path.replace("\\", "/").strip("/").split("/")
+    if any(part.startswith(".") for part in parts):
+        return "Not saved: hidden folders and files (like .obsidian) are off limits."
+    if not path.lower().endswith(".md"):
+        return "Not saved: vault files written by these tools must be Markdown (.md)."
+    if ctx.agent_id:
+        return None
+    from core import permissions
+    tainted = bool(ctx.turn_taint and ctx.turn_taint.tainted)
+    target = "/".join(parts)
+    decision = await permissions.decide(
+        surface=ctx.permission_surface, tool=VAULT_WRITE, arguments={"path": target, "tool": tool},
+        target=target, choices=_vault_write_choices(target), is_admin=ctx.is_admin,
+        title=f"{action} {target} in the vault",
+        description=f"This turn read {ctx.turn_taint.reason}." if tainted else "", force_prompt=tainted)
+    if decision.behavior != "allow":
+        return f"Not saved: {decision.reason or 'the vault write was not approved'}"
+    return None
+
+
+def _vault_write_source(ctx: ToolContext) -> str:
+    """Who the checkpoint names in the note's History."""
+    return f"chat:{ctx.session_id}" if ctx.session_id else f"agent:{ctx.agent_id}" if ctx.agent_id else "model"
+
+
+_VAULT_PATH = _str("Relative .md path within the vault, e.g. 'Projects/Plan.md'")
+
+
+@register(
+    "create_vault_file",
+    "Create a NEW Markdown file in the Obsidian vault (folders are created as needed). Refuses if the file exists; use update_vault_file or append_vault_file for that. Kairos Notes (create_note) are separate todos, not vault files.",
+    _object({"path": _VAULT_PATH, "content": _str("The file's full Markdown content")}, ("path", "content")),
+    surfaces=frozenset({OPENAI}), admin_only=True, effect=WRITE,
+)
+async def _create_vault_file(args, ctx):
+    from core import vault_graph
+    path = args.get("path")
+    refusal = await _vault_write_refusal(ctx, "create_vault_file", path, "Create")
+    if refusal:
+        return refusal
+    try:
+        created = vault_graph.create_vault_note(path, args.get("content", ""), _vault_write_source(ctx))
+    except (FileExistsError, ValueError) as problem:
+        return f"Not saved: {problem}"
+    return f"Created {created} in the vault."
+
+
+@register(
+    "update_vault_file",
+    "Replace the full content of an EXISTING Markdown file in the Obsidian vault. Read it first with read_vault_file and send back the whole new text; keep its properties (frontmatter) block.",
+    _object({"path": _VAULT_PATH, "content": _str("The file's complete new Markdown content")}, ("path", "content")),
+    surfaces=frozenset({OPENAI}), admin_only=True, effect=WRITE,
+)
+async def _update_vault_file(args, ctx):
+    from core import vault_graph
+    path = args.get("path")
+    refusal = await _vault_write_refusal(ctx, "update_vault_file", path, "Update")
+    if refusal:
+        return refusal
+    note = vault_graph.read_vault_note_full(path)
+    if note is None:
+        return f"Not saved: {path} does not exist in the vault. Use create_vault_file for a new file."
+    if not note["editable"]:
+        return "Not saved: this note is not UTF-8 text, so it can't be edited here."
+    try:
+        vault_graph.save_vault_note(path, args.get("content", ""), note["version"], "", source=_vault_write_source(ctx))
+    except vault_graph.VersionConflict:
+        return "Not saved: the file changed while saving. Read it again and retry."
+    except vault_graph.PropertiesRemoved:
+        return "Not saved: the new content drops the file's properties (frontmatter) block. Keep it and retry."
+    except ValueError as problem:
+        return f"Not saved: {problem}"
+    return f"Updated {note['path']} in the vault."
+
+
+@register(
+    "append_vault_file",
+    "Add Markdown text to the end of an EXISTING file in the Obsidian vault, on a new line, leaving the rest untouched.",
+    _object({"path": _VAULT_PATH, "content": _str("The Markdown text to add at the end")}, ("path", "content")),
+    surfaces=frozenset({OPENAI}), admin_only=True, effect=WRITE,
+)
+async def _append_vault_file(args, ctx):
+    from core import vault_graph
+    path = args.get("path")
+    refusal = await _vault_write_refusal(ctx, "append_vault_file", path, "Append to")
+    if refusal:
+        return refusal
+    try:
+        saved = vault_graph.append_vault_note(path, args.get("content", ""), _vault_write_source(ctx))
+    except vault_graph.VersionConflict:
+        return "Not saved: the file changed while saving. Retry."
+    except ValueError as problem:
+        return f"Not saved: {problem}"
+    if saved is None:
+        return f"Not saved: {path} does not exist in the vault. Use create_vault_file for a new file."
+    return f"Appended to {saved['path']} in the vault."
+
+
 @register(
     "list_repo_directory",
     "List one level of Kairos's own source or user-built tab source (not recursive — call again with a sub-path to descend). Omit path to list the top-level accessible directories; custom-tabs/ is available only to supported OpenAI models.",

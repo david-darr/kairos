@@ -2794,7 +2794,7 @@ class ToolRegistryTests(unittest.TestCase):
         # write_repo_file is admin-only since roadmap phase 7 (2026-10-06).
         self.assertEqual(admin - plain, {"run_shell", "google_drive", "google_sheets", "google_forms", "google_calendar",
                                          "list_email_accounts", "send_email",
-                                         "write_repo_file", "hand_to_agent", "save_skill", "add_mcp_server",
+                                         "write_repo_file", "create_vault_file", "update_vault_file", "append_vault_file", "hand_to_agent", "save_skill", "add_mcp_server",
                                          "design_system_save"})  # forge_app_logs: Forge sessions only (test_forge_apps); design_system_save: admins save design systems
         self.assertIn("Unknown tool", asyncio.run(reg.call("run_shell", {"command": "echo hi"}, reg.ToolContext(), reg.OPENAI)))
         self.assertIn("Unknown tool", asyncio.run(reg.call("save_generated_file", {}, reg.ToolContext(), reg.OPENAI)))
