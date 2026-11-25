@@ -30,6 +30,7 @@ from core.secret_storage import decrypt, encrypt
 
 ENDPOINTS_FILE = os.path.join(DATA_DIR, "model_endpoints.json")
 
+MIN_NUM_CTX = 1024
 DEFAULT_LOCAL_NUM_CTX = 16384  # real incident, 2026-09-01: a local model loaded
 # with no cap defaulted to its max supported context (phi3's 131072) and its
 # KV cache alone ate ~21GB of system RAM. Every "local" endpoint gets a sane
@@ -88,6 +89,8 @@ def create_endpoint(name: str, base_url: str = "", model: str = "", api_key: Opt
         raise ValueError("kind must be 'local', 'api', 'claude_cli', 'codex_cli', or 'antigravity_cli'")
     if kind not in ("claude_cli", "codex_cli", "antigravity_cli") and not base_url:
         raise ValueError("base_url is required for local/api endpoints")
+    if num_ctx is not None and (isinstance(num_ctx, bool) or not isinstance(num_ctx, int) or num_ctx < MIN_NUM_CTX):
+        raise ValueError(f"context window must be at least {MIN_NUM_CTX:,} tokens")
     data = _load()
     endpoint_id = uuid.uuid4().hex[:12]
     data[endpoint_id] = {
@@ -102,10 +105,10 @@ def create_endpoint(name: str, base_url: str = "", model: str = "", api_key: Opt
         "api_key_encrypted": encrypt(api_key) if api_key else None,
         "kind": kind,
         "supports_images": bool(supports_images) if kind in ("local", "api") else True,
-        # Only meaningful for "local" — the serving engine's own context-
-        # window cap (Ollama's `options.num_ctx`; other local servers that
-        # don't recognize the field just ignore it). None for api/claude_cli.
-        "num_ctx": (num_ctx if num_ctx is not None else DEFAULT_LOCAL_NUM_CTX) if kind == "local" else None,
+        # Local: the serving engine's cap (Ollama's `options.num_ctx`), sent on
+        # the wire. API: optional, only the window Kairos plans around (never sent).
+        "num_ctx": (num_ctx if num_ctx is not None else DEFAULT_LOCAL_NUM_CTX) if kind == "local"
+                   else num_ctx if kind == "api" else None,
     }
     write_json_atomic(ENDPOINTS_FILE, data)
     return _masked(data[endpoint_id])
@@ -136,4 +139,14 @@ def resolve_runtime(endpoint_id: str) -> tuple[str, str, Optional[str], Optional
     if ep is None:
         raise ValueError(f"unknown model endpoint: {endpoint_id}")
     api_key = decrypt(ep["api_key_encrypted"]) if ep.get("api_key_encrypted") else None
-    return ep["base_url"], ep["model"], api_key, ep.get("num_ctx")
+    # Only a local server is sent num_ctx; a hosted API may reject the unknown field.
+    return ep["base_url"], ep["model"], api_key, ep.get("num_ctx") if ep.get("kind") == "local" else None
+
+
+def context_capacity(endpoint: dict, model: Optional[str] = None) -> Optional[dict]:
+    """The window Kairos plans around: the connection's own setting, else the model catalog's."""
+    if endpoint.get("num_ctx"):
+        size = int(endpoint["num_ctx"])
+        return {"window": size, "effective": size, "estimated": False, "source": "endpoint_num_ctx"}
+    from core import model_catalog
+    return model_catalog.context_capacity(endpoint.get("kind"), model or endpoint.get("model") or None)

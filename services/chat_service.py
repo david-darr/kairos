@@ -277,12 +277,12 @@ def _build_brain(endpoint: dict, session_id: Optional[str], is_admin: bool = Fal
     base_url, model, api_key, num_ctx = model_endpoints.resolve_runtime(endpoint["id"])
     if endpoint["kind"] == "api" and override is not None:
         model = override or endpoint["model"]
-    # The model's window, when known: a local connection's own cap, or the
+    # The model's window, when known: the connection's own setting, or the
     # catalog's for an API model. A small one gets the core tools only.
-    capacity = model_catalog.context_capacity(endpoint["kind"], model) if endpoint["kind"] == "api" else None
+    capacity = model_endpoints.context_capacity(endpoint, model)
     # A local model with no num_ctx set is Ollama-class (a few thousand tokens by
     # default), so it is treated as small and gets the deferred tool list (E5a, 2026-10-27).
-    window = (num_ctx or tool_registry.SMALL_WINDOW) if endpoint["kind"] == "local" else (capacity or {}).get("window")
+    window = (capacity or {}).get("window") or (tool_registry.SMALL_WINDOW if endpoint["kind"] == "local" else None)
     # exclude_last: the current message is already saved by the time a brain
     # is built, and run_turn() adds it itself. Loading it here too sent it to
     # the model twice on every fresh connection (found 2026-09-22), and the
@@ -1220,13 +1220,8 @@ def _record_turn_telemetry(session_id: str, endpoint: dict, brain, turn_usage) -
         logger.exception("record_usage failed for endpoint %s", endpoint.get("id"))
     try:
         model_id = getattr(brain, "model", None) or endpoint.get("model") or None
-        capacity = model_catalog.context_capacity(endpoint.get("kind"), model_id)
-        if capacity is None and endpoint.get("kind") == "local" and endpoint.get("num_ctx"):
-            # A local endpoint's configured num_ctx IS its real context
-            # ceiling (core/model_endpoints.py sets and enforces it), so
-            # this is a measured capacity rather than a curated guess —
-            # flagged accordingly.
-            capacity = {"effective": int(endpoint["num_ctx"]), "estimated": False, "source": "endpoint_num_ctx"}
+        # A configured window is the connection's real ceiling, so it wins over the catalog's guess.
+        capacity = model_endpoints.context_capacity(endpoint, model_id)
         session_manager.set_context_state(session_id, token_usage.build_context_state(usage, capacity, model_id))
     except Exception:
         logger.exception("context state update failed for session %s", session_id)
